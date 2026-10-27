@@ -67,3 +67,10 @@ The recurring footer stays short. Compaction is not
 implemented. The CLI consumes streamed responses but commits assistant display
 only after completion. No shell, web, memory or skill tools were enabled by this
 provider change. Those capabilities and their approval pipeline remain MVP work.
+
+## License
+
+Original Staf code is licensed under the [Apache License 2.0](LICENSE).
+Third-party material retains its applicable licenses. The Hermes-derived
+cache/request material in the direct Responses adapter remains subject to the
+MIT notice in [Third-party notices](THIRD_PARTY_NOTICES.md).

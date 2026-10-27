@@ -2,6 +2,7 @@
   "name": "staf",
   "version": "0.1.0",
   "private": true,
+  "license": "Apache-2.0",
   "type": "module",
   "engines": {
     "node": ">=22",
@@ -28,6 +29,7 @@
     "README.md",
     "AGENTS.md",
     ".env.example",
-    "THIRD_PARTY_NOTICES.md"
+    "THIRD_PARTY_NOTICES.md",
+    "LICENSE"
   ]
 }

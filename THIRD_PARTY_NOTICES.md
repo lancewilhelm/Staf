@@ -1,5 +1,10 @@
 # Third-party notices
 
+Original Staf code is licensed under the Apache License 2.0; see [LICENSE](LICENSE).
+That license does not replace third-party licenses or copyright notices.
+
+## Hermes Agent (MIT)
+
 The direct Responses adapter uses Hermes Agent as a design reference for message
 and function-call boundaries, encrypted reasoning replay, and a cache key scoped
 to a conversation and stable instructions/tools. The TypeScript implementation
@@ -9,7 +14,8 @@ client identity, credentials, or native app-server runtime.
 Reference: NousResearch/hermes-agent, commit
 `daec3cd4c6d34f5befbc8f25a8af3e3b84b94f06`.
 
-The applicable Hermes MIT notice is retained for adapted cache/request design:
+Hermes-derived cache/request material in `src/codex-direct.ts` remains subject
+to the following MIT license. Retain this notice when redistributing that material:
 
 MIT License
 
