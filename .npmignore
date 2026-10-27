@@ -1,0 +1,14 @@
+.staf/
+.env
+.env.*
+!.env.example
+node_modules/
+*.log
+*.tgz
+VISION-INTERVIEW.md
+
+**/.staf/
+**/auth.json
+**/.env
+**/.env.*
+!**/.env.example

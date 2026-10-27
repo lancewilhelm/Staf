@@ -1,0 +1,24 @@
+# Local runtime data, authentication, and credentials.
+.staf/
+.env
+.env.*
+!.env.example
+**/auth.json
+*.pem
+*.key
+
+# Dependencies, builds, caches, and test output.
+node_modules/
+dist/
+coverage/
+.cache/
+.pnpm-store/
+test-results/
+playwright-report/
+*.tsbuildinfo
+*.log
+*.tgz
+.DS_Store
+
+# Private product interview; keep the original local record.
+VISION-INTERVIEW.md

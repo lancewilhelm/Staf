@@ -1,0 +1,60 @@
+{
+  "version": 1,
+  "id": "268ca003-976d-454c-91db-b61edc2dea1c",
+  "provider": "demo",
+  "messages": [
+    {
+      "role": "user",
+      "content": "time"
+    },
+    {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "clock-demo",
+          "type": "function",
+          "function": {
+            "name": "clock",
+            "arguments": "{}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "clock-demo",
+      "content": "2026-10-22T03:13:41.809Z"
+    },
+    {
+      "role": "assistant",
+      "content": "Demo tool result: 2026-10-22T03:13:41.809Z"
+    }
+  ],
+  "events": [
+    {
+      "type": "provider_start",
+      "provider": "demo"
+    },
+    {
+      "type": "tool_start",
+      "id": "clock-demo",
+      "name": "clock"
+    },
+    {
+      "type": "tool_result",
+      "id": "clock-demo",
+      "name": "clock",
+      "success": true,
+      "content": "2026-10-22T03:13:41.809Z"
+    },
+    {
+      "type": "provider_start",
+      "provider": "demo"
+    },
+    {
+      "type": "assistant",
+      "text": "Demo tool result: 2026-10-22T03:13:41.809Z"
+    }
+  ]
+}
