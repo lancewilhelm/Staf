@@ -52,11 +52,12 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
       if(subscriber.response.writableLength>2_000_000){subscriber.response.destroy();continue;}
       const last=subscriber.last;
       if(progress && typeof progress.id==='string' && typeof progress.state==='string' && typeof progress.text==='string') {
+        const visible=progress.state==='completed'?{...progress,text:''}:progress;
         if(last && last.id===progress.id && last.state==='running' && progress.state==='running' && progress.text.startsWith(last.text)) {
           const text=progress.text.slice(last.text.length);
           if(text)subscriber.response.write(`data: ${JSON.stringify({type:'delta',id:progress.id,text})}\n\n`);
-        } else subscriber.response.write(`data: ${JSON.stringify({type:'snapshot',response:progress})}\n\n`);
-        subscriber.last={id:progress.id,state:progress.state,text:progress.text};
+        } else subscriber.response.write(`data: ${JSON.stringify({type:'snapshot',response:visible})}\n\n`);
+        subscriber.last={id:progress.id,state:progress.state,text:progress.state==='completed'?'':progress.text};
       } else {subscriber.response.write(`data: ${JSON.stringify({type:'snapshot',response:null})}\n\n`);subscriber.last=null;}
     }
   }
@@ -537,6 +538,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
             if(observed.length+event.text.length>1000000){progressFull=true;return;}
             observed+=event.text;
             const safe=redactProgress(observed).replace(/https?:\/\/[^\s<>"']+/gi,url=>containsUnsafeWebUrl(url)?'[redacted URL]':url);
+            if(safe.length>1000000){progressFull=true;return;}
             const prefix=safe.replace(/\S+$/,'');
             instance.updateResponse(id,prefix);
             publishResponse(botId);
