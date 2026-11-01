@@ -30,6 +30,7 @@ try{
  await evaluate(`window.testInput=(selector,value)=>{const el=document.querySelector(selector);Object.getOwnPropertyDescriptor(el.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,'value').set.call(el,value);el.dispatchEvent(new Event('input',{bubbles:true}))}; window.testClick=text=>{const b=[...document.querySelectorAll('button')].find(x=>x.textContent.trim()===text);if(!b)throw Error('Missing button '+text);b.click()}`);
  await act(`testInput('input',${JSON.stringify(code)});testClick('Pair')`,"document.body.innerText.includes('Providers') && document.body.innerText.includes('Connect Codex')",'pair browser and open global provider setup');
  assert.equal(await evaluate("!![...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('New agent'))"),true,'agent creation is discoverable in navigation');
+ assert.equal(await evaluate("document.querySelector('nav[aria-labelledby=agents-label]')?.getAttribute('aria-labelledby')==='agents-label' && document.querySelector('#agents-label')?.textContent==='Your agents'"),true,'navigation has an agent accessible name');
  await cdp('Emulation.setEmulatedMedia',{features:[{name:'prefers-color-scheme',value:'light'}]});
  assert.equal(await evaluate("document.querySelector('input[name=appearance][value=system]')?.checked"),true,'fresh browser defaults to System');
  assert.equal(await evaluate("getComputedStyle(document.documentElement).colorScheme"),'light');
@@ -247,6 +248,16 @@ try{
  await act("[...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('Settings')).click()","document.body.innerText.includes('Archived agents')",'archived agents available');
  await evaluate("[...document.querySelectorAll('.provider')].find(e=>e.textContent.includes('Name only')).querySelector('button').click()");await until(()=>evaluate("[...document.querySelectorAll('.side button')].some(b=>b.textContent.includes('Name only'))"),'restored agent returns');
  const restored=await evaluate(`(async()=>{const t=localStorage.getItem('staf-token');return await (await fetch('/api/bots/${nameOnly.id}',{headers:{Authorization:'Bearer '+t}})).json()})()`);assert.equal(restored.chatId,nameOnly.chatId);assert.equal(restored.configDir,nameOnly.configDir);assert.equal(restored.archived,false);console.log('PASS name-only creation, archive, and restore');
+ await act("[...document.querySelectorAll('.side nav button')].find(b=>b.textContent.includes('Name only')).click()","!!document.querySelector('[aria-label=Message]')",'open restored agent chat');
+ await act("testInput('[aria-label=Message]','Remember for this agent: I like tea');testClick('Send ↑')","document.body.innerText.includes('Saved to this agent’s memory.')",'chat uses agent memory wording');
+ await act("testInput('[aria-label=Message]','Remember for all agents: I like coffee');testClick('Send ↑')","document.body.innerText.includes('ALL agents will see this memory.')",'shared memory warning names agents');
+ await evaluate("document.querySelector('[aria-label=Activity]').click()");
+ assert.equal(await evaluate("document.querySelector('aside[aria-label=Activity]')?.innerText.includes('No tasks recorded for this agent.')"),true,'Activity empty state names the agent');
+ assert.equal(await evaluate("!!document.querySelector('button[aria-label=\"Close Activity\"]')"),true,'Activity close control is labelled');
+ await evaluate("document.querySelector('button[aria-label=\"Close Activity\"]').click()");
+ const named=await evaluate("(async()=>{const t=localStorage.getItem('staf-token');return await (await fetch('/api/bots',{method:'POST',headers:{Authorization:'Bearer '+t,'Content-Type':'application/json'},body:JSON.stringify({name:'My bot',provider:'demo'})})).json()})()");
+ await until(()=>evaluate("[...document.querySelectorAll('.side nav button')].some(b=>b.textContent.includes('My bot'))"),'user chosen bot name remains unchanged');
+ assert.equal(named.name,'My bot');console.log('PASS agent terminology and user-chosen names');
  const legacyStatus=await evaluate("(async()=>{const t=localStorage.getItem('staf-token');return (await fetch('/advanced',{headers:{Authorization:'Bearer '+t}})).status})()");assert.equal(legacyStatus,404);console.log('PASS retired Advanced page is not served');
  const configured=join(temp,'already-configured');await mkdir(join(configured,'auth'),{recursive:true,mode:0o700});
  await writeFile(join(configured,'auth','codex-direct.json'),JSON.stringify({version:1,issuer:'https://auth.openai.com',subject:'synthetic',clientId:'synthetic-client',hostId:'synthetic-host',accessToken:'synthetic',refreshToken:'synthetic',idToken:'synthetic',scopes:['resource.invoke','chatgpt.tokens.use.direct'],expiresAt:Date.now()+3600000}),{mode:0o600});

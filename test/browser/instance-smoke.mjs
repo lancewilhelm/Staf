@@ -137,7 +137,7 @@ try {
   await evaluate("document.querySelector('#draft').value='Remember for all bots: I prefer green tea';document.querySelector('#send').click()");
   await until(async()=>{await evaluate("if(localStorage.getItem('staf-pending'))document.querySelector('#status').click()");await sleep(150);return evaluate("document.querySelector('#messages').textContent.includes('Proposed shared user memory:') && !localStorage.getItem('staf-pending')")},'shared memory proposal');
   const proposalText=await evaluate("document.querySelector('#messages').textContent");
-  assert(proposalText.includes('Proposed shared user memory: \"I prefer green tea\"'));assert(proposalText.includes('ALL bots will see this memory. Nothing has been saved to active memory yet.'));
+  assert(proposalText.includes('Proposed shared user memory: \"I prefer green tea\"'));assert(proposalText.includes('ALL agents will see this memory. Nothing has been saved to active memory yet.'));
   const proposalId=proposalText.match(/Confirm shared memory ([\w-]+)/)?.[1];assert(proposalId);
   assert(!JSON.parse(cli('memory-list',url,credential,'user')).some(m=>m.text==='I prefer green tea'));
   console.log('PASS shared memory proposal states exact scope and text without saving');
