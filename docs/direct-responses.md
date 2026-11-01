@@ -110,11 +110,12 @@ missing terminal events and native output types fail closed. Repeated progress
 or terminal events do not execute a function twice. There is no automatic HTTP
 retry, token-exchange retry or alternate-provider fallback.
 
-The provider contract exposes streamed events. The current CLI buffers assistant
-display until completion so failed partial output and split secrets are not
-committed or printed. The adapter also redacts the known bearer across delta
-boundaries. Incremental CLI text presentation remains future work. The terminal
-shows command status and recorded tool progress.
+The provider contract exposes streamed events. The adapter redacts the known
+bearer across delta boundaries and withholds only a suffix that could still
+become part of that bearer. The shared workspace and `instance response-follow`
+show provisional text. The interactive terminal buffers assistant display
+until completion and shows command status and recorded tool progress. Partial
+output is never committed as a completed provider response.
 
 The shared instance captures a bot profile for each accepted turn. Provider
 selection and tool execution happen inside the instance, independently of the

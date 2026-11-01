@@ -50,9 +50,9 @@ export class Instance {
     const hasProfiles = this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='bot_profiles'").get();
     const versionRow = this.db.prepare('PRAGMA user_version').get();
     const version = Number(versionRow?.user_version ?? 0);
-    if (version > 27) throw new Error('Database version is newer than this Staf');
-    if (hasBots && version < 27 && path !== ':memory:') {
-      this.migrationBackup = `${path}.before-${version < 2 ? 'profiles' : version < 3 ? 'tasks' : version < 4 ? 'approvals' : version < 5 ? 'task-inbox' : version < 6 ? 'memory' : version < 7 ? 'memory-confirmation' : version < 8 ? 'skills' : version < 9 ? 'schedules' : version < 10 ? 'schedule-retries' : version < 11 ? 'schedule-lineage' : version < 12 ? 'bot-description' : version < 13 ? 'delegation-scope' : version < 14 ? 'collaboration' : version < 15 ? 'disclosure' : version < 16 ? 'chat-tasks' : version < 17 ? 'creation-defaults' : version < 18 ? 'web-actions' : version < 19 ? 'search-actions' : version < 20 ? 'scratch-shell' : version < 21 ? 'approval-grants' : version < 22 ? 'schedule-web-scope' : version < 23 ? 'schedule-search-scope' : version < 24 ? 'schedule-shell-scope' : version < 25 ? 'main-bot' : version < 26 ? 'command-events' : 'bot-creation'}-${randomUUID()}.sqlite`;
+    if (version > 28) throw new Error('Database version is newer than this Staf');
+    if (hasBots && version < 28 && path !== ':memory:') {
+      this.migrationBackup = `${path}.before-${version < 2 ? 'profiles' : version < 3 ? 'tasks' : version < 4 ? 'approvals' : version < 5 ? 'task-inbox' : version < 6 ? 'memory' : version < 7 ? 'memory-confirmation' : version < 8 ? 'skills' : version < 9 ? 'schedules' : version < 10 ? 'schedule-retries' : version < 11 ? 'schedule-lineage' : version < 12 ? 'bot-description' : version < 13 ? 'delegation-scope' : version < 14 ? 'collaboration' : version < 15 ? 'disclosure' : version < 16 ? 'chat-tasks' : version < 17 ? 'creation-defaults' : version < 18 ? 'web-actions' : version < 19 ? 'search-actions' : version < 20 ? 'scratch-shell' : version < 21 ? 'approval-grants' : version < 22 ? 'schedule-web-scope' : version < 23 ? 'schedule-search-scope' : version < 24 ? 'schedule-shell-scope' : version < 25 ? 'main-bot' : version < 26 ? 'command-events' : version < 27 ? 'bot-creation' : 'response-progress'}-${randomUUID()}.sqlite`;
       const previousUmask = process.umask(0o077);
       try { this.db.prepare('VACUUM INTO ?').run(this.migrationBackup); }
       finally { process.umask(previousUmask); }
@@ -121,7 +121,8 @@ export class Instance {
     if(version < 25 && hasBots)this.db.exec('INSERT OR IGNORE INTO local_bootstrap VALUES (1)');
     if(version < 26)this.db.exec('CREATE TABLE IF NOT EXISTS command_runtime_events (seq INTEGER PRIMARY KEY AUTOINCREMENT, command_id TEXT NOT NULL REFERENCES commands(id), type TEXT NOT NULL, name TEXT NOT NULL, success INTEGER)');
     if(version < 27)this.db.exec('CREATE TABLE IF NOT EXISTS bot_creation_operations (id TEXT PRIMARY KEY, digest TEXT NOT NULL, bot_id TEXT NOT NULL REFERENCES bots(id))');
-    this.db.exec('PRAGMA user_version=27');
+    if(version < 28)this.db.exec("CREATE TABLE IF NOT EXISTS response_progress (command_id TEXT PRIMARY KEY REFERENCES commands(id), text TEXT NOT NULL DEFAULT '')");
+    this.db.exec('PRAGMA user_version=28');
     for (const row of this.db.prepare("SELECT id,bot_id FROM task_attempts WHERE state IN ('queued','running','stopping','waiting') ORDER BY rowid").all()) {
       if (typeof row.id !== 'string' || typeof row.bot_id !== 'string') throw Error('Invalid interrupted task');
       this.cancelTaskInputs(row.id);
@@ -832,7 +833,11 @@ export class Instance {
   }
   private taskContext(botId:string) { return this.db.prepare('SELECT m.id,m.role,m.content,EXISTS(SELECT 1 FROM task_notices n WHERE n.message_id=m.id) AS isNotice FROM messages m WHERE m.bot_id=? ORDER BY m.seq').all(botId); }
   messages(botId: string) { return this.db.prepare('SELECT id, role, content FROM messages WHERE bot_id=? ORDER BY seq').all(botId); }
+  hasBot(botId:string) {return !!this.botIdentity(botId);}
   command(id: string) { return this.db.prepare('SELECT id, bot_id AS botId, content, state, error FROM commands WHERE id=?').get(id); }
+  responseProgress(id:string) {return this.db.prepare("SELECT c.id,c.bot_id AS botId,CASE WHEN c.state='pending' THEN CASE WHEN p.command_id IS NULL THEN 'accepted' ELSE 'running' END ELSE c.state END AS state,COALESCE(p.text,'') AS text,c.error FROM commands c LEFT JOIN response_progress p ON p.command_id=c.id WHERE c.id=?").get(id);}
+  latestResponse(botId:string) {const row=this.db.prepare('SELECT id FROM commands WHERE bot_id=? ORDER BY rowid DESC LIMIT 1').get(botId);return typeof row?.id==='string'?this.responseProgress(row.id):null;}
+  updateResponse(id:string,text:string) {this.db.prepare("INSERT INTO response_progress(command_id,text) SELECT id,? FROM commands WHERE id=? AND state='pending' ON CONFLICT(command_id) DO UPDATE SET text=excluded.text").run(text,id);}
   commandRuntimeEvent(id:string, event:{type:'tool_start'|'tool_result';name:string;success?:boolean}) {
     this.db.prepare('INSERT INTO command_runtime_events (command_id,type,name,success) VALUES (?,?,?,?)').run(id,event.type,event.name,event.success === undefined ? null : Number(event.success));
   }
@@ -935,6 +940,7 @@ export class Instance {
       session.events.push({type:'assistant',text:reply});
       this.db.prepare('INSERT INTO sessions VALUES (?,?) ON CONFLICT(bot_id) DO UPDATE SET session=excluded.session').run(command.botId,JSON.stringify(session));
       this.db.prepare("INSERT INTO messages VALUES (?, ?, 'assistant', ?, (SELECT COALESCE(MAX(seq),0)+1 FROM messages WHERE bot_id=?))").run(randomUUID(),command.botId,reply,command.botId);
+      this.updateResponse(id,reply);
       this.db.prepare("UPDATE commands SET state='completed' WHERE id=?").run(id);
       this.db.exec('COMMIT');
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
@@ -949,6 +955,7 @@ export class Instance {
         const answer=session.messages.at(-1);
         if (!answer || answer.role !== 'assistant' || typeof answer.content !== 'string') throw Error('Missing assistant answer');
         this.db.prepare("INSERT INTO messages VALUES (?, ?, 'assistant', ?, (SELECT COALESCE(MAX(seq),0)+1 FROM messages WHERE bot_id=?))").run(randomUUID(),command.botId,answer.content,command.botId);
+        this.updateResponse(id,answer.content);
         this.db.prepare("UPDATE commands SET state='completed' WHERE id=?").run(id);
         this.db.prepare('UPDATE task_notices SET delivered=1 WHERE message_id IN (SELECT message_id FROM command_notices WHERE command_id=?)').run(id);
       }
@@ -961,6 +968,7 @@ export class Instance {
       const command = this.command(id);
       if (!command || command.state !== 'pending' || typeof command.botId !== 'string') throw new Error('Command is not pending');
       this.db.prepare("INSERT INTO messages VALUES (?, ?, 'assistant', ?, (SELECT COALESCE(MAX(seq),0)+1 FROM messages WHERE bot_id=?))").run(randomUUID(), command.botId, content, command.botId);
+      this.updateResponse(id,content);
       this.db.prepare("UPDATE commands SET state='completed' WHERE id=?").run(id);
       this.db.exec('COMMIT');
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }

@@ -1,4 +1,4 @@
-import {redactValue} from './config.js';
+import {possibleSecretSuffixLength,redactValue} from './config.js';
 import {createHash} from 'node:crypto';
 import {isDeepStrictEqual} from 'node:util';
 import type {AssistantMessage,Message,ToolDefinition,Provider,ProviderEvent,ProviderCallOptions,ResponseReplayItem,ResponseReplayContent} from './types.js';
@@ -118,8 +118,8 @@ export function directCodexProvider(options:{model:string;sessionId:string;dataD
   try{for await(const event of responseEvents(response,options.model,signal)){
     signal.throwIfAborted();
     if(event.type==='text_delta'){
-      // Keep a token-length tail so a bearer echoed across SSE chunks cannot leak.
-      withheld=redact(withheld+event.text);const ready=Math.max(0,withheld.length-token.length+1);
+      // Retain only text that could become a bearer echoed across SSE chunks.
+      withheld=redact(withheld+event.text);const ready=withheld.length-possibleSecretSuffixLength(withheld,[token]);
       if(ready){yield {type:'text_delta',text:withheld.slice(0,ready)};withheld=withheld.slice(ready);}
     }else if(event.type==='message'){
       if(withheld)yield {type:'text_delta',text:redact(withheld)};

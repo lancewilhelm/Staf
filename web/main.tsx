@@ -1,9 +1,17 @@
-import {useEffect,useRef,useState,useSyncExternalStore,type ReactNode} from 'react';
+import {useEffect,useLayoutEffect,useRef,useState,useSyncExternalStore,type ReactNode} from 'react';
 import {createRoot} from 'react-dom/client';
+import Markdown from 'react-markdown';
 import {Controller,type BotProfile,type InboxItem} from './controller';
 import './style.css';
 
 const app=new Controller();
+
+function CodeBlock({children}:{children:ReactNode}){
+  const ref=useRef<HTMLPreElement>(null);
+  const [status,setStatus]=useState('Copy');
+  return <div className="code-block"><button className="quiet" onClick={()=>{void navigator.clipboard.writeText(ref.current?.querySelector('code')?.textContent??'').then(()=>setStatus('Copied'),()=>setStatus('Copy failed'))}}>{status}</button><pre ref={ref}>{children}</pre></div>;
+}
+function ResponseText({text}:{text:string}){return <div className="bottext markdown"><Markdown skipHtml components={{pre:({children})=><CodeBlock>{children}</CodeBlock>,a:({href,children})=><a href={href} target="_blank" rel="noopener noreferrer">{children}</a>}}>{text}</Markdown></div>}
 
 type View='chat'|'inbox'|'settings'|'bot';
 type Appearance='light'|'dark'|'system';
@@ -84,6 +92,10 @@ function App(){
   const firstRun=useRef(false);
   const activityButton=useRef<HTMLButtonElement>(null);
   const closeButton=useRef<HTMLButtonElement>(null);
+  const messagesRef=useRef<HTMLDivElement>(null);
+  const followBottom=useRef(true);
+  useLayoutEffect(()=>{followBottom.current=true},[s.selected,view]);
+  useLayoutEffect(()=>{const node=messagesRef.current;if(node&&followBottom.current)node.scrollTop=node.scrollHeight},[s.selected,view,s.messages,s.response?.text,s.response?.state]);
   useEffect(()=>{if(s.activityOpen&&document.activeElement===activityButton.current)closeButton.current?.focus()},[s.activityOpen]);
   useEffect(()=>{if(!firstRun.current&&s.connection.kind==='ready'){firstRun.current=true;if(!s.bots.length&&s.credential==='signed-out')setView('settings')}},[s.connection.kind,s.bots.length,s.credential]);
   const selected=s.bots.find(b=>b.id===s.selected);
@@ -129,13 +141,15 @@ function App(){
     </div>:<div className="workspace"><div className="chat">{view==='inbox'?<div className="messages"><h2>Inbox</h2><p>Questions and approvals that need your attention.</p>
       {s.inbox.length?s.inbox.map(item=><div key={item.kind+item.id}><button className="inbox-link" onClick={()=>{if(item.botId)app.select(item.botId);app.activity(true);setView('chat')}}>{item.botId?labelFor(item.botId):'Instance-wide'} · {item.kind==='question'?'Question':item.approvalKind+' approval'}</button>{!item.botId&&<Item item={item}/>}</div>):<p>Nothing needs attention right now.</p>}
       <h3>Task updates</h3>{s.taskUpdates.length?s.taskUpdates.map(task=><article className="item" key={task.id}><button className="inbox-link" onClick={()=>{app.select(task.botId);app.activity(true);setView('chat')}}>{labelFor(task.botId)} · {task.objective}</button><div className="meta">{task.state} · {task.id}</div>{task.outcome&&<p>{task.outcome}</p>}</article>):<p>No task updates yet.</p>}
-    </div>:<div className="messages">{selected?s.messages.length?s.messages.map(m=><div className="message" key={m.id}><div className="who">{m.role==='user'?'YOU':selected.name.toUpperCase()}</div><div className={m.role==='user'?'bubble':'bottext'}>{m.content}</div></div>):<div className="empty"><strong>Say hello to {selected.name}</strong><p>This is your ongoing conversation.</p></div>:<div className="empty"><strong>Let's set up your first agent.</strong><p>Create an agent now, even if your provider is not connected.</p><button onClick={openBotCreation}>Create an agent</button></div>}
+    </div>:<div className="messages" ref={messagesRef} onScroll={e=>{const node=e.currentTarget;followBottom.current=node.scrollHeight-node.scrollTop-node.clientHeight<40}}>{selected?s.messages.length?s.messages.map(m=><div className="message" key={m.id}><div className="who">{m.role==='user'?'YOU':selected.name.toUpperCase()}</div>{m.role==='user'?<div className="bubble">{m.content}</div>:<ResponseText text={m.content}/>}</div>):<div className="empty"><strong>Say hello to {selected.name}</strong><p>This is your ongoing conversation.</p></div>:<div className="empty"><strong>Let's set up your first agent.</strong><p>Create an agent now, even if your provider is not connected.</p><button onClick={openBotCreation}>Create an agent</button></div>}
+      {selected&&s.responseConnection==='reconnecting'&&<div className="message meta">Live response updates disconnected. Reconnecting…</div>}
+      {selected&&s.response&&s.response.state!=='completed'&&<div className="message provisional"><div className="who">{selected.name.toUpperCase()} · {s.response.state}</div>{s.response.text&&<ResponseText text={s.response.text}/>}<div className="meta">{s.response.state==='failed'||s.response.state==='interrupted'?'Response did not complete. ':'Response in progress. '}{s.response.error}</div></div>}
       {selected?.provider==='codex'&&s.credential==='signed-out'&&<div className="provider"><strong>Connect Codex to chat</strong><p>Provider connections are shared by this Staf instance.</p><button className="quiet" onClick={openSettings}>Open provider settings</button></div>}
       {s.recoveries.length>0&&<details><summary>Recover saved browser drafts or creation</summary><p>Drafts are stored locally in this browser. Choose a record to copy it into the selected agent.</p>{s.recoveries.map(r=><div className="row" key={r.key}><span>{r.label}</span><button className="quiet" onClick={()=>r.key.includes(':creation:')?app.recoverCreation(r):app.adopt(r)}>Recover</button></div>)}</details>}
     </div>}
     {selected&&view==='chat'&&<div className="composer"><textarea aria-label="Message" placeholder={'Message '+selected.name+'…'} value={s.draft.text} onChange={e=>app.edit(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();void app.send()}}}/>
-      {submission&&<div className="submission">Message {submission.kind}. {submission.error} {submission.kind==='unknown'&&'The original request may still complete.'}<div className="row"><button className="quiet" onClick={()=>void app.checkSubmission()}>Check status</button>{submission.kind==='unknown'&&<button className="quiet" onClick={()=>void app.send(true)}>Retry same message</button>}</div></div>}
-      <div className="actions"><button className="model-button" onClick={()=>{setSettingsBotId(selected.id);setView('bot')}} aria-label="Change agent settings">{selected.provider} · {selected.model||'Choose model'}</button><button onClick={()=>void app.send()}>Send ↑</button></div>
+      {submission&&<div className="submission">Message {submission.kind}. {submission.error} {submission.kind==='unknown'&&'The original request may still complete.'}<div className="row">{submission.kind==='busy'?<button className="quiet" onClick={()=>app.restoreUnsent()}>Restore unsent message</button>:<button className="quiet" onClick={()=>void app.checkSubmission()}>Check status</button>}{submission.kind==='unknown'&&<button className="quiet" onClick={()=>void app.send(true)}>Retry same message</button>}</div></div>}
+      <div className="actions"><button className="model-button" onClick={()=>{setSettingsBotId(selected.id);setView('bot')}} aria-label="Change agent settings">{selected.provider} · {selected.model||'Choose model'}</button><button disabled={!!s.response&&['accepted','running'].includes(s.response.state)||!!submission&&['submitting','pending','unknown','busy'].includes(submission.kind)} onClick={()=>void app.send()}>Send ↑</button></div>
     </div>}</div>
     {s.activityOpen&&<aside className="activity" aria-label="Activity"><h3>Activity <button ref={closeButton} className="quiet close" onClick={()=>{app.activity(false);activityButton.current?.focus()}} aria-label="Close Activity">×</button></h3>{relevant.map(item=><Item key={item.kind+item.id} item={item}/>)}{s.tasks.length?s.tasks.map(task=><article className="item" key={task.id}><strong>{task.objective}</strong><div className="meta">{task.state} · {task.id}</div>{task.outcome&&<p>{task.outcome}</p>}{task.activity?.map((event,index)=><pre key={index}>{JSON.stringify(event,null,2)}</pre>)}</article>):<p className="meta">No tasks recorded for this agent.</p>}</aside>}
     </div>}

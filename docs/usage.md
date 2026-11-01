@@ -146,7 +146,7 @@ client needs a new host code to reconnect. Clients are identified by an ID,
 not a device name.
 
 The workspace keeps an agent list beside the selected main chat, visible while
-the page scrolls. Select an agent to switch conversations; agents with the same
+the chat scrolls. Select an agent to switch conversations; agents with the same
 name, including archived namesakes, show the last four characters of their stable
 IDs in the list and Updates. Suffixes can coincide; full IDs remain available
 through the API or CLI. **New agent** opens creation, and **Settings** controls appearance and
@@ -164,6 +164,15 @@ In agent settings, select **Archive agent** to retain configuration and history
 while preventing new work. To restore it, open **Settings** and select
 **Restore agent** under **Archived agents**. An agent with active chat or background
 work cannot be archived until that work settles.
+
+While a response runs, the workspace receives provisional text and progress over a shared-instance event stream. If the connection drops, the workspace reconnects and shows the latest saved progress.
+You can type a next draft, but cannot send it until the active response ends.
+Markdown headings, lists, links and code blocks render in assistant responses;
+use Copy on a code block. Raw HTML is not rendered. The conversation follows new
+output while you are at the bottom and stays in place when you scroll up.
+Incremental output is available when the adapter supplies it; buffered adapters
+show progress and then the completed message. A failed or interrupted response
+remains labeled as incomplete.
 
 **Updates** shows task updates, questions, and approval requests. Activity opens
 automatically for a new question or approval for the selected agent. Other
@@ -240,6 +249,7 @@ pnpm start instance restore http://127.0.0.1:3210 ~/.staf-client.json BOT_ID REV
 pnpm start instance read http://127.0.0.1:3210 ~/.staf-client.json BOT_ID
 pnpm start instance send http://127.0.0.1:3210 ~/.staf-client.json BOT_ID 'Hello'
 pnpm start instance status http://127.0.0.1:3210 ~/.staf-client.json COMMAND_ID
+node dist/cli.js instance response-follow http://127.0.0.1:3210 ~/.staf-client.json COMMAND_ID
 ```
 
 The bot name can contain multiple arguments. Pass instructions as one quoted
@@ -261,7 +271,7 @@ retain configuration and history and cannot accept new work until restored.
 
 The CLI prints the command ID before submission; check status if its outcome is
 uncertain instead of automatically resending. A busy bot does not accept a new
-message. The browser retains its draft on busy, failure or uncertain submission;
+message. The browser retains the submitted text for recovery on busy, failure or uncertain submission and keeps the next draft editable;
 use **Check status** to inspect an uncertain outcome. If the command cannot be
 found, the original request may still arrive. The workspace retains its ID and
 offers an explicit retry of that same message and ID. The CLI takes text as an argument and has no interactive draft.

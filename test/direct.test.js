@@ -19,6 +19,22 @@ function sse(events,fragment=1){const bytes=new TextEncoder().encode(events.map(
 async function fixture(t){const root=await mkdtemp(join(tmpdir(),'staf-direct-'));t.after(()=>rm(root,{recursive:true,force:true}));return root;}
 const provider=request=>directCodexProvider({model,sessionId:'session-a',dataDir:'/unused',token:async()=> 'dummy-access',request});
 
+test('Codex streams normal text before completion even with a long access token',async()=>{
+ let controller;
+ const body=new ReadableStream({start(value){controller=value;}});
+ const p=directCodexProvider({model,sessionId:'test-stream',dataDir:'/unused',token:async()=> 'synthetic-credential-'+ 'x'.repeat(2048),request:async()=>new Response(body)});
+ const events=p.stream([],[]);
+ const next=events.next();
+ controller.enqueue(new TextEncoder().encode('data: '+JSON.stringify({type:'response.output_text.delta',delta:'Hello, this is a response in progress. '})+'\n\n'));
+ const result=await Promise.race([next,new Promise(resolve=>setTimeout(()=>resolve('timed-out'),200))]);
+ controller.enqueue(new TextEncoder().encode('data: '+JSON.stringify(completed([message('Hello, this is a response in progress. ')]))+'\n\n'));controller.close();
+ if(result==='timed-out')await next;
+ await events.return();
+ assert.notEqual(result,'timed-out','text must be visible before provider completion');
+ assert.equal(result.value.type,'text_delta');
+ assert.match(result.value.text,/Hello/);
+});
+
 test('direct request has scoped stable cache identity, real item boundaries and provider/model-bound reasoning replay',()=>{
  const first=[{role:'user',content:'hello'}],history=[...first,{role:'assistant',content:'answer',tool_calls:[{id:'c1',function:{name:'clock',arguments:'{}'}}]},{role:'tool',tool_call_id:'c1',content:'time'},{role:'user',content:'next'}];
  const a=responsesRequest(first,tools,model,'a'),b=responsesRequest(history,[...tools].reverse(),model,'a');assert.equal(a.prompt_cache_key,b.prompt_cache_key);assert.notEqual(a.prompt_cache_key,responsesRequest(first,tools,model,'b').prompt_cache_key);assert.notEqual(a.prompt_cache_key,responsesRequest(first,tools,'other','a').prompt_cache_key);assert.notEqual(a.prompt_cache_key,responsesRequest(first,[{...tools[0],function:{...tools[0].function,description:'changed'}}],model,'a').prompt_cache_key);
