@@ -1,10 +1,14 @@
 import { createInterface } from 'node:readline';
 import { createServer } from 'node:http';
 import { startInstance } from '../../dist/instance-service.js';
-import { demoProvider } from '../../dist/providers.js';
+import { demoProvider, openRouterProvider } from '../../dist/providers.js';
+import { loadOpenRouterKey } from '../../dist/openrouter-credential.js';
+import {mkdir,writeFile} from 'node:fs/promises';
+import {join,dirname} from 'node:path';
 
 const [path, port] = process.argv.slice(2);
-let releaseInputTask, releaseStream;
+let releaseInputTask, releaseStream, releaseRouter;
+let routerFailed=false;
 function makeProvider() {
 let inputCalls=0, inputTask=false, skillCalls=0, skillTask=false, collabCalls=0, collabTask=false, webCalls=0, searchCalls=0, shellCalls=0;
 return {
@@ -89,7 +93,7 @@ return {
   },
 };
 }
-const authHooks = { prepare: async () => ({hostId:'urn:uuid:synthetic',clientId:'synthetic-client'}), complete: async () => { throw Error('Synthetic auth must not exchange credentials'); } };
+const authHooks = { prepare: async () => ({hostId:'urn:uuid:synthetic',clientId:'synthetic-client'}), complete: async (root,_attempt,callback,_fetch,signal,beforeCommit) => {if(callback.searchParams.get('code')!=='success')throw Error('Synthetic failure');signal.throwIfAborted();await mkdir(join(root,'auth'),{recursive:true,mode:0o700});await beforeCommit();await writeFile(join(root,'auth','codex-direct.json'),JSON.stringify({version:1,issuer:'https://auth.openai.com',subject:'synthetic',clientId:'synthetic-client',hostId:'synthetic-host',accessToken:'synthetic-access-secret',refreshToken:'synthetic-refresh-secret',idToken:'synthetic-id-secret',scopes:['resource.invoke','chatgpt.tokens.use.direct'],expiresAt:Date.now()+3600000}),{mode:0o600});} };
 const webDependencies={
   resolve:async host=>{console.log('SYNTHETIC_WEB dns '+host);return [{address:'8.8.8.8',family:4}];},
   request:async url=>{console.log('SYNTHETIC_WEB request '+url.hostname);return {status:url.hostname==='one.example'?302:200,headers:url.hostname==='one.example'?{location:'https://two.example/second'}:{'content-type':'text/plain'},body:(async function*(){yield Buffer.from('Synthetic page content')})(),close(){}};},
@@ -98,7 +102,13 @@ const searchBackend=createServer(async(req,res)=>{let body='';for await(const ch
 await new Promise(resolve=>searchBackend.listen(0,'127.0.0.1',resolve));
 console.log('SYNTHETIC_SEARCH_ORIGIN http://127.0.0.1:'+searchBackend.address().port);
 const shellExecutor=async request=>{const {signal,...details}=request;console.log('SYNTHETIC_SHELL '+JSON.stringify(details));if(request.command==='simulate uncertainty')throw Error('Synthetic lost response');return {output:'hello from fake executor',exitCode:0,outputComplete:true,stopped:'completed'};};
-const app = startInstance(path, Number(port), { env: {}, authHooks, webDependencies, shellExecutor, enableReusableApprovals:process.argv[4]==='--grants', providerFactory: async () => {
+const app = startInstance(path, Number(port), { env: {}, authHooks, webDependencies, shellExecutor, enableReusableApprovals:process.argv[4]==='--grants', providerFactory: async (profile,instructions) => {
+  if(profile.provider==='openrouter') return openRouterProvider({OPENROUTER_API_KEY:loadOpenRouterKey(dirname(path))},profile.model,async (_url,init)=>{
+    const body=JSON.parse(init.body),last=body.messages.at(-1),frame=value=>`data: ${JSON.stringify(value)}\n\n`;
+    if(last.content==='Browser failure fixture' && !routerFailed){routerFailed=true;return new Response(frame({choices:[{index:0,delta:{content:'Partial browser output '},finish_reason:null}]})+frame({error:{message:'synthetic-browser-recovery'}}));}
+    const stream=new ReadableStream({async start(controller){const write=value=>controller.enqueue(new TextEncoder().encode(value));write(frame({choices:[{index:0,delta:{content:'Router first chunk '},finish_reason:null}]}));if(last.content==='Keep OpenRouter draft')await new Promise(resolve=>{releaseRouter=resolve});write(frame({choices:[{index:0,delta:{content:'and finished.'},finish_reason:'stop'}]}));write('data: [DONE]\n\n');controller.close();}});
+    return new Response(stream);
+  },undefined,instructions);
   const provider=makeProvider();
   return {...provider,async *stream(messages,tools,options){
     if(options?.currentUserInput!=='Streaming markdown fixture'){yield {type:'message',message:await provider.complete(messages,tools,options)};return;}
@@ -114,4 +124,4 @@ const responseStreams=new Set();
 app.server.on('request',(req,res)=>{if(req.url?.endsWith('/response/stream')){responseStreams.add(res);res.on('close',()=>responseStreams.delete(res));}});
 await app.listen();
 console.log(`Listening on http://127.0.0.1:${port}\nPairing code: ${app.code}`);
-createInterface({input:process.stdin}).on('line', line => { if(line==='release') releaseInputTask?.(); else if(line==='stream-next')releaseStream?.();else if(line==='drop-response-streams')for(const response of responseStreams)response.destroy();else console.log(`Pairing code: ${app.issueCode()}`); });
+createInterface({input:process.stdin}).on('line', line => { if(line==='release') releaseInputTask?.(); else if(line==='stream-next')releaseStream?.();else if(line==='router-next')releaseRouter?.();else if(line==='drop-response-streams')for(const response of responseStreams)response.destroy();else console.log(`Pairing code: ${app.issueCode()}`); });

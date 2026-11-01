@@ -27,7 +27,8 @@ one-shot commands.
 Run `pnpm start instance serve .staf/instance.sqlite 3210` and open
 `http://127.0.0.1:3210/`. Enter the host's pairing code to open the chat workspace.
 **Settings** shows the instance-wide Codex connection and offers sign-in when
-needed. It also offers Light, Dark, and System appearance for this browser;
+needed, progress, cancellation, retry, and sign-out. A saved sign-in does not
+verify account or model access. It also offers Light, Dark, and System appearance for this browser;
 System follows the device setting. The persistent agent list switches between main chats; each agent has its own configuration, which you can edit from its chat.
 Instructions live in its `soul.md` file; settings live in `agent.toml`. You can
 [edit these files directly](docs/usage.md#agent-configuration-files) on the instance host.
@@ -99,7 +100,7 @@ Public OIDC metadata and the documented direct endpoint contract were checked.
 On a new checkout, run
 `pnpm install --frozen-lockfile`. pnpm 10.27.0 is used for verification.
 
-The workspace receives provisional main-chat response progress over an authenticated event stream and renders Markdown with copyable code. Use Stop to end the current response while keeping the next draft; the shared service waits for cancellation to settle before accepting another message. The paired CLI can follow progress with `instance response-follow` and request Stop with `instance response-stop`. Incremental text depends on the provider: Codex direct supports it; the current Chat Completions adapters return buffered responses. The shared terminal displays command status and recorded tool progress.
+The workspace receives provisional main-chat response progress over an authenticated event stream and renders Markdown with copyable code. Use Stop to end the current response while keeping the next draft; the shared service waits for cancellation to settle before accepting another message. The paired CLI can follow progress with `instance response-follow` and request Stop with `instance response-stop`. Incremental text depends on the provider: Codex direct and OpenRouter support it; LM Studio and generic Chat Completions responses are buffered. The shared terminal displays command status and recorded tool progress.
 `/usage` shows reported main-chat consumption. `/context` reports historical input
 when available; current context occupancy is unavailable. Shared-instance provider
 sign-in and live chat have not been verified with real credentials.

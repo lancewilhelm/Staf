@@ -117,9 +117,8 @@ mode 0600. Disconnect removes that file and affects subsequent work; requests
 already in flight may still use the previous key. The shared instance ignores
 `OPENROUTER_API_KEY` in its environment, so migrate an existing key into Settings
 or the CLI. Select `openrouter` and an explicit model in each agent. A message
-can spend API credits. Choose a model that supports function calling to use tools.
-These operations have synthetic service, CLI, and browser coverage; live access
-has not been verified.
+can spend API credits. OpenRouter streams provisional text and reports usage when available. Choose a model that supports function calling to use tools; capabilities vary by model. Interrupted, truncated, or unsupported responses are shown as incomplete. Restore a failed message from the composer to retry it; a newer draft is retained separately.
+Synthetic service, CLI, and served-browser checks exercise the streaming adapter; live OpenRouter conversation and remote-instance access remain unverified.
 
 ### Use LM Studio or a compatible HTTP endpoint
 
@@ -182,7 +181,13 @@ System is the default and follows device appearance changes. The choice is saved
 in this browser, independently of other browsers; clearing browser storage resets it.
 
 A saved Codex sign-in is shared by all agents; it does not establish that the
-provider or a model is available. Create an agent with a name and optional
+provider or a model is available. In **Settings**, use **Connect Codex**, open
+**Continue sign-in** on the instance host, and return to Settings for progress.
+Cancel a pending attempt or retry a failed or expired one. If the page was
+refreshed and the link is no longer available, cancel the attempt and start a
+new one. **Sign out** removes the instance's local credential after confirmation;
+finish active work and sign-in first. Agent provider and model selections and
+unsent drafts are retained. Create an agent with a name and optional
 instructions, provider, and model, even before signing in or choosing a model. Select the
 model label below an agent's chat to edit its settings and Instructions. Press
 Enter to send a message or Shift+Enter to insert a new line. The workspace keeps
@@ -269,7 +274,7 @@ remove the old revision's `.retired` marker after review. The old files remain
 on disk.
 
 A later request after a provider change can send existing chat history to the new provider. Creation defaults set provider, model, and reasoning for future bots. The instance copies these settings at creation; changing defaults never changes existing bots. Revisions prevent stale clients from overwriting each other. In the CLI, use `instance defaults URL CREDENTIAL_FILE` and `instance defaults-set URL CREDENTIAL_FILE REVISION PROVIDER MODEL REASONING`; use `-` for an empty model or reasoning. Permission and approval settings remain separate. The description is owner-edited metadata visible to other bots; keep private instructions and memory out of it. New bots start with an empty description.
-The deterministic demo provider does not follow the instructions. Select Codex, OpenRouter, LM Studio, or live and an explicit model in the bot profile. OpenRouter uses the managed instance key described above; the instance command does not load the project `.env` file. Codex uses the Staf grant under the directory containing the instance database. From a paired browser, use Codex sign-in and open the provided link on the instance host. The initiating paired client can check or cancel that attempt, including after refreshing the page. The CLI provides `instance codex-auth-start URL CREDENTIAL_FILE`, `codex-auth-current URL CREDENTIAL_FILE`, `codex-auth-status URL CREDENTIAL_FILE ATTEMPT_ID`, `codex-auth-cancel URL CREDENTIAL_FILE ATTEMPT_ID`, and `codex-auth-credential URL CREDENTIAL_FILE`. The callback listens on the same loopback origin. Revoking the initiating client prevents credential commit. These paths have been tested with synthetic auth only; live sign-in has not been verified. Provider failures do not fall back to another provider. Live provider execution has not been verified in this preview.
+The deterministic demo provider does not follow the instructions. Select Codex, OpenRouter, LM Studio, or live and an explicit model in the bot profile. OpenRouter uses the managed instance key described above; the instance command does not load the project `.env` file. Codex uses the Staf grant under the directory containing the instance database. From a paired browser, use Codex sign-in and open the provided link on the instance host. The initiating paired client can check or cancel that attempt, including after refreshing the page. The CLI provides `instance codex-auth-start URL CREDENTIAL_FILE`, `codex-auth-current URL CREDENTIAL_FILE`, `codex-auth-status URL CREDENTIAL_FILE ATTEMPT_ID`, `codex-auth-cancel URL CREDENTIAL_FILE ATTEMPT_ID`, `codex-auth-credential URL CREDENTIAL_FILE`, and `codex-auth-logout URL CREDENTIAL_FILE`. The callback listens on the same loopback origin. Revoking the initiating client prevents credential commit. These paths have been tested with synthetic auth only; live sign-in has not been verified. Provider failures do not fall back to another provider. Live provider execution has not been verified in this preview.
 
 CLI examples (use a fresh host code for each client):
 

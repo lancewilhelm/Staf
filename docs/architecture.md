@@ -16,8 +16,7 @@ send existing conversation history to the new provider on the next request.
 Provider adapters normalize messages and tools for the runtime. Codex uses direct
 Responses with a Staf-owned grant and model-bound replay. OpenRouter, LM Studio,
 and the generic live adapter use Chat Completions. The demo returns deterministic
-responses. Provider output is buffered until completion; the terminal displays
-command status and persisted tool progress. The service applies permissions and approval
+responses. Codex and OpenRouter stream provisional text through the shared service; LM Studio and the generic live adapter buffer provider output. Only completed provider responses are committed as completed replies; stopped partial output is labeled separately. The terminal displays command status and persisted tool progress. The service applies permissions and approval
 rules before supported actions. See [direct Responses](direct-responses.md),
 [settings](settings.md), and [usage](usage.md).
 
@@ -118,7 +117,7 @@ The version 9 instance migration creates schedule and occurrence tables after a 
 
 The collaboration runtime journals actual bot messages and separate helper attempts. The owner approves each exact message before disclosure. A helper receives only the assignment brief as task context and does not retrieve private memory. Parent stop cancels its helper, and late output remains in helper Activity. Restart interrupts unfinished attempts. Offline synthetic-provider tests cover these paths; live provider behavior remains unverified.
 
-Shared-instance Codex sign-in owns a short-lived in-memory attempt bound to its initiating paired client and the service loopback callback. The credential adapter checks that client remains authorized at the locked credential commit boundary. Callback parameters are not returned in the response. This integration has synthetic tests and has not been verified with live authorization.
+Shared-instance Codex sign-in owns a short-lived in-memory attempt bound to its initiating paired client and the service loopback callback. The credential adapter checks that client remains authorized at the locked credential commit boundary. Callback parameters are not returned in the response. The browser keeps the sign-in URL only for the attempt that produced it and offers cancellation and retry if it is lost or the attempt fails. Paired CLI and GUI sign-out use the same guarded service operation. Credential status is local and does not verify account or model access. This integration has synthetic service, CLI, and served-browser tests and has not been verified with live authorization.
 
 The shared main-chat runtime may request one background task per command through a host-controlled tool. A durable journal binds the command, tool call, objective, and task attempt, so duplicate submissions do not start duplicate work. Explicit main-chat task direction and stop use the attempt ID and do not expand permissions. New bots copy the instance provider, model, and reasoning creation defaults in the creation transaction; later default changes do not alter existing bots. These paths have offline synthetic coverage; live provider behavior remains unverified.
 
@@ -138,8 +137,7 @@ uses the managed key for new OpenRouter work and ignores the host environment
 key. Saving does not verify account or model access. Known keys are redacted
 from supported conversation and output paths; the key is rejected from agent
 configuration writes. In-flight work may retain a previous key. Service, CLI,
-and served-browser coverage uses synthetic credentials and providers; live
-OpenRouter access remains unverified.
+and served-browser coverage uses synthetic credentials and streaming provider responses, including tool calls and recovery; live OpenRouter conversation and remote-instance access remain unverified.
 
 The agent editor combines its revisioned profile with the authenticated Codex
 and OpenRouter presence statuses to offer configured shared connections and the
