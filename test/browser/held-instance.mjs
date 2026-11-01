@@ -110,6 +110,8 @@ const app = startInstance(path, Number(port), { env: {}, authHooks, webDependenc
     yield {type:'message',message:{role:'assistant',content:first+'More incoming text. Finished.'}};
   }};
 } });
+const responseStreams=new Set();
+app.server.on('request',(req,res)=>{if(req.url?.endsWith('/response/stream')){responseStreams.add(res);res.on('close',()=>responseStreams.delete(res));}});
 await app.listen();
 console.log(`Listening on http://127.0.0.1:${port}\nPairing code: ${app.code}`);
-createInterface({input:process.stdin}).on('line', line => { if(line==='release') releaseInputTask?.(); else if(line==='stream-next')releaseStream?.();else console.log(`Pairing code: ${app.issueCode()}`); });
+createInterface({input:process.stdin}).on('line', line => { if(line==='release') releaseInputTask?.(); else if(line==='stream-next')releaseStream?.();else if(line==='drop-response-streams')for(const response of responseStreams)response.destroy();else console.log(`Pairing code: ${app.issueCode()}`); });

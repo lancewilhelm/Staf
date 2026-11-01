@@ -160,7 +160,7 @@ message or Shift+Enter to insert a new line. If no Codex sign-in is available,
 the workspace keeps your draft and directs you to provider settings. If a bot
 has no model, the workspace keeps your draft until you choose one.
 
-While a response runs, its provisional text and progress appear in the conversation.
+While a response runs, the workspace receives provisional text and progress over a shared-instance event stream. If the connection drops, the workspace reconnects and shows the latest saved progress.
 You can type a next draft, but cannot send it until the active response ends.
 Markdown headings, lists, links and code blocks render in assistant responses;
 use Copy on a code block. Raw HTML is not rendered. The conversation follows new

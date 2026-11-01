@@ -1,3 +1,5 @@
+import {responseEvents} from './response-stream';
+
 export type Bot={id:string;name:string;provider:string;model:string|null;archived:boolean};
 export type BotProfile=Bot & {revision:string;instructions:string;description:string;reasoning:string|null;configDir:string};
 export type Message={id:string;role:string;content:string};
@@ -8,21 +10,51 @@ export type Submission={kind:'submitting'|'pending'|'unknown'|'busy'|'failed'|'i
 export type Draft={text:string;submission:Submission|null};
 export type Connection={kind:'connecting'}|{kind:'pairing';message:string}|{kind:'ready'}|{kind:'offline';message:string};
 export type Setup={kind:'closed'}|{kind:'create';name:string;instructions:string;model:string;operationId:string|null;status:string};
-export type Workspace={connection:Connection;setup:Setup;bots:Bot[];selected:string|null;messages:Message[];response:ResponseProgress|null;tasks:Task[];inbox:InboxItem[];taskUpdates:Array<Task & {botId:string}>;activityOpen:boolean;credential:'signed-in'|'signed-out'|'unknown';authAttempt:{id:string;phase:string}|null;authUrl:string;freshness:string;notice:string;draft:Draft;recoveries:Recovery[]};
+export type Workspace={connection:Connection;setup:Setup;bots:Bot[];selected:string|null;messages:Message[];response:ResponseProgress|null;responseConnection:'connecting'|'connected'|'reconnecting';tasks:Task[];inbox:InboxItem[];taskUpdates:Array<Task & {botId:string}>;activityOpen:boolean;credential:'signed-in'|'signed-out'|'unknown';authAttempt:{id:string;phase:string}|null;authUrl:string;freshness:string;notice:string;draft:Draft;recoveries:Recovery[]};
 type Recovery={key:string;label:string;value:string};
 class ApiError extends Error {constructor(message:string,readonly status:number){super(message);}}
+const isRecord=(value:unknown):value is Record<string,unknown>=>typeof value==='object'&&value!==null&&!Array.isArray(value);
+function isResponseProgress(value:unknown,botId:string):value is ResponseProgress {
+  return isRecord(value)&&typeof value.id==='string'&&value.botId===botId&&typeof value.state==='string'&&['accepted','running','completed','failed','interrupted'].includes(value.state)&&typeof value.text==='string'&&(value.error===null||typeof value.error==='string');
+}
 const prefix='staf-workspace-v1:';
 export class Controller {
-  private writer=crypto.randomUUID(); private listeners=new Set<()=>void>(); private generation=0; private seen=new Set<string>(); private token=localStorage.getItem('staf-token')||''; private currentKey=''; private timer:number;
-  state:Workspace={connection:{kind:'connecting'},setup:{kind:'closed'},bots:[],selected:null,messages:[],response:null,tasks:[],inbox:[],taskUpdates:[],activityOpen:false,credential:'unknown',authAttempt:null,authUrl:'',freshness:'',notice:'',draft:{text:'',submission:null},recoveries:[]};
+  private writer=crypto.randomUUID(); private listeners=new Set<()=>void>(); private generation=0; private seen=new Set<string>(); private token=localStorage.getItem('staf-token')||''; private currentKey=''; private timer:number; private responseStream:{botId:string;controller:AbortController}|null=null;
+  state:Workspace={connection:{kind:'connecting'},setup:{kind:'closed'},bots:[],selected:null,messages:[],response:null,responseConnection:'connecting',tasks:[],inbox:[],taskUpdates:[],activityOpen:false,credential:'unknown',authAttempt:null,authUrl:'',freshness:'',notice:'',draft:{text:'',submission:null},recoveries:[]};
   constructor(){this.timer=window.setInterval(()=>{if(document.visibilityState==='visible')void this.refresh()},1000);window.addEventListener('online',()=>void this.refresh());document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')void this.refresh()});this.recoveries();void this.refresh()}
   subscribe=(fn:()=>void)=>{this.listeners.add(fn);return()=>this.listeners.delete(fn)};
   snapshot=()=>this.state;
   private update(change:Partial<Workspace>){this.state={...this.state,...change};this.listeners.forEach(fn=>fn())}
   private async api<T>(path:string,body?:unknown):Promise<T>{const response=await fetch(path,{method:body===undefined?'GET':'POST',headers:{...(body===undefined?{}:{'Content-Type':'application/json'}),...(this.token?{Authorization:'Bearer '+this.token}:{})},...(body===undefined?{}:{body:JSON.stringify(body)})});const data:unknown=await response.json();if(!response.ok){const message=typeof data==='object'&&data!==null&&'error'in data&&typeof data.error==='string'?data.error:'Request failed';throw new ApiError(message,response.status)}return data as T}
+  private watchResponse(botId:string|null){
+    if(this.responseStream?.botId===botId && !this.responseStream.controller.signal.aborted)return;
+    this.responseStream?.controller.abort();this.responseStream=null;
+    if(!botId || !this.token)return;
+    const controller=new AbortController(),token=this.token;this.responseStream={botId,controller};this.update({responseConnection:'connecting'});
+    void (async()=>{while(!controller.signal.aborted && this.token===token){
+      try {
+        const response=await fetch('/api/bots/'+botId+'/response/stream',{headers:{Authorization:'Bearer '+token,Accept:'text/event-stream'},signal:controller.signal});
+        if(response.status===401){if(this.token===token){this.token='';this.watchResponse(null);localStorage.removeItem('staf-token');this.update({connection:{kind:'pairing',message:'Pairing expired or was revoked.'}})}return;}
+        if(!response.ok || !response.body || !response.headers.get('content-type')?.startsWith('text/event-stream'))throw Error('Response stream unavailable');
+        this.update({responseConnection:'connected'});
+        for await(const event of responseEvents(response.body)){
+          if(controller.signal.aborted || this.state.selected!==botId)break;
+          if(!isRecord(event))throw Error('Invalid response stream event');
+          const previous=this.state.response;
+          let next:ResponseProgress|null;
+          if(event.type==='snapshot' && (event.response===null || isResponseProgress(event.response,botId)))next=event.response;
+          else if(event.type==='delta' && typeof event.id==='string' && typeof event.text==='string' && previous?.id===event.id && previous.state==='running')next={...previous,text:previous.text+event.text};
+          else throw Error('Invalid response stream event');
+          this.update({response:next});
+          if(previous?.id!==next?.id || (previous?.state!==next?.state && next && !['accepted','running'].includes(next.state)))void this.refresh();
+        }
+      }catch{if(controller.signal.aborted)return;}
+      if(!controller.signal.aborted){this.update({responseConnection:'reconnecting'});await new Promise(resolve=>setTimeout(resolve,1000));}
+    }})();
+  }
   async pair(code:string){try{const result=await this.api<{token:string}>('/api/pair',{code});localStorage.setItem('staf-token',result.token);this.token=result.token;await this.refresh()}catch(e){this.update({connection:{kind:'pairing',message:String(e)}})}}
-  async refresh(){if(!this.token){this.update({connection:{kind:'pairing',message:''}});return}const gen=++this.generation;try{const [bots,inbox,taskUpdates,credential,current]=await Promise.all([this.api<Bot[]>('/api/bots'),this.api<InboxItem[]>('/api/inbox'),this.api<Array<Task & {botId:string}>>('/api/task-updates'),this.api<{signedIn:boolean}>('/api/codex-auth/credential'),this.api<{attempt:{id:string;phase:string}|null}>('/api/codex-auth/current')]);const selected=this.state.selected && bots.some(b=>b.id===this.state.selected&&!b.archived)?this.state.selected:bots.find(b=>!b.archived)?.id??null;const [messages,taskList,response]=selected?await Promise.all([this.api<Message[]>('/api/bots/'+selected+'/messages'),this.api<Task[]>('/api/bots/'+selected+'/tasks'),this.api<ResponseProgress|null>('/api/bots/'+selected+'/response')]):[[],[],null];const tasks=await Promise.all(taskList.slice(0,30).map(task=>this.api<Task>('/api/tasks/'+task.id)));if(gen!==this.generation)return;const newly=inbox.some(item=>item.botId===selected&&!this.seen.has(item.kind+':'+item.id));inbox.filter(item=>item.botId===selected).forEach(item=>this.seen.add(item.kind+':'+item.id));if(selected!==this.state.selected)this.loadDraft(selected);this.update({connection:{kind:'ready'},bots,selected,messages,response,tasks,inbox,taskUpdates,credential:credential.signedIn?'signed-in':'signed-out',authAttempt:current.attempt,activityOpen:newly?true:this.state.activityOpen,freshness:''});if(this.state.draft.submission && ['pending','unknown','submitting'].includes(this.state.draft.submission.kind))void this.checkSubmission()}catch(e){if(gen!==this.generation)return;if(e instanceof ApiError&&e.status===401){this.token='';localStorage.removeItem('staf-token');this.update({connection:{kind:'pairing',message:'Pairing expired or was revoked.'}})}else this.update({connection:{kind:'offline',message:'Connection unavailable. Showing the last successful update.'},freshness:String(e)})}}
-  select(id:string){if(id===this.state.selected)return;this.generation++;this.loadDraft(id);const newAction=this.state.inbox.some(item=>item.botId===id&&!this.seen.has(item.kind+':'+item.id));this.state.inbox.filter(item=>item.botId===id).forEach(item=>this.seen.add(item.kind+':'+item.id));this.update({selected:id,messages:[],response:null,tasks:[],activityOpen:newAction});void this.refresh()}
+  async refresh(){if(!this.token){this.update({connection:{kind:'pairing',message:''}});return}const gen=++this.generation;try{const [bots,inbox,taskUpdates,credential,current]=await Promise.all([this.api<Bot[]>('/api/bots'),this.api<InboxItem[]>('/api/inbox'),this.api<Array<Task & {botId:string}>>('/api/task-updates'),this.api<{signedIn:boolean}>('/api/codex-auth/credential'),this.api<{attempt:{id:string;phase:string}|null}>('/api/codex-auth/current')]);const selected=this.state.selected && bots.some(b=>b.id===this.state.selected&&!b.archived)?this.state.selected:bots.find(b=>!b.archived)?.id??null;const [messages,taskList]=selected?await Promise.all([this.api<Message[]>('/api/bots/'+selected+'/messages'),this.api<Task[]>('/api/bots/'+selected+'/tasks')]):[[],[]];const tasks=await Promise.all(taskList.slice(0,30).map(task=>this.api<Task>('/api/tasks/'+task.id)));if(gen!==this.generation)return;const newly=inbox.some(item=>item.botId===selected&&!this.seen.has(item.kind+':'+item.id));inbox.filter(item=>item.botId===selected).forEach(item=>this.seen.add(item.kind+':'+item.id));const changed=selected!==this.state.selected;if(changed)this.loadDraft(selected);this.update({connection:{kind:'ready'},bots,selected,messages,...(changed?{response:null}:{}),tasks,inbox,taskUpdates,credential:credential.signedIn?'signed-in':'signed-out',authAttempt:current.attempt,activityOpen:newly?true:this.state.activityOpen,freshness:''});this.watchResponse(selected);if(this.state.draft.submission && ['pending','unknown','submitting'].includes(this.state.draft.submission.kind))void this.checkSubmission()}catch(e){if(gen!==this.generation)return;if(e instanceof ApiError&&e.status===401){this.token='';this.watchResponse(null);localStorage.removeItem('staf-token');this.update({connection:{kind:'pairing',message:'Pairing expired or was revoked.'}})}else this.update({connection:{kind:'offline',message:'Connection unavailable. Showing the last successful update.'},freshness:String(e)})}}
+  select(id:string){if(id===this.state.selected)return;this.generation++;this.loadDraft(id);const newAction=this.state.inbox.some(item=>item.botId===id&&!this.seen.has(item.kind+':'+item.id));this.state.inbox.filter(item=>item.botId===id).forEach(item=>this.seen.add(item.kind+':'+item.id));this.update({selected:id,messages:[],response:null,tasks:[],activityOpen:newAction});this.watchResponse(id);void this.refresh()}
   private loadDraft(id:string|null){this.currentKey=id?prefix+this.writer+':'+id:'';let draft:Draft={text:'',submission:null};try{if(this.currentKey){const saved=localStorage.getItem(this.currentKey);if(saved)draft=JSON.parse(saved)}}catch{this.update({notice:'Browser storage is unavailable. Sending is blocked.'})}this.update({draft})}
   private save(draft:Draft):boolean{try{if(!this.currentKey)return false;localStorage.setItem(this.currentKey,JSON.stringify(draft));this.update({draft});return true}catch{this.update({notice:'Browser storage is unavailable. Sending is blocked; copy your text before leaving.'});return false}}
   edit(text:string){this.save({...this.state.draft,text})}

@@ -25,7 +25,7 @@ The shared instance has synthetic provider and authentication coverage. Earlier
 live Codex checks used the prior CLI path and an existing grant; they do not verify
 shared-instance sign-in or inference. See [verification](direct-responses.md#verification-and-remaining-gaps).
 
-Main-chat progress is owned by the shared service. The version 28 migration stores sanitized provisional snapshots separately from completed messages; restart marks unfinished commands interrupted. The runtime emits provider-step starts and deltas without adding partial text to provider replay or the completed transcript. The GUI polls the same progress as the CLI, preserves a next draft, and renders Markdown without raw HTML. Configured credentials and unsafe URLs are withheld or redacted before progress persistence. Buffered providers do not invent deltas. This path is tested with synthetic providers and does not establish live provider behavior.
+Main-chat progress is owned by the shared service. The version 28 migration stores sanitized provisional snapshots separately from completed messages; restart marks unfinished commands interrupted. The runtime emits provider-step starts and deltas without adding partial text to provider replay or the completed transcript. The GUI subscribes to the shared progress through an authenticated SSE connection; reconnecting starts with the latest saved snapshot. The CLI polls the same shared progress. The GUI preserves a next draft and renders Markdown without raw HTML. Configured credentials and unsafe URLs are withheld or redacted before progress persistence. Buffered providers do not invent deltas. This path is tested with synthetic providers and does not establish live provider behavior.
 
 ## Local shared instance preview
 
