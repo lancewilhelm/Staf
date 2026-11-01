@@ -18,6 +18,13 @@ The equivalent one-shot commands are `staf auth codex login`, `staf auth codex
 status`, `staf auth codex cancel`, and `staf auth codex logout`. They accept the
 same trailing connection options as chat.
 
+In the browser, **Settings** offers the same connection for the instance. Open
+the sign-in link on the instance host, then return to see progress. A cancelled,
+failed, or expired attempt can be retried. The link is held only in the browser
+that started it; if a refresh loses it, cancel the pending attempt and start
+again. Sign-out requires confirmation; finish active work and sign-in before
+signing out. It leaves agent models and unsent drafts unchanged.
+
 Selecting Codex alone does not start sign-in. `/auth codex cancel` cancels the
 initiating client's pending attempt. `/auth codex logout` removes local tokens;
 it does not revoke the server grant. Manage server-side access in

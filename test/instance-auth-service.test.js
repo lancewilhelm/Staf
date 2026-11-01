@@ -2,6 +2,36 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {startInstance} from '../dist/instance-service.js';
 
+test('paired instance CLI can disconnect a saved Codex credential',async()=>{
+ const {mkdtempSync,mkdirSync,writeFileSync,existsSync,rmSync}=await import('node:fs');
+ const {tmpdir}=await import('node:os');const {join}=await import('node:path');const {spawn}=await import('node:child_process');
+ const dir=mkdtempSync(join(tmpdir(),'staf-codex-cli-')),path=join(dir,'auth','codex-direct.json');mkdirSync(join(dir,'auth'));
+ writeFileSync(path,JSON.stringify({version:1,issuer:'https://auth.openai.com',subject:'synthetic',clientId:'client',hostId:'host',accessToken:'secret-access',refreshToken:'secret-refresh',idToken:'secret-id',scopes:['resource.invoke','chatgpt.tokens.use.direct'],expiresAt:Date.now()+3600000}));
+ const app=startInstance(join(dir,'db'),0,{env:{}}),port=await app.listen(),url=`http://127.0.0.1:${port}`,credential=join(dir,'client.json');
+ const cli=args=>new Promise((resolve,reject)=>{const p=spawn(process.execPath,['dist/cli.js','instance',...args]);let out='',err='';p.stdout.on('data',b=>out+=b);p.stderr.on('data',b=>err+=b);p.on('error',reject);p.on('close',code=>code===0?resolve(out):reject(Error(err)));});
+ try{await cli(['pair',url,credential,app.code]);const status=await cli(['codex-auth-credential',url,credential]);assert.equal(JSON.parse(status).signedIn,true);assert.doesNotMatch(status,/secret-/);
+  assert.deepEqual(JSON.parse(await cli(['codex-auth-logout',url,credential])),{signedIn:false});assert.equal(existsSync(path),false);
+ }finally{await app.close();rmSync(dir,{recursive:true,force:true});}
+});
+
+test('CLI sign-in retries a synthetic failure and shares the credential without changing agent models',async()=>{
+ const {mkdtempSync,mkdirSync,writeFileSync,readFileSync,rmSync}=await import('node:fs');const {tmpdir}=await import('node:os');const {join}=await import('node:path');const {spawn}=await import('node:child_process');
+ const dir=mkdtempSync(join(tmpdir(),'staf-codex-journey-'));let inference=0;
+ const authHooks={prepare:async()=>({hostId:'synthetic-host',clientId:'synthetic-client'}),complete:async(root,_attempt,callback,_fetch,signal,beforeCommit)=>{if(callback.searchParams.get('code')==='fail')throw Error('synthetic failure');signal.throwIfAborted();mkdirSync(join(root,'auth'),{recursive:true});await beforeCommit();writeFileSync(join(root,'auth','codex-direct.json'),JSON.stringify({version:1,issuer:'https://auth.openai.com',subject:'synthetic',clientId:'synthetic-client',hostId:'synthetic-host',accessToken:'access-secret-32',refreshToken:'refresh-secret-32',idToken:'id-secret-32',scopes:['resource.invoke','chatgpt.tokens.use.direct'],expiresAt:Date.now()+3600000}));}};
+ const app=startInstance(join(dir,'db'),0,{env:{},authHooks,providerFactory:async()=>{inference++;throw Error('Unexpected inference');}}),port=await app.listen(),url=`http://127.0.0.1:${port}`,credential=join(dir,'client.json');
+ const cli=args=>new Promise((resolve,reject)=>{const p=spawn(process.execPath,['dist/cli.js','instance',...args]);let out='',err='';p.stdout.on('data',b=>out+=b);p.stderr.on('data',b=>err+=b);p.on('error',reject);p.on('close',code=>code===0?resolve(out):reject(Error(err)));});
+ const run=async(action,...args)=>JSON.parse(await cli([action,url,credential,...args]));
+ const callback=async(attempt,code)=>fetch(`${url}/auth/callback?code=${code}&state=${encodeURIComponent(new URL(attempt.url).searchParams.get('state'))}`);
+ try{await cli(['pair',url,credential,app.code]);const a=await run('create','A','--provider','codex','--model','model-a'),b=await run('create','B','--provider','codex','--model','model-b');
+  const cancelled=await run('codex-auth-start');assert.equal((await run('codex-auth-current')).attempt.phase,'waiting');assert.equal((await run('codex-auth-cancel',cancelled.id)).phase,'cancelled');
+  const failed=await run('codex-auth-start');assert.equal((await callback(failed,'fail')).status,400);assert.equal((await run('codex-auth-status',failed.id)).phase,'failed');
+  const success=await run('codex-auth-start');assert.equal((await callback(success,'success')).status,200);assert.equal((await run('codex-auth-current')).attempt.phase,'succeeded');
+  const status=await run('codex-auth-credential'),profiles=[await run('inspect',a.id),await run('inspect',b.id)];assert.equal(status.signedIn,true);assert.deepEqual(profiles.map(p=>p.model),['model-a','model-b']);assert.equal(inference,0);
+  const visible=JSON.stringify({status,profiles});assert.doesNotMatch(visible,/access-secret-32|refresh-secret-32|id-secret-32/);for(const profile of profiles)assert.doesNotMatch(readFileSync(join(profile.configDir,'agent.toml'),'utf8')+readFileSync(join(profile.configDir,'soul.md'),'utf8'),/access-secret-32|refresh-secret-32|id-secret-32/);
+  assert.deepEqual(await run('codex-auth-logout'),{signedIn:false});assert.equal((await run('codex-auth-credential')).signedIn,false);assert.deepEqual((await Promise.all([run('inspect',a.id),run('inspect',b.id)])).map(p=>p.model),['model-a','model-b']);
+ }finally{await app.close();rmSync(dir,{recursive:true,force:true});}
+});
+
 test('paired initiator owns sign-in and callback is bound to the active loopback attempt',async()=>{
  let completed=0;const authHooks={prepare:async()=>({hostId:'urn:uuid:test',clientId:'synthetic-client'}),complete:async(_root,attempt,callback,_fetch,signal,beforeCommit)=>{assert.equal(callback.searchParams.get('state'),attempt.state);signal.throwIfAborted();await beforeCommit();completed++;}};
  const app=startInstance(':memory:',0,{env:{},authHooks}),port=await app.listen();
