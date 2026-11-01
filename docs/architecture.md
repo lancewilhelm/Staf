@@ -37,8 +37,16 @@ paths and fields continue to identify these agents. Provider sign-in belongs to
 the instance; each agent owns its model selection. The former Advanced page is not served.
 Appearance is a browser-local preference; CSS follows the device color scheme
 when System is selected. It is not stored by the shared instance.
-Browser-local draft and command journals support explicit recovery;
-the instance remains authoritative for accepted commands and work. A keyed
+A per-tab browser journal retains each agent's next draft and submitted command.
+After reload or reconnect the browser checks the same command ID and resubmits
+that ID if it is missing; the instance remains authoritative for accepted work.
+Accepted commands use a deterministic user-message ID so the optimistic message
+and the stored conversation appear once. Busy and definitive failures remain
+inline for explicit retry or dismissal; accepted failed commands get a new ID on
+explicit retry. Local journal storage is required for sending. The tab identity
+is kept in session storage and the journal in local storage; clearing either may
+require recovering an earlier record through Settings.
+ A keyed
 bot-creation operation stores its fingerprint and result with the bot in one
 transaction. Version 27 backs up an existing database before adding the journal.
 The browser retains the operation ID locally, and the CLI prints it before
@@ -69,7 +77,7 @@ user message transactionally; completed responses are stored with the command
 state. Restart marks pending commands interrupted. SQLite exclusive locking
 prevents a second process from treating active commands as interrupted. The
 service runs demo, Codex, OpenRouter, LM Studio and live with instance or host credentials and an explicit bot model for each non-demo provider. This preview does not implement the LAN,
-push updates, complete reconnect recovery, or operational features described in the plans above.
+all operational features described in the plans above.
 
 Agent settings and instructions live under `agents/ID/current` beside the
 instance database. The `current` symlink points to a revision directory holding

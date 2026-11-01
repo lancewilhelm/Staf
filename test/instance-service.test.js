@@ -286,3 +286,22 @@ test('compatible providers use host endpoints and profile prompts; discovery is 
   for(const chat of chats){const body=JSON.parse(chat.init.body);assert.equal(body.model,'fixture-model');assert.match(body.messages[0].content,/custom soul[\s\S]*custom instruction/);}
  }finally{await app.close();globalThis.fetch=original;}
 });
+
+
+test('concurrent command recovery is idempotent across clients and restart', async()=>{
+ const dir=mkdtempSync(join(tmpdir(),'staf-command-recovery-')),path=join(dir,'db');let release,calls=0;const gate=new Promise(resolve=>{release=resolve});
+ const factory=async()=>({name:'held',capabilities:{toolCalls:false},async complete(){calls++;await gate;return {role:'assistant',content:'done'}}});
+ let app=startInstance(path,0,{providerFactory:factory}),port=await app.listen();
+ const call=async(route,token,body)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return [response.status,await response.json()]};
+ try{
+  const a=(await call('/api/pair','',{code:app.code}))[1].token,b=(await call('/api/pair','',{code:app.issueCode()}))[1].token;
+  const bot=(await call('/api/bots',a,{name:'Recovery'}))[1],command={id:'recovered',botId:bot.id,content:'One message'};
+  const results=await Promise.all(Array.from({length:8},(_,i)=>call('/api/commands',i%2?a:b,command)));
+  assert.equal(results.filter(([,v])=>v.kind==='accepted').length,1);assert.equal(results.filter(([,v])=>v.kind==='existing').length,7);
+  assert.equal((await call('/api/commands',b,{id:'competing',botId:bot.id,content:'Keep this'}))[1].kind,'busy');
+  release();for(let i=0;i<100;i++){if((await call('/api/commands/recovered',b))[1].state==='completed')break;await new Promise(r=>setTimeout(r,5));}
+  assert.equal((await call('/api/commands/recovered',b))[1].state,'completed');await app.close();app=startInstance(path,0,{providerFactory:factory});port=await app.listen();
+  assert.equal((await call('/api/commands',b,command))[1].kind,'existing');assert.equal(calls,1);
+  assert.equal((await call(`/api/bots/${bot.id}/messages`,a))[1].filter(m=>m.content==='One message').length,1);
+ }finally{release();await app.close();rmSync(dir,{recursive:true,force:true});}
+});

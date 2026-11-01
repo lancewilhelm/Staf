@@ -28,7 +28,7 @@ Run `pnpm start instance serve .staf/instance.sqlite 3210` and open
 `http://127.0.0.1:3210/`. Enter the host's pairing code to open the chat workspace.
 **Settings** shows the instance-wide Codex connection and offers sign-in when
 needed. It also offers Light, Dark, and System appearance for this browser;
-System follows the device setting. The persistent agent list switches between main chats; each agent has its own configuration, which you can edit from its chat.
+System follows the device setting. The persistent agent list switches between main chats; each agent has its own configuration, which you can edit from its chat. Submitted messages appear immediately, and per-agent drafts and uncertain submissions recover automatically after a reload in the same browser tab.
 Instructions live in its `soul.md` file; settings live in `agent.toml`. You can
 [edit these files directly](docs/usage.md#agent-configuration-files) on the instance host.
 Connect an instance-wide OpenRouter key in global Settings or through the paired CLI; saved presence does not verify account or model access. You can create an agent with just a name before connecting a provider. Agent settings
