@@ -1,7 +1,9 @@
 import { DatabaseSync } from 'node:sqlite';
 import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
-import { closeSync, openSync } from 'node:fs';
-import { isAbsolute, resolve } from 'node:path';
+import { closeSync, openSync, mkdtempSync, rmSync } from 'node:fs';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
+import { AgentConfigStore, AgentConfigUncertain } from './agent-config.js';
 import { hasCode } from './validation.js';
 import type { Session, Message } from './types.js';
 import { validSession } from './validation.js';
@@ -23,16 +25,20 @@ const clockBoundary = { enabledCapabilities:['clock'], actions:[clockAction] };
 const modes: ApprovalMode[] = ['ask-every-time','ask-for-risky-actions','never-ask'];
 
 export const starterSoul = "You are an assistant working for the owner. Be clear and candid. Distinguish observations from assumptions. Follow the owner's role instructions and work within the permissions and task scope granted to you.";
-export type BotEdit = { revision: number; name: string; description?: string; instructions: string; soul: string; provider: string; model: string | null; reasoning: string | null };
+export type BotEdit = { revision: string; name: string; description?: string; instructions: string; provider: string; model: string | null; reasoning: string | null };
 export class BotConflict extends Error {}
 
 /** Instance-owned records. Callers supply execution; no provider runs during creation. */
 export class Instance {
   private readonly db: DatabaseSync;
+  private readonly configs: AgentConfigStore;
+  private readonly temporaryConfigRoot: string | undefined;
   private readonly fingerprintKey: Uint8Array;
   private readonly grantControllers = new Map<string,Set<AbortController>>();
   readonly migrationBackup: string | undefined;
   constructor(path: string, private readonly redactSkill: (text:string) => string = text => text) {
+    this.temporaryConfigRoot = path === ':memory:' ? mkdtempSync(join(tmpdir(),'staf-config-')) : undefined;
+    this.configs = new AgentConfigStore(this.temporaryConfigRoot ?? join(dirname(resolve(path)),'agents'));
     if (path !== ':memory:') {
       try { closeSync(openSync(path, 'wx', 0o600)); }
       catch (error) { if (!hasCode(error, 'EEXIST')) throw error; }
@@ -124,13 +130,13 @@ export class Instance {
     }
     this.db.exec("UPDATE task_questions SET state='cancelled' WHERE state='open' AND attempt_id IN (SELECT id FROM task_attempts WHERE state IN ('queued','running','stopping','waiting'))");
     this.db.exec("UPDATE task_attempts SET state='interrupted', outcome='Instance restarted during execution' WHERE state IN ('queued','running','stopping','waiting')");
-    this.db.prepare('INSERT OR IGNORE INTO bot_profiles (bot_id, revision, soul, archived) SELECT id, 1, ?, 0 FROM bots').run(starterSoul);
+    this.db.prepare('INSERT OR IGNORE INTO bot_profiles (bot_id, revision, soul, archived) SELECT id, 1, ?, 0 FROM bots').run('');
     if (version < 2) this.db.prepare("INSERT INTO instance_secrets VALUES ('command-fingerprint', ?)").run(randomBytes(32));
     const key = this.db.prepare("SELECT value FROM instance_secrets WHERE name='command-fingerprint'").get()?.value;
     if (!(key instanceof Uint8Array) || key.length !== 32) throw Error('Invalid instance fingerprint key');
     this.fingerprintKey = key;
     this.db.exec('COMMIT');
-    } catch (error) { this.db.close(); throw error; }
+    } catch (error) { this.db.close(); if(this.temporaryConfigRoot)rmSync(this.temporaryConfigRoot,{recursive:true,force:true}); throw error; }
   }
   private scheduleOrigin(attemptId:string) {
     return this.db.prepare(`SELECT s.id AS schedule_id, s.revoked, s.authorization, o.due_at, o.status
@@ -150,7 +156,7 @@ export class Instance {
   get schedules() { return new ScheduleStore(this.db); }
   scheduleTick(id:string, now:number) {
     return this.schedules.tick({id,now,
-      isBusy:botId=>this.taskAttempts(botId).some(attempt=>['queued','running','stopping','waiting'].includes(String(attempt.state))) || !this.bot(botId) || !!this.bot(botId)?.archived,
+      isBusy:botId=>this.taskAttempts(botId).some(attempt=>['queued','running','stopping','waiting'].includes(String(attempt.state))) || !this.botIdentity(botId) || !!this.botIdentity(botId)?.archived,
       createTask:schedule=>{
         const taskId=randomUUID();
         const result=this.acceptTaskInTransaction({id:taskId,botId:schedule.botId,objective:schedule.objective,limitMs:300000});
@@ -210,7 +216,7 @@ export class Instance {
   }
   setApprovalSettings(scope:string, mode:ApprovalMode | null, clockEnabled:boolean) {
     if (!(scope === 'instance' || /^(bot|task):[\w-]+$/.test(scope)) || (scope === 'instance' && mode === null) || (mode !== null && !modes.includes(mode))) throw Error('Invalid approval settings');
-    if (scope.startsWith('bot:') && !this.bot(scope.slice(4))) throw Error('Bot not found');
+    if (scope.startsWith('bot:') && !this.botIdentity(scope.slice(4))) throw Error('Bot not found');
     if (scope.startsWith('task:') && !this.taskAttempt(scope.slice(5))) throw Error('Task not found');
     this.db.prepare('INSERT INTO approval_settings VALUES (?,?,?) ON CONFLICT(scope) DO UPDATE SET mode=excluded.mode,clock_enabled=excluded.clock_enabled').run(scope,mode,clockEnabled ? 1 : 0);
     return this.approvalSettings(scope);
@@ -224,7 +230,7 @@ export class Instance {
       const permission=(enabled:boolean)=>enabled ? clockBoundary : {enabledCapabilities:[],actions:[]};
       const rootMode=root.mode ?? requester.mode ?? instance.mode, helperMode=task?.mode ?? bot.mode ?? instance.mode;
       if (!modes.some(item=>item===rootMode) || !modes.some(item=>item===helperMode)) throw Error('Invalid stored approval mode');
-      const live=assignment.state === 'active' && assignment.parent_state === 'running' && assignment.helper_state === 'running' && assignment.helper_bot_id === botId && !this.bot(requesterId)?.archived && !this.bot(botId)?.archived && this.scheduleClockAllowed(rootId);
+      const live=assignment.state === 'active' && assignment.parent_state === 'running' && assignment.helper_state === 'running' && assignment.helper_bot_id === botId && !this.botIdentity(requesterId)?.archived && !this.botIdentity(botId)?.archived && this.scheduleClockAllowed(rootId);
       return evaluateApproval({action:clockAction,botId:requesterId,taskId:rootId,scheduleId:null,now:Date.now(),instancePermissions:permission(instance.clockEnabled),botPermissions:permission(requester.clockEnabled),taskScope:live && assignment.delegation_clock === 1 && root.clockEnabled ? [clockAction] : [],modes:[rootMode as ApprovalMode],helper:{permissions:permission(bot.clockEnabled && task?.clockEnabled !== false),assignmentScope:live && assignment.delegation_clock === 1 ? [clockAction] : [],mode:helperMode as ApprovalMode},grants:[],ownerRequest:null});
     }
     const mode=task?.mode ?? bot.mode ?? instance.mode;
@@ -270,10 +276,11 @@ export class Instance {
     this.db.exec('BEGIN IMMEDIATE');
     try {
       const row=this.db.prepare('SELECT bot_id FROM main_bot WHERE id=1').get();
-      if (row && typeof row.bot_id === 'string') { const bot=this.bot(row.bot_id); if (!bot) throw Error('Main bot is missing'); this.db.exec('COMMIT'); return bot; }
+      if (row && typeof row.bot_id === 'string') { const bot=this.bots().find(item=>item.id===row.bot_id); if (!bot) throw Error('Main bot is missing'); this.db.exec('COMMIT'); return bot; }
       const id=randomUUID(), chatId=randomUUID(), defaults=this.creationDefaults();
-      this.db.prepare('INSERT INTO bots VALUES (?, ?, ?, ?, ?, ?, ?)').run(id,chatId,'Staf','',defaults.provider,defaults.model,defaults.reasoning);
-      this.db.prepare('INSERT INTO bot_profiles (bot_id,revision,soul,archived) VALUES (?, 1, ?, 0)').run(id,starterSoul);
+      this.configs.publish(id,{name:'Staf',description:'',provider:defaults.provider,model:defaults.model,reasoning:defaults.reasoning,instructions:starterSoul},false);
+      this.db.prepare('INSERT INTO bots VALUES (?, ?, ?, ?, ?, ?, ?)').run(id,chatId,'','','demo',null,null);
+      this.db.prepare('INSERT INTO bot_profiles (bot_id,revision,soul,archived) VALUES (?, 1, ?, 0)').run(id,'');
       this.db.prepare('INSERT INTO main_bot VALUES (1,?)').run(id);
       const bot=this.bot(id); this.db.exec('COMMIT'); return bot;
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
@@ -295,7 +302,7 @@ export class Instance {
     }
     return false;
   }
-  close() { this.db.close(); }
+  close() { this.db.close(); if(this.temporaryConfigRoot)rmSync(this.temporaryConfigRoot,{recursive:true,force:true}); }
   shellConfig() {const row=this.db.prepare('SELECT revision,docker_binary AS dockerBinary,docker_socket AS dockerSocket,image_id AS imageId FROM shell_config WHERE id=1').get();if(!row || typeof row.revision!=='number' || !(row.dockerBinary===null || typeof row.dockerBinary==='string') || !(row.dockerSocket===null || typeof row.dockerSocket==='string') || !(row.imageId===null || typeof row.imageId==='string'))throw Error('Invalid shell configuration');return {revision:row.revision,dockerBinary:row.dockerBinary,dockerSocket:row.dockerSocket,imageId:row.imageId};}
   shellUnresolved() {return this.db.prepare("SELECT a.id,a.state,a.summary,c.docker_binary AS dockerBinary,c.docker_socket AS dockerSocket,c.image_id AS imageId FROM action_journal a LEFT JOIN shell_action_configs c ON c.action_id=a.id WHERE a.summary='Run scratch command' AND a.state='uncertain' AND NOT EXISTS (SELECT 1 FROM shell_reviews r WHERE r.action_id=a.id) ORDER BY a.rowid").all();}
   shellBusy() {return !!this.db.prepare("SELECT 1 FROM action_journal a WHERE a.summary='Run scratch command' AND (a.state='started' OR (a.state='uncertain' AND NOT EXISTS (SELECT 1 FROM shell_reviews r WHERE r.action_id=a.id))) LIMIT 1").get() || !!this.db.prepare('SELECT 1 FROM shell_lock').get();}
@@ -307,7 +314,7 @@ export class Instance {
     const effective=this.shellCanOffer({kind:'task',id}) && scopeEnabled && unspent && !this.taskHasPending(id) && !this.shellBusy() && (!scheduled || (config.revision===scheduled.revision && config.dockerBinary===scheduled.dockerBinary && config.dockerSocket===scheduled.dockerSocket && config.imageId===scheduled.imageId));
     return {enabled,override,inheritedSchedule:!!scheduled,scopeEnabled,effective,scheduledCommand:scheduled?.command??null};
   }
-  setShellPermission(scope:string,enabled:boolean) {if(!(scope==='instance'||/^(bot|task):[\w-]+$/.test(scope))||typeof enabled!=='boolean')throw Error('Invalid shell scope');if(scope.startsWith('bot:')&&!this.bot(scope.slice(4)))throw Error('Bot not found');if(scope.startsWith('task:')&&!this.taskAttempt(scope.slice(5)))throw Error('Task not found');this.db.prepare('INSERT INTO shell_permissions VALUES (?,?) ON CONFLICT(scope) DO UPDATE SET enabled=excluded.enabled').run(scope,enabled?1:0);return this.shellPermission(scope);}
+  setShellPermission(scope:string,enabled:boolean) {if(!(scope==='instance'||/^(bot|task):[\w-]+$/.test(scope))||typeof enabled!=='boolean')throw Error('Invalid shell scope');if(scope.startsWith('bot:')&&!this.botIdentity(scope.slice(4)))throw Error('Bot not found');if(scope.startsWith('task:')&&!this.taskAttempt(scope.slice(5)))throw Error('Task not found');this.db.prepare('INSERT INTO shell_permissions VALUES (?,?) ON CONFLICT(scope) DO UPDATE SET enabled=excluded.enabled').run(scope,enabled?1:0);return this.shellPermission(scope);}
   scheduleShellScope(attemptId:string) {
     const origin=this.scheduleOrigin(attemptId),scope=this.db.prepare('SELECT command,docker_binary,docker_socket,image_id,revision FROM schedule_shell_scopes WHERE attempt_id=?').get(attemptId);
     if(!origin || origin.revoked!==0 || typeof origin.authorization!=='string' || typeof scope?.command!=='string' || typeof scope.docker_binary!=='string' || typeof scope.docker_socket!=='string' || typeof scope.image_id!=='string' || typeof scope.revision!=='number')return null;
@@ -315,7 +322,7 @@ export class Instance {
     if(!a || typeof a!=='object' || !('action' in a) || a.action!=='shell.execute' || !('resource' in a) || a.resource!==scope.command || !('limits' in a) || JSON.stringify(a.limits)!==JSON.stringify({maxExecutions:1,dockerBinary:scope.docker_binary,dockerSocket:scope.docker_socket,imageId:scope.image_id,revision:scope.revision,...scratchLimits}))return null;
     return {command:scope.command,dockerBinary:scope.docker_binary,dockerSocket:scope.docker_socket,imageId:scope.image_id,revision:scope.revision,scheduleId:String(origin.schedule_id),dueAt:Number(origin.due_at)};
   }
-  shellCanOffer(work:WorkRef) {const record=work.kind==='task'?this.taskAttempt(work.id):this.command(work.id),config=this.shellConfig();if(!record||typeof record.botId!=='string'||record.state!==(work.kind==='task'?'running':'pending')||!config.dockerBinary||!config.dockerSocket||!config.imageId||!this.shellPermission('instance').enabled||!this.shellPermission('bot:'+record.botId).enabled||!this.bot(record.botId)||this.bot(record.botId)?.archived)return false;if(work.kind!=='task')return true;if(this.isHelperAttempt(work.id))return false;return !this.scheduleOrigin(work.id)||!!this.scheduleShellScope(work.id);}
+  shellCanOffer(work:WorkRef) {const record=work.kind==='task'?this.taskAttempt(work.id):this.command(work.id),config=this.shellConfig();if(!record||typeof record.botId!=='string'||record.state!==(work.kind==='task'?'running':'pending')||!config.dockerBinary||!config.dockerSocket||!config.imageId||!this.shellPermission('instance').enabled||!this.shellPermission('bot:'+record.botId).enabled||!this.botIdentity(record.botId)||this.botIdentity(record.botId)?.archived)return false;if(work.kind!=='task')return true;if(this.isHelperAttempt(work.id))return false;return !this.scheduleOrigin(work.id)||!!this.scheduleShellScope(work.id);}
   shellAllowed(work:WorkRef,revision:number,command?:string) {if(!this.shellCanOffer(work)||this.shellConfig().revision!==revision||this.shellBusy())return false;if(work.kind!=='task')return true;const origin=this.scheduleOrigin(work.id);if(origin){const scope=this.scheduleShellScope(work.id),row=this.db.prepare('SELECT enabled FROM shell_permissions WHERE scope=?').get('task:'+work.id),config=this.shellConfig();if(!scope||row?.enabled===0||scope.revision!==revision||scope.dockerBinary!==config.dockerBinary||scope.dockerSocket!==config.dockerSocket||scope.imageId!==config.imageId||(command!==undefined && scope.command!==command)||this.db.prepare('SELECT 1 FROM schedule_shell_dispatches WHERE schedule_id=? AND due_at=?').get(scope.scheduleId,scope.dueAt))return false;}else if(!this.shellPermission('task:'+work.id).enabled)return false;return !this.taskHasPending(work.id);}
   shellIdentity(work:WorkRef,callId:string,config:{revision:number;dockerBinary:string;dockerSocket:string;imageId:string},command:string) {const hex=createHmac('sha256',this.fingerprintKey).update(JSON.stringify(['shell-id',work.kind,work.id,callId])).digest('hex').slice(0,32).split('');hex[12]='4';hex[16]=['8','9','a','b'][parseInt(hex[16] ?? '0',16)%4] ?? '8';const raw=hex.join(''),id=`${raw.slice(0,8)}-${raw.slice(8,12)}-${raw.slice(12,16)}-${raw.slice(16,20)}-${raw.slice(20)}`;return {id,fingerprint:createHmac('sha256',this.fingerprintKey).update(JSON.stringify(['shell-action',work.kind,work.id,callId,config,command,scratchLimits])).digest('hex')};}
   recordShellDecision(id:string,fingerprint:string,config:{dockerBinary:string;dockerSocket:string;imageId:string},decision:'approve'|'deny') {this.db.prepare('INSERT INTO shell_action_configs VALUES (?,?,?,?,?,?)').run(id,fingerprint,config.dockerBinary,config.dockerSocket,config.imageId,decision);}
@@ -342,7 +349,7 @@ export class Instance {
     const config=this.searchConfig(),effective=this.searchCanOffer({kind:'task',id}) && scopeEnabled && unspent && !this.taskHasPending(id) && !!scheduled && config.origin===scheduled.origin && config.revision===scheduled.revision;
     return {enabled,override,inheritedSchedule:!!scheduled,scopeEnabled,effective:scheduled?effective:this.searchCanOffer({kind:'task',id}) && scopeEnabled && !this.taskHasPending(id),scheduledQuery:scheduled?.query??null,scheduledOrigin:scheduled?.origin??null};
   }
-  setSearchPermission(scope:string,enabled:boolean) {if (!(scope === 'instance' || /^(bot|task):[\w-]+$/.test(scope)) || typeof enabled !== 'boolean')throw Error('Invalid search scope');if(scope.startsWith('bot:') && !this.bot(scope.slice(4)))throw Error('Bot not found');if(scope.startsWith('task:') && !this.taskAttempt(scope.slice(5)))throw Error('Task not found');this.db.prepare('INSERT INTO search_permissions VALUES (?,?) ON CONFLICT(scope) DO UPDATE SET enabled=excluded.enabled').run(scope,enabled ? 1 : 0);return this.searchPermission(scope);}
+  setSearchPermission(scope:string,enabled:boolean) {if (!(scope === 'instance' || /^(bot|task):[\w-]+$/.test(scope)) || typeof enabled !== 'boolean')throw Error('Invalid search scope');if(scope.startsWith('bot:') && !this.botIdentity(scope.slice(4)))throw Error('Bot not found');if(scope.startsWith('task:') && !this.taskAttempt(scope.slice(5)))throw Error('Task not found');this.db.prepare('INSERT INTO search_permissions VALUES (?,?) ON CONFLICT(scope) DO UPDATE SET enabled=excluded.enabled').run(scope,enabled ? 1 : 0);return this.searchPermission(scope);}
   scheduleSearchScope(attemptId:string) {
     const origin=this.scheduleOrigin(attemptId),scope=this.db.prepare('SELECT query,origin,revision FROM schedule_search_scopes WHERE attempt_id=?').get(attemptId);
     if(!origin || origin.revoked!==0 || typeof origin.authorization!=='string' || typeof scope?.query!=='string' || typeof scope.origin!=='string' || typeof scope.revision!=='number')return null;
@@ -350,7 +357,7 @@ export class Instance {
     if(!a || typeof a!=='object' || !('action' in a) || a.action!=='search.read' || !('resource' in a) || a.resource!==scope.query || !('limits' in a) || JSON.stringify(a.limits)!==JSON.stringify({maxSearches:1,origin:scope.origin,revision:scope.revision}))return null;
     return {query:scope.query,origin:scope.origin,revision:scope.revision,scheduleId:String(origin.schedule_id),dueAt:Number(origin.due_at)};
   }
-  searchCanOffer(work:WorkRef) {const record=work.kind==='task' ? this.taskAttempt(work.id) : this.command(work.id);if(!record || typeof record.botId!=='string' || record.state !== (work.kind==='task' ? 'running' : 'pending'))return false;if(!this.bot(record.botId) || this.bot(record.botId)?.archived || !this.searchConfig().origin || !this.searchPermission('instance').enabled || !this.searchPermission('bot:'+record.botId).enabled)return false;if(work.kind!=='task')return true;if(this.isHelperAttempt(work.id))return false;return !this.scheduleOrigin(work.id) || !!this.scheduleSearchScope(work.id);}
+  searchCanOffer(work:WorkRef) {const record=work.kind==='task' ? this.taskAttempt(work.id) : this.command(work.id);if(!record || typeof record.botId!=='string' || record.state !== (work.kind==='task' ? 'running' : 'pending'))return false;if(!this.botIdentity(record.botId) || this.botIdentity(record.botId)?.archived || !this.searchConfig().origin || !this.searchPermission('instance').enabled || !this.searchPermission('bot:'+record.botId).enabled)return false;if(work.kind!=='task')return true;if(this.isHelperAttempt(work.id))return false;return !this.scheduleOrigin(work.id) || !!this.scheduleSearchScope(work.id);}
   searchAllowed(work:WorkRef,origin:string,revision:number,query?:string) {if(!this.searchCanOffer(work) || this.searchConfig().origin!==origin || this.searchConfig().revision!==revision)return false;if(work.kind!=='task')return true;const scheduled=this.scheduleOrigin(work.id);if(scheduled){const scope=this.scheduleSearchScope(work.id),row=this.db.prepare('SELECT enabled FROM search_permissions WHERE scope=?').get('task:'+work.id);if(!scope || row?.enabled===0 || scope.origin!==origin || scope.revision!==revision || (query!==undefined && query!==scope.query) || this.db.prepare('SELECT 1 FROM schedule_search_dispatches WHERE schedule_id=? AND due_at=?').get(scope.scheduleId,scope.dueAt))return false;}else if(!this.searchPermission('task:'+work.id).enabled)return false;return !this.taskHasPending(work.id);}
   claimScheduledSearchDispatch(work:WorkRef,origin:string,revision:number,query:string,actionId:string) {
     if(work.kind!=='task' || !this.scheduleOrigin(work.id))return true;
@@ -370,7 +377,7 @@ export class Instance {
     const effective=this.webCanOffer({kind:'task',id}) && scopeEnabled && unspent && !this.taskHasPending(id);
     return {enabled,override,inheritedSchedule:!!scheduled,scopeEnabled,effective,scheduledUrl:scheduled?.url ?? null};
   }
-  setWebPermission(scope:string,enabled:boolean) {if (!(scope === 'instance' || /^(bot|task):[\w-]+$/.test(scope)) || typeof enabled !== 'boolean')throw Error('Invalid web scope');if(scope.startsWith('bot:') && !this.bot(scope.slice(4)))throw Error('Bot not found');if(scope.startsWith('task:') && !this.taskAttempt(scope.slice(5)))throw Error('Task not found');this.db.prepare('INSERT INTO web_permissions VALUES (?,?) ON CONFLICT(scope) DO UPDATE SET enabled=excluded.enabled').run(scope,enabled ? 1 : 0);return this.webPermission(scope);}
+  setWebPermission(scope:string,enabled:boolean) {if (!(scope === 'instance' || /^(bot|task):[\w-]+$/.test(scope)) || typeof enabled !== 'boolean')throw Error('Invalid web scope');if(scope.startsWith('bot:') && !this.botIdentity(scope.slice(4)))throw Error('Bot not found');if(scope.startsWith('task:') && !this.taskAttempt(scope.slice(5)))throw Error('Task not found');this.db.prepare('INSERT INTO web_permissions VALUES (?,?) ON CONFLICT(scope) DO UPDATE SET enabled=excluded.enabled').run(scope,enabled ? 1 : 0);return this.webPermission(scope);}
   webWorkBotId(work:WorkRef) {const record=work.kind==='task' ? this.taskAttempt(work.id) : this.command(work.id);return typeof record?.botId==='string' ? record.botId : undefined;}
   scheduleWebScope(attemptId:string) {
     const origin=this.scheduleOrigin(attemptId),scope=this.db.prepare('SELECT url FROM schedule_web_scopes WHERE attempt_id=?').get(attemptId);
@@ -380,7 +387,7 @@ export class Instance {
     return {url:scope.url,scheduleId:String(origin.schedule_id),dueAt:Number(origin.due_at)};
   }
   scheduleOwnsAttempt(attemptId:string,scheduleId:string) {return this.scheduleOrigin(attemptId)?.schedule_id===scheduleId;}
-  webCanOffer(work:WorkRef) {const record=work.kind==='task' ? this.taskAttempt(work.id) : this.command(work.id);if(!record || typeof record.botId!=='string' || record.state !== (work.kind==='task' ? 'running' : 'pending'))return false;if(!this.bot(record.botId) || this.bot(record.botId)?.archived || !this.webPermission('instance').enabled || !this.webPermission('bot:'+record.botId).enabled)return false;if(work.kind!=='task')return true;if(this.isHelperAttempt(work.id))return false;const origin=this.scheduleOrigin(work.id);return !origin || !!this.scheduleWebScope(work.id);}
+  webCanOffer(work:WorkRef) {const record=work.kind==='task' ? this.taskAttempt(work.id) : this.command(work.id);if(!record || typeof record.botId!=='string' || record.state !== (work.kind==='task' ? 'running' : 'pending'))return false;if(!this.botIdentity(record.botId) || this.botIdentity(record.botId)?.archived || !this.webPermission('instance').enabled || !this.webPermission('bot:'+record.botId).enabled)return false;if(work.kind!=='task')return true;if(this.isHelperAttempt(work.id))return false;const origin=this.scheduleOrigin(work.id);return !origin || !!this.scheduleWebScope(work.id);}
   webAllowed(work:WorkRef,url?:string) {if(!this.webCanOffer(work))return false;if(work.kind==='task'){const origin=this.scheduleOrigin(work.id);if(origin){const scope=this.scheduleWebScope(work.id);const setting=this.db.prepare('SELECT enabled FROM web_permissions WHERE scope=?').get('task:'+work.id);if(!scope || setting?.enabled===0 || (url!==undefined && url!==scope.url) || this.db.prepare('SELECT 1 FROM schedule_web_dispatches WHERE schedule_id=? AND due_at=?').get(scope.scheduleId,scope.dueAt))return false;}else if(!this.webPermission('task:'+work.id).enabled)return false;if(this.taskHasPending(work.id))return false;}return true;}
   claimScheduledWebDispatch(work:WorkRef,url:string,actionId:string) {
     if(work.kind!=='task' || !this.scheduleOrigin(work.id))return true;
@@ -427,7 +434,7 @@ export class Instance {
   }
   releaseGrantController(grantId:string,controller:AbortController) {const controllers=this.grantControllers.get(grantId);controllers?.delete(controller);if(!controllers?.size)this.grantControllers.delete(grantId);}
   editApprovalGrant(id:string,revision:number,scope:{kind:'bot';botId:string}|{kind:'all-bots'},lifetime:{kind:'task';taskId:string}|{kind:'remembered'}) {
-    if(scope.kind==='bot' && !this.bot(scope.botId))throw new BotConflict('Bot not found');
+    if(scope.kind==='bot' && !this.botIdentity(scope.botId))throw new BotConflict('Bot not found');
     if(lifetime.kind==='task') {const attempt=this.taskAttempt(lifetime.taskId);if(!attempt || (scope.kind==='bot' && attempt.botId!==scope.botId))throw new BotConflict('Task does not match grant scope');}
     this.#approvalGrants.edit(id,revision,scope,lifetime);for(const controller of this.grantControllers.get(id)??[])controller.abort();
   }
@@ -449,19 +456,31 @@ export class Instance {
       const digest=input.operationId ? createHmac('sha256',this.fingerprintKey).update(JSON.stringify([input.name,input.instructions,input.provider ?? null,input.model ?? null,input.reasoning ?? null])).digest('hex') : null;
       if(input.operationId) { const existing=this.db.prepare('SELECT digest,bot_id FROM bot_creation_operations WHERE id=?').get(input.operationId); if(existing) { if(existing.digest!==digest || typeof existing.bot_id!=='string') throw new BotConflict('Creation operation ID conflict'); const bot=this.bot(existing.bot_id); this.db.exec('COMMIT'); return bot; } }
       const defaults=this.creationDefaults();const provider=input.provider ?? defaults.provider, model=input.provider === undefined ? defaults.model : input.model ?? null, reasoning=input.provider === undefined ? defaults.reasoning : input.reasoning ?? (input.operationId ? defaults.reasoning : null);
-      this.db.prepare('INSERT INTO bots VALUES (?, ?, ?, ?, ?, ?, ?)').run(id, chatId, input.name, input.instructions, provider, model, reasoning);
-      this.db.prepare('INSERT INTO bot_profiles (bot_id,revision,soul,archived) VALUES (?, 1, ?, 0)').run(id, starterSoul);
+      this.configs.publish(id,{name:input.name,description:'',provider,model,reasoning,instructions:input.instructions},false);
+      this.db.prepare('INSERT INTO bots VALUES (?, ?, ?, ?, ?, ?, ?)').run(id, chatId, '', '', 'demo', null, null);
+      this.db.prepare('INSERT INTO bot_profiles (bot_id,revision,soul,archived) VALUES (?, 1, ?, 0)').run(id, '');
       if(input.operationId && digest) this.db.prepare('INSERT INTO bot_creation_operations VALUES (?,?,?)').run(input.operationId,digest,id);
       this.db.exec('COMMIT');
       return this.bot(id);
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
   }
   creationOperation(id:string) { const row=this.db.prepare('SELECT bot_id FROM bot_creation_operations WHERE id=?').get(id); return typeof row?.bot_id==='string' ? this.bot(row.bot_id) : undefined; }
-  bots() { return this.db.prepare('SELECT b.id, b.chat_id AS chatId, b.name, b.instructions, b.provider, b.model, b.reasoning, p.revision, p.soul, p.archived, p.description FROM bots b JOIN bot_profiles p ON p.bot_id=b.id ORDER BY b.rowid').all().map(row => ({id: row.id, chatId: row.chatId, name: row.name, instructions: row.instructions, provider: row.provider, model: row.model, reasoning: row.reasoning, revision: row.revision, soul: row.soul, description: row.description, archived: row.archived === 1})); }
-  bot(id: string) { return this.bots().find(bot => bot.id === id); }
+  private botIdentity(id:string) {
+    const row=this.db.prepare('SELECT b.id,b.chat_id AS chatId,p.archived FROM bots b JOIN bot_profiles p ON p.bot_id=b.id WHERE b.id=?').get(id);
+    return row && typeof row.id==='string' && typeof row.chatId==='string' ? {id:row.id,chatId:row.chatId,archived:row.archived===1} : undefined;
+  }
+  bots() {
+    return this.db.prepare('SELECT id FROM bots ORDER BY rowid').all().map(row=>{
+      const id=String(row.id),identity=this.botIdentity(id);
+      if(!identity)throw Error('Invalid agent identity');
+      try { return {...identity,...this.configs.read(id,identity.archived)}; }
+      catch(error) { return {...identity,name:'Invalid configuration',description:'',provider:'demo',model:null,reasoning:null,instructions:'',revision:'',configDir:this.configs.location(id),configError:error instanceof Error?error.message:'Invalid configuration'}; }
+    });
+  }
+  bot(id: string) { const identity=this.botIdentity(id);return identity ? {...identity,...this.configs.read(id,identity.archived)} : undefined; }
   discoverBots(requesterId:string, query:string) {
-    if (!this.bot(requesterId) || this.bot(requesterId)?.archived) throw new Error('Requester bot not found');
-    const entries=this.bots().map(bot=>({id:String(bot.id),name:String(bot.name),description:String(bot.description),availability:bot.archived ? 'archived' as const : this.db.prepare("SELECT 1 FROM task_attempts WHERE bot_id=? AND state IN ('queued','running','stopping','waiting') UNION ALL SELECT 1 FROM commands WHERE bot_id=? AND state='pending' LIMIT 1").get(String(bot.id),String(bot.id)) ? 'busy' as const : 'active' as const}));
+    if (!this.botIdentity(requesterId) || this.botIdentity(requesterId)?.archived) throw new Error('Requester bot not found');
+    const entries=this.bots().filter(bot=>!('configError' in bot)).map(bot=>({id:String(bot.id),name:String(bot.name),description:String(bot.description),availability:bot.archived ? 'archived' as const : this.db.prepare("SELECT 1 FROM task_attempts WHERE bot_id=? AND state IN ('queued','running','stopping','waiting') UNION ALL SELECT 1 FROM commands WHERE bot_id=? AND state='pending' LIMIT 1").get(String(bot.id),String(bot.id)) ? 'busy' as const : 'active' as const}));
     return discoverBots({requesterId,query,entries});
   }
   editBot(id: string, edit: BotEdit) {
@@ -470,19 +489,19 @@ export class Instance {
       const current = this.bot(id);
       if (!current) throw new Error('Bot not found');
       if (current.revision !== edit.revision) throw new BotConflict('Profile changed. Refresh before editing.');
-      this.db.prepare('UPDATE bots SET name=?, instructions=?, provider=?, model=?, reasoning=? WHERE id=?').run(edit.name, edit.instructions, edit.provider, edit.model, edit.reasoning, id);
-      this.db.prepare('UPDATE bot_profiles SET revision=revision+1, soul=?, description=? WHERE bot_id=?').run(edit.soul, edit.description ?? String(current.description), id);
-      const result = this.bot(id); this.db.exec('COMMIT'); return result;
-    } catch (error) { this.db.exec('ROLLBACK'); throw error; }
+      const config=this.configs.publish(id,{name:edit.name,description:edit.description ?? current.description,instructions:edit.instructions,provider:edit.provider,model:edit.model,reasoning:edit.reasoning},current.archived,edit.revision);
+      try { this.db.exec('COMMIT'); } catch { throw new AgentConfigUncertain('Configuration save may have taken effect. Inspect the current configuration before retrying.'); }
+      return {...current,...config};
+    } catch (error) { try { this.db.exec('ROLLBACK'); } catch {} throw error; }
   }
-  setArchived(id: string, revision: number, archived: boolean) {
+  setArchived(id: string, revision: string, archived: boolean) {
     this.db.exec('BEGIN IMMEDIATE');
     try {
       const bot = this.bot(id);
       if (!bot) throw new Error('Bot not found');
       if (bot.revision !== revision) throw new BotConflict('Profile changed. Refresh before editing.');
       if (archived && (this.db.prepare("SELECT 1 FROM commands WHERE bot_id=? AND state='pending'").get(id) || this.db.prepare("SELECT 1 FROM task_attempts WHERE bot_id=? AND state IN ('queued','running','stopping','waiting')").get(id))) throw new BotConflict('Bot is busy');
-      if (bot.archived !== archived) this.db.prepare('UPDATE bot_profiles SET archived=?, revision=revision+1 WHERE bot_id=?').run(archived ? 1 : 0, id);
+      if (bot.archived !== archived) this.db.prepare('UPDATE bot_profiles SET archived=? WHERE bot_id=?').run(archived ? 1 : 0, id);
       const result = this.bot(id); this.db.exec('COMMIT'); return result;
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
   }
@@ -496,7 +515,7 @@ export class Instance {
       a.state, a.outcome, a.limit_ms AS limitMs, a.delegation_clock AS delegationClock, json_extract(a.profile,'$.revision') AS profileRevision
       FROM task_attempts a JOIN tasks t ON t.id=a.task_id WHERE a.id=?`).get(id);
     if (!row) return undefined;
-    const attempt = row as {id:string; taskId:string; botId:string; objective:string; predecessor:string | null; state:string; outcome:string | null; limitMs:number; profileRevision:number};
+    const attempt = row as {id:string; taskId:string; botId:string; objective:string; predecessor:string | null; state:string; outcome:string | null; limitMs:number; profileRevision:string};
     const saved=this.db.prepare('SELECT session FROM task_attempts WHERE id=?').get(id);
     const session: Session | undefined=typeof saved?.session === 'string' ? JSON.parse(saved.session) : undefined;
     const inbox = new TaskInbox(this.db).inspect({botId:attempt.botId,attemptId:id});
@@ -555,7 +574,7 @@ export class Instance {
   proposeDisclosure(input:{parentAttemptId:string;senderBotId:string;recipientBotId:string;kind:'request'|'question'|'answer'|'result'|'failure';content:string}) {
     if (!['request','question','answer','result','failure'].includes(input.kind) || !input.content.trim() || Buffer.byteLength(input.content,'utf8') > 16384 || input.senderBotId === input.recipientBotId) throw Error('Invalid disclosure');
     const parent=this.taskAttempt(input.parentAttemptId);
-    if (!parent || parent.state !== 'running' || !this.bot(input.senderBotId) || !this.bot(input.recipientBotId)) throw new BotConflict('Disclosure participants unavailable');
+    if (!parent || parent.state !== 'running' || !this.botIdentity(input.senderBotId) || !this.botIdentity(input.recipientBotId)) throw new BotConflict('Disclosure participants unavailable');
     const id=randomUUID();this.db.prepare("INSERT INTO disclosure_requests VALUES (?,?,?,?,?,?,'pending')").run(id,input.parentAttemptId,input.senderBotId,input.recipientBotId,input.kind,input.content);return id;
   }
   decideDisclosure(id:string,approved:boolean) {
@@ -721,7 +740,7 @@ export class Instance {
   taskExecution(id: string) {
     const row=this.db.prepare('SELECT a.profile,a.context,a.state,a.limit_ms AS limitMs,t.objective FROM task_attempts a JOIN tasks t ON t.id=a.task_id WHERE a.id=?').get(id);
     if (!row || row.state !== 'queued' || typeof row.profile !== 'string' || typeof row.context !== 'string') throw Error('Task is not queued');
-    const profile=JSON.parse(row.profile) as {provider:string; model:string | null; reasoning:string | null; instructions:string; soul:string; chatId:string};
+    const profile=JSON.parse(row.profile) as {provider:string; model:string | null; reasoning:string | null; instructions:string; chatId:string};
     const context=JSON.parse(row.context) as Array<{role:string;content:string;isNotice:number}>;
     return {profile,context,objective:String(row.objective),limitMs:Number(row.limitMs)};
   }
@@ -811,7 +830,7 @@ export class Instance {
     return this.db.prepare('SELECT type,name,success FROM command_runtime_events WHERE command_id=? ORDER BY seq').all(id).map(row=>row.type === 'tool_result' ? {type:'tool_result' as const,name:String(row.name),success:row.success === 1} : {type:'tool_start' as const,name:String(row.name)});
   }
   chatSession(botId:string):Session {
-    const bot=this.bot(botId);if(!bot || typeof bot.chatId !== 'string')throw Error('Bot not found');
+    const bot=this.botIdentity(botId);if(!bot || typeof bot.chatId !== 'string')throw Error('Bot not found');
     const row=this.db.prepare('SELECT session FROM sessions WHERE bot_id=?').get(botId);
     if(typeof row?.session !== 'string')return {version:1,id:bot.chatId,provider:null,messages:[],events:[]};
     const parsed:unknown=JSON.parse(row.session);if(!validSession(parsed,bot.chatId))throw Error('Invalid stored session');return parsed;
@@ -850,8 +869,8 @@ export class Instance {
     const row = this.db.prepare('SELECT profile FROM command_profiles WHERE command_id=?').get(id);
     if (!command || command.state !== 'pending' || typeof command.botId !== 'string' || typeof command.content !== 'string' || typeof row?.profile !== 'string') throw Error('Command is not pending');
     const profile: unknown = JSON.parse(row.profile);
-    if (!profile || typeof profile !== 'object' || !('provider' in profile) || typeof profile.provider !== 'string' || !('model' in profile) || !(profile.model === null || typeof profile.model === 'string') || !('reasoning' in profile) || !(profile.reasoning === null || typeof profile.reasoning === 'string') || !('instructions' in profile) || typeof profile.instructions !== 'string' || !('soul' in profile) || typeof profile.soul !== 'string' || !('chatId' in profile) || typeof profile.chatId !== 'string') throw Error('Invalid captured profile');
-    const captured = profile as {provider:string;model:string | null;reasoning:string | null;instructions:string;soul:string;chatId:string};
+    if (!profile || typeof profile !== 'object' || !('provider' in profile) || typeof profile.provider !== 'string' || !('model' in profile) || !(profile.model === null || typeof profile.model === 'string') || !('reasoning' in profile) || !(profile.reasoning === null || typeof profile.reasoning === 'string') || !('instructions' in profile) || typeof profile.instructions !== 'string' || !('chatId' in profile) || typeof profile.chatId !== 'string') throw Error('Invalid captured profile');
+    const captured = profile as {provider:string;model:string | null;reasoning:string | null;instructions:string;chatId:string};
     const saved = this.db.prepare('SELECT session FROM sessions WHERE bot_id=?').get(command.botId);
     let session: Session;
     if (typeof saved?.session === 'string') {

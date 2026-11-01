@@ -27,7 +27,8 @@ one-shot commands.
 Run `pnpm start instance serve .staf/instance.sqlite 3210` and open
 `http://127.0.0.1:3210/`. Enter the host's pairing code to open the chat workspace.
 **Settings** shows the instance-wide Codex connection and offers sign-in when
-needed. Each bot has its own model, which you can change from its chat. You can
+needed. Each bot has its own configuration, which you can edit from its chat.
+Instructions live in its `soul.md` file; settings live in `agent.toml`. You can
 create a bot before connecting a provider. The inbox shows task updates and
 requests for input or approval. The previous Advanced page has been retired;
 other management features remain available through the service and CLI while
@@ -88,8 +89,8 @@ and a resumed clock-tool round trip were live-tested
 with user-authorized `gpt-6-luna` requests and an existing grant on 2026-10-26.
 Fresh browser sign-in and live refresh rotation remain unverified; see
 [verification and remaining gaps](docs/direct-responses.md#verification-and-remaining-gaps).
-Public OIDC metadata and the documented direct endpoint contract were checked. No new runtime
-or development dependencies were added. On a new checkout, run
+Public OIDC metadata and the documented direct endpoint contract were checked.
+On a new checkout, run
 `pnpm install --frozen-lockfile`. pnpm 10.27.0 is used for verification.
 
 The shared terminal displays command status and recorded tool progress.

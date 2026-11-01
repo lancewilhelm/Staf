@@ -71,7 +71,7 @@ test('bot profiles detect stale edits and archive preserves shared chat across r
   const b=(await call('/api/pair','',{code:app.issueCode()}))[1].token;
   const bot=(await call('/api/bots',a,{name:'Ada',instructions:'Help'}))[1];
   const initial=(await call(`/api/bots/${bot.id}`,b))[1];
-  const edit={revision:initial.revision,name:'Renamed',instructions:'Explain',soul:'Be candid',provider:'demo',model:null,reasoning:null};
+  const edit={revision:initial.revision,name:'Renamed',instructions:'Be candid\nExplain',provider:'demo',model:null,reasoning:null};
   assert.equal((await call(`/api/bots/${bot.id}/profile`,a,edit))[0],200);
   assert.equal((await call(`/api/bots/${bot.id}/profile`,b,edit))[0],409);
   const updated=(await call(`/api/bots/${bot.id}`,b))[1]; assert.equal(updated.name,'Renamed'); assert.equal(updated.chatId,bot.chatId);
@@ -117,17 +117,17 @@ test('captured profile and private replay survive restart without exposing provi
  try {
   token=(await call('/api/pair','',{code:app.code})).token;
   const bot=await call('/api/bots',token,{name:'A'});
-  const edit={revision:bot.revision,name:'A',instructions:'old instructions',soul:'old soul',provider:'codex',model:'model-one',reasoning:null};
+  const edit={revision:bot.revision,name:'A',instructions:'old soul\nold instructions',provider:'codex',model:'model-one',reasoning:null};
   const first=await call(`/api/bots/${bot.id}/profile`,token,edit);
   assert.equal((await call('/api/commands',token,{id:'first-replay',botId:bot.id,content:'first'})).kind,'accepted');
-  await call(`/api/bots/${bot.id}/profile`,token,{...edit,revision:first.revision,instructions:'new instructions',soul:'new soul'});
+  await call(`/api/bots/${bot.id}/profile`,token,{...edit,revision:first.revision,instructions:'new soul\nnew instructions'});
   release(); assert.equal((await wait('first-replay')).state,'completed');
-  assert.equal(seen[0].profile.instructions,'old instructions');
-  assert.equal(seen[0].profile.soul,'old soul');
+  assert.equal(seen[0].profile.instructions,'old soul\nold instructions');
+  assert.equal('soul' in seen[0].profile,false);
   await app.close(); app=startInstance(path,0,{providerFactory:factory});port=await app.listen();
   assert.equal((await call('/api/commands',token,{id:'second-replay',botId:bot.id,content:'second'})).kind,'accepted');
   assert.equal((await wait('second-replay')).state,'completed');
-  assert.equal(seen[1].profile.instructions,'new instructions');
+  assert.equal(seen[1].profile.instructions,'new soul\nnew instructions');
   assert.equal(seen[1].messages[1].responseReplay.items[0].encrypted_content,'opaque+/= exact');
   const visible=await call(`/api/bots/${bot.id}/messages`,token);assert.ok(!JSON.stringify(visible).includes('opaque+/= exact'));
   assert.equal((await call('/api/commands',token,{id:'second-replay',botId:bot.id,content:'second'})).kind,'existing');assert.equal(seen.length,2);
@@ -143,7 +143,7 @@ test('named adapters send captured prompts and model using offline transports', 
  const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return r.json()};
  try {const token=(await call('/api/pair','',{code:app.code})).token;const bot=await call('/api/bots',token,{name:'A'});let revision=bot.revision;
   for(const [provider,model,id] of [['openrouter','vendor/model','router'],['codex','model-one','codex'],['codex','model-one','codex-again']]){
-   const profile=await call(`/api/bots/${bot.id}/profile`,token,{revision,name:'A',instructions:'individual instruction',soul:'individual soul',provider,model,reasoning:null});revision=profile.revision;
+   const profile=await call(`/api/bots/${bot.id}/profile`,token,{revision,name:'A',instructions:'individual soul\nindividual instruction',provider,model,reasoning:null});revision=profile.revision;
    await call('/api/commands',token,{id,botId:bot.id,content:id});let state;for(let i=0;i<100;i++){state=await call('/api/commands/'+id,token);if(state.state!=='pending')break;await new Promise(r=>setTimeout(r,5));}assert.equal(state.state,'completed',state.error);
   }
   assert.equal(requests[0].model,'vendor/model');assert.match(requests[0].messages[0].content,/individual soul[\s\S]*individual instruction/);
@@ -177,7 +177,7 @@ test('production provider selection uses only the configured synthetic host cred
  const app=startInstance(join(dir,'db'),0,{dataDir:dir,env:{OPENROUTER_API_KEY:'dummy-router',STAF_MODEL:'must-not-be-used'}});const port=await app.listen();
  const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return r.json()};
  try{const token=(await call('/api/pair','',{code:app.code})).token;const bot=await call('/api/bots',token,{name:'A'});let revision=bot.revision;
-  for(const [provider,model,id] of [['openrouter',null,'missing'],['openrouter','vendor/model','router-prod'],['codex','codex-model','codex-prod']]){const profile=await call(`/api/bots/${bot.id}/profile`,token,{revision,name:'A',instructions:'profile instruction',soul:'profile soul',provider,model,reasoning:null});revision=profile.revision;await call('/api/commands',token,{id,botId:bot.id,content:'hello'});let state;for(let i=0;i<100;i++){state=await call('/api/commands/'+id,token);if(state.state!=='pending')break;await new Promise(r=>setTimeout(r,5));}assert.equal(state.state,id==='missing'?'failed':'completed',state.error);}
+  for(const [provider,model,id] of [['openrouter',null,'missing'],['openrouter','vendor/model','router-prod'],['codex','codex-model','codex-prod']]){const profile=await call(`/api/bots/${bot.id}/profile`,token,{revision,name:'A',instructions:'profile soul\nprofile instruction',provider,model,reasoning:null});revision=profile.revision;await call('/api/commands',token,{id,botId:bot.id,content:'hello'});let state;for(let i=0;i<100;i++){state=await call('/api/commands/'+id,token);if(state.state!=='pending')break;await new Promise(r=>setTimeout(r,5));}assert.equal(state.state,id==='missing'?'failed':'completed',state.error);}
   assert.equal(requests.length,2);assert.equal(requests[0].body.model,'vendor/model');assert.equal(requests[0].authorization,'Bearer dummy-router');assert.match(requests[0].body.messages[0].content,/profile soul[\s\S]*profile instruction/);assert.equal(requests[1].body.model,'codex-model');assert.equal(requests[1].authorization,'Bearer dummy-token');assert.match(requests[1].body.instructions,/profile soul[\s\S]*profile instruction/);
  }finally{await app.close();globalThis.fetch=original;rmSync(dir,{recursive:true,force:true});}
 });
@@ -201,7 +201,7 @@ test('OpenRouter credit and rate-limit errors are useful without exposing respon
  const {openRouterProvider}=await import('../dist/providers.js');const dir=mkdtempSync(join(tmpdir(),'staf-http-errors-'));let status=402;
  const factory=async(profile,instructions)=>openRouterProvider({OPENROUTER_API_KEY:'dummy-key'},profile.model,async()=>new Response('secret provider body',{status}),undefined,instructions);
  const app=startInstance(join(dir,'db'),0,{providerFactory:factory}),port=await app.listen();const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return r.json()};
- try{const token=(await call('/api/pair','',{code:app.code})).token;const bot=await call('/api/bots',token,{name:'A'});await call(`/api/bots/${bot.id}/profile`,token,{revision:bot.revision,name:'A',instructions:'',soul:'',provider:'openrouter',model:'fixture/model',reasoning:null});
+ try{const token=(await call('/api/pair','',{code:app.code})).token;const bot=await call('/api/bots',token,{name:'A'});await call(`/api/bots/${bot.id}/profile`,token,{revision:bot.revision,name:'A',instructions:'',provider:'openrouter',model:'fixture/model',reasoning:null});
   for(const [code,message] of [[402,'Provider credits are required'],[429,'Provider rate limit reached; retry later']]){status=code;await call('/api/commands',token,{id:'http-'+code,botId:bot.id,content:'hello'});let state;for(let i=0;i<100;i++){state=await call('/api/commands/http-'+code,token);if(state.state!=='pending')break;await new Promise(r=>setTimeout(r,5));}assert.equal(state.state,'failed');assert.equal(state.error,message);assert.ok(!JSON.stringify(state).includes('secret provider body'));}
  }finally{await app.close();rmSync(dir,{recursive:true,force:true});}
 });
@@ -241,7 +241,7 @@ test('compatible providers use host endpoints and profile prompts; discovery is 
  const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return [r.status,await r.json()];};
  try {const token=(await call('/api/pair',null,{code:app.code}))[1].token,bot=(await call('/api/bots',token,{name:'A'}))[1];let revision=bot.revision;
   for(const provider of ['lmstudio','live']){
-   const [status,profile]=await call(`/api/bots/${bot.id}/profile`,token,{revision,name:'A',instructions:'custom instruction',soul:'custom soul',provider,model:'fixture-model',reasoning:null});assert.equal(status,200);revision=profile.revision;
+   const [status,profile]=await call(`/api/bots/${bot.id}/profile`,token,{revision,name:'A',instructions:'custom soul\ncustom instruction',provider,model:'fixture-model',reasoning:null});assert.equal(status,200);revision=profile.revision;
    assert.equal(seen.filter(x=>x.url.endsWith('/models')).length,provider==='lmstudio'?0:1);
    const [discoveryStatus,catalog]=await call(`/api/bots/${bot.id}/models`,token,{});assert.equal(discoveryStatus,200);assert.equal(catalog.models[0].id,'fixture-model');assert.ok(!JSON.stringify(catalog).includes('lm-key'));
    await call('/api/commands',token,{id:provider,botId:bot.id,content:'hello'});let state;for(let i=0;i<100;i++){state=(await call(`/api/commands/${provider}`,token))[1];if(state.state!=='pending')break;await new Promise(r=>setTimeout(r,5));}assert.equal(state.state,'completed',state.error);

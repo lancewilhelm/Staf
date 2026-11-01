@@ -1,7 +1,7 @@
 # Keep agent configuration in directly editable files
 
-Accepted in the GUI and agent-management interview on 2026-11-01. This is a
-design decision; runtime implementation is pending.
+Accepted in the GUI and agent-management interview on 2026-11-01. The shared
+service implements file-backed configuration for fresh instances.
 
 Agent configuration files are authoritative. The GUI, CLI, and future clients
 edit the same configuration through the shared service, while terminal tools and
@@ -19,8 +19,9 @@ edits report conflicts and preserve unsaved edits. Each agent has a directory
 keyed by its stable ID, so renaming preserves the path. Agent Settings and the
 CLI expose the path. Structured settings belong in agent.toml. One soul.md holds
 personality, role, and standing guidance, with one Instructions editor in the GUI.
-Preserve both existing texts when consolidating them. The mechanics for publishing
-consistent configuration revisions remain implementation design work.
+Legacy text consolidation is outside this delivery's scope. The service publishes
+both files through an atomic revision-directory pointer, as described in the
+[architecture](../architecture.md#local-shared-instance-preview).
 
 See the [interview decisions](../decisions.md#chat-gui-polish-and-agent-terminology)
 and [copied creation defaults](0002-copy-bot-creation-defaults.md).

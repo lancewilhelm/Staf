@@ -148,9 +148,9 @@ not a device name.
 The workspace lists persistent bots and shows their main chats. **Settings**
 shows the Codex sign-in for this instance. A saved sign-in is reused across
 bots; it does not establish that the provider or a model is available. Select
-**New bot** to create a bot with a name, role instructions, and its own model.
+**New bot** to create a bot with a name and optional instructions and model.
 You can create a bot before signing in or choosing a model. Select the model
-label below a bot's chat to change that bot's model. Press Enter to send a
+label below a bot's chat to edit its settings and Instructions. Press Enter to send a
 message or Shift+Enter to insert a new line. If no Codex sign-in is available,
 the workspace keeps your draft and directs you to provider settings. If a bot
 has no model, the workspace keeps your draft until you choose one.
@@ -170,8 +170,23 @@ removes locally saved drafts and pending IDs. The former Advanced page has been
 retired. Profile, permission, memory, skill, schedule, and task management are
 not yet fully available in the workspace; the service and CLI operations below
 remain available.
-Bot profiles contain a name, directory description, instructions, soul, provider, model, and reasoning. A later request after a provider change can send existing chat history to the new provider. Creation defaults set provider, model, and reasoning for future bots. The instance copies these settings at creation; changing defaults never changes existing bots. Revisions prevent stale clients from overwriting each other. In the CLI, use `instance defaults URL CREDENTIAL_FILE` and `instance defaults-set URL CREDENTIAL_FILE REVISION PROVIDER MODEL REASONING`; use `-` for an empty model or reasoning. Permission and approval settings remain separate. The description is owner-edited metadata visible to other bots; keep private instructions and memory out of it. Existing bots start with an empty description.
-The deterministic demo provider does not follow the instructions or soul. Select Codex, OpenRouter, LM Studio, or live and an explicit model in the bot profile. OpenRouter uses `OPENROUTER_API_KEY` in the service host environment; the instance command does not load the project `.env` file. Codex uses the Staf grant under the directory containing the instance database. From a paired browser, use Codex sign-in and open the provided link on the instance host. The initiating paired client can check or cancel that attempt, including after refreshing the page. The CLI provides `instance codex-auth-start URL CREDENTIAL_FILE`, `codex-auth-current URL CREDENTIAL_FILE`, `codex-auth-status URL CREDENTIAL_FILE ATTEMPT_ID`, `codex-auth-cancel URL CREDENTIAL_FILE ATTEMPT_ID`, and `codex-auth-credential URL CREDENTIAL_FILE`. The callback listens on the same loopback origin. Revoking the initiating client prevents credential commit. These paths have been tested with synthetic auth only; live sign-in has not been verified. Provider failures do not fall back to another provider. Live provider execution has not been verified in this preview.
+Each bot's `agent.toml` contains its name, directory description, provider, model, and reasoning. Its `soul.md` contains its standing instructions. The **Instructions** editor, CLI, and API use the same files. Inspect the bot in the CLI or open bot settings to find `configDir`; it remains stable when the bot is renamed. The active files can also be edited directly on the instance host. The service validates them when it reads them; an invalid file remains intact and blocks new work for that bot until corrected. Avoid direct file edits while a client save is underway.
+
+Client saves include a revision and reject stale versions. Ordinary file
+editors do not send a revision: saving an old buffer by pathname after a client
+save can overwrite the newer contents without a conflict. Coordinate direct
+editing with client saves and reload files before saving. If a client reports
+that a save result is uncertain, inspect the current files before retrying.
+
+An editor may still have a previous revision open when a client publishes a new
+one. If that editor saves late, Staf retains the old files and blocks new work
+for that bot with their path. Compare those files with the files under
+`configDir` and apply the changes you want to keep to the current files. Then
+close the old editor and remove the `.retired` marker in the named previous revision to acknowledge the
+reconciliation. The previous files remain on disk.
+
+A later request after a provider change can send existing chat history to the new provider. Creation defaults set provider, model, and reasoning for future bots. The instance copies these settings at creation; changing defaults never changes existing bots. Revisions prevent stale clients from overwriting each other. In the CLI, use `instance defaults URL CREDENTIAL_FILE` and `instance defaults-set URL CREDENTIAL_FILE REVISION PROVIDER MODEL REASONING`; use `-` for an empty model or reasoning. Permission and approval settings remain separate. The description is owner-edited metadata visible to other bots; keep private instructions and memory out of it. New bots start with an empty description.
+The deterministic demo provider does not follow the instructions. Select Codex, OpenRouter, LM Studio, or live and an explicit model in the bot profile. OpenRouter uses `OPENROUTER_API_KEY` in the service host environment; the instance command does not load the project `.env` file. Codex uses the Staf grant under the directory containing the instance database. From a paired browser, use Codex sign-in and open the provided link on the instance host. The initiating paired client can check or cancel that attempt, including after refreshing the page. The CLI provides `instance codex-auth-start URL CREDENTIAL_FILE`, `codex-auth-current URL CREDENTIAL_FILE`, `codex-auth-status URL CREDENTIAL_FILE ATTEMPT_ID`, `codex-auth-cancel URL CREDENTIAL_FILE ATTEMPT_ID`, and `codex-auth-credential URL CREDENTIAL_FILE`. The callback listens on the same loopback origin. Revoking the initiating client prevents credential commit. These paths have been tested with synthetic auth only; live sign-in has not been verified. Provider failures do not fall back to another provider. Live provider execution has not been verified in this preview.
 
 CLI examples (use a fresh host code for each client):
 

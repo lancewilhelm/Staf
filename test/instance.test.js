@@ -53,8 +53,6 @@ test('upgrades an existing database after making a readable backup', async () =>
   let instance;
   try {
     instance=new Instance(path);
-    assert.equal(instance.bot('bot').name,'Ada');
-    assert.equal(instance.bot('bot').revision,1);
     assert.equal(instance.command('old-command').state,'completed');
     assert.throws(()=>instance.claim({id:'old-command',botId:'bot',content:'[REDACTED]'}),/unverifiable/);
     const backup=readdirSync(dir).find(name=>name.startsWith('instance.sqlite.before-profiles-'));

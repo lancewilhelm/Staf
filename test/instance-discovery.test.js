@@ -14,7 +14,7 @@ test('paired discovery reports ambiguous and busy bots without exposing private 
   const requester=(await call('/api/bots',token,{name:'Owner'}))[1];
   const first=(await call('/api/bots',token,{name:'Researcher',instructions:'private secret'}))[1];
   const second=(await call('/api/bots',token,{name:'Researcher'}))[1];
-  const profile={revision:second.revision,name:second.name,description:'Historical archives',instructions:second.instructions,soul:second.soul,provider:second.provider,model:second.model,reasoning:second.reasoning};
+  const profile={revision:second.revision,name:second.name,description:'Historical archives',instructions:second.instructions,provider:second.provider,model:second.model,reasoning:second.reasoning};
   assert.equal((await call(`/api/bots/${second.id}/profile`,token,profile))[0],200);
   assert.equal((await call(`/api/bots/${second.id}/profile`,token,profile))[0],409);
   assert.equal((await call('/api/bot-discovery',token,{requesterId:requester.id,query:'archives'}))[1].candidates[0].id,second.id);

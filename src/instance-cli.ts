@@ -117,7 +117,7 @@ export async function instanceCommand(args: string[]) {
   else if(action==='create' && create) result=await request('/api/bots',token,create);
   else if(action==='inspect' && values[0]) result=await request(`/api/bots/${encodeURIComponent(values[0])}`,token);
   else if(action==='edit' && values[0] && values[1]) { const profile: unknown=JSON.parse(await readFile(values[1],'utf8')); if (!profile || typeof profile !== 'object' || Array.isArray(profile)) throw Error('Profile file must contain a JSON object'); result=await request(`/api/bots/${encodeURIComponent(values[0])}/profile`,token,profile); }
-  else if((action==='archive' || action==='restore') && values[0] && values[1]) result=await request(`/api/bots/${encodeURIComponent(values[0])}/${action}`,token,{revision:Number(values[1])});
+  else if((action==='archive' || action==='restore') && values[0] && values[1]) result=await request(`/api/bots/${encodeURIComponent(values[0])}/${action}`,token,{revision:values[1]});
   else if(action==='read' && values[0]) result=await request(`/api/bots/${encodeURIComponent(values[0])}/messages`,token);
   else if(action==='tasks' && values[0]) result=await request(`/api/bots/${encodeURIComponent(values[0])}/tasks`,token);
   else if(action==='task' && values[0]) result=await request(`/api/tasks/${encodeURIComponent(values[0])}`,token);

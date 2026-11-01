@@ -13,6 +13,7 @@ import { createServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { BotConflict, Instance } from './instance.js';
+import { AgentConfigConflict, AgentConfigInvalid, AgentConfigUncertain } from './agent-config.js';
 import { MemoryConflict, type MemoryScope } from './memory.js';
 import { selectProvider } from './registry.js';
 import { runTurn } from './runtime.js';
@@ -31,7 +32,7 @@ import { discoverModels } from './models.js';
 import { resolveSettings } from './settings.js';
 import { usageText } from './usage.js';
 
-export function startInstance(path: string, port = 0, options: {dataDir?: string; env?: Environment; enableCollaboration?: boolean; enableReusableApprovals?: boolean; localBootstrapToken?: string; authNow?:()=>number; authLifetimeMs?:number; webDependencies?:WebDependencies; searchTransport?:SearchTransport; shellExecutor?:typeof executeShellSandbox; authHooks?: {prepare:typeof prepareDirectLogin; complete:typeof completeDirectLogin}; providerFactory?: (profile: {provider:string; model:string | null; reasoning:string | null; instructions:string; soul:string; chatId:string}, instructions:string) => Promise<Provider>} = {}) {
+export function startInstance(path: string, port = 0, options: {dataDir?: string; env?: Environment; enableCollaboration?: boolean; enableReusableApprovals?: boolean; localBootstrapToken?: string; authNow?:()=>number; authLifetimeMs?:number; webDependencies?:WebDependencies; searchTransport?:SearchTransport; shellExecutor?:typeof executeShellSandbox; authHooks?: {prepare:typeof prepareDirectLogin; complete:typeof completeDirectLogin}; providerFactory?: (profile: {provider:string; model:string | null; reasoning:string | null; instructions:string; chatId:string}, instructions:string) => Promise<Provider>} = {}) {
   const env = options.env ?? process.env;
   const redact = redactor(env);
   const dataDir = options.dataDir ?? resolve(dirname(path));
@@ -201,7 +202,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
             remaining=limitMs; resume();
             if (!['demo','codex','openrouter','lmstudio','live'].includes(profile.provider)) throw Error('Unsupported provider');
             if (profile.provider !== 'demo' && !profile.model?.trim()) throw Error('Set a model in the bot profile');
-            const instructions=`${chatSystemMessage.content}\n\nBot soul:\n${profile.soul}\n\nBot instructions:\n${profile.instructions}`;
+            const instructions=`${chatSystemMessage.content}\n\nBot instructions:\n${profile.instructions}`;
             const taskProfile={...profile,chatId:id};
             const provider=options.providerFactory ? await options.providerFactory(taskProfile,instructions) : (await selectProvider(profile.provider,{env:{...env,STAF_MODEL:undefined},model:profile.model ?? undefined,reasoning:profile.reasoning ?? undefined,dataDir,sessionId:id,instructions})).provider;
             controller.signal.throwIfAborted();
@@ -397,7 +398,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
       if (req.method === 'GET' && req.url === '/api/bots') return json(200,instance.bots());
       if (req.method === 'POST' && req.url === '/api/bots') {
         if (typeof value.name !== 'string' || !value.name.trim() || value.name.length > 200 || (value.instructions !== undefined && (typeof value.instructions !== 'string' || value.instructions.length > 30000))) return json(400,{error:'Invalid name or instructions'});
-        if(value.operationId !== undefined && (typeof value.instructions !== 'string' || !value.instructions.trim() || typeof value.operationId !== 'string' || !/^[\w-]{1,100}$/.test(value.operationId) || value.provider !== 'codex' || !(value.model === null || typeof value.model === 'string' && value.model.length <= 200))) return json(400,{error:'Invalid creation operation'});
+        if(value.operationId !== undefined && (typeof value.instructions !== 'string' || typeof value.operationId !== 'string' || !/^[\w-]{1,100}$/.test(value.operationId) || value.provider !== 'codex' || !(value.model === null || typeof value.model === 'string' && value.model.length <= 200))) return json(400,{error:'Invalid creation operation'});
         return json(201,instance.createBot({name:value.name, instructions:typeof value.instructions === 'string' ? value.instructions : '',...(typeof value.operationId === 'string' ? {operationId:value.operationId,provider:'codex',...(typeof value.model === 'string' ? {model:value.model} : {})} : {})}));
       }
       const creationMatch=req.url?.match(/^\/api\/bot-creations\/([\w-]+)$/);
@@ -407,12 +408,12 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
         const id = botMatch[1], action = botMatch[2];
         if (req.method === 'GET' && !action) { const bot = instance.bot(id); return bot ? json(200,bot) : json(404,{error:'Bot not found'}); }
         if (req.method === 'POST' && (action === 'archive' || action === 'restore')) {
-          if (!Number.isSafeInteger(value.revision) || typeof value.revision !== 'number' || value.revision < 1) return json(400,{error:'Revision required'});
+          if (typeof value.revision !== 'string' || !/^[a-f0-9]{64}$/.test(value.revision)) return json(400,{error:'Revision required'});
           return json(200,instance.setArchived(id,value.revision,action === 'archive'));
         }
         if (req.method === 'POST' && action === 'profile') {
-          if (typeof value.revision !== 'number' || !Number.isSafeInteger(value.revision) || value.revision < 1 || typeof value.name !== 'string' || !value.name.trim() || value.name.length > 200 || (value.description !== undefined && (typeof value.description !== 'string' || Buffer.byteLength(value.description,'utf8') > 4096)) || typeof value.instructions !== 'string' || value.instructions.length > 15000 || typeof value.soul !== 'string' || value.soul.length > 15000 || typeof value.provider !== 'string' || !['demo','codex','openrouter','lmstudio','live'].includes(value.provider) || !(value.model === null || typeof value.model === 'string' && value.model.length <= 200) || !(value.reasoning === null || typeof value.reasoning === 'string' && value.reasoning.length <= 100)) return json(400,{error:'Invalid profile'});
-          return json(200,instance.editBot(id,{revision:value.revision,name:value.name,...(typeof value.description === 'string' ? {description:value.description} : {}),instructions:value.instructions,soul:value.soul,provider:value.provider,model:value.model,reasoning:value.reasoning}));
+          if ('soul' in value || typeof value.revision !== 'string' || !/^[a-f0-9]{64}$/.test(value.revision) || typeof value.name !== 'string' || !value.name.trim() || value.name.length > 200 || (value.description !== undefined && (typeof value.description !== 'string' || Buffer.byteLength(value.description,'utf8') > 4096)) || typeof value.instructions !== 'string' || value.instructions.length > 30000 || typeof value.provider !== 'string' || !['demo','codex','openrouter','lmstudio','live'].includes(value.provider) || !(value.model === null || typeof value.model === 'string' && value.model.length <= 200) || !(value.reasoning === null || typeof value.reasoning === 'string' && value.reasoning.length <= 100)) return json(400,{error:'Invalid profile'});
+          return json(200,instance.editBot(id,{revision:value.revision,name:value.name,...(typeof value.description === 'string' ? {description:value.description} : {}),instructions:value.instructions,provider:value.provider,model:value.model,reasoning:value.reasoning}));
         }
       }
       const terminalInfoMatch=req.url?.match(/^\/api\/bots\/([\w-]+)\/(usage|context|models)$/);
@@ -495,7 +496,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
             const {profile,session,notices} = instance.execution(id);
             if (!['demo','codex','openrouter','lmstudio','live'].includes(profile.provider)) throw Error('Unsupported provider');
             if (profile.provider !== 'demo' && !profile.model?.trim()) throw Error('Set a model in the bot profile');
-            const instructions = `${chatSystemMessage.content}\n\nBot soul:\n${profile.soul}\n\nBot instructions:\n${profile.instructions}`;
+            const instructions = `${chatSystemMessage.content}\n\nBot instructions:\n${profile.instructions}`;
             const provider = options.providerFactory ? await options.providerFactory(profile,instructions) : (await selectProvider(profile.provider,{env:{...env, STAF_MODEL:undefined},model:profile.model ?? undefined,reasoning:profile.reasoning ?? undefined,dataDir,sessionId:profile.chatId,instructions})).provider;
             controller.signal.throwIfAborted();
             await runTurn({session, provider, ...(instance.shellCanOffer({kind:'command',id}) ? {shell:(request:{callId:string;command:string})=>runScratchShell({kind:'command',id},request,controller.signal)} : {}), ...(instance.searchCanOffer({kind:'command',id}) ? {search:(request:{callId:string;query:string})=>searchWeb({kind:'command',id},request,controller.signal)} : {}), ...(instance.webCanOffer({kind:'command',id}) ? {web:(request:{callId:string;url:string})=>readWeb({kind:'command',id},request,controller.signal)} : {}), chatTasks:{start:request=>{const result=instance.startChatTask(id,request.callId,request.objective);if(result.kind==='accepted' && result.attemptId)executeTask(result.attemptId);return result.outcome==='accepted' && result.attemptId ? `Background task ${result.attemptId} accepted. Check Activity for progress.` : 'A background task is already active for this bot. No new task was started.';}}, skills:skillAccess(botId,instance.skills.availableToBot(botId).slice(0,32).map(({id,revision,name,description,digest})=>({id,revision,name,description,digest})),event=>instance.commandSkillLoaded(id,event)), requestText:content, memory:query=>recall(botId,query), text:notices.length ? `Task updates since your last chat turn:\n${notices.join('\n')}\n\nUser message:\n${content}` : content, redact, signal:controller.signal, emit:event=>{if(event.type === 'tool_start' || event.type === 'tool_result'){const allowed=['clock','read_web','search_web','run_scratch_shell','select_skill','start_background_task'];const name=allowed.includes(event.name) ? event.name : 'tool';instance.commandRuntimeEvent(id,event.type === 'tool_start' ? {type:event.type,name} : {type:event.type,name,success:event.success});}}, authorizeClock:()=>authorizeClock(botId,'command',id,controller.signal), store:{save:async updated => instance.saveExecution(id,updated,updated.messages.length > session.messages.length)}});
@@ -508,7 +509,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
         return json(200,claim);
       }
       return json(404,{error:'Not found'});
-    } catch (error) { return json((error instanceof BotConflict || error instanceof MemoryConflict || error instanceof SkillConflict || error instanceof ScheduleConflict) ? 409 : 400,{error:error instanceof Error ? error.message : 'Request failed'}); }
+    } catch (error) { if(error instanceof AgentConfigInvalid)return json(422,{error:error.message,code:'invalid_agent_configuration'});if(error instanceof AgentConfigUncertain)return json(503,{error:error.message,code:'configuration_save_uncertain'});return json((error instanceof BotConflict || error instanceof AgentConfigConflict || error instanceof MemoryConflict || error instanceof SkillConflict || error instanceof ScheduleConflict) ? 409 : 400,{error:error instanceof Error ? error.message : 'Request failed'}); }
   });
   return { server, code, migrationBackup: instance.migrationBackup, issueCode: () => (code = randomBytes(18).toString('base64url')), close: () => new Promise<void>((resolve,reject)=>{closing=true; instanceAuth?.shutdown(); if(scheduleTimer) clearInterval(scheduleTimer); for(const controller of active) controller.abort(); server.close(error=>{instance.close(); if(error)reject(error);else resolve();});}), listen: () => new Promise<number>((resolve,reject)=>{server.once('error',reject);server.listen(port,'127.0.0.1',()=>{const a=server.address();if(a && typeof a !== 'string') { tickSchedules(); scheduleTimer=setInterval(tickSchedules,30000); resolve(a.port); }else reject(Error('Listen failed'));});}) };
 }

@@ -60,12 +60,23 @@ prevents a second process from treating active commands as interrupted. The
 service runs demo, Codex, OpenRouter, LM Studio and live with host-owned credentials and an explicit bot model for each non-demo provider. This preview does not implement the LAN,
 push updates, complete reconnect recovery, or operational features described in the plans above.
 
-Bot profile revisions, directory descriptions, and archive state belong to the instance database. Discovery uses only names and owner-edited descriptions and reports busy matches; the task runtime separately requests helpers. Task attempts can record a separately selected helper clock scope, defaulting to none; helper clock actions must also pass current requester and helper permission and approval checks.
+Agent settings and instructions live under `agents/ID/current` beside the
+instance database. The `current` symlink points to a revision directory holding
+`agent.toml` and `soul.md`. The service validates and fsyncs both new files
+before atomically replacing the symlink. A content hash, including archive
+state, detects stale client saves and direct file edits. Before switching the
+pointer, the service records the previous file hash. A direct edit detected
+during publication causes a conflict and restores the previous pointer. A later
+edit to an open previous file blocks new work until the owner reconciles it.
+Archive state and operational records remain in SQLite. Unpublished revision directories can
+remain after an interrupted save; they are not read as active configuration.
+Old database-owned profiles are not migrated by this feature.
 
-Bot profile revisions and archive state belong to the instance database. A
-profile edit checks the revision in a transaction. Archive and chat acceptance
-check the same durable state, and each accepted command stores its profile
-snapshot. The offline demo does not use the saved instructions or soul. Live providers receive both in system instructions. The private execution session retains tool history, usage and model-bound replay separately from visible chat. Background attempts capture their bot profile and visible chat context at acceptance and use a separate provider session. Existing databases receive a SQLite backup before the execution journal schema is added. Live provider execution remains unverified.
+Discovery uses names and owner-edited descriptions. Each accepted command and
+task captures its settings and instructions. The offline demo does not follow
+instructions. The private execution session retains tool history, usage and
+model-bound replay separately from visible chat. Permissions and revocations
+remain service-controlled. Live provider execution remains unverified.
 The shared chat-completions adapter passes caller cancellation and its timeout
 to the HTTP transport.
 
