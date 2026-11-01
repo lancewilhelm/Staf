@@ -913,19 +913,19 @@ export class Instance {
       if (input) this.memories.create(input);
       if (proposal?.kind === 'propose') {
         this.db.prepare("INSERT INTO memory_proposals VALUES (?,?,?,'pending')").run(id,command.botId,proposal.text);
-        reply=`Proposed shared user memory: ${JSON.stringify(proposal.text)}\nALL bots will see this memory. Nothing has been saved to active memory yet. To save exactly this text, say: Confirm shared memory ${id}\nTo discard it, say: Cancel shared memory ${id}`;
+        reply=`Proposed shared user memory: ${JSON.stringify(proposal.text)}\nALL agents will see this memory. Nothing has been saved to active memory yet. To save exactly this text, say: Confirm shared memory ${id}\nTo discard it, say: Cancel shared memory ${id}`;
       } else if (proposal) {
         const row=this.db.prepare('SELECT text,state FROM memory_proposals WHERE id=? AND bot_id=?').get(proposal.id,command.botId);
-        if (!row) reply='No matching shared memory proposal for this bot. No changes were made.';
+        if (!row) reply='No matching shared memory proposal for this agent. No changes were made.';
         else if (row.state === 'confirmed') reply='That shared memory proposal was already confirmed. No new memory was created.';
         else if (row.state === 'cancelled') reply='That shared memory proposal was cancelled. No changes were made.';
         else if (row.state !== 'pending' || typeof row.text !== 'string') throw Error('Invalid memory proposal');
         else if (proposal.kind === 'cancel') {this.db.prepare("UPDATE memory_proposals SET state='cancelled',text=NULL WHERE id=? AND state='pending'").run(proposal.id); reply='Shared memory proposal cancelled. No memory was saved.';}
-        else {this.memories.create({scope:{kind:'user'},text:row.text}); this.db.prepare("UPDATE memory_proposals SET state='confirmed',text=NULL WHERE id=? AND state='pending'").run(proposal.id);reply='Confirmed and saved to shared user memory. All bots can retrieve it.';}
+        else {this.memories.create({scope:{kind:'user'},text:row.text}); this.db.prepare("UPDATE memory_proposals SET state='confirmed',text=NULL WHERE id=? AND state='pending'").run(proposal.id);reply='Confirmed and saved to shared user memory. All agents can retrieve it.';}
       }
       if (operation) {
         const entries=this.memories.list(operation.scope);
-        const label=operation.scope.kind === 'user' ? 'shared user memory' : 'this bot’s memory';
+        const label=operation.scope.kind === 'user' ? 'shared user memory' : 'this agent’s memory';
         if (operation.kind === 'list') reply=entries.length ? `Entries in ${label}: ` + entries.map(item=>`${item.id} (version ${item.version}): ${item.text}`).join('\n') : `There are no entries in ${label}.`;
         else {
           const target=entries.find(item=>item.id === operation.id);
