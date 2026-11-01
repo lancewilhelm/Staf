@@ -322,12 +322,14 @@ try{
  await act("testClick('Open provider settings')","!!document.querySelector('input[type=password]')",'open OpenRouter settings');
  await act("testInput('input[type=password]','synthetic-browser-recovery');testClick('Save OpenRouter key')","document.body.innerText.includes('API key saved for this instance.')",'recover OpenRouter connection');
  await act("testClick('Back to chat')","document.querySelector('[aria-label=Message]')?.value==='Next OpenRouter draft' && document.querySelector('.messages').innerText.includes('Keep OpenRouter draft')",'OpenRouter draft preserved through setup');
- await act("testClick('Retry')","!document.querySelector('.submission') && document.body.innerText.includes('Demo (offline): Keep OpenRouter draft')",'retry after connecting OpenRouter');
+ await evaluate("testClick('Retry')");
+ await until(()=>evaluate("document.querySelector('.provisional')?.textContent.includes('Router first chunk')"),'OpenRouter retry streams incrementally');
+ assert.equal(await evaluate("document.querySelector('[aria-label=Message]').value"),'Next OpenRouter draft');
  assert.equal(await evaluate("JSON.stringify(localStorage).includes('synthetic-browser-recovery')"),false);
- await evaluate("testClick('Send ↑')");
- await until(()=>evaluate("document.querySelector('.provisional')?.textContent.includes('Router first chunk')"),'OpenRouter incremental output');
  server.stdin.write('router-next\n');
- await until(()=>evaluate("!document.querySelector('.provisional') && document.body.innerText.includes('Router first chunk and finished.')"),'OpenRouter streaming completed');
+ await until(()=>evaluate("!document.querySelector('.submission') && !document.querySelector('.provisional') && document.body.innerText.includes('Router first chunk and finished.')"),'OpenRouter retry completes');
+ await evaluate("testClick('Send ↑')");
+ await until(()=>evaluate("!document.querySelector('.submission') && document.querySelector('.messages').innerText.includes('Next OpenRouter draft')"),'send newer OpenRouter draft');
  await until(()=>evaluate("![...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Send ↑').disabled"),'OpenRouter ready for next message');
  await evaluate("testInput('[aria-label=Message]','Browser failure fixture');testClick('Send ↑')");
  await until(()=>evaluate("document.body.innerText.includes('Message failed.') && [...document.querySelectorAll('.submission button')].some(b=>b.textContent==='Retry')"),'OpenRouter failure offers inline retry');
