@@ -16,7 +16,7 @@ send existing conversation history to the new provider on the next request.
 Provider adapters normalize messages and tools for the runtime. Codex uses direct
 Responses with a Staf-owned grant and model-bound replay. OpenRouter, LM Studio,
 and the generic live adapter use Chat Completions. The demo returns deterministic
-responses. Codex and OpenRouter stream provisional text through the shared service; LM Studio and the generic live adapter buffer provider output. Only completed responses are committed to conversation history. The terminal displays command status and persisted tool progress. The service applies permissions and approval
+responses. Codex and OpenRouter stream provisional text through the shared service; LM Studio and the generic live adapter buffer provider output. Only completed provider responses are committed as completed replies; stopped partial output is labeled separately. The terminal displays command status and persisted tool progress. The service applies permissions and approval
 rules before supported actions. See [direct Responses](direct-responses.md),
 [settings](settings.md), and [usage](usage.md).
 
@@ -73,7 +73,7 @@ its hash. A client ID is derived from the token hash and is not a bearer token.
 The first-delivery trust model treats every paired client as acting for the sole owner, with no separate role check. Any paired client can list and revoke client authorizations and manage approvals and settings. A browser stores its credential and uncertain draft locally, while a
 CLI client uses a separate credential file. Commands claim a bot and append the
 user message transactionally; completed responses are stored with the command
-state. Restart marks pending commands interrupted. SQLite exclusive locking
+state. Stop records a durable request while retaining the pending command and its unique busy lock, aborts the running provider and pending operations, and settles only after the turn returns. A late provider result cannot commit after Stop. The partial output is stored as a stopped conversation entry and excluded from provider replay. Restart marks pending or stopping commands interrupted; it does not resume them. SQLite exclusive locking
 prevents a second process from treating active commands as interrupted. The
 service runs demo, Codex, OpenRouter, LM Studio and live with instance or host credentials and an explicit bot model for each non-demo provider. This preview does not implement the LAN,
 all operational features described in the plans above.

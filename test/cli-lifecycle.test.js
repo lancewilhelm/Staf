@@ -22,14 +22,14 @@ test('shared profile changes persist between clients without modifying legacy fi
  } finally {await stop(root);rmSync(root,{recursive:true,force:true});}
 });
 
-test('an unresolved local draft blocks new submissions until explicitly discarded', async () => {
+test('an unresolved submission preserves the next draft until explicitly retried', async () => {
  const root=mkdtempSync(join(tmpdir(),'staf-cli-pending-'));
  try {
   const first=cli(root,'/quit\n');assert.equal(first.status,0,first.stderr);
   const botId=first.stdout.match(/shared main chat ([\w-]+)/)?.[1];assert.ok(botId);
   const id=randomUUID();mkdirSync(join(root,'terminal-pending'),{recursive:true});writeFileSync(join(root,'terminal-pending',`${id}.json`),JSON.stringify({scope:'local',botId,content:'possibly submitted'}));
-  let result=cli(root,`/status ${id}\nnew message\n/quit\n`);assert.equal(result.status,0,result.stderr);assert.match(result.stdout,/Resolve pending commands/);assert.doesNotMatch(result.stdout,/User turns saved/);assert.match(readFileSync(join(root,'terminal-pending',`${id}.json`),'utf8'),/possibly submitted/);
-  result=cli(root,`/discard ${id}\nnew message\n/quit\n`);assert.equal(result.status,0,result.stderr);assert.match(result.stdout,/does not cancel a command/);assert.match(result.stdout,/User turns saved: 1/);
+  let result=cli(root,`/status ${id}\nnew message\n/quit\n`);assert.equal(result.status,0,result.stderr);const draft=result.stdout.match(/Unsent draft ([\w-]+): new message/)?.[1];assert.ok(draft);assert.match(readFileSync(join(root,'terminal-pending',`${draft}.json`),'utf8'),/new message/);assert.doesNotMatch(result.stdout,/User turns saved/);assert.match(readFileSync(join(root,'terminal-pending',`${id}.json`),'utf8'),/possibly submitted/);
+  result=cli(root,`/discard ${id}\n/retry ${draft}\n/quit\n`);assert.equal(result.status,0,result.stderr);assert.match(result.stdout,/does not cancel a command/);assert.match(result.stdout,/User turns saved: 1/);
  } finally {await stop(root);rmSync(root,{recursive:true,force:true});}
 });
 

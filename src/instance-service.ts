@@ -45,6 +45,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
   const instance = new Instance(path,redact);
   if (options.localBootstrapToken) instance.bootstrapLocal(options.localBootstrapToken);
   const active = new Set<AbortController>();
+  const responseControllers = new Map<string,AbortController>();
   type ResponseSubscriber={botId:string;token:string;response:ServerResponse;last:{id:string;state:string;text:string}|null};
   const responseSubscribers=new Set<ResponseSubscriber>();
   function publishResponse(botId:string) {
@@ -516,6 +517,14 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
         res.on('error',()=>res.destroy());
         publishResponse(botId);return;
       }
+      const responseStopMatch=req.url?.match(/^\/api\/commands\/([\w-]+)\/stop$/);
+      if(req.method==='POST' && responseStopMatch?.[1]) {
+        const id=responseStopMatch[1],progress=instance.requestResponseStop(id);
+        if(!progress)return json(404,{error:'Command not found'});
+        if(progress.state==='stopping')responseControllers.get(id)?.abort();
+        if(typeof progress.botId==='string')publishResponse(progress.botId);
+        return json(200,progress);
+      }
       const commandMatch = req.url?.match(/^\/api\/commands\/([\w-]+)$/);
       if (req.method === 'GET' && commandMatch?.[1]) { const command=instance.command(commandMatch[1]); return command ? json(200,{...command,responseProgress:instance.responseProgress(commandMatch[1]),runtimeEvents:instance.commandRuntimeEvents(commandMatch[1]),skillActivity:instance.commandSkills(commandMatch[1]),webActions:instance.webActions({kind:'command',id:commandMatch[1]}),searchActions:instance.searchActions({kind:'command',id:commandMatch[1]}),shellActions:instance.shellActions({kind:'command',id:commandMatch[1]})}) : json(404,{error:'Command not found'}); }
       if (req.method === 'POST' && req.url === '/api/commands') {
@@ -541,9 +550,10 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
           }
           const intent=memoryIntent(content,botId);
           if (intent) { instance.completeMemoryCommand(id,intent.input,intent.reply,intent.operation,intent.proposal);publishResponse(botId); return json(200,claim); }
-          const controller = new AbortController(); active.add(controller);
+          const controller = new AbortController(); active.add(controller); responseControllers.set(id,controller);
           let observed='', progressFull=false;
           const responseProgress=(event:{type:'start'}|{type:'delta';text:string})=>{
+            if(controller.signal.aborted)return;
             if(event.type==='start'){observed='';progressFull=false;instance.updateResponse(id,'');publishResponse(botId);return;}
             if(progressFull)return;
             if(observed.length+event.text.length>1000000){progressFull=true;return;}
@@ -565,8 +575,8 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
           } catch (error) {
             const message = error instanceof Error ? error.message : '';
             const safe = message.startsWith('Clock ') || message === 'Selected skill is no longer available' ? message : message === 'Set a model in the agent profile' ? message : /requires OPENROUTER_API_KEY/.test(message) ? 'Connect OpenRouter in Settings' : /HTTP 401/.test(message) || /credential|sign.in|login/i.test(message) ? 'Configure the selected provider credentials on the instance host' : /HTTP 402/.test(message) ? 'Provider credits are required' : /HTTP 429/.test(message) ? 'Provider rate limit reached; retry later' : /OpenRouter HTTP 40[034]/.test(message) ? 'Check the selected OpenRouter model, access and supported capabilities' : /OpenRouter (response|interrupted)|Invalid OpenRouter|Incomplete OpenRouter|Unsupported OpenRouter/.test(message) ? 'OpenRouter response was incomplete or unsupported; retry or choose another model' : /reasoning|effort/i.test(message) ? 'Check the model and reasoning settings in the agent profile' : /connection|timed out/i.test(message) ? 'Provider connection failed or timed out; check host network access' : 'Provider request failed. Check the instance host configuration.';
-            if (!closing) { try { instance.fail(id,safe); } catch { /* A prior state transition won. */ } }
-          } finally { if(!closing)publishResponse(botId);active.delete(controller); } })();
+            if (!closing && !instance.responseStopping(id)) { try { instance.fail(id,safe); } catch { /* A prior state transition won. */ } }
+          } finally { if(!closing){if(instance.responseStopping(id))instance.settleResponseStop(id);publishResponse(botId);}responseControllers.delete(id);active.delete(controller); } })();
         }
         return json(200,claim);
       }

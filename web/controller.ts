@@ -3,7 +3,7 @@ import {responseEvents} from './response-stream';
 export type Bot={id:string;name:string;provider:string;model:string|null;archived:boolean};
 export type BotProfile=Bot & {revision:string;instructions:string;description:string;reasoning:string|null;configDir:string};
 export type Message={id:string;role:string;content:string};
-export type ResponseProgress={id:string;botId:string;state:'accepted'|'running'|'completed'|'failed'|'interrupted';text:string;error:string|null};
+export type ResponseProgress={id:string;botId:string;state:'accepted'|'running'|'stopping'|'stopped'|'completed'|'failed'|'interrupted';text:string;error:string|null};
 export type Task={id:string;objective:string;state:string;outcome:string|null;activity?:Array<Record<string,unknown>>};
 export type InboxItem={kind:'question';id:string;botId:string|null;attemptId:string;text:string}|{kind:'approval';approvalKind:'clock'|'web'|'search'|'shell'|'disclosure';id:string;botId:string|null;work:{kind:'task'|'command';id:string};detail:unknown};
 export type Submission={kind:'submitting'|'pending'|'unknown'|'busy'|'rejected'|'failed'|'interrupted';id:string;text:string;error?:string;uncertain?:boolean};
@@ -15,7 +15,7 @@ type Recovery={key:string;label:string;value:string};
 class ApiError extends Error {constructor(message:string,readonly status:number){super(message);}}
 const isRecord=(value:unknown):value is Record<string,unknown>=>typeof value==='object'&&value!==null&&!Array.isArray(value);
 function isResponseProgress(value:unknown,botId:string):value is ResponseProgress {
-  return isRecord(value)&&typeof value.id==='string'&&value.botId===botId&&typeof value.state==='string'&&['accepted','running','completed','failed','interrupted'].includes(value.state)&&typeof value.text==='string'&&(value.error===null||typeof value.error==='string');
+  return isRecord(value)&&typeof value.id==='string'&&value.botId===botId&&typeof value.state==='string'&&['accepted','running','stopping','stopped','completed','failed','interrupted'].includes(value.state)&&typeof value.text==='string'&&(value.error===null||typeof value.error==='string');
 }
 const prefix='staf-workspace-v1:';
 export class Controller {
@@ -63,7 +63,7 @@ export class Controller {
   async send(retry=false){
     const botId=this.state.selected,draft=this.state.draft;
     if(!botId||(!retry&&!draft.text.trim()))return;
-    if(this.state.response&&['accepted','running'].includes(this.state.response.state))return;
+    if(this.state.response&&['accepted','running','stopping'].includes(this.state.response.state))return;
     let submission=draft.submission;
     if(!retry){if(submission)return;submission={kind:'submitting',id:crypto.randomUUID(),text:draft.text}}
     else if(submission && ['failed','interrupted'].includes(submission.kind))submission={...submission,id:crypto.randomUUID(),uncertain:false};
@@ -75,6 +75,7 @@ export class Controller {
     if(setupError){this.save({...this.state.draft,submission:{...current,kind:'rejected',error:setupError}});return}
     await this.submit(botId,current);
   }
+  async stopResponse(){const response=this.state.response;if(!response||!['accepted','running','stopping'].includes(response.state))return;try{await this.api('/api/commands/'+encodeURIComponent(response.id)+'/stop',{});}catch(e){this.update({notice:'Could not stop the response: '+String(e)})}}
   private async submit(botId:string,submission:Submission){
     try{
       const result=await this.api<{kind:string}>('/api/commands',{id:submission.id,botId,content:submission.text});
@@ -96,7 +97,7 @@ export class Controller {
     try{
       const command=await this.api<{state:string;error:string|null}>('/api/commands/'+submission.id);
       if(this.state.selected!==botId||this.state.draft.submission?.id!==submission.id)return;
-      if(command.state==='completed'){this.save({...this.state.draft,submission:null});void this.refresh()}
+      if(command.state==='completed'||command.state==='stopped'){this.save({...this.state.draft,submission:null});void this.refresh()}
       else if(command.state==='failed'||command.state==='interrupted')this.save({...this.state.draft,submission:{...submission,kind:command.state,error:command.error??undefined}});
       else this.save({...this.state.draft,submission:{...submission,kind:'pending',error:undefined}});
     }catch(e){

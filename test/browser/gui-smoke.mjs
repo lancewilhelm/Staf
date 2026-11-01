@@ -161,6 +161,18 @@ try{
  await until(()=>evaluate("!document.querySelector('.provisional') && document.body.innerText.includes('Finished.')"),'stream completion');
  assert.equal(await evaluate("document.querySelector('[aria-label=Message]').value"),'Next draft');
  assert.equal(await evaluate("(()=>{const n=document.querySelector('.messages');return n.scrollHeight-n.scrollTop-n.clientHeight<40})()"),true);console.log('PASS streaming markdown, safe HTML, code copy, draft, and scroll behavior');
+ await until(()=>evaluate("![...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Send ↑').disabled"),'ready for stop');
+ await evaluate("testInput('[aria-label=Message]','Streaming markdown fixture');testClick('Send ↑')");
+ await until(()=>evaluate("!!document.querySelector('.provisional h1')"),'stop fixture streaming');
+ await evaluate("testInput('[aria-label=Message]','Draft after stop');testClick('Stop')");
+ await until(()=>evaluate("document.body.innerText.includes('Stopping…')"),'stopping is visible');
+ assert.equal(await evaluate("document.querySelector('[aria-label=Message]').value==='Draft after stop' && [...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Send ↑').disabled"),true);
+ server.stdin.write('stream-next\n');
+ await until(()=>evaluate("document.body.innerText.includes('· stopped') && ![...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Send ↑').disabled"),'stopped response settles');
+ assert.equal(await evaluate("document.querySelector('[aria-label=Message]').value"),'Draft after stop');
+ await evaluate("testClick('Send ↑')");
+ await until(()=>evaluate("document.body.innerText.includes('Demo (offline): Draft after stop')"),'send preserved draft');
+ console.log('PASS Stop, settled partial output and preserved next draft');
  await until(()=>evaluate("![...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Send ↑').disabled"),'ready for contention');
  await evaluate("window.nativeFetch=window.fetch;window.delayedSend=new Promise(resolve=>window.releaseSend=resolve);window.fetch=async(...args)=>{if(args[0]==='/api/commands'&&String(args[1]?.body).includes('Rejected draft'))await window.delayedSend;return window.nativeFetch(...args)};testInput('[aria-label=Message]','Rejected draft');testClick('Send ↑')");
  assert.equal(await evaluate("document.querySelector('[aria-label=Message]').value"),'');
