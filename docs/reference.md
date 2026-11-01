@@ -123,6 +123,11 @@ fallback exists.
 
 ## Local shared instance preview
 
+The workspace journals per-agent drafts and command IDs locally. It recovers an
+uncertain submission automatically with the same command ID; busy and definitive
+failures have inline Retry and Dismiss controls. A failed accepted command needs
+a new ID for an explicit retry.
+
 The workspace is served at `/`. Its persistent agent list selects main chats,
 and duplicate names display the last four characters of their stable IDs.
 Suffixes can coincide; full IDs remain available through the API and CLI. The UI
