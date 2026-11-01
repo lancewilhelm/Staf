@@ -6,6 +6,14 @@ import './style.css';
 const app=new Controller();
 
 type View='chat'|'inbox'|'settings'|'bot';
+type Appearance='light'|'dark'|'system';
+const appearanceKey='staf-appearance';
+function readAppearance():Appearance{
+  try{const saved=localStorage.getItem(appearanceKey);return saved==='light'||saved==='dark'?saved:'system'}catch{return 'system'}
+}
+function applyAppearance(appearance:Appearance){document.documentElement.dataset.appearance=appearance}
+const initialAppearance=readAppearance();
+applyAppearance(initialAppearance);
 
 function Item({item}:{item:InboxItem}){
   return <article className="item">
@@ -48,6 +56,7 @@ function App(){
   const s=useSyncExternalStore(app.subscribe,app.snapshot);
   const [code,setCode]=useState('');
   const [view,setView]=useState<View>('chat');
+  const [appearance,setAppearance]=useState<Appearance>(initialAppearance);
   const [settingsBotId,setSettingsBotId]=useState<string|null>(null);
   const [botSaving,setBotSaving]=useState(false);
   const firstRun=useRef(false);
@@ -62,6 +71,7 @@ function App(){
   const submission=s.draft.submission;
   const openBotCreation=()=>{setView('chat');app.openSetup()};
   const openSettings=()=>{app.closeSetup();setView('settings')};
+  const chooseAppearance=(value:Appearance)=>{setAppearance(value);applyAppearance(value);try{localStorage.setItem(appearanceKey,value)}catch{/* Appearance still applies for this page. */}};
   const openChat=(id:string)=>{app.closeSetup();setView('chat');app.select(id)};
   return <div className="shell"><aside className="side">
     <div className="brand">✳ <span>staf</span></div>
@@ -85,7 +95,9 @@ function App(){
       <label>Codex model<input value={s.setup.model} disabled={!!s.setup.operationId} placeholder="Choose a model for this bot" onChange={e=>app.setupField('model',e.target.value)}/></label>
       <p>The Codex connection is shared by all bots. You can set a model later.</p>
       <div className="row">{s.setup.operationId?<><button onClick={()=>void app.checkCreate()}>Check creation</button><button onClick={()=>void app.create(true)}>Retry same creation</button></>:<button onClick={()=>void app.create()}>Create bot</button>}<button className="quiet" onClick={()=>app.closeSetup()}>Close</button></div><p role="status">{s.setup.status}</p>
-    </div>:view==='settings'?<div className="setup"><span className="eyebrow">SETTINGS</span><h2>Providers</h2><p>Provider connections belong to this Staf instance and are available to all your bots. Each bot has its own model.</p>
+    </div>:view==='settings'?<div className="setup"><span className="eyebrow">SETTINGS</span><h2>Appearance</h2><p>Choose how Staf looks in this browser.</p>
+      <fieldset className="appearance"><legend>Appearance</legend>{(['light','dark','system'] satisfies Appearance[]).map(value=><label key={value}><input type="radio" name="appearance" value={value} checked={appearance===value} onChange={()=>chooseAppearance(value)}/>{value[0].toUpperCase()+value.slice(1)}</label>)}</fieldset>
+      <h2>Providers</h2><p>Provider connections belong to this Staf instance and are available to all your bots. Each bot has its own model.</p>
       <div className="provider provider-settings"><strong>Codex</strong><p>{s.credential==='signed-in'?'Saved sign-in found for this instance.':s.credential==='signed-out'?'No usable sign-in found for this instance.':'Checking the sign-in for this instance.'}</p>{s.credential==='signed-in'&&<p className="meta">This saved sign-in has not been checked against the provider.</p>}
         {s.authAttempt&&<p>Sign-in {s.authAttempt.phase}</p>}
         <div className="row"><button onClick={()=>void app.startAuth()}>{s.credential==='signed-in'?'Sign in again':'Connect Codex'}</button>{s.authUrl&&<a href={s.authUrl} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer">Continue sign-in</a>}{s.authAttempt&&['waiting','exchanging','committing'].includes(s.authAttempt.phase)&&<button className="quiet" onClick={()=>void app.cancelAuth()}>Cancel sign-in</button>}{s.credential==='signed-in'&&<button className="quiet" onClick={()=>{if(window.confirm('Sign out of Codex for this Staf instance? All bots using it will need a new sign-in.'))void app.signOutAuth()}}>Sign out</button>}</div>

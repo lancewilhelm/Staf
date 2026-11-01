@@ -11,9 +11,9 @@ const chrome=process.env.CHROME_PATH||(existsSync(cached)?cached:'/Applications/
 const temp=await mkdtemp(join(tmpdir(),'staf-gui-test-'));
 const port=await new Promise((resolve,reject)=>{const s=createServer();s.on('error',reject);s.listen(0,'127.0.0.1',()=>{const p=s.address().port;s.close(()=>resolve(p))})});
 const url=`http://127.0.0.1:${port}`, env={PATH:process.env.PATH,HOME:temp,TMPDIR:temp};
-const sleep=ms=>new Promise(r=>setTimeout(r,ms));let server,secondServer,browser,socket,proxy,output='';const pending=new Map();let seq=0;
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));let server,secondServer,browser,socket,browserSocket,proxy,output='';const pending=new Map();let seq=0;
 async function until(fn,label){for(let i=0;i<160;i++){let x=await fn();if(x)return x;await sleep(100)}throw Error('Timed out: '+label)}
-function cdp(method,params={}){return new Promise((resolve,reject)=>{const id=++seq;const timer=setTimeout(()=>{pending.delete(id);reject(Error('CDP timed out '+method))},10000);pending.set(id,{resolve:x=>{clearTimeout(timer);resolve(x)},reject:x=>{clearTimeout(timer);reject(x)}});socket.send(JSON.stringify({id,method,params}))})}
+function cdp(method,params={},sessionId,connection=socket){return new Promise((resolve,reject)=>{const id=++seq;const timer=setTimeout(()=>{pending.delete(id);reject(Error('CDP timed out '+method))},10000);pending.set(id,{resolve:x=>{clearTimeout(timer);resolve(x)},reject:x=>{clearTimeout(timer);reject(x)}});connection.send(JSON.stringify({id,method,params,sessionId}))})}
 async function evaluate(expression){const x=await cdp('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});if(x.exceptionDetails)throw Error(JSON.stringify(x.exceptionDetails));return x.result.value}
 async function act(expression,condition,label){await evaluate(expression);await until(()=>evaluate(condition),label);console.log('PASS '+label)}
 try{
@@ -23,10 +23,40 @@ try{
  browser=spawn(chrome,['--headless=new','--no-first-run','--disable-background-networking','--disable-extensions',`--proxy-server=http://127.0.0.1:${proxy.address().port}`,'--proxy-bypass-list=127.0.0.1','--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1',`--user-data-dir=${join(temp,'chrome')}`,'--remote-debugging-port=0',url],{env,stdio:['ignore','ignore','pipe']});
  const debug=await until(async()=>{try{return (await readFile(join(temp,'chrome','DevToolsActivePort'),'utf8')).split('\n')[0]}catch{return null}},'Chrome');
  const page=await until(async()=>{try{return (await(await fetch(`http://127.0.0.1:${debug}/json/list`)).json()).find(x=>x.type==='page'&&x.url.startsWith(url))}catch{return null}},'page');
- socket=new WebSocket(page.webSocketDebuggerUrl);await new Promise((resolve,reject)=>{socket.onopen=resolve;socket.onerror=reject});socket.onmessage=e=>{const m=JSON.parse(e.data);if(m.id&&pending.has(m.id)){const p=pending.get(m.id);pending.delete(m.id);m.error?p.reject(Error(m.error.message)):p.resolve(m.result)}};await cdp('Page.enable');
+ const receive=e=>{const m=JSON.parse(e.data);if(m.id&&pending.has(m.id)){const p=pending.get(m.id);pending.delete(m.id);m.error?p.reject(Error(m.error.message)):p.resolve(m.result)}};
+ socket=new WebSocket(page.webSocketDebuggerUrl);await new Promise((resolve,reject)=>{socket.onopen=resolve;socket.onerror=reject});socket.onmessage=receive;await cdp('Page.enable');
+ const browserPath=(await readFile(join(temp,'chrome','DevToolsActivePort'),'utf8')).split('\n')[1];browserSocket=new WebSocket(`ws://127.0.0.1:${debug}${browserPath}`);await new Promise((resolve,reject)=>{browserSocket.onopen=resolve;browserSocket.onerror=reject});browserSocket.onmessage=receive;
  await until(()=>evaluate("document.body.innerText.includes('Pair this browser')"),'pair page');
  await evaluate(`window.testInput=(selector,value)=>{const el=document.querySelector(selector);Object.getOwnPropertyDescriptor(el.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,'value').set.call(el,value);el.dispatchEvent(new Event('input',{bubbles:true}))}; window.testClick=text=>{const b=[...document.querySelectorAll('button')].find(x=>x.textContent.trim()===text);if(!b)throw Error('Missing button '+text);b.click()}`);
  await act(`testInput('input',${JSON.stringify(code)});testClick('Pair')`,"document.body.innerText.includes('Providers') && document.body.innerText.includes('Connect Codex')",'pair browser and open global provider setup');
+ await cdp('Emulation.setEmulatedMedia',{features:[{name:'prefers-color-scheme',value:'light'}]});
+ assert.equal(await evaluate("document.querySelector('input[name=appearance][value=system]')?.checked"),true,'fresh browser defaults to System');
+ assert.equal(await evaluate("getComputedStyle(document.documentElement).colorScheme"),'light');
+ await act("document.querySelector('input[name=appearance][value=dark]').click()","getComputedStyle(document.documentElement).colorScheme==='dark'",'choose dark appearance');
+ await cdp('Page.reload');await until(()=>evaluate("document.querySelector('input[name=appearance][value=dark]')?.checked"),'dark appearance persists');
+ await cdp('Emulation.setEmulatedMedia',{features:[{name:'prefers-color-scheme',value:'dark'}]});
+ await cdp('Emulation.setEmulatedMedia',{features:[{name:'prefers-color-scheme',value:'light'}]});assert.equal(await evaluate("getComputedStyle(document.documentElement).colorScheme"),'dark','explicit dark ignores device light');
+ await cdp('Emulation.setEmulatedMedia',{features:[{name:'prefers-color-scheme',value:'dark'}]});
+ await act("document.querySelector('input[name=appearance][value=light]').click()","getComputedStyle(document.documentElement).colorScheme==='light'",'choose light appearance');
+ await cdp('Page.reload');await until(()=>evaluate("document.querySelector('input[name=appearance][value=light]')?.checked"),'light appearance persists');
+ assert.equal(await evaluate("getComputedStyle(document.documentElement).colorScheme"),'light','explicit light ignores device dark');
+ await act("document.querySelector('input[name=appearance][value=system]').click()","getComputedStyle(document.documentElement).colorScheme==='dark'",'system follows dark device');
+ await cdp('Emulation.setEmulatedMedia',{features:[{name:'prefers-color-scheme',value:'light'}]});
+ await until(()=>evaluate("getComputedStyle(document.documentElement).colorScheme==='light'"),'system follows device changes');
+ await cdp('Page.reload');await until(()=>evaluate("document.querySelector('input[name=appearance][value=system]')?.checked && getComputedStyle(document.documentElement).colorScheme==='light'"),'system appearance persists');
+ const browserCdp=(method,params={},sessionId)=>cdp(method,params,sessionId,browserSocket);
+ const context=await browserCdp('Target.createBrowserContext');
+ const target=await browserCdp('Target.createTarget',{url,browserContextId:context.browserContextId});
+ const attached=await browserCdp('Target.attachToTarget',{targetId:target.targetId,flatten:true});
+ const other=async expression=>(await browserCdp('Runtime.evaluate',{expression,returnByValue:true},attached.sessionId)).result.value;
+ await until(()=>other("document.body?.innerText.includes('Pair this browser')"),'fresh browser context');
+ assert.equal(await other("localStorage.getItem('staf-appearance')"),null,'another browser has no saved appearance');
+ await other("localStorage.setItem('staf-appearance','dark');location.reload()");
+ await until(()=>other("document.documentElement.dataset.appearance==='dark' && getComputedStyle(document.documentElement).colorScheme==='dark'"),'independent browser appearance');
+ assert.equal(await evaluate("localStorage.getItem('staf-appearance')"),'system','other browser does not change the first preference');
+ await browserCdp('Target.disposeBrowserContext',{browserContextId:context.browserContextId});
+ await evaluate("window.testInput=(selector,value)=>{const el=document.querySelector(selector);Object.getOwnPropertyDescriptor(el.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,'value').set.call(el,value);el.dispatchEvent(new Event('input',{bubbles:true}))};window.testClick=text=>{const b=[...document.querySelectorAll('button')].find(x=>x.textContent.trim()===text);if(!b)throw Error('Missing button '+text);b.click()}");
+ console.log('PASS appearance choices, persistence, and device changes');
  await act("testClick('Connect Codex')","document.body.innerText.includes('Continue sign-in')",'start synthetic Codex sign-in');
  await act("testClick('Cancel sign-in')","document.body.innerText.includes('Sign-in cancelled') || document.body.innerText.includes('Sign-in canceled')",'cancel synthetic Codex sign-in');
  await act("testClick('Create a bot')","document.body.innerText.includes('Create your bot')",'create bot without connecting');
@@ -79,6 +109,10 @@ try{
  await evaluate("testInput('[aria-label=Message]','What time is it in UTC?');testClick('Send ↑');document.querySelector('[aria-label=Message]').focus()");
  await until(()=>evaluate("!!document.querySelector('aside[aria-label=Activity]') && document.body.innerText.includes('clock approval')"),'approval opens Activity');
  assert.equal(await evaluate("document.activeElement?.getAttribute('aria-label')"),'Message');console.log('PASS pending approval opens Activity without interrupting chat focus');
+ const surfaceColors=()=>evaluate("['.side','.composer','.activity','.item pre'].map(selector=>{const style=getComputedStyle(document.querySelector(selector));return [style.backgroundColor,style.color]})");
+ const lightSurfaces=await surfaceColors();await cdp('Emulation.setEmulatedMedia',{features:[{name:'prefers-color-scheme',value:'dark'}]});await until(()=>evaluate("getComputedStyle(document.documentElement).colorScheme==='dark'"),'dark approval view');const darkSurfaces=await surfaceColors();
+ for(let i=0;i<lightSurfaces.length;i++)assert.notDeepEqual(lightSurfaces[i],darkSurfaces[i],'navigation, composer, Activity, and approval content follow appearance');
+ await cdp('Emulation.setEmulatedMedia',{features:[{name:'prefers-color-scheme',value:'light'}]});await until(()=>evaluate("getComputedStyle(document.documentElement).colorScheme==='light'"),'restore light approval view');console.log('PASS chat and approval surfaces follow appearance');
  const approvalId=await evaluate("(async()=>{const t=localStorage.getItem('staf-token');return (await (await fetch('/api/approvals',{headers:{Authorization:'Bearer '+t}})).json()).find(a=>a.state==='pending').id})()");
  await evaluate("testClick('Approve once')");
  await until(()=>evaluate(`(async()=>{const t=localStorage.getItem('staf-token');return (await (await fetch('/api/approvals',{headers:{Authorization:'Bearer '+t}})).json()).some(a=>a.id===${JSON.stringify(approvalId)} && a.state==='approved')})()`),'exact approval recorded');console.log('PASS exact clock approval recorded');
@@ -106,4 +140,4 @@ try{
  await until(()=>evaluate("document.body.innerText.includes('set up your first bot')"),'configured instance skips provider setup');
  assert.equal(await evaluate("document.body.innerText.includes('Connect Codex')"),false);console.log('PASS existing sign-in skips first-run provider setup');
  console.log('PASS new workspace browser smoke');
-} finally {socket?.close();browser?.kill();secondServer?.kill();server?.kill();proxy?.close();await sleep(200);await rm(temp,{recursive:true,force:true})}
+} finally {socket?.close();browserSocket?.close();browser?.kill();secondServer?.kill();server?.kill();proxy?.close();await sleep(200);await rm(temp,{recursive:true,force:true})}

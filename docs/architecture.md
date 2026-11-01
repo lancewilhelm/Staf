@@ -31,6 +31,8 @@ The React workspace is built with Vite into static assets served by the same
 loopback instance. It reads bots, chat, task updates, and pending requests from
 the service and polls while visible. Provider sign-in belongs to the instance;
 each bot owns its model selection. The former Advanced page is not served.
+Appearance is a browser-local preference; CSS follows the device color scheme
+when System is selected. It is not stored by the shared instance.
 Browser-local draft and command journals support explicit recovery;
 the instance remains authoritative for accepted commands and work. A keyed
 bot-creation operation stores its fingerprint and result with the bot in one

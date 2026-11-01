@@ -145,7 +145,12 @@ and revoke a client. Revoking this browser returns it to pairing. A revoked
 client needs a new host code to reconnect. Clients are identified by an ID,
 not a device name.
 
-The workspace lists persistent bots and shows their main chats. **Settings**
+The workspace lists persistent bots and shows their main chats. In **Settings**,
+choose Light, Dark, or System appearance. System is the default and follows
+device appearance changes. The choice is saved in this browser, independently
+of other browsers; clearing browser storage resets it to System.
+
+**Settings**
 shows the Codex sign-in for this instance. A saved sign-in is reused across
 bots; it does not establish that the provider or a model is available. Select
 **New bot** to create a bot with a name and optional instructions and model.

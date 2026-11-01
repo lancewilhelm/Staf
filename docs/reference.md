@@ -108,6 +108,10 @@ fallback exists.
 ## Local shared instance preview
 
 The workspace is served at `/`. The former Advanced page is not served.
+Its appearance preference is stored in browser localStorage under
+`staf-appearance`, with `light`, `dark`, or `system` values. Missing or invalid
+values use System, which follows the device color scheme. This preference is
+not an instance configuration or a shared API setting.
 Authenticated `GET /api/inbox` projects pending questions and approvals.
 `GET /api/task-updates` returns task summaries for the inbox. A guided Codex bot
 creation uses `POST /api/bots` with `operationId`, `provider`, and `model`;
