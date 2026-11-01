@@ -17,7 +17,7 @@ import { AgentConfigConflict, AgentConfigInvalid, AgentConfigUncertain } from '.
 import { MemoryConflict, type MemoryScope } from './memory.js';
 import { selectProvider } from './registry.js';
 import { runTurn } from './runtime.js';
-import { redactor, redactionTailLength, redactValue, type Environment } from './config.js';
+import { redactor, streamingRedactor, redactValue, type Environment } from './config.js';
 import { chatSystemMessage } from './prompts.js';
 import { SkillConflict } from './skill-catalog.js';
 import { dirname, resolve } from 'node:path';
@@ -35,7 +35,7 @@ import { usageText } from './usage.js';
 export function startInstance(path: string, port = 0, options: {dataDir?: string; env?: Environment; enableCollaboration?: boolean; enableReusableApprovals?: boolean; localBootstrapToken?: string; authNow?:()=>number; authLifetimeMs?:number; webDependencies?:WebDependencies; searchTransport?:SearchTransport; shellExecutor?:typeof executeShellSandbox; authHooks?: {prepare:typeof prepareDirectLogin; complete:typeof completeDirectLogin}; providerFactory?: (profile: {provider:string; model:string | null; reasoning:string | null; instructions:string; chatId:string}, instructions:string) => Promise<Provider>} = {}) {
   const env = options.env ?? process.env;
   const redact = redactor(env);
-  const secretTail = redactionTailLength(env);
+  const redactProgress = streamingRedactor(env);
   const dataDir = options.dataDir ?? resolve(dirname(path));
   const instance = new Instance(path,redact);
   if (options.localBootstrapToken) instance.bootstrapLocal(options.localBootstrapToken);
@@ -503,9 +503,8 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
             if(progressFull)return;
             if(observed.length+event.text.length>1000000){progressFull=true;return;}
             observed+=event.text;
-            const safe=redact(observed).replace(/https?:\/\/[^\s<>"']+/gi,url=>containsUnsafeWebUrl(url)?'[redacted URL]':url);
-            const end=Math.max(0,safe.length-Math.max(0,secretTail));
-            const prefix=safe.slice(0,end).replace(/\S+$/,'');
+            const safe=redactProgress(observed).replace(/https?:\/\/[^\s<>"']+/gi,url=>containsUnsafeWebUrl(url)?'[redacted URL]':url);
+            const prefix=safe.replace(/\S+$/,'');
             instance.updateResponse(id,prefix);
           };
           void (async () => { try {

@@ -5,6 +5,18 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
+import { directCodexProvider } from '../dist/codex-direct.js';
+import { streamingRedactor } from '../dist/config.js';
+
+test('progress withholds only a possible credential suffix, including escaped credentials', () => {
+  const secret='synthetic"credential with spaces';
+  const redact=streamingRedactor({OPENROUTER_API_KEY:secret});
+  assert.equal(redact('Normal short response. '),'Normal short response. ');
+  for(const value of [secret,JSON.stringify(secret).slice(1,-1)]){
+    for(let i=1;i<value.length;i++)assert.equal(redact('Safe text. '+value.slice(0,i)),'Safe text. ');
+    assert.equal(redact('Safe text. '+value+' end.'),'Safe text. [REDACTED] end.');
+  }
+});
 
 test('paired clients observe provisional response progress and contention', async () => {
   let release;
@@ -18,7 +30,7 @@ test('paired clients observe provisional response progress and contention', asyn
     },
     async complete() { throw Error('unexpected buffered request'); },
   });
-  const app = startInstance(':memory:', 0, { providerFactory, env: {} });
+  const app = startInstance(':memory:', 0, { providerFactory, env: {OPENROUTER_API_KEY:'synthetic-key-'+'x'.repeat(2048)} });
   const port = await app.listen();
   const call = async (route, token, body) => {
     const response = await fetch(`http://127.0.0.1:${port}${route}`, { method: body ? 'POST' : 'GET', headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(body ? { 'Content-Type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined });
@@ -49,6 +61,31 @@ test('paired clients observe provisional response progress and contention', asyn
     const messages = await call(`/api/bots/${bot.id}/messages`, second);
     assert.equal(messages.at(-1).content, 'Hello from the streaming response. Finished.');
   } finally { release(); await app.close(); }
+});
+
+test('shared progress streams through the real Codex adapter before the SSE response completes', async () => {
+  let stream;
+  const encoder=new TextEncoder();
+  const body=new ReadableStream({start(controller){stream=controller;}});
+  const token='synthetic-bearer-'+'x'.repeat(2048);
+  const providerFactory=async()=>directCodexProvider({model:'test-model',sessionId:'test',dataDir:'/unused',token:async()=>token,request:async()=>new Response(body)});
+  const app=startInstance(':memory:',0,{providerFactory,env:{}}),port=await app.listen();
+  const call=async(route,credential,body)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${credential}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return response.json();};
+  const emit=event=>stream.enqueue(encoder.encode('data: '+JSON.stringify(event)+'\n\n'));
+  try {
+    const credential=(await call('/api/pair','',{code:app.code})).token;
+    const bot=await call('/api/bots',credential,{name:'Codex'});
+    await call('/api/commands',credential,{id:'codex-stream',botId:bot.id,content:'go'});
+    emit({type:'response.output_text.delta',delta:'Live response begins here. '+token.slice(0,20)});
+    let progress;
+    for(let i=0;i<100;i++){progress=await call(`/api/bots/${bot.id}/response`,credential);if(progress?.text?.includes('Live response'))break;await new Promise(r=>setTimeout(r,10));}
+    assert.equal(progress.state,'running');assert.match(progress.text,/Live response/);assert.doesNotMatch(progress.text,/synthetic-bearer/);
+    emit({type:'response.output_text.delta',delta:token.slice(20)+' continued. '});
+    const final='Live response begins here. '+token+' continued.';
+    emit({type:'response.completed',response:{status:'completed',model:'test-model',output:[{type:'message',role:'assistant',content:[{type:'output_text',text:final}]}]}});stream.close();
+    for(let i=0;i<100;i++){progress=await call('/api/commands/codex-stream',credential);if(progress.state==='completed')break;await new Promise(r=>setTimeout(r,10));}
+    assert.equal(progress.state,'completed');assert.match(progress.responseProgress.text,/\[REDACTED\]/);assert.doesNotMatch(progress.responseProgress.text,/synthetic-bearer/);
+  } finally {await app.close();}
 });
 
 test('failed progress is provisional, redacted across chunks, and visible to the CLI after restart', async () => {
