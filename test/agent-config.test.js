@@ -32,6 +32,27 @@ test('direct file edits become visible and preserve previously observed configur
   } finally {await app.close();await rm(dir,{recursive:true,force:true});}
 });
 
+test('observed direct changes keep stale clients stale even with coarse file timestamps', async () => {
+  const fs=(await import('node:fs')).default,{syncBuiltinESMExports}=await import('node:module');
+  const {writeFile,readdir}=await import('node:fs/promises');const dir=await mkdtemp(join(tmpdir(),'staf-config-coarse-'));
+  const app=startInstance(join(dir,'db'));const port=await app.listen();let token;
+  const call=async(route,body)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});return [response.status,await response.json()];};
+  const originalStat=fs.statSync;
+  try {
+    token=(await call('/api/pair',{code:app.code}))[1].token;
+    const agent=(await call('/api/bots',{name:'Ada',instructions:'A'}))[1],file=join(agent.configDir,'soul.md');
+    fs.statSync=(path,options)=>{const result=originalStat(path,options);if(options?.bigint && /(?:agent\.toml|soul\.md)$/.test(String(path)))return {...result,ctimeNs:0n,mtimeNs:0n};return result;};syncBuiltinESMExports();
+    const initial=(await call(`/api/bots/${agent.id}`))[1];
+    await writeFile(file,'B');assert.equal((await call(`/api/bots/${agent.id}`))[1].instructions,'B');
+    const history=join(agent.configDir,'.history'),count=(await readdir(history)).length;
+    await writeFile(file,'B');assert.equal((await call(`/api/bots/${agent.id}`))[1].instructions,'B');
+    assert.equal((await readdir(history)).length,count,'repeated identical saves do not duplicate recovery copies');
+    await writeFile(file,'A');const restored=(await call(`/api/bots/${agent.id}`))[1];
+    assert.notEqual(restored.revision,initial.revision);
+    assert.equal((await call(`/api/bots/${agent.id}/profile`,{...initial,instructions:'stale'}))[0],409);
+  } finally {fs.statSync=originalStat;syncBuiltinESMExports();await app.close();await rm(dir,{recursive:true,force:true});}
+});
+
 test('fresh service exposes the authoritative agent configuration files', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'staf-agent-config-'));
   const app = startInstance(join(dir, 'instance.sqlite'));
@@ -424,6 +445,21 @@ test('previously retired revisions keep their legacy hash across upgrade', async
     await writeFile(join(old,'soul.md'),'Late legacy edit');
     assert.equal((await call(`/api/bots/${agent.id}`))[0],422);
   } finally {await app.close();await rm(dir,{recursive:true,force:true});}
+});
+
+test('a copied instance can read unchanged retained revisions', async () => {
+  const {cp,mkdir}=await import('node:fs/promises');
+  const root=await mkdtemp(join(tmpdir(),'staf-config-copy-')),source=join(root,'source'),copy=join(root,'copy');await mkdir(source);
+  let app=startInstance(join(source,'db')),port=await app.listen(),token;
+  const call=async(route,body)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});return [response.status,await response.json()];};
+  try {
+    token=(await call('/api/pair',{code:app.code}))[1].token;
+    const agent=(await call('/api/bots',{name:'Ada',instructions:'First'}))[1];
+    assert.equal((await call(`/api/bots/${agent.id}/profile`,{...agent,instructions:'Second'}))[0],200);
+    await app.close();await cp(source,copy,{recursive:true,preserveTimestamps:true,verbatimSymlinks:true});
+    app=startInstance(join(copy,'db'));port=await app.listen();
+    const restored=await call(`/api/bots/${agent.id}`);assert.equal(restored[0],200);assert.equal(restored[1].instructions,'Second');
+  } finally {await app.close();await rm(root,{recursive:true,force:true});}
 });
 
 test('service file publication preserves authored TOML when editing instructions', async () => {

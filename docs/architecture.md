@@ -66,8 +66,8 @@ Agent settings and instructions live under `agents/ID/current` beside the
 instance database. The `current` symlink points to a revision directory holding
 `agent.toml` and `soul.md`. The service validates and fsyncs both new files
 before atomically replacing the symlink. A hash of revision identity, content,
-file metadata and archive state detects stale client saves. Archive and restore
-create a new revision identity. Direct file changes are validated on read and
+an observed-change generation and archive state detects stale client saves.
+Archive and restore create a new revision identity. Direct file changes are validated on read and
 their observed valid versions are retained under `.history`; `.published` holds
 the initial pair in that revision directory. Existing valid configurations
 without a copy are sealed on startup; existing invalid files remain unchanged.

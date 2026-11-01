@@ -92,30 +92,48 @@ function writeSnapshot(dir:string,name:string,settings:string,instructions:strin
   syncDirectory(temporary);renameSync(temporary,snapshot);
   syncDirectory(dir);
 }
-function rememberPublished(dir:string,settings:string,instructions:string,revision:string) {
+function contentRevision(dir:string,settings:string,instructions:string,archived:boolean) {
+  return createHash('sha256').update(basename(dir)).update('\0').update(settings).update('\0').update(instructions).update(archived ? '\x01' : '\0').digest('hex');
+}
+function writeObserved(dir:string,fingerprint:string) {
+  const state={fingerprint,generation:randomUUID()},temporary=join(dir,`.observed-${randomUUID()}`);
+  writeDurable(temporary,JSON.stringify(state));renameSync(temporary,join(dir,'.observed'));syncDirectory(dir);
+  return state;
+}
+function rememberPublished(dir:string,files:ReturnType<typeof revisionFiles>,archived:boolean) {
   const snapshot=join(dir,'.published'),marker=join(dir,'.sealed');
   if (existsSync(marker) && !existsSync(snapshot)) throw new AgentConfigInvalid(`Invalid configuration: the published snapshot is missing at ${snapshot}. Restore it from a backup before continuing.`);
-  if (!existsSync(snapshot)) writeSnapshot(dir,'.published',settings,instructions);
+  if (!existsSync(snapshot)) writeSnapshot(dir,'.published',files.settings,files.instructions);
   const savedSettings=decodeAgentFile(readFileSync(join(snapshot,'agent.toml'))),savedInstructions=decodeAgentFile(readFileSync(join(snapshot,'soul.md')));
-  if (settings!==savedSettings || instructions!==savedInstructions) {
-    const history=join(dir,'.history'),entry=join(history,revision);
+  const stateFile=join(dir,'.observed');
+  let observed:{fingerprint:string;generation:string};
+  if (existsSync(stateFile)) {
+    const saved:unknown=JSON.parse(readFileSync(stateFile,'utf8'));
+    if (!saved || typeof saved!=='object' || !('fingerprint' in saved) || typeof saved.fingerprint!=='string' || !/^[a-f0-9]{64}$/.test(saved.fingerprint) || !('generation' in saved) || typeof saved.generation!=='string' || !/^[a-f0-9-]{36}$/.test(saved.generation)) throw Error('Invalid configuration observation marker');
+    observed={fingerprint:saved.fingerprint,generation:saved.generation};
+  } else observed=writeObserved(dir,contentRevision(dir,savedSettings,savedInstructions,archived));
+  if (files.contentFingerprint!==observed.fingerprint) {
+    const history=join(dir,'.history'),entry=join(history,files.contentFingerprint);
     const existed=existsSync(history);
     mkdirSync(history,{recursive:true,mode:0o700});
     if (!existed) syncDirectory(dir);
-    if (!existsSync(entry)) writeSnapshot(history,revision,settings,instructions);
-    if (decodeAgentFile(readFileSync(join(entry,'agent.toml')))!==settings || decodeAgentFile(readFileSync(join(entry,'soul.md')))!==instructions) throw new AgentConfigInvalid(`Configuration recovery copy is invalid at ${entry}. Inspect the files before continuing.`);
+    if (!existsSync(entry)) writeSnapshot(history,files.contentFingerprint,files.settings,files.instructions);
+    if (decodeAgentFile(readFileSync(join(entry,'agent.toml')))!==files.settings || decodeAgentFile(readFileSync(join(entry,'soul.md')))!==files.instructions) throw new AgentConfigInvalid(`Configuration recovery copy is invalid at ${entry}. Inspect the files before continuing.`);
+    if (revisionFiles(dir,archived).fileFingerprint!==files.fileFingerprint) throw new AgentConfigInvalid(`Configuration changed while reading ${dir}. Inspect the files and retry.`);
+    observed=writeObserved(dir,files.contentFingerprint);
   }
   if (!existsSync(marker)) { writeDurable(marker,'1');syncDirectory(dir); }
+  return observed.generation;
 }
 function revisionFiles(dir:string, archived:boolean) {
   const toml=join(dir,'agent.toml'),soul=join(dir,'soul.md');
   const tomlStat=statSync(toml,{bigint:true}),soulStat=statSync(soul,{bigint:true});
   if (tomlStat.size>65536n || soulStat.size>120000n) throw Error('Configuration file exceeds the size limit');
   const settings=decodeAgentFile(readFileSync(toml)),instructions=decodeAgentFile(readFileSync(soul));
-  const previousRevision=createHash('sha256').update(basename(dir)).update('\0').update(settings).update('\0').update(instructions).update(archived ? '\x01' : '\0').digest('hex');
-  const revision=createHash('sha256').update(previousRevision).update('\0').update([tomlStat.dev,tomlStat.ino,tomlStat.ctimeNs,tomlStat.mtimeNs,soulStat.dev,soulStat.ino,soulStat.ctimeNs,soulStat.mtimeNs].join(':')).digest('hex');
+  const contentFingerprint=contentRevision(dir,settings,instructions,archived);
+  const fileFingerprint=createHash('sha256').update(contentFingerprint).update('\0').update([tomlStat.dev,tomlStat.ino,tomlStat.ctimeNs,tomlStat.mtimeNs,soulStat.dev,soulStat.ino,soulStat.ctimeNs,soulStat.mtimeNs].join(':')).digest('hex');
   const legacyRevision=createHash('sha256').update(settings).update('\0').update(instructions).update(archived ? '\x01' : '\0').digest('hex');
-  return {settings,instructions,revision,previousRevision,legacyRevision};
+  return {settings,instructions,fileFingerprint,contentFingerprint,legacyRevision};
 }
 
 /** A current symlink publishes a complete, durable pair of editable files. */
@@ -137,7 +155,7 @@ export class AgentConfigStore {
         const data:unknown=JSON.parse(readFileSync(marker,'utf8'));
         if (!data || typeof data!=='object' || !('revision' in data) || typeof data.revision!=='string' || !('archived' in data) || typeof data.archived!=='boolean') throw Error('Invalid retired marker');
         const files=revisionFiles(previous,data.archived);
-        if (data.revision!==files.revision && data.revision!==files.previousRevision && data.revision!==files.legacyRevision) throw Error('Changed');
+        if (data.revision!==files.fileFingerprint && data.revision!==files.contentFingerprint && data.revision!==files.legacyRevision) throw Error('Changed');
       } catch {
         throw new AgentConfigInvalid(`A previous revision was edited after publication: ${previous}. Reconcile its files with the current configuration, then remove its .retired marker.`);
       }
@@ -150,9 +168,10 @@ export class AgentConfigStore {
       this.checkRetired(base,target);
       const files=revisionFiles(join(base,target),archived);
       const settings=parseAgentFiles(files.settings,files.instructions);
-      rememberPublished(join(base,target),files.settings,files.instructions,files.revision);
-      if (revisionFiles(join(base,target),archived).revision!==files.revision) throw new AgentConfigInvalid(`Configuration changed while reading ${configDir}. Inspect the files and retry.`);
-      return {...settings,revision:files.revision,configDir};
+      const generation=rememberPublished(join(base,target),files,archived);
+      if (revisionFiles(join(base,target),archived).fileFingerprint!==files.fileFingerprint) throw new AgentConfigInvalid(`Configuration changed while reading ${configDir}. Inspect the files and retry.`);
+      const revision=createHash('sha256').update(files.contentFingerprint).update('\0').update(generation).digest('hex');
+      return {...settings,revision,configDir};
     } catch (error) {
       if (error instanceof AgentConfigInvalid) throw error;
       throw new AgentConfigInvalid(`Invalid configuration at ${configDir}: ${error instanceof Error ? error.message : 'cannot read files'}`);
@@ -161,7 +180,8 @@ export class AgentConfigStore {
   readFiles(id:string,archived:boolean) {
     const config=this.read(id,archived),target=this.currentTarget(id);
     const files=revisionFiles(join(this.root,id,target),archived);
-    if (files.revision!==config.revision) throw new AgentConfigConflict('Profile changed. Refresh before editing.');
+    const current=this.read(id,archived);
+    if (current.revision!==config.revision || this.currentTarget(id)!==target || revisionFiles(join(this.root,id,target),archived).fileFingerprint!==files.fileFingerprint) throw new AgentConfigConflict('Profile changed. Refresh before editing.');
     return {revision:config.revision,settings:files.settings,instructions:files.instructions};
   }
   publish(id:string, input:AgentSettings, archived:boolean, expected?:string):AgentConfig {
@@ -189,12 +209,13 @@ export class AgentConfigStore {
     writeSnapshot(revisionDir,'.published',settings,instructions);
     writeDurable(join(revisionDir,'.sealed'),'1');
     syncDirectory(revisionDir); syncDirectory(revisions);
-    const publishedRevision=revisionFiles(revisionDir,archived).revision;
-    let previous:string|undefined;
+    const publishedRevision=revisionFiles(revisionDir,archived).contentFingerprint;
+    let previous:string|undefined,previousFiles:ReturnType<typeof revisionFiles>|undefined;
     if (expected!==undefined) {
       if (this.read(id,archived).revision!==expected) throw new AgentConfigConflict('Profile changed. Refresh before editing.');
       previous=this.currentTarget(id);
-      retireRevision(join(base,previous),expected,archived);
+      previousFiles=revisionFiles(join(base,previous),archived);
+      retireRevision(join(base,previous),previousFiles.contentFingerprint,archived);
       if (this.read(id,archived).revision!==expected) throw new AgentConfigConflict('Profile changed. Refresh before editing.');
     }
     const next=join(base,`.current-${revision}`);
@@ -205,9 +226,9 @@ export class AgentConfigStore {
     } catch {
       throw new AgentConfigUncertain('Configuration save may have taken effect. Inspect the current configuration before retrying.');
     }
-    if (previous && expected!==undefined) {
+    if (previous && previousFiles && expected!==undefined) {
       let unchanged=false;
-      try { unchanged=revisionFiles(join(base,previous),archived).revision===expected; } catch {}
+      try { unchanged=revisionFiles(join(base,previous),archived).fileFingerprint===previousFiles.fileFingerprint; } catch {}
       if (!unchanged) {
         try {
           retireRevision(revisionDir,publishedRevision,archived);
