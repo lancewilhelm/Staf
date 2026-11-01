@@ -36,9 +36,31 @@ export async function loadEnvironment(path: string, shell: Environment = process
 }
 
 /** Redact known credential values before output or conversation persistence. */
-export function redactor(env: Environment): (text: string) => string {
-  const secrets = [env.OPENROUTER_API_KEY, env.STAF_API_KEY, env.OPENAI_API_KEY, env.CODEX_API_KEY, env.LMSTUDIO_API_KEY]
+function credentialValues(env: Environment): string[] {
+  return [env.OPENROUTER_API_KEY, env.STAF_API_KEY, env.OPENAI_API_KEY, env.CODEX_API_KEY, env.LMSTUDIO_API_KEY]
     .filter((value): value is string => typeof value === 'string' && value.length > 0);
+}
+/** Keep only an unfinished suffix that could still become a complete secret. */
+export function possibleSecretSuffixLength(text: string, secrets: readonly string[]): number {
+  let longest=0;
+  for (const secret of secrets) {
+    for (let length=Math.min(secret.length-1,text.length);length>longest;length--) {
+      if (text[text.length-length]===secret[0] && text[text.length-1]===secret[length-1] && secret.startsWith(text.slice(-length))) {longest=length;break;}
+    }
+  }
+  return longest;
+}
+export function streamingRedactor(env: Environment, additionalSecrets: () => readonly string[] = () => []): (text: string) => string {
+  const redact=redactor(env);
+  return text=>{
+    const extra=additionalSecrets();
+    const secrets=[...credentialValues(env),...extra].flatMap(value=>[value,JSON.stringify(value).slice(1,-1)]);
+    const safe=extra.reduce((result,key)=>redactor({OPENROUTER_API_KEY:key})(result),redact(text));
+    return safe.slice(0,safe.length-possibleSecretSuffixLength(safe,secrets));
+  };
+}
+export function redactor(env: Environment): (text: string) => string {
+  const secrets = credentialValues(env);
   return text => secrets.reduce((result, value) => result.split(value).join('[REDACTED]')
     .split(JSON.stringify(value).slice(1, -1)).join('[REDACTED]'), text)
     .replace(/sk-or-v1-[A-Za-z0-9_-]+/g, '[REDACTED]');

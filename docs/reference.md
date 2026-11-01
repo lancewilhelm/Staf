@@ -107,14 +107,23 @@ fallback exists.
 
 ## Local shared instance preview
 
-The workspace is served at `/`. The former Advanced page is not served.
+The workspace is served at `/`. Its persistent agent list selects main chats,
+and duplicate names display the last four characters of their stable IDs.
+Suffixes can coincide; full IDs remain available through the API and CLI. The UI
+calls these records agents; the
+existing `bots` API paths, fields, and CLI command remain unchanged. The former
+Advanced page is not served.
 Its appearance preference is stored in browser localStorage under
 `staf-appearance`, with `light`, `dark`, or `system` values. Missing or invalid
 values use System, which follows the device color scheme. This preference is
 not an instance configuration or a shared API setting.
 Authenticated `GET /api/inbox` projects pending questions and approvals.
-`GET /api/task-updates` returns task summaries for the inbox. A guided Codex bot
-creation uses `POST /api/bots` with `operationId`, `provider`, and `model`;
+`GET /api/task-updates` returns task summaries for the inbox. `POST /api/bots`
+requires a nonblank `name` and accepts optional `instructions`, `provider`,
+`model`, and `operationId`. An omitted provider uses the copied instance
+default. An omitted model uses the default when the provider is omitted, or
+is empty when a provider is specified. A model can override the default.
+For retry-safe creation, clients supply an `operationId`;
 `GET /api/bot-creations/OPERATION_ID` recovers a recorded result. Reusing an
 operation ID with different input conflicts. The transaction copies remaining
 creation defaults into the new bot. The version 27 migration adds the creation
@@ -123,17 +132,23 @@ journal after a database backup. These operations do not change existing bots.
 Shared-instance Codex sign-in uses `POST /api/codex-auth/start`, `GET /api/codex-auth/current`, `GET /api/codex-auth/ATTEMPT_ID`, `POST /api/codex-auth/ATTEMPT_ID/cancel`, and `GET /api/codex-auth/credential`, and `POST /api/codex-auth/logout`. The initiating paired client owns an attempt and can recover its status and cancel it after a page refresh. Other paired clients cannot inspect it. The OAuth callback is a loopback route at `/auth/callback`; it does not expose callback parameters in its response. Cancellation, client revocation, expiry, and shutdown prevent a pending commit. Synthetic tests cover these boundaries; live sign-in is unverified.
 
 `instance serve [DATABASE_PATH] [PORT]` uses the database directory for Codex credentials and defaults to `.staf/instance.sqlite`
-and port `3210`, binding `127.0.0.1` only. `instance pair|clients|revoke|bots|create|inspect|edit|archive|restore|read|send|status`
+and port `3210`, binding `127.0.0.1` only. `instance pair|clients|revoke|bots|create|inspect|edit|archive|restore|read|send|status|response-follow`
 use the loopback origin and a separate client credential file; see
-[usage](usage.md#local-shared-instance-offline-preview). `instance create URL CREDENTIAL_FILE NAME [--instructions TEXT]` joins name
-arguments with spaces. The optional flag must appear once at the end, followed
-by one text argument. The server stores
+[usage](usage.md#local-shared-instance-offline-preview). `instance create URL CREDENTIAL_FILE NAME [--instructions TEXT] [--provider PROVIDER] [--model MODEL] [--operation-id ID]` joins name
+arguments with spaces. Each option takes one argument and can appear once.
+The CLI prints the generated operation ID before submission; callers can reuse
+it with unchanged arguments. A direct API creation without an operation ID is
+not retry-safe. The server stores
 SHA-256 token hashes in SQLite and limits JSON request bodies to 64 KiB, except skill import and update requests, which are limited to 1,600,000 bytes. Newly created databases have owner-only permissions, independent of a permissive umask. Existing file permissions are not changed. Restrict the containing directory and any existing database separately. On the tested platform, SQLite rollback journals inherit the owner-only database mode.
 The host issues a one-time code at startup and on each terminal Enter. Browser
 requests with an Origin must match the exact server origin; JSON and bearer
 credentials are required for protected writes. No network transport beyond
 loopback is implemented here. Codex and OpenRouter use instance-owned credentials; LM Studio and live use host configuration. Each requires an explicit bot model. Paired clients have derived
 identifiers; any paired client can list and revoke them. Every paired client is trusted to act for the sole owner, including managing approvals and settings; there is no separate owner role check.
+
+Paired clients can read the latest main-chat progress with `GET /api/bots/{id}/response`, or `responseProgress` within `GET /api/commands/{id}`. The response has the command ID, bot ID, accepted/running/completed/failed/interrupted state, provisional text and a safe error. `instance response-follow URL CREDENTIAL_FILE COMMAND_ID` polls and prints changed progress as JSON lines until a terminal state. Text that could complete a known credential may be withheld at chunk boundaries. The service also holds unfinished words for safe URL handling. Provisional snapshots stop growing at one million UTF-16 code units per provider step; the completed response remains available. Version 28 adds a progress table after a database backup; incomplete output is retained separately from committed conversation messages. Codex direct can emit deltas; Chat Completions and demo adapters are buffered. No live provider verification was performed for this change.
+
+The paired `GET /api/bots/{id}/response/stream` endpoint returns `text/event-stream` and requires a bearer authorization header and the same origin checks as other instance requests. An initial `snapshot` event contains the current progress or null. Later JSON events contain either a `snapshot` with `response`, or a `delta` with `id` and text to append. Completed snapshots have empty text; clients read the completed answer from the conversation. Failed and interrupted snapshots retain provisional text. Each reconnection begins with a new snapshot; clients do not resubmit a command. Heartbeat comments keep idle connections open. Revocation closes the revoked client's connections. The instance allows up to 256 response streams and disconnects clients whose pending output exceeds 2 MB; they can reconnect for a current snapshot. The workspace uses authenticated `fetch` to consume the stream. Task and Activity updates still use polling.
 
 An optional profile description is directory metadata visible to other bots. A profile edit that omits it preserves its current value. The paired `POST /api/bot-discovery` endpoint accepts `requesterId` and `query`, and returns matching active or busy bots by name and description, without selecting a helper. Archived bots and the requester are excluded. Matching and limits are provisional; discovery itself does not execute collaboration. The version 12 migration backs up existing databases and initializes descriptions as empty strings. Version 13 separately records an owner-selected helper clock scope on task acceptance. Version 14 installs the collaboration journal and interrupts active assignments on restart. Version 15 installs the exact-message disclosure approval journal; pending and unused approvals are interrupted on restart. The exchange runtime has been exercised with synthetic providers, not live providers. Every request, question, answer, and result requires approval of its exact recipient and text. The helper clock scope defaults to false, retries retain it, and it does not enable a disabled capability. Version 16 journals main-chat task starts by command and tool-call ID. Version 17 adds revision-safe bot creation defaults.
 

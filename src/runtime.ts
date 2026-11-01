@@ -16,6 +16,7 @@ interface TurnOptions {
   text: string;
   requestText?: string;
   emit?: (event: RuntimeEvent) => void;
+  responseProgress?: (event: {type:'start'} | {type:'delta';text:string}) => void;
   maxSteps?: number;
   clock?: () => string;
   authorizeClock?: () => Promise<void>;
@@ -37,7 +38,7 @@ export const tools: ToolDefinition[] = [{ type: 'function', function: {
 } }];
 
 // Transport-independent loop: providers see messages; clients receive persisted events.
-export async function runTurn({ session, store, provider, text, emit = () => {}, maxSteps = 4, clock = () => new Date().toISOString(), authorizeClock, redact = text => text, signal, preserveObservedAfterAbort = false, task, chatTasks, web, search, shell, memory, requestText, skills }: TurnOptions): Promise<void> {
+export async function runTurn({ session, store, provider, text, emit = () => {}, responseProgress, maxSteps = 4, clock = () => new Date().toISOString(), authorizeClock, redact = text => text, signal, preserveObservedAfterAbort = false, task, chatTasks, web, search, shell, memory, requestText, skills }: TurnOptions): Promise<void> {
   text = redact(text);
   if (!text.trim()) throw new Error('Message cannot be empty');
   const history = redactValue(session, redact);
@@ -74,6 +75,7 @@ export async function runTurn({ session, store, provider, text, emit = () => {},
       if (directions.length) memoryQuery=directions.join(' ');
       if(task) checkpoint={...current,messages:structuredClone(messages)};
       report({ type: 'provider_start', provider: redact(provider.name) });
+      responseProgress?.({type:'start'});
       let raw: unknown;
       started = performance.now();
       const availableTools = provider.capabilities?.toolCalls === false ? [] : task ? [...tools, {type:'function' as const,function:{name:'ask_owner',description:'Ask the owner a question needed to continue this task.',parameters:{type:'object' as const,properties:{question:{type:'string'}},required:['question'],additionalProperties:false as const}}}] : [...tools];
@@ -96,6 +98,7 @@ export async function runTurn({ session, store, provider, text, emit = () => {},
       }
       for await (const event of providerEvents(provider, requestMessages, availableTools, false, {signal,currentUserInput:memoryQuery}, preserveObservedAfterAbort)) {
         if (event.type === 'error') throw new Error(event.message);
+        if (event.type === 'text_delta') responseProgress?.({type:'delta',text:event.text});
         if (event.type === 'message') raw = event.message;
       }
       if (!preserveObservedAfterAbort || raw === undefined) signal?.throwIfAborted();

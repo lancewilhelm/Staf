@@ -8,6 +8,33 @@ import { promisify } from 'node:util';
 import { startInstance } from '../dist/instance-service.js';
 
 const run=promisify(execFile);
+test('CLI creation operation is retryable across restart and shared with the service',async()=>{
+ const dir=mkdtempSync(join(tmpdir(),'staf-cli-create-')),path=join(dir,'db'),credential=join(dir,'client.json');let app=startInstance(path),port=await app.listen();
+ const cli=async (...args)=>(await run(process.execPath,['dist/cli.js','instance',...args])).stdout;const url=()=>`http://127.0.0.1:${port}`;
+ try{
+  await cli('pair',url(),credential,app.code);
+  const created=JSON.parse(await cli('create',url(),credential,'Ada','--operation-id','same-create','--provider','lmstudio','--model','local','--instructions','Help'));
+  await app.close();app=startInstance(path);port=await app.listen();
+  const retry=JSON.parse(await cli('create',url(),credential,'Ada','--operation-id','same-create','--provider','lmstudio','--model','local','--instructions','Help'));assert.equal(retry.id,created.id);
+  const {token}=JSON.parse(await (await import('node:fs/promises')).readFile(credential,'utf8'));const response=await fetch(`${url()}/api/bot-creations/same-create`,{headers:{Authorization:`Bearer ${token}`}});assert.equal((await response.json()).id,created.id);
+  await assert.rejects(cli('create',url(),credential,'Other','--operation-id','same-create'));
+  assert.equal(JSON.parse(await cli('bots',url(),credential)).length,1);
+ }finally{await app.close();rmSync(dir,{recursive:true,force:true});}
+});
+test('CLI archive races task acceptance from another paired client',async()=>{
+ const dir=mkdtempSync(join(tmpdir(),'staf-cli-race-')),credential=join(dir,'client.json');let release;const gate=new Promise(resolve=>{release=resolve});
+ const app=startInstance(join(dir,'db'),0,{providerFactory:async()=>({name:'held',capabilities:{toolCalls:false},async complete(){await gate;return {role:'assistant',content:'done'}}})});const port=await app.listen(),url=`http://127.0.0.1:${port}`;
+ const cli=async (...args)=>(await run(process.execPath,['dist/cli.js','instance',...args])).stdout;
+ const call=async(route,token,body)=>{const r=await fetch(url+route,{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify(body)});return [r.status,await r.json()]};
+ try{
+  await cli('pair',url,credential,app.code);const token=(await call('/api/pair','',{code:app.issueCode()}))[1].token;
+  for(let n=0;n<3;n++){
+   const bot=JSON.parse(await cli('create',url,credential,`Race ${n}`));
+   const [archived,work]=await Promise.all([cli('archive',url,credential,bot.id,bot.revision).then(stdout=>({ok:true,body:JSON.parse(stdout)}),error=>({ok:false,error:String(error.stderr)})),call('/api/tasks',token,{id:`race-${n}`,botId:bot.id,objective:'Hold'})]);
+   assert.notEqual(archived.ok,work[1].kind==='accepted');if(archived.ok){assert.equal(archived.body.archived,true);assert.equal(work[0],409)}else {assert.match(archived.error,/409.*busy/i);assert.equal(work[1].kind,'accepted')}
+  }
+ }finally{release();await app.close();rmSync(dir,{recursive:true,force:true});}
+});
 test('CLI edits, archives, and restores the shared bot',async()=>{
  const dir=mkdtempSync(join(tmpdir(),'staf-cli-profile-')); const app=startInstance(join(dir,'db')); const port=await app.listen();
  const url=`http://127.0.0.1:${port}`, credential=join(dir,'client.json');
@@ -48,10 +75,10 @@ test('CLI clients share bot instructions and conversation across service restart
   assert.equal(legacy.instructions,'');
   for (const [args,pattern] of [
    [['Ada','--instructions'],/requires TEXT/],
-   [['Ada','--instructions','text','--instructions','other'],/once at the end/],
-   [['Ada','--instructions','text','extra'],/once at the end/],
+   [['Ada','--instructions','text','--instructions','other'],/must appear once/],
+   [['Ada','--instructions','text','extra'],/Unknown create option/],
    [['Ada','--unknown','text'],/Unknown create option/],
-   [['--instructions','text'],/Bot name required/],
+   [['--instructions','text'],/Agent name required/],
   ]) await assert.rejects(cli('create',url(),a,...args),error=>{assert.match(error.stderr,pattern);return true});
   assert.equal(JSON.parse(await cli('bots',url(),a)).length,2);
   const sent=await cli('send',url(),a,bot.id,'Hello from first client');

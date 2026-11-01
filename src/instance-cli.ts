@@ -6,7 +6,7 @@ import { startInstance } from './instance-service.js';
 
 export async function instanceCommand(args: string[]) {
   const [action,...rest]=args;
-  if (!action || action === 'help' || action === '--help') {console.log('Usage: instance serve [DATABASE_PATH] [PORT]\n       instance COMMAND URL CREDENTIAL_FILE [ARGUMENTS]\nCommands: pair, clients, revoke, bots, create, inspect, edit, archive, restore, read, send, status, discover, defaults, defaults-set, tasks, task, task-follow, task-start, task-stop, task-retry, task-replace, task-direct, task-answer, approvals, approve, deny, approval-settings, set-approval-settings, disclosures, disclosure-approve, disclosure-deny, web-permission, web-permission-set, web-approvals, web-approve, web-deny, search-config, search-config-set, search-permission, search-permission-set, search-approvals, search-approve, search-deny, shell-config, shell-config-set, shell-permission, shell-permission-set, shell-approvals, shell-approve, shell-deny, shell-uncertain, shell-review, approval-grants, approval-grant-revoke, approval-grant-edit, openrouter-status, openrouter-set, openrouter-disconnect, codex-auth-start, codex-auth-current, codex-auth-status, codex-auth-cancel, codex-auth-credential, memory-*, skill-*, schedule-*\nSee docs/usage.md for arguments and examples.');return;}
+  if (!action || action === 'help' || action === '--help') {console.log('Usage: instance serve [DATABASE_PATH] [PORT]\n       instance COMMAND URL CREDENTIAL_FILE [ARGUMENTS]\nCommands: pair, clients, revoke, bots, create, inspect, edit, archive, restore, read, send, status, response-follow, discover, defaults, defaults-set, tasks, task, task-follow, task-start, task-stop, task-retry, task-replace, task-direct, task-answer, approvals, approve, deny, approval-settings, set-approval-settings, disclosures, disclosure-approve, disclosure-deny, web-permission, web-permission-set, web-approvals, web-approve, web-deny, search-config, search-config-set, search-permission, search-permission-set, search-approvals, search-approve, search-deny, shell-config, shell-config-set, shell-permission, shell-permission-set, shell-approvals, shell-approve, shell-deny, shell-uncertain, shell-review, approval-grants, approval-grant-revoke, approval-grant-edit, openrouter-status, openrouter-set, openrouter-disconnect, codex-auth-start, codex-auth-current, codex-auth-status, codex-auth-cancel, codex-auth-credential, memory-*, skill-*, schedule-*\nSee docs/usage.md for arguments and examples.');return;}
   if (action === 'serve') {
     const path=resolve(rest[0] || '.staf/instance.sqlite'); const port=Number(rest[1] || 3210);
     if (!Number.isInteger(port) || port<1 || port>65535) throw Error('Invalid port');
@@ -28,19 +28,23 @@ export async function instanceCommand(args: string[]) {
     const result=await request('/api/pair','',{code:values[0]});
     await mkdir(dirname(resolve(credential)),{recursive:true,mode:0o700}); await writeFile(credential,JSON.stringify(result),{mode:0o600,flag:'wx'}); console.log('Paired.'); return;
   }
-  let create: {name:string; instructions:string} | undefined;
+  let create: {name:string; instructions:string; operationId:string; provider?:string; model?:string} | undefined;
   if (action === 'create') {
     const option=values.findIndex(value=>value.startsWith('--'));
     const names=option < 0 ? values : values.slice(0,option);
-    if (!names.join(' ').trim()) throw Error('Bot name required. Use instance create URL CREDENTIAL_FILE NAME [--instructions TEXT]');
-    let instructions='';
-    if (option >= 0) {
-      if (values[option] !== '--instructions') throw Error('Unknown create option. Use --instructions TEXT');
-      if (values[option+1] === undefined || values[option+1]?.startsWith('--')) throw Error('--instructions requires TEXT');
-      if (option+2 !== values.length) throw Error('--instructions must appear once at the end, followed by one TEXT argument');
-      instructions=values[option+1] ?? '';
+    if (!names.join(' ').trim()) throw Error('Agent name required. Use instance create URL CREDENTIAL_FILE NAME [--instructions TEXT]');
+    const options:Record<string,string>={};
+    for(let i=option < 0 ? values.length : option;i<values.length;i+=2) {
+      const key=values[i],value=values[i+1];
+      if (!key || !['--instructions','--operation-id','--provider','--model'].includes(key)) throw Error('Unknown create option. Use --instructions TEXT, --operation-id ID, --provider PROVIDER or --model MODEL');
+      if (value === undefined || value.startsWith('--')) throw Error(`${key} requires TEXT`);
+      if (key in options) throw Error(`${key} must appear once`);
+      options[key]=value;
     }
-    create={name:names.join(' '),instructions};
+    const operationId=options['--operation-id'] ?? randomUUID();
+    if(!/^[\w-]{1,100}$/.test(operationId))throw Error('Invalid creation operation ID');
+    console.error(`Creation operation ID: ${operationId}`);
+    create={name:names.join(' '),instructions:options['--instructions'] ?? '',operationId,...(options['--provider'] !== undefined ? {provider:options['--provider']} : {}),...(options['--model'] !== undefined ? {model:options['--model']} : {})};
   }
   const saved: unknown=JSON.parse(await readFile(credential,'utf8'));
   if (!saved || typeof saved !== 'object' || !('token' in saved) || typeof saved.token !== 'string') throw Error('Invalid client credential');
@@ -136,6 +140,7 @@ export async function instanceCommand(args: string[]) {
   else if(action==='task-start' && values[0] && values[1]) { const delegateClock=values[1] === '--delegate-clock'; const objective=values.slice(delegateClock ? 2 : 1).join(' '); if (!objective.trim()) throw Error('Task objective required'); const id=randomUUID(); console.log(`Task attempt ID: ${id} (check task if the request is uncertain)`); result=await request('/api/tasks',token,{id,botId:values[0],objective,delegateClock}); }
   else if(action==='task-retry' && values[0]) { const previous: unknown=await request(`/api/tasks/${encodeURIComponent(values[0])}`,token); if (!previous || typeof previous !== 'object' || !('botId' in previous) || typeof previous.botId !== 'string' || !('objective' in previous) || typeof previous.objective !== 'string' || !('limitMs' in previous) || typeof previous.limitMs !== 'number') throw Error('Invalid task'); const id=randomUUID(); console.log(`Task attempt ID: ${id} (check task if the request is uncertain)`); result=await request('/api/tasks',token,{id,botId:previous.botId,objective:previous.objective,limitMs:previous.limitMs,predecessor:values[0],delegateClock:'delegationClock' in previous && previous.delegationClock === 1}); }
   else if(action==='status' && values[0]) result=await request(`/api/commands/${encodeURIComponent(values[0])}`,token);
+  else if(action==='response-follow' && values[0]) {let last='';for(;;){const current=await request(`/api/commands/${encodeURIComponent(values[0])}`,token);if(!current || typeof current!=='object' || !('responseProgress' in current) || !current.responseProgress || typeof current.responseProgress!=='object' || !('state' in current.responseProgress))throw Error('Invalid response progress');const progress=current.responseProgress;const serialized=JSON.stringify(progress);if(serialized!==last){console.log(serialized);last=serialized;}if(!['accepted','running'].includes(String(progress.state)))return;await new Promise(resolve=>setTimeout(resolve,500));}}
   else if(action==='send' && values[0] && values[1]) { const id=randomUUID(); console.log(`Command ID: ${id} (check status if the request is uncertain)`); result=await request('/api/commands',token,{id,botId:values[0],content:values.slice(1).join(' ')}); }
   else throw Error('Invalid instance command or missing arguments. Run instance help or see docs/usage.md.');
   console.log(JSON.stringify(result,null,2));

@@ -6,6 +6,39 @@ import { join } from 'node:path';
 import { startInstance } from '../dist/instance-service.js';
 import { Instance } from '../dist/instance.js';
 
+test('creation operation retries across restart with copied defaults and optional provider', async () => {
+ const dir=mkdtempSync(join(tmpdir(),'staf-create-retry-')),path=join(dir,'db');let app=startInstance(path,0,{env:{}}),port=await app.listen();
+ const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return [r.status,await r.json()]};
+ try {
+  const token=(await call('/api/pair','',{code:app.code}))[1].token;
+  const [status,bot]=await call('/api/bots',token,{operationId:'retry-name',name:'Ada'});assert.equal(status,201);
+  const defaults=(await call('/api/creation-defaults',token))[1];await call('/api/creation-defaults',token,{revision:defaults.revision,provider:'openrouter',model:'new/model',reasoning:'high'});
+  await app.close();app=startInstance(path,0,{env:{}});port=await app.listen();
+  const retry=await call('/api/bots',token,{operationId:'retry-name',name:'Ada'});assert.equal(retry[1].id,bot.id);assert.equal(retry[1].provider,bot.provider);
+  assert.equal((await call('/api/bots',token,{operationId:'retry-name',name:'Changed'}))[0],409);
+  const custom=await call('/api/bots',token,{operationId:'custom',name:'Ada',provider:'lmstudio',model:'local',instructions:'Help'});assert.equal(custom[0],201);assert.equal(custom[1].provider,'lmstudio');assert.equal(custom[1].model,'local');assert.equal(custom[1].reasoning,'high');assert.notEqual(custom[1].id,bot.id);
+  const unkeyed=await call('/api/bots',token,{name:'Ada',provider:'lmstudio',model:'local',instructions:'Help'});assert.equal(unkeyed[1].reasoning,custom[1].reasoning);
+  assert.equal((await call('/api/bots',token))[1].length,3);
+ } finally {await app.close();rmSync(dir,{recursive:true,force:true});}
+});
+
+test('archive and concurrent chat or task acceptance cannot both win',async()=>{
+ let release;const gate=new Promise(resolve=>{release=resolve});
+ const app=startInstance(':memory:',0,{providerFactory:async()=>({name:'held',capabilities:{toolCalls:false},async complete(){await gate;return {role:'assistant',content:'done'}}})});const port=await app.listen();
+ const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return [r.status,await r.json()]};
+ try{
+  const a=(await call('/api/pair','',{code:app.code}))[1].token,b=(await call('/api/pair','',{code:app.issueCode()}))[1].token;
+  for(const kind of ['commands','tasks'])for(let n=0;n<4;n++){
+   const bot=(await call('/api/bots',a,{name:`${kind}-${n}`}))[1];
+   const work=kind==='commands'?{id:`chat-${n}`,botId:bot.id,content:'Hello'}:{id:`task-${n}`,botId:bot.id,objective:'Work'};
+   const archive=()=>call(`/api/bots/${bot.id}/archive`,a,{revision:bot.revision}),submit=()=>call('/api/'+kind,b,work);
+   const results=await Promise.all(n%2?[submit(),archive()]:[archive(),submit()]);const [archived,accepted]=n%2?[results[1],results[0]]:results;
+   assert.notEqual(archived[0]===200,accepted[1].kind==='accepted');
+   if(archived[0]===200){assert.equal(accepted[0],409);assert.equal((await call(`/api/bots/${bot.id}`,a))[1].archived,true)}else assert.equal(archived[0],409);
+  }
+ }finally{release();await app.close();}
+});
+
 test('instance workspace stylesheet is served from the same origin under its CSP', async () => {
  const app=startInstance(':memory:'); const port=await app.listen();
  try {
@@ -69,6 +102,7 @@ test('bot profiles detect stale edits and archive preserves shared chat across r
  try {
   const a=(await call('/api/pair','',{code:app.code}))[1].token;
   const b=(await call('/api/pair','',{code:app.issueCode()}))[1].token;
+  assert.deepEqual(await call('/api/bots/missing',a),[404,{error:'Agent not found'}]);
   const bot=(await call('/api/bots',a,{name:'Ada',instructions:'Help'}))[1];
   const initial=(await call(`/api/bots/${bot.id}`,b))[1];
   const edit={revision:initial.revision,name:'Renamed',instructions:'Be candid\nExplain',provider:'demo',model:null,reasoning:null};
@@ -82,7 +116,7 @@ test('bot profiles detect stale edits and archive preserves shared chat across r
   const demo=(await call(`/api/bots/${bot.id}/profile`,a,{...edit,revision:configured.revision}))[1];
   assert.equal((await call('/api/commands',b,{id:'hello',botId:bot.id,content:'Hello'}))[1].kind,'accepted');
   assert.equal((await call(`/api/bots/${bot.id}/archive`,a,{revision:demo.revision}))[0],200);
-  assert.equal((await call('/api/commands',b,{id:'archived',botId:bot.id,content:'No'}))[0],409);
+  assert.deepEqual(await call('/api/commands',b,{id:'archived',botId:bot.id,content:'No'}),[409,{error:'Agent is archived'}]);
   await app.close(); app=startInstance(path,0,{env:{}}); port=await app.listen();
   const archived=(await call(`/api/bots/${bot.id}`,a))[1]; assert.equal(archived.archived,true);
   assert.equal((await call(`/api/bots/${bot.id}/restore`,b,{revision:archived.revision}))[0],200);

@@ -28,15 +28,16 @@ Run `pnpm start instance serve .staf/instance.sqlite 3210` and open
 `http://127.0.0.1:3210/`. Enter the host's pairing code to open the chat workspace.
 **Settings** shows the instance-wide Codex connection and offers sign-in when
 needed. It also offers Light, Dark, and System appearance for this browser;
-System follows the device setting. Each bot has its own configuration, which you can edit from its chat.
+System follows the device setting. The persistent agent list switches between main chats; each agent has its own configuration, which you can edit from its chat.
 Instructions live in its `soul.md` file; settings live in `agent.toml`. You can
 [edit these files directly](docs/usage.md#agent-configuration-files) on the instance host.
-Connect an instance-wide OpenRouter key in global Settings or through the paired CLI; saved presence does not verify account or model access. You can create a bot before connecting a provider. The inbox shows task updates and
+Connect an instance-wide OpenRouter key in global Settings or through the paired CLI; saved presence does not verify account or model access. You can create an agent with just a name before connecting a provider. Agent settings
+include archive, and Settings lists archived agents for restoration. The inbox shows task updates and
 requests for input or approval. The previous Advanced page has been retired;
 other management features remain available through the service and CLI while
 their GUI is developed. Shared-instance Codex sign-in has synthetic coverage
-but is not live verified. Bots can start background work from main chat and
-request help during tasks; each bot-to-bot message requires owner approval.
+but is not live verified. Agents can start background work from main chat and
+request help during tasks; each agent-to-agent message requires owner approval.
 Public web reading, owner-configured local search and scratch-only shell are off
 by default and require owner approval. Press Enter in the host
 terminal to issue a fresh one-time code for another client. This preview binds
@@ -98,7 +99,7 @@ Public OIDC metadata and the documented direct endpoint contract were checked.
 On a new checkout, run
 `pnpm install --frozen-lockfile`. pnpm 10.27.0 is used for verification.
 
-The shared terminal displays command status and recorded tool progress.
+The workspace receives provisional main-chat response progress over an authenticated event stream and renders Markdown with copyable code. The paired CLI can follow the same progress with `instance response-follow`. Incremental text depends on the provider: Codex direct supports it; the current Chat Completions adapters return buffered responses. The shared terminal displays command status and recorded tool progress.
 `/usage` shows reported main-chat consumption. `/context` reports historical input
 when available; current context occupancy is unavailable. Shared-instance provider
 sign-in and live chat have not been verified with real credentials.
