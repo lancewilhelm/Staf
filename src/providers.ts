@@ -1,4 +1,5 @@
 import { chatSystemMessage } from './prompts.js';
+import { openRouterStream } from './openrouter-stream.js';
 import { httpUsage } from './usage.js';
 import { validateEffort } from './models.js';
 import type { Provider } from './types.js';
@@ -67,11 +68,13 @@ function compatibleProvider(env: Record<string, string | undefined>, request: ty
 /** OpenRouter uses its official endpoint and a key separate from Codex login. */
 export function openRouterProvider(env: Record<string, string | undefined>, model?: string, request: typeof fetch = fetch, effort?: string, instructions?: string): Provider {
   validateEffort('openrouter', effort || 'default');
-  if (!env.OPENROUTER_API_KEY) throw new Error('OpenRouter requires OPENROUTER_API_KEY in the shell or project .env');
+  const key = env.OPENROUTER_API_KEY;
+  if (!key) throw new Error('OpenRouter requires OPENROUTER_API_KEY in the shell or project .env');
   const selected = model || env.STAF_MODEL;
   if (!selected) throw new Error('OpenRouter requires --model PROVIDER/MODEL or STAF_MODEL');
   const provider = compatibleProvider({ STAF_API_KEY: env.OPENROUTER_API_KEY, STAF_MODEL: selected, STAF_BASE_URL: 'https://openrouter.ai/api/v1/' }, request, true, effort, 'openrouter', instructions);
-  return { ...provider, name: `openrouter:${selected}${effort && effort !== 'default' ? `:reasoning=${effort}` : ''}` };
+  return { ...provider, capabilities:{...provider.capabilities,incrementalText:true}, name: `openrouter:${selected}${effort && effort !== 'default' ? `:reasoning=${effort}` : ''}`,
+    stream:(messages,tools,options)=>openRouterStream({key,model:selected,effort,instructions:instructions ?? chatSystemMessage.content,request,messages,tools,options}) };
 }
 
 export function liveProvider(env: Record<string, string | undefined> = process.env, request: typeof fetch = fetch, instructions?: string): Provider {

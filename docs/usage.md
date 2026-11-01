@@ -117,9 +117,8 @@ mode 0600. Disconnect removes that file and affects subsequent work; requests
 already in flight may still use the previous key. The shared instance ignores
 `OPENROUTER_API_KEY` in its environment, so migrate an existing key into Settings
 or the CLI. Select `openrouter` and an explicit model in each agent. A message
-can spend API credits. Choose a model that supports function calling to use tools.
-These operations have synthetic service, CLI, and browser coverage; live access
-has not been verified.
+can spend API credits. OpenRouter streams provisional text and reports usage when available. Choose a model that supports function calling to use tools; capabilities vary by model. Interrupted, truncated, or unsupported responses are shown as incomplete. Restore a failed message from the composer to retry it; a newer draft is retained separately.
+Synthetic service, CLI, and served-browser checks exercise the streaming adapter; live OpenRouter conversation and remote-instance access remain unverified.
 
 ### Use LM Studio or a compatible HTTP endpoint
 
