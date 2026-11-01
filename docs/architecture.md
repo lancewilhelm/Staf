@@ -16,7 +16,7 @@ send existing conversation history to the new provider on the next request.
 Provider adapters normalize messages and tools for the runtime. Codex uses direct
 Responses with a Staf-owned grant and model-bound replay. OpenRouter, LM Studio,
 and the generic live adapter use Chat Completions. The demo returns deterministic
-responses. Codex and OpenRouter stream provisional text through the shared service; LM Studio and the generic live adapter buffer provider output. Only completed provider responses are committed as completed replies; stopped partial output is labeled separately. The terminal displays command status and persisted tool progress. The service applies permissions and approval
+responses. Codex and OpenRouter stream provisional text through the shared service; LM Studio and the generic live adapter buffer provider output. Only completed provider responses are committed as completed replies; stopped partial output is labeled separately. The terminal displays provisional text, command status and persisted tool progress. The service applies permissions and approval
 rules before supported actions. See [direct Responses](direct-responses.md),
 [settings](settings.md), and [usage](usage.md).
 
@@ -36,15 +36,19 @@ paths and fields continue to identify these agents. Provider sign-in belongs to
 the instance; each agent owns its model selection. The former Advanced page is not served.
 Appearance is a browser-local preference; CSS follows the device color scheme
 when System is selected. It is not stored by the shared instance.
-A per-tab browser journal retains each agent's next draft and submitted command.
+A browser journal retains each agent's next draft and submitted command. Each
+open tab claims its records with browser Web Locks; closed-tab records can be
+claimed automatically when that agent is opened again. Concurrent tabs keep
+separate records and command IDs. When several unclaimed records exist for one
+agent, one is loaded at a time; the next is claimed after the current record is cleared.
 After reload or reconnect the browser checks the same command ID and resubmits
 that ID if it is missing; the instance remains authoritative for accepted work.
 Accepted commands use a deterministic user-message ID so the optimistic message
 and the stored conversation appear once. Busy and definitive failures remain
-inline for explicit retry or dismissal; accepted failed commands get a new ID on
-explicit retry. Local journal storage is required for sending. The tab identity
-is kept in session storage and the journal in local storage; clearing either may
-require recovering an earlier record through Settings.
+inline for explicit retry or dismissal; an uncertain original cannot be dismissed
+after a busy retry because it may still arrive. Accepted failed commands get a
+new ID on explicit retry. Local journal storage and Web Locks are required for
+sending. Clearing browser storage removes the journal.
  A keyed
 bot-creation operation stores its fingerprint and result with the bot in one
 transaction. Version 27 backs up an existing database before adding the journal.

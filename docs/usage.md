@@ -209,7 +209,7 @@ while preventing new work. To restore it, open **Settings** and select
 **Restore agent** under **Archived agents**. An agent with active chat or background
 work cannot be archived until that work settles.
 
-In the shared terminal, `/stop` requests cancellation of the current main-chat response, including one started by another paired client. A line entered while your terminal command is unresolved is kept as an unsent draft. Use `/edit ID TEXT` to revise it and `/retry ID` after the response settles; drafts are never queued automatically.
+In the shared terminal, `/stop` requests cancellation of the current main-chat response, including one started by another paired client, and reports its settled state and any stopped partial output. Incremental provider text is labeled provisional until the response settles. A line entered while your terminal command is unresolved is kept as an unsent draft. Use `/edit ID TEXT` to revise it and `/retry ID` after the response settles; drafts are never queued automatically.
 
 While a response runs, the workspace receives provisional text and progress over a shared-instance event stream. If the connection drops, the workspace reconnects and shows the latest saved progress.
 You can type a next draft while the response runs. Select **Stop** to request cancellation; the response shows **stopping** until the provider and pending operations settle. Send becomes available after completion or a settled Stop, and the draft remains editable throughout. Stopped partial output stays in the conversation labeled **stopped** and is not treated as a completed provider reply. A provider that does not promptly honor cancellation can keep the agent in stopping until it returns.
@@ -227,16 +227,24 @@ Clock approvals can be approved or denied there. Task questions are visible, but
 answering them in the workspace is not yet implemented. The workspace checks
 for updates while the page is visible; it does not provide background notifications.
 
-Drafts and pending message IDs are stored in this browser tab's local journal.
-The selected agent, its draft, and any pending submission recover automatically
-after reload. A lost acknowledgment is checked against the shared instance and,
+Drafts and pending message IDs are stored in the browser's local journal.
+An agent's draft and pending submission recover automatically after reload or
+after closing and reopening a tab. Concurrent tabs keep separate records; if
+several closed tabs left drafts for one agent, one record is loaded at a time
+and the next is recovered when the current draft and submission are cleared. The browser must support Web Locks and
+local storage for sending. A lost acknowledgment is checked against the shared instance and,
 if no command is found, resubmitted using the same ID. A failure or busy rejection
 remains beside the message with Retry and Dismiss; a newer draft is retained.
+If a retry finds the agent busy while the original request may still arrive,
+the message cannot be dismissed and any retry keeps the original ID.
 Earlier session records can be recovered in Settings. Clearing browser storage
 removes locally saved drafts and pending IDs. The former Advanced page has been
 retired. Profile, permission, memory, skill, schedule, and task management are
 not yet fully available in the workspace; the service and CLI operations below
 remain available.
+
+After updating Staf, reload any already-open workspace tabs so they all use the
+current draft coordination before editing in multiple tabs.
 ### Agent configuration files
 
 Each agent has `agent.toml` for its name, description, provider, model and

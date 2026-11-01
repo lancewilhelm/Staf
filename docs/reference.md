@@ -34,6 +34,11 @@ login|status|cancel|logout`, `/usage [details|help]`, `/context [refresh|help]`,
 commands edit the current bot profile; creation defaults are separate. See
 [settings](settings.md) for behavior and controls.
 
+The interactive terminal labels streamed text provisional and follows a response
+that it stops, including a response started by another paired client, through its
+settled state. Browser draft recovery uses local storage and Web Locks to keep
+concurrent tabs separate.
+
 The instance inherits its host environment at startup. It does not load `.env`.
 Changing the environment of a later terminal does not change a running instance.
 Models and reasoning belong to the bot profile, not environment variables.
