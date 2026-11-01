@@ -190,8 +190,8 @@ finish active work and sign-in first. Agent provider and model selections and
 unsent drafts are retained. Create an agent with a name and optional
 instructions, provider, and model, even before signing in or choosing a model. Select the
 model label below an agent's chat to edit its settings and Instructions. Press
-Enter to send a message or Shift+Enter to insert a new line. The workspace keeps
-your draft if sign-in or a model is missing and when switching agents.
+Enter to send a message or Shift+Enter to insert a new line. The workspace keeps drafts when switching agents. If sign-in or a model is
+missing, the submitted text remains beside an explanation and Retry control.
 
 In agent settings, Demo is always available; Codex and OpenRouter can be chosen
 when their shared connection is saved. A saved connection does not verify account
@@ -225,10 +225,12 @@ Clock approvals can be approved or denied there. Task questions are visible, but
 answering them in the workspace is not yet implemented. The workspace checks
 for updates while the page is visible; it does not provide background notifications.
 
-Drafts and pending message IDs are stored in the browser. After a reload, use
-**Recover saved browser drafts or creation** to select an earlier record. If a
-submission result is uncertain, check its status or retry the same message with
-the same ID. Staf does not silently send a new request. Clearing browser storage
+Drafts and pending message IDs are stored in this browser tab's local journal.
+The selected agent, its draft, and any pending submission recover automatically
+after reload. A lost acknowledgment is checked against the shared instance and,
+if no command is found, resubmitted using the same ID. A failure or busy rejection
+remains beside the message with Retry and Dismiss; a newer draft is retained.
+Earlier session records can be recovered in Settings. Clearing browser storage
 removes locally saved drafts and pending IDs. The former Advanced page has been
 retired. Profile, permission, memory, skill, schedule, and task management are
 not yet fully available in the workspace; the service and CLI operations below
@@ -315,10 +317,12 @@ retain configuration and history and cannot accept new work until restored.
 
 The CLI prints the command ID before submission; check status if its outcome is
 uncertain instead of automatically resending. A busy bot does not accept a new
-message. The browser retains the submitted text for recovery on busy, failure or uncertain submission and keeps the next draft editable;
-use **Check status** to inspect an uncertain outcome. If the command cannot be
-found, the original request may still arrive. The workspace retains its ID and
-offers an explicit retry of that same message and ID. The CLI takes text as an argument and has no interactive draft.
+message. The browser clears the composer immediately and shows the submitted message and
+status in the conversation while keeping the next draft editable. It automatically
+recovers uncertain outcomes with the original command ID. Busy or rejected work
+can be retried inline; retrying a failed or interrupted accepted command starts a
+new command. Resolve or dismiss that message before sending the next draft. The
+CLI takes text as an argument and has no interactive draft.
 
 Providers receive the recorded conversation and tool history on each turn; the preview does not compact
 or limit it. It does not import existing file-based sessions. The workspace polls
