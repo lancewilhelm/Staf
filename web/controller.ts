@@ -15,7 +15,7 @@ export type Submission=SubmissionIdentity & (
 export type Draft={text:string;submission:Submission|null};
 export type Connection={kind:'connecting'}|{kind:'pairing';message:string}|{kind:'ready'}|{kind:'offline';message:string};
 export type Setup={kind:'closed'}|{kind:'create';name:string;instructions:string;provider:string;model:string;operationId:string|null;status:string};
-export type Workspace={connection:Connection;setup:Setup;bots:Bot[];selected:string|null;messages:Message[];response:ResponseProgress|null;responseConnection:'connecting'|'connected'|'reconnecting';tasks:Task[];inbox:InboxItem[];taskUpdates:Array<Task & {botId:string}>;activityOpen:boolean;credential:'signed-in'|'signed-out'|'unknown';openrouter:'saved'|'missing'|'unknown'|'error';authAttempt:{id:string;phase:string}|null;authUrl:string;authUrlAttemptId:string;freshness:string;notice:string;draft:Draft;recoveries:Recovery[]};
+export type Workspace={connection:Connection;setup:Setup;bots:Bot[];selected:string|null;messages:Message[];response:ResponseProgress|null;responseConnection:'connecting'|'connected'|'reconnecting';tasks:Task[];inbox:InboxItem[];taskUpdates:Array<Task & {botId:string}>;activityOpen:boolean;credential:'signed-in'|'signed-out'|'unknown';openrouter:'saved'|'missing'|'unknown'|'error';authAttempt:{id:string;phase:string}|null;authUrl:string;authUrlAttemptId:string;freshness:string;notice:string;draft:Draft;draftReady:boolean;recoveries:Recovery[]};
 type Recovery={key:string;label:string;value:string};
 class ApiError extends Error {constructor(message:string,readonly status:number){super(message);}}
 const isRecord=(value:unknown):value is Record<string,unknown>=>typeof value==='object'&&value!==null&&!Array.isArray(value);
@@ -31,7 +31,7 @@ function normalizeDraft(draft:Draft):Draft {
 }
 export class Controller {
   private writer=crypto.randomUUID(); private checking=false; private listeners=new Set<()=>void>(); private generation=0; private seen=new Set<string>(); private token=localStorage.getItem('staf-token')||''; private currentKey=''; private timer:number; private responseStream:{botId:string;controller:AbortController}|null=null;
-  state:Workspace={connection:{kind:'connecting'},setup:{kind:'closed'},bots:[],selected:null,messages:[],response:null,responseConnection:'connecting',tasks:[],inbox:[],taskUpdates:[],activityOpen:false,credential:'unknown',openrouter:'unknown',authAttempt:null,authUrl:'',authUrlAttemptId:'',freshness:'',notice:'',draft:{text:'',submission:null},recoveries:[]};
+  state:Workspace={connection:{kind:'connecting'},setup:{kind:'closed'},bots:[],selected:null,messages:[],response:null,responseConnection:'connecting',tasks:[],inbox:[],taskUpdates:[],activityOpen:false,credential:'unknown',openrouter:'unknown',authAttempt:null,authUrl:'',authUrlAttemptId:'',freshness:'',notice:'',draft:{text:'',submission:null},draftReady:false,recoveries:[]};
   constructor(){this.timer=window.setInterval(()=>{if(document.visibilityState==='visible')void this.refresh()},1000);window.addEventListener('online',()=>void this.refresh());document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')void this.refresh()});this.recoveries();void this.refresh()}
   subscribe=(fn:()=>void)=>{this.listeners.add(fn);return()=>this.listeners.delete(fn)};
   snapshot=()=>this.state;
@@ -70,7 +70,7 @@ export class Controller {
     sessionStorage.setItem('staf-selected-agent',id);this.generation++;
     const newAction=this.state.inbox.some(item=>item.botId===id&&!this.seen.has(item.kind+':'+item.id));
     this.state.inbox.filter(item=>item.botId===id).forEach(item=>this.seen.add(item.kind+':'+item.id));
-    this.currentKey='';this.update({selected:id,messages:[],response:null,tasks:[],draft:{text:'',submission:null},activityOpen:newAction});
+    this.currentKey='';this.update({selected:id,messages:[],response:null,tasks:[],draft:{text:'',submission:null},draftReady:false,activityOpen:newAction});
     this.watchResponse(id);await this.loadDraft(id);if(this.state.selected===id)void this.refresh();
   }
   private claims=new Set<string>(); private draftLoad=0; private recovering=false;
@@ -86,7 +86,7 @@ export class Controller {
     });
   }
   private async loadDraft(id:string|null, expectedGeneration?:number){
-    const load=++this.draftLoad;this.currentKey='';let draft:Draft={text:'',submission:null};
+    const load=++this.draftLoad;this.currentKey='';this.update({draftReady:false});let draft:Draft={text:'',submission:null};
     try{
       if(id){
         const own=prefix+this.writer+':'+id;
@@ -106,7 +106,7 @@ export class Controller {
         if(saved)draft=normalizeDraft(JSON.parse(saved));
       }
     }catch{if(load===this.draftLoad && (expectedGeneration===undefined || expectedGeneration===this.generation)){this.currentKey='';this.update({notice:'Browser storage or locking is unavailable. Sending is blocked.'})}}
-    if(load===this.draftLoad && (expectedGeneration===undefined || expectedGeneration===this.generation))this.update({draft});
+    if(load===this.draftLoad && (expectedGeneration===undefined || expectedGeneration===this.generation))this.update({draft,draftReady:!!this.currentKey});
   }
   private async recoverNext(){
     const id=this.state.selected,current=this.currentKey;

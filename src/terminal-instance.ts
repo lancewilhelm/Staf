@@ -107,12 +107,12 @@ export async function terminalClient(args:string[]) {
   const pendingPath=(id:string)=>join(pendingDir,`${id}.json`);
   let providerChange: {value:string; profile:Record<string,unknown>} | undefined;
   const drafts=new Map<string,string>();
-  const unresolved=new Set<string>(), watched=new Set<string>(), shown=new Set<string>(), eventCounts=new Map<string,number>(), provisional=new Map<string,string>();
+  const unresolved=new Set<string>(), watched=new Set<string>(), shown=new Set<string>(), eventCounts=new Map<string,number>(), provisional=new Map<string,string>(), reconciled=new Set<string>();
   let ownMessage:string|undefined;
   let input:ChatInput|undefined, closed=false, menuActive=false;
   function display(action:()=>void) {if(input)input.display(action);else action();}
   async function loadHistory() {const messages=await request(connection,`/api/bots/${botId}/messages`);if(!Array.isArray(messages))throw Error('Invalid conversation');return messages;}
-  function showHistory(messages:unknown[]) {let submitted=ownMessage;ownMessage=undefined;for(const message of messages){if(!isRecord(message) || typeof message.id!=='string' || typeof message.content!=='string' || typeof message.role!=='string' || shown.has(message.id))continue;shown.add(message.id);if(message.role==='user' && message.content===submitted){submitted=undefined;continue;}const label=message.role==='assistant'?'staf':message.role==='assistant_stopped'?'staf (stopped)':message.role;console.log(`${view.style(`${label}>`,message.role==='assistant'?'heading':'dim')} ${cleanText(message.content)}\n`);}}
+  function showHistory(messages:unknown[]) {let submitted=ownMessage;ownMessage=undefined;for(const message of messages){if(!isRecord(message) || typeof message.id!=='string' || typeof message.content!=='string' || typeof message.role!=='string' || shown.has(message.id))continue;shown.add(message.id);if(message.role==='user' && message.content===submitted){submitted=undefined;continue;}const label=message.role==='assistant'?'staf':message.role==='assistant_stopped'?'staf (stopped)':message.role;let content=message.content,reconciledResponse=false;if(message.role==='assistant'||message.role==='assistant_stopped'){for(const [id,text] of provisional){if(text && !reconciled.has(id) && content.startsWith(text)){content=content.slice(text.length);reconciledResponse=true;reconciled.add(id);break;}}}console.log(`${view.style(`${label}>`,message.role==='assistant'?'heading':'dim')} ${content||!reconciledResponse?cleanText(content):message.role==='assistant_stopped'?'Response stopped.':'Response completed.'}\n`);}}
   async function history() {const messages=await loadHistory();showHistory(messages);}
   let statusQueue:Promise<void>=Promise.resolve();
   function status(id:string, announce=true, background=false):Promise<unknown> {
@@ -121,7 +121,7 @@ export async function terminalClient(args:string[]) {
         if(value.state==='pending' && isRecord(value.responseProgress) && typeof value.responseProgress.text==='string'){const text=value.responseProgress.text,previous=provisional.get(id) ?? '';if(text!==previous){const delta=text.startsWith(previous)?text.slice(previous.length):text;if(delta)console.log(`${view.style('staf (provisional)>','dim')} ${cleanText(delta)}`);provisional.set(id,text);}}
         if(announce || (background && value.state!=='pending'))console.log(view.style(`Command ${id}: ${String(value.state)}${value.error ? ` (${String(value.error)})` : ''}`,'status'));showHistory(messages);};
       if(background)display(render);else render();
-      if(['completed','failed','interrupted','stopped'].includes(String(value.state))){if(unresolved.has(id))await unlink(pendingPath(id)).catch(()=>{});unresolved.delete(id);watched.delete(id);provisional.delete(id);}return value.state;});
+      if(['completed','failed','interrupted','stopped'].includes(String(value.state))){if(unresolved.has(id))await unlink(pendingPath(id)).catch(()=>{});unresolved.delete(id);watched.delete(id);provisional.delete(id);reconciled.delete(id);}return value.state;});
     statusQueue=work.then(()=>{},()=>{});return work;
   }
   function watch(id:string) {

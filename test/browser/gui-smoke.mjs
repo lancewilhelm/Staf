@@ -49,6 +49,13 @@ try{
  await until(()=>evaluate("getComputedStyle(document.documentElement).colorScheme==='light'"),'system follows device changes');
  await cdp('Page.reload');await until(()=>evaluate("document.querySelector('input[name=appearance][value=system]')?.checked && getComputedStyle(document.documentElement).colorScheme==='light'"),'system appearance persists');
  const browserCdp=(method,params={},sessionId)=>cdp(method,params,sessionId,browserSocket);
+ const unsupported=await browserCdp('Target.createTarget',{url:'about:blank'});
+ const unsupportedSession=await browserCdp('Target.attachToTarget',{targetId:unsupported.targetId,flatten:true});
+ await browserCdp('Page.enable',{},unsupportedSession.sessionId);
+ await browserCdp('Page.addScriptToEvaluateOnNewDocument',{source:"Object.defineProperty(Crypto.prototype,'randomUUID',{value:undefined,configurable:true})"},unsupportedSession.sessionId);
+ await browserCdp('Page.navigate',{url},unsupportedSession.sessionId);
+ await until(async()=>(await browserCdp('Runtime.evaluate',{expression:"document.body?.innerText.includes('secure random UUID support')",returnByValue:true},unsupportedSession.sessionId)).result.value,'unsupported browser shows secure ID requirement');
+ await browserCdp('Target.closeTarget',{targetId:unsupported.targetId});console.log('PASS unsupported browser shows an actionable requirement');
  const context=await browserCdp('Target.createBrowserContext');
  const target=await browserCdp('Target.createTarget',{url,browserContextId:context.browserContextId});
  const attached=await browserCdp('Target.attachToTarget',{targetId:target.targetId,flatten:true});
@@ -338,7 +345,9 @@ try{
  const slowSwitch=await openCopy();await until(()=>slowSwitch.eval("document.querySelectorAll('.side nav button').length===2"),'additional tab ready for switching');
  await slowSwitch.eval("Object.defineProperty(document,'visibilityState',{value:'visible',configurable:true});const request=navigator.locks.request.bind(navigator.locks);navigator.locks.request=(name,options,callback)=>request(name,options,async lock=>{await new Promise(resolve=>setTimeout(resolve,1200));return callback(lock)});document.querySelectorAll('.side nav button')[0].click()");
  await until(()=>slowSwitch.eval(`document.querySelector('.title')?.textContent.includes(${JSON.stringify(bot.id.slice(-4))})`),'slow switch selects the requested agent');
+ assert.equal(await slowSwitch.eval("document.querySelector('[aria-label=Message]').disabled"),true,'composer waits for draft ownership');
  await sleep(3000);
+ assert.equal(await slowSwitch.eval("document.querySelector('[aria-label=Message]').disabled"),false,'composer becomes editable after draft loading');
  await slowSwitch.eval("(()=>{const el=document.querySelector('[aria-label=Message]');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(el,'Slow switch draft');el.dispatchEvent(new Event('input',{bubbles:true}))})()");
  assert.equal(await slowSwitch.eval(`Object.entries(localStorage).some(([key,value])=>key.endsWith(':${bot.id}')&&JSON.parse(value).text==='Slow switch draft')`),true,'refresh during a slow switch cannot write to the previous agent');
  await slowSwitch.eval("(()=>{const el=document.querySelector('[aria-label=Message]');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(el,'');el.dispatchEvent(new Event('input',{bubbles:true}))})()");await browserCdp('Target.closeTarget',{targetId:slowSwitch.id});console.log('PASS refresh during delayed agent switching keeps draft ownership');

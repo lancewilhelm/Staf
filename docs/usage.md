@@ -231,8 +231,9 @@ Drafts and pending message IDs are stored in the browser's local journal.
 An agent's draft and pending submission recover automatically after reload or
 after closing and reopening a tab. Concurrent tabs keep separate records; if
 several closed tabs left drafts for one agent, one record is loaded at a time
-and the next is recovered when the current draft and submission are cleared. The browser must support Web Locks and
-local storage for sending. A lost acknowledgment is checked against the shared instance and,
+and the next is recovered when the current draft and submission are cleared.
+The composer waits until the selected agent’s draft is ready. The browser must
+support secure random UUIDs, Web Locks, and local storage for sending. A lost acknowledgment is checked against the shared instance and,
 if no command is found, resubmitted using the same ID. A failure or busy rejection
 remains beside the message with Retry and Dismiss; a newer draft is retained.
 If a retry finds the agent busy while the original request may still arrive,

@@ -27,7 +27,7 @@ test('interactive terminal shows held OpenRouter chunks as provisional before co
     child.stdin.write('stream now\n');
     for(let i=0;i<120&&!out.includes('First provisional router chunk.');i++)await new Promise(resolve=>setTimeout(resolve,25));
     assert.match(out,/staf \(provisional\)> First provisional router chunk\./,err);assert.doesNotMatch(out,/Router finished\./);assert.doesNotMatch(out,/synthetic-secret/);
-    release();for(let i=0;i<120&&!out.includes('Router finished.');i++)await new Promise(resolve=>setTimeout(resolve,25));assert.match(out,/Router finished\./);
+    release();for(let i=0;i<120&&!out.includes('Router finished.');i++)await new Promise(resolve=>setTimeout(resolve,25));assert.match(out,/Router finished\./);assert.equal(out.split('First provisional router chunk.').length-1,1,'streamed text is not repeated after completion');
     child.stdin.end('/quit\n');await new Promise(resolve=>child.once('exit',resolve));child=undefined;
   }finally{release();child?.kill();await app.close();rmSync(dir,{recursive:true,force:true});}
 });
@@ -44,9 +44,11 @@ test('interactive terminal shows stopped partial output for another client respo
     const token=(await call('/api/pair','',{code:app.code})).token,credential=join(dir,'client.json');writeFileSync(credential,JSON.stringify({token}));
     const bot=await call('/api/main-bot',token,{});await call('/api/commands',token,{id:'foreign-stream',botId:bot.id,content:'start elsewhere'});
     for(let i=0;i<100;i++){if((await call('/api/commands/foreign-stream',token)).responseProgress?.text.includes('Partial output'))break;await new Promise(resolve=>setTimeout(resolve,10));}
-    child=spawn(process.execPath,['dist/cli.js','--instance',`http://127.0.0.1:${port}`,'--credential',credential,'--data-dir',dir],{stdio:['pipe','pipe','pipe']});let out='',err='';child.stdout.on('data',chunk=>out+=chunk);child.stderr.on('data',chunk=>err+=chunk);child.stdin.write('/stop\n');
-    for(let i=0;i<160&&!out.includes('staf (stopped)> Partial output before ');i++)await new Promise(resolve=>setTimeout(resolve,25));
-    assert.match(out,/Command foreign-stream: stopped/,err);assert.match(out,/staf \(stopped\)> Partial output before /);
+    child=spawn(process.execPath,['dist/cli.js','--instance',`http://127.0.0.1:${port}`,'--credential',credential,'--data-dir',dir],{stdio:['pipe','pipe','pipe']});let out='',err='';child.stdout.on('data',chunk=>out+=chunk);child.stderr.on('data',chunk=>err+=chunk);child.stdin.write('/status foreign-stream\n');
+    for(let i=0;i<160&&!out.includes('staf (provisional)> Partial output before');i++)await new Promise(resolve=>setTimeout(resolve,25));
+    assert.match(out,/staf \(provisional\)> Partial output before/,err);child.stdin.write('/stop\n');
+    for(let i=0;i<160&&!out.includes('staf (stopped)>');i++)await new Promise(resolve=>setTimeout(resolve,25));
+    assert.match(out,/Command foreign-stream: stopped/,err);assert.match(out,/staf \(stopped\)> Response stopped\./);assert.equal(out.split('Partial output before').length-1,1,'streamed text is not repeated after Stop');
     child.stdin.end('/quit\n');await new Promise(resolve=>child.once('exit',resolve));child=undefined;
   }finally{child?.kill();await app.close();rmSync(dir,{recursive:true,force:true});}
 });

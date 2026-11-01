@@ -4,7 +4,15 @@ import Markdown from 'react-markdown';
 import {Controller,type BotProfile,type InboxItem,type Workspace} from './controller';
 import './style.css';
 
-const app=new Controller();
+function createController():Controller {
+  if(typeof globalThis.crypto?.randomUUID!=='function'){
+    const root=document.getElementById('root');
+    if(root)root.textContent='Staf requires a browser with secure random UUID support. Update your browser and open Staf on localhost or a secure connection.';
+    throw Error('Secure random UUID support is unavailable');
+  }
+  return new Controller();
+}
+const app=createController();
 
 function CodeBlock({children}:{children:ReactNode}){
   const ref=useRef<HTMLPreElement>(null);
@@ -161,8 +169,9 @@ function App(){
       {selected?.provider==='openrouter'&&s.openrouter==='missing'&&<div className="provider"><strong>Connect OpenRouter to chat</strong><p>Provider connections are shared by this Staf instance.</p><button className="quiet" onClick={openSettings}>Open provider settings</button></div>}
 
     </div>}
-    {selected&&view==='chat'&&<div className="composer"><textarea aria-label="Message" placeholder={'Message '+selected.name+'…'} value={s.draft.text} onChange={e=>app.edit(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();void app.send()}}}/>
-      <div className="actions"><button className="model-button" onClick={()=>{setSettingsBotId(selected.id);setView('bot')}} aria-label="Change agent settings">{selected.provider} · {selected.model||'Choose model'}</button>{s.response&&['accepted','running','stopping'].includes(s.response.state)&&<button disabled={s.response.state==='stopping'} onClick={()=>void app.stopResponse()}>{s.response.state==='stopping'?'Stopping…':'Stop'}</button>}<button disabled={!!s.response&&['accepted','running','stopping'].includes(s.response.state)||!!submission} onClick={()=>void app.send()}>Send ↑</button></div>
+    {selected&&view==='chat'&&<div className="composer"><textarea disabled={!s.draftReady} aria-label="Message" placeholder={'Message '+selected.name+'…'} value={s.draft.text} onChange={e=>app.edit(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();void app.send()}}}/>
+      <div className="actions"><button className="model-button" onClick={()=>{setSettingsBotId(selected.id);setView('bot')}} aria-label="Change agent settings">{selected.provider} · {selected.model||'Choose model'}</button>{s.response&&['accepted','running','stopping'].includes(s.response.state)&&<button disabled={s.response.state==='stopping'} onClick={()=>void app.stopResponse()}>{s.response.state==='stopping'?'Stopping…':'Stop'}</button>}<button disabled={!s.draftReady||!!s.response&&['accepted','running','stopping'].includes(s.response.state)||!!submission} onClick={()=>void app.send()}>Send ↑</button></div>
+      {!s.draftReady&&<p role="status">{s.notice.includes('Browser storage or locking is unavailable')?'Draft unavailable. Check browser storage and locking.':'Loading saved draft…'}</p>}
     </div>}</div>
     {s.activityOpen&&<aside className="activity" aria-label="Activity"><h3>Activity <button ref={closeButton} className="quiet close" onClick={()=>{app.activity(false);activityButton.current?.focus()}} aria-label="Close Activity">×</button></h3>{relevant.map(item=><Item key={item.kind+item.id} item={item}/>)}{s.tasks.length?s.tasks.map(task=><article className="item" key={task.id}><strong>{task.objective}</strong><div className="meta">{task.state} · {task.id}</div>{task.outcome&&<p>{task.outcome}</p>}{task.activity?.map((event,index)=><pre key={index}>{JSON.stringify(event,null,2)}</pre>)}</article>):<p className="meta">No tasks recorded for this agent.</p>}</aside>}
     </div>}

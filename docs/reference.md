@@ -37,7 +37,8 @@ commands edit the current bot profile; creation defaults are separate. See
 The interactive terminal labels streamed text provisional and follows a response
 that it stops, including a response started by another paired client, through its
 settled state. Browser draft recovery uses local storage and Web Locks to keep
-concurrent tabs separate.
+concurrent tabs separate. The browser also requires secure random UUID support;
+the composer waits for the selected draft to load.
 
 The instance inherits its host environment at startup. It does not load `.env`.
 Changing the environment of a later terminal does not change a running instance.
