@@ -122,3 +122,20 @@ test('terminal stop cancels a pending clock approval and permits another message
   result=cli(root,`/edit ${draft} Revised draft\n/retry ${draft}\n/quit\n`);assert.equal(result.status,0,result.stderr);assert.match(result.stdout,/Demo \(offline\).*Revised draft/);
  }finally{await stop(root);rmSync(root,{recursive:true,force:true});}
 });
+
+test('terminal observes settlement when stopping another client response',async()=>{
+ const root=mkdtempSync(join(tmpdir(),'staf-terminal-cross-stop-'));let child;
+ try{
+  const initial=cli(root,'/quit\n');assert.equal(initial.status,0,initial.stderr);
+  const bot=(await request(root,'/api/main-bot',{})).body;
+  await request(root,'/api/approval-settings/instance',{mode:'ask-every-time',clockEnabled:true});
+  await request(root,'/api/commands',{id:'other-stop',botId:bot.id,content:'what time is it?'});
+  for(let i=0;i<100;i++){if((await request(root,'/api/approvals')).body.some(x=>x.workId==='other-stop' && x.state==='pending'))break;await pause(20);}
+  child=spawn(process.execPath,['dist/cli.js','--data-dir',root],{stdio:['pipe','pipe','pipe']});let output='',errors='';child.stdout.on('data',chunk=>output+=chunk);child.stderr.on('data',chunk=>errors+=chunk);
+  for(let i=0;i<100 && !output.includes('you>');i++)await pause(20);
+  child.stdin.write('/stop\n');
+  for(let i=0;i<100 && !output.includes('Command other-stop: stopped');i++)await pause(30);
+  assert.match(output,/Command other-stop: stopped/,errors);
+  child.stdin.end('/quit\n');await new Promise(resolve=>child.once('exit',resolve));child=undefined;
+ }finally{child?.kill();await stop(root);rmSync(root,{recursive:true,force:true});}
+});

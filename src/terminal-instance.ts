@@ -107,7 +107,7 @@ export async function terminalClient(args:string[]) {
   const pendingPath=(id:string)=>join(pendingDir,`${id}.json`);
   let providerChange: {value:string; profile:Record<string,unknown>} | undefined;
   const drafts=new Map<string,string>();
-  const unresolved=new Set<string>(), shown=new Set<string>(), eventCounts=new Map<string,number>();
+  const unresolved=new Set<string>(), watched=new Set<string>(), shown=new Set<string>(), eventCounts=new Map<string,number>(), provisional=new Map<string,string>();
   let ownMessage:string|undefined;
   let input:ChatInput|undefined, closed=false, menuActive=false;
   function display(action:()=>void) {if(input)input.display(action);else action();}
@@ -116,16 +116,18 @@ export async function terminalClient(args:string[]) {
   async function history() {const messages=await loadHistory();showHistory(messages);}
   let statusQueue:Promise<void>=Promise.resolve();
   function status(id:string, announce=true, background=false):Promise<unknown> {
-    const work=statusQueue.then(async()=>{const value=record(await request(connection,`/api/commands/${encodeURIComponent(id)}`));const messages=await loadHistory();if(background && (closed || menuActive || !unresolved.has(id)))return value.state;
+    const work=statusQueue.then(async()=>{const value=record(await request(connection,`/api/commands/${encodeURIComponent(id)}`));const messages=await loadHistory();if(background && (closed || menuActive || !watched.has(id)))return value.state;
       const render=()=>{if(Array.isArray(value.runtimeEvents)) {const events=value.runtimeEvents;for(const event of events.slice(eventCounts.get(id) ?? 0)){if(!isRecord(event) || typeof event.name!=='string')continue;if(event.type==='tool_start')console.log(view.style(`[tool_start] ${event.name}`,'status'));else if(event.type==='tool_result')console.log(view.style(`[tool_result] ${event.name} [${event.success?'ok':'failed'}]`,event.success?'success':'error'));}eventCounts.set(id,events.length);}
-        if(announce)console.log(view.style(`Command ${id}: ${String(value.state)}${value.error ? ` (${String(value.error)})` : ''}`,'status'));showHistory(messages);};
+        if(value.state==='pending' && isRecord(value.responseProgress) && typeof value.responseProgress.text==='string'){const text=value.responseProgress.text,previous=provisional.get(id) ?? '';if(text!==previous){const delta=text.startsWith(previous)?text.slice(previous.length):text;if(delta)console.log(`${view.style('staf (provisional)>','dim')} ${cleanText(delta)}`);provisional.set(id,text);}}
+        if(announce || (background && value.state!=='pending'))console.log(view.style(`Command ${id}: ${String(value.state)}${value.error ? ` (${String(value.error)})` : ''}`,'status'));showHistory(messages);};
       if(background)display(render);else render();
-      if(['completed','failed','interrupted','stopped'].includes(String(value.state))){await unlink(pendingPath(id)).catch(()=>{});unresolved.delete(id);}return value.state;});
+      if(['completed','failed','interrupted','stopped'].includes(String(value.state))){if(unresolved.has(id))await unlink(pendingPath(id)).catch(()=>{});unresolved.delete(id);watched.delete(id);provisional.delete(id);}return value.state;});
     statusQueue=work.then(()=>{},()=>{});return work;
   }
   function watch(id:string) {
+    if(watched.has(id))return;watched.add(id);
     let stoppingShown=false;
-    const tick=()=>{if(closed || !unresolved.has(id))return;const timer=setTimeout(async()=>{if(closed || !unresolved.has(id))return;try{const value=record(await request(connection,`/api/commands/${encodeURIComponent(id)}`));if(!closed && !menuActive && value.state!=='pending')await status(id,true,true);else if(!closed && !menuActive && isRecord(value.responseProgress) && value.responseProgress.state==='stopping' && !stoppingShown){stoppingShown=true;display(()=>console.log(view.style(`Command ${id}: stopping`,'status')));}}catch{}tick();},500);timer.unref();};tick();
+    const tick=()=>{if(closed || !watched.has(id))return;const timer=setTimeout(async()=>{if(closed || !watched.has(id))return;try{const value=record(await request(connection,`/api/commands/${encodeURIComponent(id)}`));if(!closed && !menuActive){if(isRecord(value.responseProgress) && value.responseProgress.state==='stopping' && !stoppingShown){stoppingShown=true;display(()=>console.log(view.style(`Command ${id}: stopping`,'status')));}await status(id,value.state!=='pending',true);}}catch{}tick();},500);timer.unref();};tick();
   }
   async function profile() {return record(await request(connection,`/api/bots/${botId}`));}
   async function showSettings() {const p=await profile();return [`Provider: ${String(p.provider)}`,`Model: ${String(p.model ?? '(provider default)')}`,`Reasoning: ${String(p.reasoning ?? '(provider default)')}`,`Revision: ${String(p.revision)}`];}
@@ -176,7 +178,7 @@ export async function terminalClient(args:string[]) {
       else if(line.startsWith('/context')) {const words=line.split(/\s+/),option=words[1];if(words.length>2 || option && !['help','refresh'].includes(option))throw Error('Use /context [refresh|help]');if(option==='help')console.log('Context describes the shared conversation. Refresh requests model metadata.');else {if(option==='refresh')await models();const result=record(await request(connection,`/api/bots/${botId}/context`));console.log(view.style(String(result.text),'status'));}}
       else if(line==='/approvals')console.log(cleanText(JSON.stringify(await request(connection,'/api/approvals'),null,2)));
       else if(/^\/(approve|deny)\s+[\w-]+$/.test(line)){const [action,id]=line.split(/\s+/);console.log(cleanText(JSON.stringify(await request(connection,`/api/approvals/${id}/${action?.slice(1)}`,{}))));}
-      else if(line==='/stop') {const progress=await request(connection,`/api/bots/${botId}/response`);if(!isRecord(progress) || typeof progress.id!=='string')console.log('No response to stop.');else {const result=record(await request(connection,`/api/commands/${encodeURIComponent(progress.id)}/stop`,{}));console.log(view.style(`Response ${String(result.state)}.`, 'status'));}}
+      else if(line==='/stop') {const progress=await request(connection,`/api/bots/${botId}/response`);if(!isRecord(progress) || typeof progress.id!=='string')console.log('No response to stop.');else {const result=record(await request(connection,`/api/commands/${encodeURIComponent(progress.id)}/stop`,{}));console.log(view.style(`Response ${String(result.state)}.`, 'status'));watch(progress.id);}}
       else if(line.startsWith('/status '))await status(line.slice(8).trim());
       else if(line.startsWith('/edit ')) {const match=raw.match(/^\/edit\s+([\w-]+)\s+([\s\S]+)$/);if(!match?.[1] || !match[2]?.trim() || !drafts.has(match[1]))throw Error('Use /edit ID TEXT for a saved unsent draft');const id=match[1],content=match[2];await writeFile(pendingPath(id),JSON.stringify({scope:connectionScope,botId,content,draft:true}),{mode:0o600});drafts.set(id,content);console.log(view.style(`Updated unsent draft ${id}.`,'status'));}
       else if(line.startsWith('/retry ')) {const id=line.slice(7).trim(), content=drafts.get(id);if(content===undefined)throw Error('No saved unsent draft with that ID');if(unresolved.size)throw Error('Resolve pending commands with /status before retrying');await submit(id,content);}
