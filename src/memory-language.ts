@@ -9,7 +9,7 @@ export function parseMemoryLanguage(input: string): MemoryLanguageResult {
   const message = input.trim();
   // The existing exact-operation and shared-proposal parser owns these commands.
   if (/^(?:confirm|cancel) shared memory\b/i.test(message) ||
-      /^(?:please\s+)?(?:show|list|forget|delete|edit|correct) (?:my )?memor(?:y|ies)(?:\s+[\w-]+)?(?:\s+version\s+\d+)?\s+in\s+(?:this bot|shared|user) memory(?:\s|$)/i.test(message)) return {kind:'none'};
+      /^(?:please\s+)?(?:show|list|forget|delete|edit|correct) (?:my )?memor(?:y|ies)(?:\s+[\w-]+)?(?:\s+version\s+\d+)?\s+in\s+(?:this (?:bot|agent)|shared|user) memory(?:\s|$)/i.test(message)) return {kind:'none'};
   const match = message.match(/^(?:please\s+)?(?:(what do you remember|what have you saved) about\s+|(show|find|list) (?:my )?memor(?:y|ies) about\s+|(forget|delete) (?:my |the )?memor(?:y|ies) about\s+|(change|edit|correct) (?:my |the )?memor(?:y|ies) about\s+)(.+)$/is);
   if (!match) {
     if (/^(?:please\s+)?(?:(?:what do you remember|what have you saved) about|(?:show|find|list|forget|delete|change|edit|correct) (?:my |the )?memor(?:y|ies) about)\s*$/i.test(message)) return {kind:'clarify',reason:'target'};
@@ -19,10 +19,10 @@ export function parseMemoryLanguage(input: string): MemoryLanguageResult {
   let body = (match[5] ?? '').trim();
   if (match[1] && body.endsWith('?')) body = body.slice(0,-1).trimEnd();
   let scope: 'bot' | 'shared' = 'bot';
-  const suffix = body.match(/\s+in\s+(this bot|shared|user) memory\s*$/i);
-  if (suffix) { scope = suffix[1]?.toLowerCase() === 'this bot' ? 'bot' : 'shared'; body = body.slice(0, suffix.index).trimEnd(); }
+  const suffix = body.match(/\s+in\s+(this (?:bot|agent)|shared|user) memory\s*$/i);
+  if (suffix) { scope = ['this bot','this agent'].includes(suffix[1]?.toLowerCase() ?? '') ? 'bot' : 'shared'; body = body.slice(0, suffix.index).trimEnd(); }
   // Never guess exclusions, partial sharing, or a named/other bot scope.
-  if (/\b(?:except|excluding|exclude|but not|other than|without|only|just|not|for|(?:do not|don't|never) (?:share|tell|send|give)|(?:another|other|all|both|any|each) bots?|for (?:a |the |my )?bots?|for [\p{L}\p{N}_-]+(?:'s|’s)? bot|(?:shared|user|bot) memory|in [\p{L}\p{N}_-]+(?:'s|’s) memory)\b/iu.test(body)) return {kind:'clarify',reason:'scope'};
+  if (/\b(?:except|excluding|exclude|but not|other than|without|only|just|not|for|(?:do not|don't|never) (?:share|tell|send|give)|(?:another|other|all|both|any|each) (?:bots?|agents?)|for (?:a |the |my )?(?:bots?|agents?)|for [\p{L}\p{N}_-]+(?:'s|’s)? (?:bot|agent)|(?:shared|user|bot|agent) memory|in [\p{L}\p{N}_-]+(?:'s|’s) memory)\b/iu.test(body)) return {kind:'clarify',reason:'scope'};
   let query = body;
   let replacement: string | undefined;
   if (operation === 'edit') {
