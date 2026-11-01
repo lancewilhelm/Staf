@@ -155,7 +155,7 @@ test('service settles a helper when owner input races both result and failure di
  try{const token=(await call('/api/pair','',{code:app.code}))[1].token,owner=(await call('/api/bots',token,{name:'Owner'}))[1];helperId=(await call('/api/bots',token,{name:'Helper'}))[1].id;
   timer=setInterval(async()=>{try{for(const item of (await call('/api/disclosures',token))[1].filter(x=>x.state==='pending'))await call(`/api/disclosures/${item.id}/approve`,token,{});}catch{}},5);
   await call('/api/tasks',token,{id:'root',botId:owner.id,objective:'Investigate'});let root,child;for(let i=0;i<300;i++){root=(await call('/api/tasks/root',token))[1];if(root.collaborations.length){child=(await call(`/api/tasks/${root.collaborations[0].assignment.helper_attempt_id}`,token))[1];if(child.state==='stopped')break;}await new Promise(resolve=>setTimeout(resolve,10));}
-  assert.equal(injectedResult,true);assert.equal(injectedFailure,true);assert.equal(child.state,'stopped');assert.equal(root.collaborations[0].assignment.state,'cancelled');assert.doesNotMatch(JSON.stringify(root),/private result/);
+  assert.equal(injectedResult,true);assert.equal(injectedFailure,true);assert.equal(child.state,'stopped');root=(await call('/api/tasks/root',token))[1];assert.equal(root.collaborations[0].assignment.state,'cancelled');assert.doesNotMatch(JSON.stringify(root),/private result/);
   const disclosures=(await call('/api/disclosures',token))[1];assert.equal(disclosures.find(item=>item.kind==='result').state,'interrupted');assert.equal(disclosures.find(item=>item.kind==='failure').state,'interrupted');
  }finally{clearInterval(timer);Instance.prototype.taskComplete=originalComplete;Instance.prototype.taskFinish=originalFinish;await app.close();}
 });

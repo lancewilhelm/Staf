@@ -3,6 +3,9 @@
 This file guides coding agents editing the repository. It is not automatically
 loaded into conversations by Staf's runtime or provider adapters.
 
+For setup, verification commands, and the delivery workflow, see
+[development](docs/development.md).
+
 When changing a provider, authentication flow, configuration option, default or
 precedence, CLI command, or supported capability:
 

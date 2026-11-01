@@ -103,7 +103,7 @@ test('a slow accepted response appears without a status command while chat remai
   child.stdin.write('what time is it?\n');for(let i=0;i<100 && !output.includes('Still running');i++)await pause(50);assert.match(output,/Still running/,errors);
   child.stdin.write('/settings show\n');for(let i=0;i<100 && !output.includes('Revision:');i++)await pause(20);assert.match(output,/Revision:/);
   const approval=(await request(root,'/api/approvals')).body.find(x=>x.state==='pending');assert.ok(approval);await request(root,`/api/approvals/${approval.id}/approve`,{});
-  for(let i=0;i<100 && !output.includes('[tool_result]');i++)await pause(50);assert.match(output,/\[tool_result\].*\[ok\]/);assert.match(output,/Command [\w-]+: completed/);
+  for(let i=0;i<100 && !/Command [\w-]+: completed/.test(output);i++)await pause(50);assert.match(output,/\[tool_result\].*\[ok\]/);assert.match(output,/Command [\w-]+: completed/);
   child.stdin.end('/quit\n');await new Promise((resolve,reject)=>{child.on('error',reject);child.on('exit',code=>code===0?resolve():reject(Error(errors)));});child=undefined;
  }finally{child?.kill();await stop(root);rmSync(root,{recursive:true,force:true});}
 });

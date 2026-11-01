@@ -73,6 +73,9 @@ The shared instance includes a provisional daily and weekly schedule preview for
 
 ## Verify locally
 
+See the [development guide](docs/development.md) for the pinned package manager,
+focused tests, browser smoke check, and delivery workflow.
+
 ```sh
 pnpm run build
 pnpm run check
