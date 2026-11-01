@@ -189,7 +189,7 @@ can be changed by directly editing the file. The service stores a profile snapsh
 accepted chat command. Archive rejects active chat commands. The instance captures the profile for each turn, stores full provider history privately, and exposes only visible chat. New command IDs use a private keyed fingerprint to distinguish exact retries from different input that redacts to the same text. Older commands without a fingerprint remain queryable, but reuse of their IDs is rejected because the original input cannot be verified. Provider-specific settings are checked during execution. A pre-journal SQLite database is copied with `VACUUM INTO` before migration. The backup path
 is printed by `instance serve`; this is not a complete backup/restore workflow.
 
-OpenRouter and other chat-completions adapters combine caller cancellation with
+OpenRouter streams Chat Completions with usage requested, reconstructs fragmented function calls, and commits only after a supported finish reason and the stream terminator. An incomplete provider response cannot dispatch its proposed tools or become a completed message; tools completed in earlier response steps remain recorded. Models vary in tool support; missing usage remains unavailable. LM Studio and generic Chat Completions remain buffered. OpenRouter and other chat-completions adapters combine caller cancellation with
 their 60-second timeout. Offline tests verify that cancellation closes a local
 HTTP request.
 

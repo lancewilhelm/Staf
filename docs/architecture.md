@@ -16,8 +16,7 @@ send existing conversation history to the new provider on the next request.
 Provider adapters normalize messages and tools for the runtime. Codex uses direct
 Responses with a Staf-owned grant and model-bound replay. OpenRouter, LM Studio,
 and the generic live adapter use Chat Completions. The demo returns deterministic
-responses. Provider output is buffered until completion; the terminal displays
-command status and persisted tool progress. The service applies permissions and approval
+responses. Codex and OpenRouter stream provisional text through the shared service; LM Studio and the generic live adapter buffer provider output. Only completed responses are committed to conversation history. The terminal displays command status and persisted tool progress. The service applies permissions and approval
 rules before supported actions. See [direct Responses](direct-responses.md),
 [settings](settings.md), and [usage](usage.md).
 
@@ -138,8 +137,7 @@ uses the managed key for new OpenRouter work and ignores the host environment
 key. Saving does not verify account or model access. Known keys are redacted
 from supported conversation and output paths; the key is rejected from agent
 configuration writes. In-flight work may retain a previous key. Service, CLI,
-and served-browser coverage uses synthetic credentials and providers; live
-OpenRouter access remains unverified.
+and served-browser coverage uses synthetic credentials and streaming provider responses, including tool calls and recovery; live OpenRouter conversation and remote-instance access remain unverified.
 
 The agent editor combines its revisioned profile with the authenticated Codex
 and OpenRouter presence statuses to offer configured shared connections and the
