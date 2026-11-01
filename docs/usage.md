@@ -160,6 +160,15 @@ message or Shift+Enter to insert a new line. If no Codex sign-in is available,
 the workspace keeps your draft and directs you to provider settings. If a bot
 has no model, the workspace keeps your draft until you choose one.
 
+While a response runs, its provisional text and progress appear in the conversation.
+You can type a next draft, but cannot send it until the active response ends.
+Markdown headings, lists, links and code blocks render in assistant responses;
+use Copy on a code block. Raw HTML is not rendered. The conversation follows new
+output while you are at the bottom and stays in place when you scroll up.
+Incremental output is available when the adapter supplies it; buffered adapters
+show progress and then the completed message. A failed or interrupted response
+remains labeled as incomplete.
+
 The inbox shows current task updates, questions, and approval requests. Activity
 opens automatically for a new question or approval for the selected bot. Other
 updates do not open it. Select a request for another bot to view that bot's
@@ -235,6 +244,7 @@ pnpm start instance restore http://127.0.0.1:3210 ~/.staf-client.json BOT_ID REV
 pnpm start instance read http://127.0.0.1:3210 ~/.staf-client.json BOT_ID
 pnpm start instance send http://127.0.0.1:3210 ~/.staf-client.json BOT_ID 'Hello'
 pnpm start instance status http://127.0.0.1:3210 ~/.staf-client.json COMMAND_ID
+node dist/cli.js instance response-follow http://127.0.0.1:3210 ~/.staf-client.json COMMAND_ID
 ```
 
 The bot name can contain multiple arguments. Pass instructions as one quoted
@@ -252,7 +262,7 @@ archived bots.
 
 The CLI prints the command ID before submission; check status if its outcome is
 uncertain instead of automatically resending. A busy bot does not accept a new
-message. The browser retains its draft on busy, failure or uncertain submission;
+message. The browser retains the submitted text for recovery on busy, failure or uncertain submission and keeps the next draft editable;
 use **Check status** to inspect an uncertain outcome. If the command cannot be
 found, the original request may still arrive. The workspace retains its ID and
 offers an explicit retry of that same message and ID. The CLI takes text as an argument and has no interactive draft.

@@ -98,7 +98,7 @@ Public OIDC metadata and the documented direct endpoint contract were checked.
 On a new checkout, run
 `pnpm install --frozen-lockfile`. pnpm 10.27.0 is used for verification.
 
-The shared terminal displays command status and recorded tool progress.
+The workspace displays provisional main-chat response progress and renders Markdown with copyable code. The paired CLI can follow the same progress with `instance response-follow`. Incremental text depends on the provider: Codex direct supports it; the current Chat Completions adapters return buffered responses. The shared terminal displays command status and recorded tool progress.
 `/usage` shows reported main-chat consumption. `/context` reports historical input
 when available; current context occupancy is unavailable. Shared-instance provider
 sign-in and live chat have not been verified with real credentials.

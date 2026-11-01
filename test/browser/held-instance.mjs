@@ -4,7 +4,7 @@ import { startInstance } from '../../dist/instance-service.js';
 import { demoProvider } from '../../dist/providers.js';
 
 const [path, port] = process.argv.slice(2);
-let releaseInputTask;
+let releaseInputTask, releaseStream;
 function makeProvider() {
 let inputCalls=0, inputTask=false, skillCalls=0, skillTask=false, collabCalls=0, collabTask=false, webCalls=0, searchCalls=0, shellCalls=0;
 return {
@@ -98,7 +98,18 @@ const searchBackend=createServer(async(req,res)=>{let body='';for await(const ch
 await new Promise(resolve=>searchBackend.listen(0,'127.0.0.1',resolve));
 console.log('SYNTHETIC_SEARCH_ORIGIN http://127.0.0.1:'+searchBackend.address().port);
 const shellExecutor=async request=>{const {signal,...details}=request;console.log('SYNTHETIC_SHELL '+JSON.stringify(details));if(request.command==='simulate uncertainty')throw Error('Synthetic lost response');return {output:'hello from fake executor',exitCode:0,outputComplete:true,stopped:'completed'};};
-const app = startInstance(path, Number(port), { env: {}, authHooks, webDependencies, shellExecutor, enableReusableApprovals:process.argv[4]==='--grants', providerFactory: async () => makeProvider() });
+const app = startInstance(path, Number(port), { env: {}, authHooks, webDependencies, shellExecutor, enableReusableApprovals:process.argv[4]==='--grants', providerFactory: async () => {
+  const provider=makeProvider();
+  return {...provider,async *stream(messages,tools,options){
+    if(options?.currentUserInput!=='Streaming markdown fixture'){yield {type:'message',message:await provider.complete(messages,tools,options)};return;}
+    const first='# Streaming heading\n\n- First item\n- [safe link](https://example.com)\n\n```js\nconst n = 1;\n```\n\n<img src=x onerror="window.pwned=1">\n\n'+Array.from({length:100},(_,i)=>`Line ${i}`).join('\n\n')+'\n\n';
+    yield {type:'text_delta',text:first};
+    await new Promise(resolve=>{releaseStream=resolve});
+    yield {type:'text_delta',text:'More incoming text. '};
+    await new Promise(resolve=>{releaseStream=resolve});
+    yield {type:'message',message:{role:'assistant',content:first+'More incoming text. Finished.'}};
+  }};
+} });
 await app.listen();
 console.log(`Listening on http://127.0.0.1:${port}\nPairing code: ${app.code}`);
-createInterface({input:process.stdin}).on('line', line => { if(line==='release') releaseInputTask?.(); else console.log(`Pairing code: ${app.issueCode()}`); });
+createInterface({input:process.stdin}).on('line', line => { if(line==='release') releaseInputTask?.(); else if(line==='stream-next')releaseStream?.();else console.log(`Pairing code: ${app.issueCode()}`); });
