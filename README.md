@@ -27,7 +27,8 @@ one-shot commands.
 Run `pnpm start instance serve .staf/instance.sqlite 3210` and open
 `http://127.0.0.1:3210/`. Enter the host's pairing code to open the chat workspace.
 **Settings** shows the instance-wide Codex connection and offers sign-in when
-needed. It also offers Light, Dark, and System appearance for this browser;
+needed, progress, cancellation, retry, and sign-out. A saved sign-in does not
+verify account or model access. It also offers Light, Dark, and System appearance for this browser;
 System follows the device setting. The persistent agent list switches between main chats; each agent has its own configuration, which you can edit from its chat.
 Instructions live in its `soul.md` file; settings live in `agent.toml`. You can
 [edit these files directly](docs/usage.md#agent-configuration-files) on the instance host.

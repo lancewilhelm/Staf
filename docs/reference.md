@@ -92,6 +92,12 @@ attempt. No official Codex CLI credential is imported. See
 Shared-instance sign-in and inference have synthetic coverage and remain
 unverified with a live account.
 
+The paired CLI exposes `instance codex-auth-logout URL CREDENTIAL_FILE` alongside
+start, current, status, cancel, and credential inspection. Credential inspection
+reports a locally readable record and its expiry; it does not contact the
+provider or verify account or model access. Sign-out is rejected while work or
+sign-in is active and does not change agent configuration.
+
 ## Direct Responses request facts
 
 Codex uses POST `https://api.openai.com/v1/responses` with `store:false`,

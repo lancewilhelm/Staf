@@ -2,6 +2,8 @@ import { createInterface } from 'node:readline';
 import { createServer } from 'node:http';
 import { startInstance } from '../../dist/instance-service.js';
 import { demoProvider } from '../../dist/providers.js';
+import {mkdir,writeFile} from 'node:fs/promises';
+import {join} from 'node:path';
 
 const [path, port] = process.argv.slice(2);
 let releaseInputTask, releaseStream;
@@ -89,7 +91,7 @@ return {
   },
 };
 }
-const authHooks = { prepare: async () => ({hostId:'urn:uuid:synthetic',clientId:'synthetic-client'}), complete: async () => { throw Error('Synthetic auth must not exchange credentials'); } };
+const authHooks = { prepare: async () => ({hostId:'urn:uuid:synthetic',clientId:'synthetic-client'}), complete: async (root,_attempt,callback,_fetch,signal,beforeCommit) => {if(callback.searchParams.get('code')!=='success')throw Error('Synthetic failure');signal.throwIfAborted();await mkdir(join(root,'auth'),{recursive:true,mode:0o700});await beforeCommit();await writeFile(join(root,'auth','codex-direct.json'),JSON.stringify({version:1,issuer:'https://auth.openai.com',subject:'synthetic',clientId:'synthetic-client',hostId:'synthetic-host',accessToken:'synthetic-access-secret',refreshToken:'synthetic-refresh-secret',idToken:'synthetic-id-secret',scopes:['resource.invoke','chatgpt.tokens.use.direct'],expiresAt:Date.now()+3600000}),{mode:0o600});} };
 const webDependencies={
   resolve:async host=>{console.log('SYNTHETIC_WEB dns '+host);return [{address:'8.8.8.8',family:4}];},
   request:async url=>{console.log('SYNTHETIC_WEB request '+url.hostname);return {status:url.hostname==='one.example'?302:200,headers:url.hostname==='one.example'?{location:'https://two.example/second'}:{'content-type':'text/plain'},body:(async function*(){yield Buffer.from('Synthetic page content')})(),close(){}};},
