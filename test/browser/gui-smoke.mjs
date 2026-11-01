@@ -57,6 +57,19 @@ try{
  await browserCdp('Target.disposeBrowserContext',{browserContextId:context.browserContextId});
  await evaluate("window.testInput=(selector,value)=>{const el=document.querySelector(selector);Object.getOwnPropertyDescriptor(el.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,'value').set.call(el,value);el.dispatchEvent(new Event('input',{bubbles:true}))};window.testClick=text=>{const b=[...document.querySelectorAll('button')].find(x=>x.textContent.trim()===text);if(!b)throw Error('Missing button '+text);b.click()}");
  console.log('PASS appearance choices, persistence, and device changes');
+ await evaluate("window.routerFetch=window.fetch;window.fetch=async(...args)=>String(args[0]).endsWith('/api/openrouter-connection')&&args[1]?.method==='GET'?new Response(JSON.stringify({error:'storage failure'}),{status:400,headers:{'Content-Type':'application/json'}}):window.routerFetch(...args)");
+ await until(()=>evaluate("document.body.innerText.includes('OpenRouter credential storage is unavailable') && document.body.innerText.includes('Connect Codex')"),'credential status error leaves Settings available');
+ await evaluate("window.fetch=window.routerFetch");
+ await until(()=>evaluate("document.body.innerText.includes('No OpenRouter API key saved.')"),'credential status recovers');
+ await evaluate("window.routerFetch=window.fetch;window.fetch=async(...args)=>String(args[0]).endsWith('/api/openrouter-connection')&&args[1]?.method==='POST'?new Response(JSON.stringify({error:'synthetic failure'}),{status:503,headers:{'Content-Type':'application/json'}}):window.routerFetch(...args);testInput('input[type=password]','synthetic-browser-one');testClick('Save OpenRouter key')");
+ await until(()=>evaluate("document.body.innerText.includes('Could not save the key')"),'OpenRouter save failure');
+ assert.equal(await evaluate("document.querySelector('input[type=password]').value"),'synthetic-browser-one');
+ await act("window.fetch=window.routerFetch;testClick('Save OpenRouter key')","document.body.innerText.includes('API key saved for this instance.') && !document.querySelector('input[type=password]').value",'save OpenRouter key');
+ assert.equal(await evaluate("document.body.innerText.includes('does not verify account or model access')"),true);
+ await act("testInput('input[type=password]','synthetic-browser-two');testClick('Replace OpenRouter key')","document.body.innerText.includes('Key saved.') && !document.querySelector('input[type=password]').value",'replace OpenRouter key');
+ assert.doesNotMatch(await evaluate("document.body.innerText"),/synthetic-browser/);
+ await act("testClick('Disconnect OpenRouter')","document.body.innerText.includes('No OpenRouter API key saved.')",'disconnect OpenRouter');
+
  await act("testClick('Connect Codex')","document.body.innerText.includes('Continue sign-in')",'start synthetic Codex sign-in');
  await act("testClick('Cancel sign-in')","document.body.innerText.includes('Sign-in cancelled') || document.body.innerText.includes('Sign-in canceled')",'cancel synthetic Codex sign-in');
  await act("testClick('Create a bot')","document.body.innerText.includes('Create your bot')",'create bot without connecting');
@@ -147,6 +160,15 @@ try{
  await evaluate("testInput('[aria-label=Message]','Keep this until model selection');document.querySelector('[aria-label=Message]').focus()");
  await cdp('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',windowsVirtualKeyCode:13,nativeVirtualKeyCode:13});await cdp('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13,nativeVirtualKeyCode:13});
  assert.equal(await evaluate("document.querySelector('[aria-label=Message]').value"),'Keep this until model selection');assert.equal(await evaluate("document.body.innerText.includes('Choose a model for this bot to send.')"),true);console.log('PASS missing bot model preserves the draft and explains setup');
+ await evaluate("(async()=>{const t=localStorage.getItem('staf-token'),headers={Authorization:'Bearer '+t,'Content-Type':'application/json'};const bots=await (await fetch('/api/bots',{headers})).json(),b=bots.find(x=>x.name==='No model');await fetch('/api/bots/'+b.id+'/profile',{method:'POST',headers,body:JSON.stringify({revision:b.revision,name:b.name,instructions:b.instructions,provider:'openrouter',model:'fixture/router',reasoning:null})})})()");
+ await until(()=>evaluate("document.body.innerText.includes('Connect OpenRouter to chat')"),'OpenRouter missing connection is shown');
+ await evaluate("testInput('[aria-label=Message]','Keep OpenRouter draft');testClick('Send ↑')");
+ assert.equal(await evaluate("document.querySelector('[aria-label=Message]').value"),'Keep OpenRouter draft');assert.equal(await evaluate("document.body.innerText.includes('Connect OpenRouter in Settings to send.')"),true);
+ await act("testClick('Open provider settings')","!!document.querySelector('input[type=password]')",'open OpenRouter settings');
+ await act("testInput('input[type=password]','synthetic-browser-recovery');testClick('Save OpenRouter key')","document.body.innerText.includes('API key saved for this instance.')",'recover OpenRouter connection');
+ await act("testClick('Back to chat')","document.querySelector('[aria-label=Message]')?.value==='Keep OpenRouter draft'",'OpenRouter draft preserved through setup');
+ assert.equal(await evaluate("JSON.stringify(localStorage).includes('synthetic-browser-recovery')"),false);
+ console.log('PASS OpenRouter recovery preserves draft and keeps key out of browser storage');
  const legacyStatus=await evaluate("(async()=>{const t=localStorage.getItem('staf-token');return (await fetch('/advanced',{headers:{Authorization:'Bearer '+t}})).status})()");assert.equal(legacyStatus,404);console.log('PASS retired Advanced page is not served');
  const configured=join(temp,'already-configured');await mkdir(join(configured,'auth'),{recursive:true,mode:0o700});
  await writeFile(join(configured,'auth','codex-direct.json'),JSON.stringify({version:1,issuer:'https://auth.openai.com',subject:'synthetic',clientId:'synthetic-client',hostId:'synthetic-host',accessToken:'synthetic',refreshToken:'synthetic',idToken:'synthetic',scopes:['resource.invoke','chatgpt.tokens.use.direct'],expiresAt:Date.now()+3600000}),{mode:0o600});

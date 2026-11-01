@@ -4,8 +4,6 @@ services:
     init: true
     stdin_open: true
     tty: true
-    environment:
-      - OPENROUTER_API_KEY
     ports:
       - "127.0.0.1:3210:3211"
     volumes:
