@@ -247,7 +247,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
       let body: unknown = {};
       if (req.method === 'POST') {
         if (!req.headers['content-type']?.startsWith('application/json')) return json(415,{error:'JSON required'});
-        const bodyLimit=(req.url === '/api/skills' || /^\/api\/skills\/[\w-]+\/update$/.test(req.url ?? '')) ? 1600000 : /^\/api\/bots\/[\w-]+\/config-files$/.test(req.url ?? '') ? 1000000 : 65536;
+        const bodyLimit=(req.url === '/api/skills' || /^\/api\/skills\/[\w-]+\/update$/.test(req.url ?? '')) ? 1600000 : 65536;
         const chunks:Buffer[]=[];let size=0;
         for await (const chunk of req) { const bytes=Buffer.isBuffer(chunk)?chunk:Buffer.from(chunk);size+=bytes.length;if(size>bodyLimit)return json(413,{error:'Body too large'});chunks.push(bytes); }
         body = JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(Buffer.concat(chunks)));
@@ -405,15 +405,10 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
       }
       const creationMatch=req.url?.match(/^\/api\/bot-creations\/([\w-]+)$/);
       if(req.method==='GET' && creationMatch?.[1]) {const bot=instance.creationOperation(creationMatch[1]);return bot ? json(200,bot) : json(404,{error:'Creation operation not found'});}
-      const botMatch = req.url?.match(/^\/api\/bots\/([\w-]+)(?:\/(profile|config-files|archive|restore))?$/);
+      const botMatch = req.url?.match(/^\/api\/bots\/([\w-]+)(?:\/(profile|archive|restore))?$/);
       if (botMatch?.[1]) {
         const id = botMatch[1], action = botMatch[2];
         if (req.method === 'GET' && !action) { const bot = instance.bot(id); return bot ? json(200,bot) : json(404,{error:'Bot not found'}); }
-        if (req.method === 'GET' && action==='config-files') {const files=instance.botFiles(id);return files ? json(200,files) : json(404,{error:'Bot not found'});}
-        if (req.method === 'POST' && action==='config-files') {
-          if (typeof value.revision!=='string' || !/^[a-f0-9]{64}$/.test(value.revision) || typeof value.settings!=='string' || typeof value.instructions!=='string') return json(400,{error:'Invalid configuration files'});
-          return json(200,instance.editBotFiles(id,{revision:value.revision,settings:value.settings,instructions:value.instructions}));
-        }
         if (req.method === 'POST' && (action === 'archive' || action === 'restore')) {
           if (typeof value.revision !== 'string' || !/^[a-f0-9]{64}$/.test(value.revision)) return json(400,{error:'Revision required'});
           return json(200,instance.setArchived(id,value.revision,action === 'archive'));

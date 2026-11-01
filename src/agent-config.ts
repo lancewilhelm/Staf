@@ -27,15 +27,15 @@ function parseSettings(data:ReturnType<typeof TOML.parse>, instructions:string):
   if (Object.keys(data).some(key=>!allowed.includes(key)) || typeof data.name!=='string' || !data.name.trim() || data.name.length>200 || typeof data.description!=='string' || Buffer.byteLength(data.description,'utf8')>4096 || typeof data.provider!=='string' || !['demo','codex','openrouter','lmstudio','live'].includes(data.provider) || !(data.model===undefined || typeof data.model==='string' && data.model.length<=200) || !(data.reasoning===undefined || typeof data.reasoning==='string' && data.reasoning.length<=100) || instructions.length>30000) throw Error('Invalid agent.toml or soul.md');
   return {name:data.name,description:data.description,provider:data.provider,model:data.model??null,reasoning:data.reasoning??null,instructions};
 }
-export function parseAgentFiles(settings:string,instructions:string):AgentSettings {
+function parseAgentFiles(settings:string,instructions:string):AgentSettings {
   if (Buffer.from(settings,'utf8').toString('utf8')!==settings || Buffer.from(instructions,'utf8').toString('utf8')!==instructions) throw Error('Configuration files must contain valid UTF-8 text');
   return parseSettings(TOML.parse(settings),instructions);
 }
-export function decodeAgentFile(bytes:Uint8Array):string {
+function decodeAgentFile(bytes:Uint8Array):string {
   try { return new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(bytes); }
   catch { throw Error('Configuration files must contain valid UTF-8 text'); }
 }
-export function formatAgentToml(input:AgentSettings):string {
+function formatAgentToml(input:AgentSettings):string {
   const values={name:input.name,description:input.description,provider:input.provider,...(input.model===null?{}:{model:input.model}),...(input.reasoning===null?{}:{reasoning:input.reasoning})};
   for (const value of [...Object.values(values),input.instructions]) if (Buffer.from(value,'utf8').toString('utf8')!==value) throw Error('Configuration files must contain valid UTF-8 text');
   parseSettings(values,input.instructions);
@@ -52,11 +52,11 @@ function updateAgentToml(source:string,input:AgentSettings):string {
     // Quoted keys and multiline strings are accepted by the TOML parser; the
     // edit must preserve all text around each value, including comments.
     const assignment=/^[ \t]*((?:[A-Za-z0-9_-]+)|(?:"(?:\\.|[^"\\])*")|(?:'[^']*'))[ \t]*=[ \t]*/.exec(line);
-    if (!assignment?.[1]) throw new AgentConfigConflict('Cannot safely update this TOML layout. Use config-checkout and config-publish.');
+    if (!assignment?.[1]) throw new AgentConfigConflict('Cannot safely update this TOML layout. Edit agent.toml directly.');
     const parsed=TOML.parse(`${assignment[1]} = ""`),key=Object.keys(parsed)[0];
-    if (!key || !Object.hasOwn(values,key)) throw new AgentConfigConflict('Cannot safely update this TOML layout. Use config-checkout and config-publish.');
+    if (!key || !Object.hasOwn(values,key)) throw new AgentConfigConflict('Cannot safely update this TOML layout. Edit agent.toml directly.');
     const start=offset+assignment[0].length,quote=source[start];
-    if (quote!=="'" && quote!=='"') throw new AgentConfigConflict('Cannot safely update this TOML value. Use config-checkout and config-publish.');
+    if (quote!=="'" && quote!=='"') throw new AgentConfigConflict('Cannot safely update this TOML value. Edit agent.toml directly.');
     const triple=source.slice(start,start+3)===quote.repeat(3);let cursor=start+(triple?3:1),closed=false;
     while (cursor<source.length) {
       if (quote==='"' && source[cursor]==='\\') { cursor+=2;continue; }
@@ -68,7 +68,7 @@ function updateAgentToml(source:string,input:AgentSettings):string {
       }
       cursor++;
     }
-    if (!closed) throw new AgentConfigConflict('Cannot safely update this TOML value. Use config-checkout and config-publish.');
+    if (!closed) throw new AgentConfigConflict('Cannot safely update this TOML value. Edit agent.toml directly.');
     found.add(key);
     const field=key as keyof typeof values,value=values[field];
     if (value!==existing[field]) {
@@ -81,32 +81,41 @@ function updateAgentToml(source:string,input:AgentSettings):string {
   for (const replacement of replacements.reverse()) result=result.slice(0,replacement.start)+replacement.text+result.slice(replacement.end);
   for (const [key,value] of Object.entries(values)) if (!found.has(key) && value!==null) result+=(result && !result.endsWith('\n')?'\n':'')+TOML.stringify({[key]:value});
   const parsed=parseAgentFiles(result,input.instructions);
-  if (parsed.name!==input.name || parsed.description!==input.description || parsed.provider!==input.provider || parsed.model!==input.model || parsed.reasoning!==input.reasoning) throw new AgentConfigConflict('Cannot safely update this TOML layout. Use config-checkout and config-publish.');
+  if (parsed.name!==input.name || parsed.description!==input.description || parsed.provider!==input.provider || parsed.model!==input.model || parsed.reasoning!==input.reasoning) throw new AgentConfigConflict('Cannot safely update this TOML layout. Edit agent.toml directly.');
   return result;
 }
-function sealFiles(dir:string,settings:string,instructions:string) {
-  const snapshot=join(dir,'.published'),temporary=join(dir,`.published-${randomUUID()}`);
+function writeSnapshot(dir:string,name:string,settings:string,instructions:string) {
+  const snapshot=join(dir,name),temporary=join(dir,`.snapshot-${randomUUID()}`);
   mkdirSync(temporary,{mode:0o700});
   writeDurable(join(temporary,'agent.toml'),settings);
   writeDurable(join(temporary,'soul.md'),instructions);
   syncDirectory(temporary);renameSync(temporary,snapshot);
   syncDirectory(dir);
 }
-function checkPublished(dir:string,settings:string,instructions:string) {
+function rememberPublished(dir:string,settings:string,instructions:string,revision:string) {
   const snapshot=join(dir,'.published'),marker=join(dir,'.sealed');
   if (existsSync(marker) && !existsSync(snapshot)) throw new AgentConfigInvalid(`Invalid configuration: the published snapshot is missing at ${snapshot}. Restore it from a backup before continuing.`);
-  if (!existsSync(snapshot)) sealFiles(dir,settings,instructions);
+  if (!existsSync(snapshot)) writeSnapshot(dir,'.published',settings,instructions);
   const savedSettings=decodeAgentFile(readFileSync(join(snapshot,'agent.toml'))),savedInstructions=decodeAgentFile(readFileSync(join(snapshot,'soul.md')));
-  if (settings!==savedSettings || instructions!==savedInstructions) throw new AgentConfigInvalid(`Invalid configuration: published files were edited outside the versioned editing workflow at ${dir}. Your file changes remain there; the last published files are in ${snapshot}. Save your edits elsewhere, restore both files from that directory, then use config-checkout and config-publish to reconcile them.`);
+  if (settings!==savedSettings || instructions!==savedInstructions) {
+    const history=join(dir,'.history'),entry=join(history,revision);
+    const existed=existsSync(history);
+    mkdirSync(history,{recursive:true,mode:0o700});
+    if (!existed) syncDirectory(dir);
+    if (!existsSync(entry)) writeSnapshot(history,revision,settings,instructions);
+    if (decodeAgentFile(readFileSync(join(entry,'agent.toml')))!==settings || decodeAgentFile(readFileSync(join(entry,'soul.md')))!==instructions) throw new AgentConfigInvalid(`Configuration recovery copy is invalid at ${entry}. Inspect the files before continuing.`);
+  }
   if (!existsSync(marker)) { writeDurable(marker,'1');syncDirectory(dir); }
 }
 function revisionFiles(dir:string, archived:boolean) {
   const toml=join(dir,'agent.toml'),soul=join(dir,'soul.md');
-  if (statSync(toml).size>65536 || statSync(soul).size>120000) throw Error('Configuration file exceeds the size limit');
+  const tomlStat=statSync(toml,{bigint:true}),soulStat=statSync(soul,{bigint:true});
+  if (tomlStat.size>65536n || soulStat.size>120000n) throw Error('Configuration file exceeds the size limit');
   const settings=decodeAgentFile(readFileSync(toml)),instructions=decodeAgentFile(readFileSync(soul));
-  const revision=createHash('sha256').update(basename(dir)).update('\0').update(settings).update('\0').update(instructions).update(archived ? '\x01' : '\0').digest('hex');
+  const previousRevision=createHash('sha256').update(basename(dir)).update('\0').update(settings).update('\0').update(instructions).update(archived ? '\x01' : '\0').digest('hex');
+  const revision=createHash('sha256').update(previousRevision).update('\0').update([tomlStat.dev,tomlStat.ino,tomlStat.ctimeNs,tomlStat.mtimeNs,soulStat.dev,soulStat.ino,soulStat.ctimeNs,soulStat.mtimeNs].join(':')).digest('hex');
   const legacyRevision=createHash('sha256').update(settings).update('\0').update(instructions).update(archived ? '\x01' : '\0').digest('hex');
-  return {settings,instructions,revision,legacyRevision};
+  return {settings,instructions,revision,previousRevision,legacyRevision};
 }
 
 /** A current symlink publishes a complete, durable pair of editable files. */
@@ -128,7 +137,7 @@ export class AgentConfigStore {
         const data:unknown=JSON.parse(readFileSync(marker,'utf8'));
         if (!data || typeof data!=='object' || !('revision' in data) || typeof data.revision!=='string' || !('archived' in data) || typeof data.archived!=='boolean') throw Error('Invalid retired marker');
         const files=revisionFiles(previous,data.archived);
-        if (data.revision!==files.revision && data.revision!==files.legacyRevision) throw Error('Changed');
+        if (data.revision!==files.revision && data.revision!==files.previousRevision && data.revision!==files.legacyRevision) throw Error('Changed');
       } catch {
         throw new AgentConfigInvalid(`A previous revision was edited after publication: ${previous}. Reconcile its files with the current configuration, then remove its .retired marker.`);
       }
@@ -140,10 +149,9 @@ export class AgentConfigStore {
       const target=this.currentTarget(id);
       this.checkRetired(base,target);
       const files=revisionFiles(join(base,target),archived);
-      if (!existsSync(join(base,target,'.published'))) parseAgentFiles(files.settings,files.instructions);
-      checkPublished(join(base,target),files.settings,files.instructions);
-      if (revisionFiles(join(base,target),archived).revision!==files.revision) throw new AgentConfigInvalid(`Configuration changed while reading ${configDir}. Inspect the files and retry.`);
       const settings=parseAgentFiles(files.settings,files.instructions);
+      rememberPublished(join(base,target),files.settings,files.instructions,files.revision);
+      if (revisionFiles(join(base,target),archived).revision!==files.revision) throw new AgentConfigInvalid(`Configuration changed while reading ${configDir}. Inspect the files and retry.`);
       return {...settings,revision:files.revision,configDir};
     } catch (error) {
       if (error instanceof AgentConfigInvalid) throw error;
@@ -178,7 +186,7 @@ export class AgentConfigStore {
     mkdirSync(revisionDir,{mode:0o700});
     writeDurable(join(revisionDir,'agent.toml'),settings);
     writeDurable(join(revisionDir,'soul.md'),instructions);
-    sealFiles(revisionDir,settings,instructions);
+    writeSnapshot(revisionDir,'.published',settings,instructions);
     writeDurable(join(revisionDir,'.sealed'),'1');
     syncDirectory(revisionDir); syncDirectory(revisions);
     const publishedRevision=revisionFiles(revisionDir,archived).revision;

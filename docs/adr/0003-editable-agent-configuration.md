@@ -26,13 +26,11 @@ both files through an atomic revision-directory pointer, as described in the
 See the [interview decisions](../decisions.md#chat-gui-polish-and-agent-terminology)
 and [copied creation defaults](0002-copy-bot-creation-defaults.md).
 
-## Revision: coordinated file publication
+## Revision: direct editing and recovery
 
-The owner approved a versioned editing directory and explicit publish step for
-issue #28. This revises the automatic direct-save workflow above: an editor
-changes a temporary checkout of the authoritative pair and publishes it through
-the shared service with its starting revision. This provides a coordination
-point for detecting stale editors and publishing both files together. The service
-keeps the published pair authoritative and retains a copy for recovery from an
-unexpected write to the published path. See [usage](../usage.md#agent-configuration-files)
-for the workflow and its limits.
+For issue #28, the owner chose ordinary direct edits instead of the proposed
+checkout and explicit publish workflow. The service validates files before new
+work, rejects stale client saves, and retains observed valid configurations for
+recovery. Direct file writes are last-write-wins. A version overwritten before
+the service observes it cannot be recovered, and separate writes to the two
+files do not form an atomic pair. See [usage](../usage.md#agent-configuration-files).

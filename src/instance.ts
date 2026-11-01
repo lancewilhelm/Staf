@@ -3,7 +3,7 @@ import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { closeSync, openSync, mkdtempSync, rmSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
-import { AgentConfigStore, AgentConfigUncertain, type AgentConfig } from './agent-config.js';
+import { AgentConfigStore, AgentConfigUncertain } from './agent-config.js';
 import { hasCode } from './validation.js';
 import type { Session, Message } from './types.js';
 import { validSession } from './validation.js';
@@ -480,25 +480,18 @@ export class Instance {
     });
   }
   bot(id: string) { const identity=this.botIdentity(id);return identity ? {...identity,...this.configs.read(id,identity.archived)} : undefined; }
-  botFiles(id:string) { const identity=this.botIdentity(id);return identity ? this.configs.readFiles(id,identity.archived) : undefined; }
   discoverBots(requesterId:string, query:string) {
     if (!this.botIdentity(requesterId) || this.botIdentity(requesterId)?.archived) throw new Error('Requester bot not found');
     const entries=this.bots().filter(bot=>!('configError' in bot)).map(bot=>({id:String(bot.id),name:String(bot.name),description:String(bot.description),availability:bot.archived ? 'archived' as const : this.db.prepare("SELECT 1 FROM task_attempts WHERE bot_id=? AND state IN ('queued','running','stopping','waiting') UNION ALL SELECT 1 FROM commands WHERE bot_id=? AND state='pending' LIMIT 1").get(String(bot.id),String(bot.id)) ? 'busy' as const : 'active' as const}));
     return discoverBots({requesterId,query,entries});
   }
   editBot(id: string, edit: BotEdit) {
-    return this.updateBotConfig(id,edit.revision,current=>this.configs.publish(id,{name:edit.name,description:edit.description ?? current.description,instructions:edit.instructions,provider:edit.provider,model:edit.model,reasoning:edit.reasoning},current.archived,edit.revision));
-  }
-  editBotFiles(id:string,edit:{revision:string;settings:string;instructions:string}) {
-    return this.updateBotConfig(id,edit.revision,current=>this.configs.publishFiles(id,edit.settings,edit.instructions,current.archived,edit.revision));
-  }
-  private updateBotConfig(id:string,revision:string,publish:(current:{description:string;archived:boolean})=>AgentConfig) {
     this.db.exec('BEGIN IMMEDIATE');
     try {
       const current = this.bot(id);
       if (!current) throw new Error('Bot not found');
-      if (current.revision !== revision) throw new BotConflict('Profile changed. Refresh before editing.');
-      const config=publish(current);
+      if (current.revision !== edit.revision) throw new BotConflict('Profile changed. Refresh before editing.');
+      const config=this.configs.publish(id,{name:edit.name,description:edit.description ?? current.description,instructions:edit.instructions,provider:edit.provider,model:edit.model,reasoning:edit.reasoning},current.archived,edit.revision);
       try { this.db.exec('COMMIT'); } catch { throw new AgentConfigUncertain('Configuration save may have taken effect. Inspect the current configuration before retrying.'); }
       return {...current,...config};
     } catch (error) { try { this.db.exec('ROLLBACK'); } catch {} throw error; }

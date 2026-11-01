@@ -305,11 +305,12 @@ edits report a conflict and preserve unsaved client changes. An invalid file
 remains intact, produces an actionable error, and blocks new messages for that
 agent while its conversation and other agents remain usable.
 
-For issue #28, the owner subsequently approved a versioned editing directory
-and explicit publish step. This replaces automatic application of ordinary saves
-to the published path: file edits are made in a checkout and published with its
-starting revision. The change provides conflict detection and a single
-publication point for both files. See the revision in [ADR-0003](adr/0003-editable-agent-configuration.md#revision-coordinated-file-publication).
+For issue #28, the owner reconsidered the proposed explicit publish workflow
+and chose direct file editing. Staf reloads valid files before new work and
+retains observed configurations for recovery. Direct saves are last-write-wins:
+an overwritten version that Staf never observed cannot be recovered, and
+separate edits to the two files are not an atomic pair. See the revision in
+[ADR-0003](adr/0003-editable-agent-configuration.md#revision-direct-editing-and-recovery).
 The owner confirmed that cache means provider prompt caching. Preserve the
 requirement to warn about configuration changes that may affect reuse, but defer
 prompt construction, prompt updates, cache-impact rules, and detailed warning

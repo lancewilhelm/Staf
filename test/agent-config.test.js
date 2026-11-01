@@ -5,6 +5,33 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { startInstance } from '../dist/instance-service.js';
 
+test('direct file edits become visible and preserve previously observed configuration', async () => {
+  const {writeFile,readdir}=await import('node:fs/promises');
+  const dir=await mkdtemp(join(tmpdir(),'staf-config-direct-edit-')),path=join(dir,'db');let app=startInstance(path),port=await app.listen(),token;
+  const call=async(route,body)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});return [response.status,await response.json()];};
+  try {
+    token=(await call('/api/pair',{code:app.code}))[1].token;
+    const agent=(await call('/api/bots',{name:'Ada',instructions:'Original'}))[1],file=join(agent.configDir,'agent.toml');
+    const original=await readFile(file,'utf8');
+    await writeFile(file,original.replace('name = "Ada"','name = "Ada Test"'));
+    const edited=await call(`/api/bots/${agent.id}`);assert.equal(edited[0],200);assert.equal(edited[1].name,'Ada Test');
+    assert.equal((await call(`/api/bots/${agent.id}/profile`,{...agent,name:'Stale GUI'}))[0],409);
+    assert.equal(await readFile(join(agent.configDir,'.published','agent.toml'),'utf8'),original);
+    await writeFile(file,original.replace('name = "Ada"','name = "Ada Again"'));
+    assert.equal((await call(`/api/bots/${agent.id}`))[1].name,'Ada Again');
+    const history=join(agent.configDir,'.history');
+    const snapshots=await Promise.all((await readdir(history)).map(name=>readFile(join(history,name,'agent.toml'),'utf8')));
+    assert.ok(snapshots.some(text=>text.includes('name = "Ada Test"')));
+    await app.close();app=startInstance(path);port=await app.listen();
+    assert.equal((await call(`/api/bots/${agent.id}`))[1].name,'Ada Again');
+    const afterRestart=await Promise.all((await readdir(history)).map(name=>readFile(join(history,name,'agent.toml'),'utf8')));
+    assert.ok(afterRestart.some(text=>text.includes('name = "Ada Test"')));
+    await writeFile(file,original);
+    const restored=(await call(`/api/bots/${agent.id}`))[1];assert.notEqual(restored.revision,agent.revision);
+    assert.equal((await call(`/api/bots/${agent.id}/profile`,{...agent,name:'Old draft'}))[0],409);
+  } finally {await app.close();await rm(dir,{recursive:true,force:true});}
+});
+
 test('fresh service exposes the authoritative agent configuration files', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'staf-agent-config-'));
   const app = startInstance(join(dir, 'instance.sqlite'));
@@ -52,10 +79,9 @@ test('service and direct file edits share a stable, validated configuration acro
     assert.equal(await readFile(join(agent.configDir,'soul.md'),'utf8'),'From API');
     assert.match(await readFile(join(agent.configDir,'agent.toml'),'utf8'),/Renamed/);
     await writeFile(join(agent.configDir,'soul.md'),'Edited on disk');
-    assert.equal((await call(`/api/bots/${agent.id}`))[0],422);
-    assert.equal(await readFile(join(agent.configDir,'soul.md'),'utf8'),'Edited on disk');
-    await writeFile(join(agent.configDir,'soul.md'),'From API');
-    const onDisk=(await call(`/api/bots/${agent.id}/profile`,{...edited,name:'Edited on disk',instructions:'Edited on disk'}))[1];
+    const structured=await readFile(join(agent.configDir,'agent.toml'),'utf8');
+    await writeFile(join(agent.configDir,'agent.toml'),structured.replace('name = "Renamed"','name = "Edited on disk"'));
+    const onDisk=(await call(`/api/bots/${agent.id}`))[1];
     assert.equal(onDisk.instructions,'Edited on disk');
     assert.equal(onDisk.name,'Edited on disk');
     assert.notEqual(onDisk.revision,edited.revision);
@@ -109,8 +135,7 @@ test('actual paired CLI inspects and edits the same files as direct file changes
     await cli('pair',url,credential,app.code);
     const agent=JSON.parse(await cli('create',url,credential,'Ada','--instructions','From CLI'));
     assert.equal(await readFile(join(agent.configDir,'soul.md'),'utf8'),'From CLI');
-    const directory=join(dir,'file-edit');await cli('config-checkout',url,credential,agent.id,directory);
-    await writeFile(join(directory,'soul.md'),'From disk');await cli('config-publish',url,credential,directory);
+    await writeFile(join(agent.configDir,'soul.md'),'From disk');
     const inspected=JSON.parse(await cli('inspect',url,credential,agent.id));
     assert.equal(inspected.instructions,'From disk');
     const input=join(dir,'edit.json');await writeFile(input,JSON.stringify({...inspected,name:'Ada renamed',instructions:'Saved by CLI'}));
@@ -162,7 +187,6 @@ test('old revisions stay stale after settings or archive state return to earlier
 
 test('accepted work keeps its captured instructions even if files change or become invalid', async () => {
   const { writeFile }=await import('node:fs/promises');
-  const {execFile}=await import('node:child_process');const {promisify}=await import('node:util');const exec=promisify(execFile);
   const dir=await mkdtemp(join(tmpdir(),'staf-config-capture-'));
   let entered,release;const started=new Promise(resolve=>{entered=resolve}),gate=new Promise(resolve=>{release=resolve}),seen=[];
   const providerFactory=async profile=>({name:'fixture',capabilities:{toolCalls:true},async complete(){seen.push(profile.instructions);entered();await gate;return {role:'assistant',content:'done'};}});
@@ -171,12 +195,8 @@ test('accepted work keeps its captured instructions even if files change or beco
   try {
     token=(await call('/api/pair',{code:app.code}))[1].token;
     const agent=(await call('/api/bots',{name:'Ada',instructions:'Captured'}))[1];
-    const credential=join(dir,'client.json'),checkout=join(dir,'edit');await writeFile(credential,JSON.stringify({token}));
-    const cli=async(...args)=>(await exec(process.execPath,['dist/cli.js','instance',...args])).stdout,url=`http://127.0.0.1:${port}`;
-    await cli('config-checkout',url,credential,agent.id,checkout);
-    await writeFile(join(checkout,'soul.md'),'Changed');
     assert.equal((await call('/api/commands',{id:'first',botId:agent.id,content:'hello'}))[1].kind,'accepted');await started;
-    await cli('config-publish',url,credential,checkout);
+    await writeFile(join(agent.configDir,'soul.md'),'Changed');
     const originalToml=await readFile(join(agent.configDir,'agent.toml'),'utf8');
     await writeFile(join(agent.configDir,'agent.toml'),'invalid = [');
     release();let command;for(let i=0;i<100;i++){command=(await call('/api/commands/first'))[1];if(command.state!=='pending')break;await new Promise(resolve=>setTimeout(resolve,10));}
@@ -216,9 +236,7 @@ test('a direct edit during publication is preserved and the client save conflict
     fs.symlinkSync=original;syncBuiltinESMExports();
     assert.equal(injected,true);assert.equal(result[0],409);
     assert.equal(await readFile(join(before.configDir,'soul.md'),'utf8'),'Direct edit');
-    assert.equal((await call(`/api/bots/${before.id}`))[0],422);
-    fs.writeFileSync(join(before.configDir,'soul.md'),'Original');
-    assert.equal((await call(`/api/bots/${before.id}`))[1].name,'Ada');
+    const current=(await call(`/api/bots/${before.id}`))[1];assert.equal(current.name,'Ada');assert.equal(current.instructions,'Direct edit');
   }finally{fs.symlinkSync=original;syncBuiltinESMExports();await app.close();await rm(dir,{recursive:true,force:true});}
 });
 
@@ -305,7 +323,7 @@ test('background work captures instructions when accepted', async () => {
   }finally{release();await app.close();await rm(dir,{recursive:true,force:true});}
 });
 
-test('a stale direct editor saving by pathname cannot silently replace a client save', async () => {
+test('a later direct pathname save takes effect and retains the previous client save', async () => {
   const { writeFile } = await import('node:fs/promises');
   const dir = await mkdtemp(join(tmpdir(), 'staf-config-stale-editor-'));
   const path=join(dir,'db');let app = startInstance(path);
@@ -329,11 +347,10 @@ test('a stale direct editor saving by pathname cannot silently replace a client 
     await writeFile(file, `${staleBuffer} plus editor change`);
     await app.close();app=startInstance(path);port=await app.listen();
     const inspection = await call(`/api/bots/${agent.id}`);
-    assert.equal(inspection[0], 422, 'a stale editor save should require conflict resolution');
+    assert.equal(inspection[0], 200);
+    assert.equal(inspection[1].instructions,`${staleBuffer} plus editor change`);
     assert.equal(await readFile(file, 'utf8'), `${staleBuffer} plus editor change`);
     assert.equal(await readFile(join(agent.configDir, '.published', 'soul.md'), 'utf8'), 'Client save');
-    await writeFile(file, 'Client save');
-    assert.equal((await call(`/api/bots/${agent.id}`))[1].instructions, 'Client save');
   } finally {
     await app.close();
     await rm(dir, { recursive: true, force: true });
@@ -367,7 +384,8 @@ test('invalid UTF-8 in a published file is rejected even when it decodes like th
     await writeFile(file,bad);
     const result=await call(`/api/bots/${agent.id}`);assert.equal(result[0],422);assert.match(result[1].error,/valid UTF-8/);assert.deepEqual(await readFile(file),bad);
     await writeFile(file,'a\ufffdb');
-    assert.equal((await call(`/api/bots/${agent.id}/profile`,{...agent,instructions:'\ud800'}))[0],400);
+    const repaired=(await call(`/api/bots/${agent.id}`))[1];
+    assert.equal((await call(`/api/bots/${agent.id}/profile`,{...repaired,instructions:'\ud800'}))[0],400);
     assert.equal((await call(`/api/bots/${agent.id}`))[1].instructions,'a\ufffdb');
   } finally {await app.close();await rm(dir,{recursive:true,force:true});}
 });
@@ -385,7 +403,7 @@ test('an existing file configuration is sealed on startup before client access',
     app=startInstance(path);port=await app.listen();
     assert.equal(await readFile(join(agent.configDir,'.published','soul.md'),'utf8'),'Existing');
     await writeFile(join(agent.configDir,'soul.md'),'Uncoordinated edit');
-    assert.equal((await call(`/api/bots/${agent.id}`))[0],422);
+    assert.equal((await call(`/api/bots/${agent.id}`))[1].instructions,'Uncoordinated edit');
   } finally {await app.close();await rm(dir,{recursive:true,force:true});}
 });
 
@@ -409,81 +427,57 @@ test('previously retired revisions keep their legacy hash across upgrade', async
 });
 
 test('service file publication preserves authored TOML when editing instructions', async () => {
+  const {writeFile}=await import('node:fs/promises');
   const dir=await mkdtemp(join(tmpdir(),'staf-config-comments-'));
   const app=startInstance(join(dir,'db'));const port=await app.listen();let token;
   const call=async(route,body)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});return [response.status,await response.json()];};
   try {
     token=(await call('/api/pair',{code:app.code}))[1].token;
     const agent=(await call('/api/bots',{name:'Ada',instructions:'Original'}))[1];
-    const files=(await call(`/api/bots/${agent.id}/config-files`))[1],settings='# Owner comment\n'+files.settings;
-    const published=await call(`/api/bots/${agent.id}/config-files`,{...files,settings});assert.equal(published[0],200);
+    const file=join(agent.configDir,'agent.toml'),settings='# Owner comment\n'+await readFile(file,'utf8');
+    await writeFile(file,settings);const published=await call(`/api/bots/${agent.id}`);assert.equal(published[0],200);
     const edited=await call(`/api/bots/${agent.id}/profile`,{...published[1],instructions:'Updated instructions'});assert.equal(edited[0],200);
-    assert.equal((await call(`/api/bots/${agent.id}/config-files`))[1].settings,settings);
+    assert.equal(await readFile(file,'utf8'),settings);
     const changed=await call(`/api/bots/${agent.id}/profile`,{...edited[1],name:'Changed'});
     assert.equal(changed[0],200);
-    assert.equal((await call(`/api/bots/${agent.id}/config-files`))[1].settings,settings.replace('name = "Ada"','name = "Changed"'));
+    assert.equal(await readFile(file,'utf8'),settings.replace('name = "Ada"','name = "Changed"'));
   } finally {await app.close();await rm(dir,{recursive:true,force:true});}
 });
 
 test('GUI-style settings saves retain TOML comments and multiline values', async () => {
+  const {writeFile}=await import('node:fs/promises');
   const dir=await mkdtemp(join(tmpdir(),'staf-config-formatting-'));const app=startInstance(join(dir,'db'));const port=await app.listen();let token;
   const call=async(route,body)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});return [response.status,await response.json()];};
   try {
     token=(await call('/api/pair',{code:app.code}))[1].token;
     const agent=(await call('/api/bots',{name:'Ada',instructions:'Soul'}))[1];
-    const files=(await call(`/api/bots/${agent.id}/config-files`))[1];
     const settings=`# Preserve this comment\n"name" = 'Ada' # name note\ndescription = """First line\n# Text inside the value\nLast line"""\nprovider = 'demo' # provider note\nmodel = 'old#model' # model note\n`;
-    const published=await call(`/api/bots/${agent.id}/config-files`,{...files,settings});assert.equal(published[0],200);
+    const file=join(agent.configDir,'agent.toml');await writeFile(file,settings);
+    const published=await call(`/api/bots/${agent.id}`);assert.equal(published[0],200);
     const edited=await call(`/api/bots/${agent.id}/profile`,{...published[1],name:'New Ada',model:null});assert.equal(edited[0],200);
-    const after=(await call(`/api/bots/${agent.id}/config-files`))[1].settings;
+    const after=await readFile(file,'utf8');
     assert.match(after,/# Preserve this comment/);assert.match(after,/# name note/);assert.match(after,/# provider note/);assert.match(after,/# model note/);
     assert.match(after,/description = """First line\n# Text inside the value\nLast line"""/);
     assert.equal((await call(`/api/bots/${agent.id}`))[1].name,'New Ada');
   } finally {await app.close();await rm(dir,{recursive:true,force:true});}
 });
 
-test('versioned file editing publishes through the actual CLI and rejects a stale directory', async () => {
+test('the paired CLI observes direct Unicode edits and reports invalid UTF-8', async () => {
   const {writeFile}=await import('node:fs/promises');
   const {execFile}=await import('node:child_process');const {promisify}=await import('node:util');const exec=promisify(execFile);
-  const dir=await mkdtemp(join(tmpdir(),'staf-edit-directory-'));const app=startInstance(join(dir,'db'));const port=await app.listen();
-  const url=`http://127.0.0.1:${port}`,credential=join(dir,'client.json'),first=join(dir,'first'),stale=join(dir,'stale'),invalid=join(dir,'invalid'),large=join(dir,'large'),badUtf8=join(dir,'bad-utf8');
+  const dir=await mkdtemp(join(tmpdir(),'staf-direct-cli-'));const app=startInstance(join(dir,'db'));const port=await app.listen();
+  const url=`http://127.0.0.1:${port}`,credential=join(dir,'client.json');
   const cli=async(...args)=>(await exec(process.execPath,['dist/cli.js','instance',...args])).stdout;
   try {
     await cli('pair',url,credential,app.code);
     const agent=JSON.parse(await cli('create',url,credential,'Ada','--instructions','Original'));
-    await cli('config-checkout',url,credential,agent.id,first);
-    await cli('config-checkout',url,credential,agent.id,stale);
-    const commented='# Authored comment\n'+await readFile(join(first,'agent.toml'),'utf8');
-    await writeFile(join(first,'agent.toml'),commented);
-    await writeFile(join(first,'soul.md'),'Published from file');
-    await cli('config-publish',url,credential,first);
-    assert.equal(JSON.parse(await cli('inspect',url,credential,agent.id)).instructions,'Published from file');
-    assert.equal(await readFile(join(agent.configDir,'agent.toml'),'utf8'),commented);
-    await writeFile(join(stale,'soul.md'),'Stale author text');
-    await assert.rejects(cli('config-publish',url,credential,stale));
-    assert.equal(await readFile(join(stale,'soul.md'),'utf8'),'Stale author text');
-    assert.equal(JSON.parse(await cli('inspect',url,credential,agent.id)).instructions,'Published from file');
-    await cli('config-checkout',url,credential,agent.id,invalid);
-    const original=await readFile(join(invalid,'agent.toml'),'utf8');
-    assert.equal(original,commented);
-    await writeFile(join(invalid,'agent.toml'),'name = [invalid');
-    await writeFile(join(invalid,'soul.md'),'New paired instructions');
-    await assert.rejects(cli('config-publish',url,credential,invalid));
-    assert.equal(await readFile(join(invalid,'agent.toml'),'utf8'),'name = [invalid');
-    assert.equal(JSON.parse(await cli('inspect',url,credential,agent.id)).instructions,'Published from file');
-    assert.match(await cli('send',url,credential,agent.id,'The published agent still works'),/"kind": "accepted"/);
-    await writeFile(join(invalid,'agent.toml'),original.replace('name = "Ada"','name = "Repaired Ada"'));
-    await cli('config-publish',url,credential,invalid);
-    const repaired=JSON.parse(await cli('inspect',url,credential,agent.id));
-    assert.equal(repaired.name,'Repaired Ada');assert.equal(repaired.instructions,'New paired instructions');
-    await cli('config-checkout',url,credential,agent.id,large);
-    const longSoul='界'.repeat(25000);await writeFile(join(large,'soul.md'),longSoul);
-    await cli('config-publish',url,credential,large);
+    const file=join(agent.configDir,'soul.md'),longSoul='界'.repeat(25000);
+    await writeFile(file,longSoul);
     assert.equal(JSON.parse(await cli('inspect',url,credential,agent.id)).instructions,longSoul);
-    await cli('config-checkout',url,credential,agent.id,badUtf8);
-    const bytes=Buffer.from([0x61,0xff,0x62]);await writeFile(join(badUtf8,'soul.md'),bytes);
-    await assert.rejects(cli('config-publish',url,credential,badUtf8),error=>{assert.match(error.stderr,/valid UTF-8/);return true});
-    assert.deepEqual(await readFile(join(badUtf8,'soul.md')),bytes);
+    const bytes=Buffer.from([0x61,0xff,0x62]);await writeFile(file,bytes);
+    await assert.rejects(cli('inspect',url,credential,agent.id),error=>{assert.match(error.stderr,/valid UTF-8/);return true});
+    assert.deepEqual(await readFile(file),bytes);
+    await writeFile(file,longSoul);
     assert.equal(JSON.parse(await cli('inspect',url,credential,agent.id)).instructions,longSoul);
   } finally {await app.close();await rm(dir,{recursive:true,force:true});}
 });

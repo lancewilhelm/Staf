@@ -180,41 +180,26 @@ remain available.
 Each agent has `agent.toml` for its name, description, provider, model and
 reasoning, and `soul.md` for its instructions. The GUI, CLI and API publish to
 the same configuration. Settings and `instance inspect` show the stable
-`configDir` for inspecting published files.
+`configDir` for inspecting and editing the files on the instance host. Edit
+`agent.toml` or `soul.md` directly with a text editor or shell tool. Staf reads
+and validates them on inspection and before accepting new work. Valid changes
+apply without a restart; work already underway keeps its captured settings.
+Invalid files remain intact and block new work for that agent until repaired;
+its history and other agents remain available.
 
-For file editing, create a new directory from the current revision, edit its
-files, finish saving both files, and publish them explicitly:
+Staf retains the original published pair under `configDir/.published` and
+copies of valid direct edits it has observed under `configDir/.history`. When a
+client publishes a new pair, the earlier revision directory, including its
+recovery copies, remains under the agent's `revisions` directory. These copies
+are retained until removed by the owner and may contain private instructions.
 
-```sh
-node dist/cli.js instance config-checkout http://127.0.0.1:3210 ~/.staf-client.json BOT_ID ./agent-edit
-# Edit ./agent-edit/agent.toml and ./agent-edit/soul.md, then finish saving.
-node dist/cli.js instance config-publish http://127.0.0.1:3210 ~/.staf-client.json ./agent-edit
-```
-
-Build first and replace `BOT_ID` with the ID from `instance bots`. Checkout
-requires a directory that does not yet exist. Keep `.staf-edit.json` in that
-directory: it identifies the agent and the revision you started from. Publish
-validates both files and sends them as one revision. Successful publication
-applies to the next accepted message without restarting; work already underway
-keeps its captured settings. The editing directory remains on disk after either
-success or failure. To make another change, start a new checkout. If publication
-reports a conflict, start a new checkout, compare and merge the retained edits,
-then publish the new directory. A missing or invalid editing file does not alter
-the active configuration or block the agent: an editing directory is an
-unpublished draft. An invalid or unexpected write to the published files does
-block that agent. Do not write the files while publish is running.
-The file workflow keeps TOML comments and formatting. GUI changes preserve the
-surrounding text when updating settings; if a layout cannot be safely updated,
-Staf reports an error and retains the file. Use the file workflow to edit it.
-
-Do not edit the published files under `configDir` directly. An unexpected change
-there blocks new work for that agent and leaves its files intact. Save the changed
-files elsewhere, compare them with the last published copies under
-`configDir/.published`, and restore **both** files from that directory. Then
-check out a new editing directory and publish the changes you want. The agent's
-history and other agents remain available. Uncoordinated writes to the same
-published path can overwrite each other before Staf reads them; only the
-versioned checkout and publish workflow detects stale editors reliably.
+Direct file saves are last-write-wins. An editor saving an old buffer can
+overwrite a newer file without Staf being able to identify it as stale. Staf
+cannot recover a version that was overwritten before it read that version.
+If changing both files, finish the edits before sending new work: independent
+file writes are not an atomic pair and Staf may see one before the other.
+GUI changes preserve TOML comments and surrounding formatting; if a layout
+cannot be safely updated, Staf reports an error and retains the file.
 
 Client saves include a revision and reject stale versions. If a client reports
 that a save result is uncertain, inspect the current files before retrying.
@@ -223,9 +208,10 @@ alongside your retained edits after a failed save. Review and reconcile them
 before saving again; another intervening change will still cause a conflict.
 
 If an editor writes an already retired published revision, Staf blocks new work
-and reports that revision's path. Copy its changes elsewhere, close the editor,
-and remove its `.retired` marker after review. Check out the current revision,
-merge the retained changes, and publish. The old files remain on disk.
+and reports that revision's path. Close the old editor, compare its retained
+files with `configDir`, apply the changes you want to the current files, and
+remove the old revision's `.retired` marker after review. The old files remain
+on disk.
 
 A later request after a provider change can send existing chat history to the new provider. Creation defaults set provider, model, and reasoning for future bots. The instance copies these settings at creation; changing defaults never changes existing bots. Revisions prevent stale clients from overwriting each other. In the CLI, use `instance defaults URL CREDENTIAL_FILE` and `instance defaults-set URL CREDENTIAL_FILE REVISION PROVIDER MODEL REASONING`; use `-` for an empty model or reasoning. Permission and approval settings remain separate. The description is owner-edited metadata visible to other bots; keep private instructions and memory out of it. New bots start with an empty description.
 The deterministic demo provider does not follow the instructions. Select Codex, OpenRouter, LM Studio, or live and an explicit model in the bot profile. OpenRouter uses `OPENROUTER_API_KEY` in the service host environment; the instance command does not load the project `.env` file. Codex uses the Staf grant under the directory containing the instance database. From a paired browser, use Codex sign-in and open the provided link on the instance host. The initiating paired client can check or cancel that attempt, including after refreshing the page. The CLI provides `instance codex-auth-start URL CREDENTIAL_FILE`, `codex-auth-current URL CREDENTIAL_FILE`, `codex-auth-status URL CREDENTIAL_FILE ATTEMPT_ID`, `codex-auth-cancel URL CREDENTIAL_FILE ATTEMPT_ID`, and `codex-auth-credential URL CREDENTIAL_FILE`. The callback listens on the same loopback origin. Revoking the initiating client prevents credential commit. These paths have been tested with synthetic auth only; live sign-in has not been verified. Provider failures do not fall back to another provider. Live provider execution has not been verified in this preview.

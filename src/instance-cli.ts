@@ -1,13 +1,12 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { createInterface } from 'node:readline';
 import { startInstance } from './instance-service.js';
-import { decodeAgentFile, parseAgentFiles } from './agent-config.js';
 
 export async function instanceCommand(args: string[]) {
   const [action,...rest]=args;
-  if (!action || action === 'help' || action === '--help') {console.log('Usage: instance serve [DATABASE_PATH] [PORT]\n       instance COMMAND URL CREDENTIAL_FILE [ARGUMENTS]\nCommands: pair, clients, revoke, bots, create, inspect, edit, config-checkout, config-publish, archive, restore, read, send, status, discover, defaults, defaults-set, tasks, task, task-follow, task-start, task-stop, task-retry, task-replace, task-direct, task-answer, approvals, approve, deny, approval-settings, set-approval-settings, disclosures, disclosure-approve, disclosure-deny, web-permission, web-permission-set, web-approvals, web-approve, web-deny, search-config, search-config-set, search-permission, search-permission-set, search-approvals, search-approve, search-deny, shell-config, shell-config-set, shell-permission, shell-permission-set, shell-approvals, shell-approve, shell-deny, shell-uncertain, shell-review, approval-grants, approval-grant-revoke, approval-grant-edit, codex-auth-start, codex-auth-current, codex-auth-status, codex-auth-cancel, codex-auth-credential, memory-*, skill-*, schedule-*\nSee docs/usage.md for arguments and examples.');return;}
+  if (!action || action === 'help' || action === '--help') {console.log('Usage: instance serve [DATABASE_PATH] [PORT]\n       instance COMMAND URL CREDENTIAL_FILE [ARGUMENTS]\nCommands: pair, clients, revoke, bots, create, inspect, edit, archive, restore, read, send, status, discover, defaults, defaults-set, tasks, task, task-follow, task-start, task-stop, task-retry, task-replace, task-direct, task-answer, approvals, approve, deny, approval-settings, set-approval-settings, disclosures, disclosure-approve, disclosure-deny, web-permission, web-permission-set, web-approvals, web-approve, web-deny, search-config, search-config-set, search-permission, search-permission-set, search-approvals, search-approve, search-deny, shell-config, shell-config-set, shell-permission, shell-permission-set, shell-approvals, shell-approve, shell-deny, shell-uncertain, shell-review, approval-grants, approval-grant-revoke, approval-grant-edit, codex-auth-start, codex-auth-current, codex-auth-status, codex-auth-cancel, codex-auth-credential, memory-*, skill-*, schedule-*\nSee docs/usage.md for arguments and examples.');return;}
   if (action === 'serve') {
     const path=resolve(rest[0] || '.staf/instance.sqlite'); const port=Number(rest[1] || 3210);
     if (!Number.isInteger(port) || port<1 || port>65535) throw Error('Invalid port');
@@ -117,25 +116,6 @@ export async function instanceCommand(args: string[]) {
   else if(action==='bots') result=await request('/api/bots',token);
   else if(action==='create' && create) result=await request('/api/bots',token,create);
   else if(action==='inspect' && values[0]) result=await request(`/api/bots/${encodeURIComponent(values[0])}`,token);
-  else if(action==='config-checkout' && values.length===2 && values[0] && values[1]) {
-    const agentId=values[0],directory=resolve(values[1]);
-    const profile=await request(`/api/bots/${encodeURIComponent(agentId)}/config-files`,token);
-    if (!profile || typeof profile!=='object' || !('revision' in profile) || typeof profile.revision!=='string' || !('settings' in profile) || typeof profile.settings!=='string' || !('instructions' in profile) || typeof profile.instructions!=='string') throw Error('Invalid agent configuration');
-    await mkdir(directory,{mode:0o700});
-    await writeFile(join(directory,'agent.toml'),profile.settings,{mode:0o600,flag:'wx'});
-    await writeFile(join(directory,'soul.md'),profile.instructions,{mode:0o600,flag:'wx'});
-    await writeFile(join(directory,'.staf-edit.json'),JSON.stringify({agentId,revision:profile.revision}),{mode:0o600,flag:'wx'});
-    result={directory,agentId,revision:profile.revision};
-  }
-  else if(action==='config-publish' && values.length===1 && values[0]) {
-    const directory=resolve(values[0]);
-    const metadata:unknown=JSON.parse(await readFile(join(directory,'.staf-edit.json'),'utf8'));
-    if (!metadata || typeof metadata!=='object' || !('agentId' in metadata) || typeof metadata.agentId!=='string' || !('revision' in metadata) || typeof metadata.revision!=='string') throw Error('Invalid editing directory metadata');
-    const toml=decodeAgentFile(await readFile(join(directory,'agent.toml'))),soul=decodeAgentFile(await readFile(join(directory,'soul.md')));
-    parseAgentFiles(toml,soul);
-    if (toml!==decodeAgentFile(await readFile(join(directory,'agent.toml'))) || soul!==decodeAgentFile(await readFile(join(directory,'soul.md')))) throw Error('Editing files changed during publication. Finish saving and retry.');
-    result=await request(`/api/bots/${encodeURIComponent(metadata.agentId)}/config-files`,token,{settings:toml,instructions:soul,revision:metadata.revision});
-  }
   else if(action==='edit' && values[0] && values[1]) { const profile: unknown=JSON.parse(await readFile(values[1],'utf8')); if (!profile || typeof profile !== 'object' || Array.isArray(profile)) throw Error('Profile file must contain a JSON object'); result=await request(`/api/bots/${encodeURIComponent(values[0])}/profile`,token,profile); }
   else if((action==='archive' || action==='restore') && values[0] && values[1]) result=await request(`/api/bots/${encodeURIComponent(values[0])}/${action}`,token,{revision:values[1]});
   else if(action==='read' && values[0]) result=await request(`/api/bots/${encodeURIComponent(values[0])}/messages`,token);
