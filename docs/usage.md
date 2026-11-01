@@ -187,6 +187,18 @@ instructions, provider, and model, even before signing in or choosing a model. S
 model label below an agent's chat to edit its settings and Instructions. Press
 Enter to send a message or Shift+Enter to insert a new line. The workspace keeps
 your draft if sign-in or a model is missing and when switching agents.
+
+In agent settings, Demo is always available; Codex and OpenRouter can be chosen
+when their shared connection is saved. A saved connection does not verify account
+or model access. A disconnected current provider remains visible, and **Open
+provider settings** lets you repair a connection and return to your unsaved
+agent edits. The browser does not offer LM Studio or HTTP compatible as new
+choices because their host configuration is not managed in global Settings;
+existing selections remain visible and can still be edited through the CLI or
+configuration files. A provider switch retains the model text for you to review
+and asks for confirmation because future requests can send the existing chat to
+the new provider. Saving settings does not send a model request. Other agents
+keep their own choices.
 In agent settings, select **Archive agent** to retain configuration and history
 while preventing new work. To restore it, open **Settings** and select
 **Restore agent** under **Archived agents**. An agent with active chat or background

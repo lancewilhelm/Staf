@@ -70,3 +70,24 @@ test('damaged credentials can be repaired after restart and do not block agent c
   assert.deepEqual((await call('/api/openrouter-connection/disconnect',token,{}))[1],{saved:false});
  }finally{await app.close();rmSync(dir,{recursive:true,force:true});}
 });
+
+test('provider profile saves are revision checked, independent and do not request inference',async()=>{
+ const dir=mkdtempSync(join(tmpdir(),'staf-provider-profile-'));let requests=0;
+ const app=startInstance(join(dir,'db'),0,{env:{},providerFactory:async()=>{requests++;throw Error('Unexpected inference');}}),port=await app.listen();
+ const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return [r.status,await r.json()]};
+ try{
+  const token=(await call('/api/pair','',{code:app.code}))[1].token;
+  const a=(await call('/api/bots',token,{name:'A',provider:'demo'}))[1],b=(await call('/api/bots',token,{name:'B',provider:'demo'}))[1];
+  const edit={revision:a.revision,name:a.name,instructions:'',provider:'openrouter',model:'fixture/model',reasoning:null};
+  assert.equal((await call(`/api/bots/${a.id}/profile`,'',edit))[0],401);
+  await call('/api/openrouter-connection',token,{key:'synthetic-key'});
+  assert.equal((await call(`/api/bots/${a.id}/profile`,token,edit))[0],200);
+  assert.notEqual((await call(`/api/bots/${a.id}/profile`,token,edit))[0],200);
+  const saved=(await call(`/api/bots/${a.id}`,token))[1],other=(await call(`/api/bots/${b.id}`,token))[1];
+  assert.equal(saved.provider,'openrouter');assert.equal(saved.model,'fixture/model');assert.equal(other.provider,'demo');assert.equal(other.revision,b.revision);
+  assert.match(readFileSync(join(saved.configDir,'agent.toml'),'utf8'),/openrouter/);
+  await call('/api/openrouter-connection/disconnect',token,{});
+  assert.equal((await call(`/api/bots/${a.id}`,token))[1].provider,'openrouter');
+  assert.equal(requests,0);
+ }finally{await app.close();rmSync(dir,{recursive:true,force:true});}
+});
