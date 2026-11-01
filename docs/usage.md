@@ -147,7 +147,9 @@ not a device name.
 
 The workspace keeps an agent list beside the selected main chat, visible while
 the page scrolls. Select an agent to switch conversations; agents with the same
-name, including archived namesakes, show their stable IDs in the list and Updates. **New agent** opens creation, and **Settings** controls appearance and
+name, including archived namesakes, show the last four characters of their stable
+IDs in the list and Updates. Suffixes can coincide; full IDs remain available
+through the API or CLI. **New agent** opens creation, and **Settings** controls appearance and
 instance-wide provider connections. Choose Light, Dark, or System appearance;
 System is the default and follows device appearance changes. The choice is saved
 in this browser, independently of other browsers; clearing browser storage resets it.

@@ -75,7 +75,7 @@ function App(){
   useEffect(()=>{if(s.activityOpen&&document.activeElement===activityButton.current)closeButton.current?.focus()},[s.activityOpen]);
   useEffect(()=>{if(!firstRun.current&&s.connection.kind==='ready'){firstRun.current=true;if(!s.bots.length&&s.credential==='signed-out')setView('settings')}},[s.connection.kind,s.bots.length,s.credential]);
   const selected=s.bots.find(b=>b.id===s.selected);
-  const botLabel=(bot:{id:string;name:string})=>s.bots.filter(other=>other.name===bot.name).length>1?bot.name+' · '+bot.id:bot.name;
+  const botLabel=(bot:{id:string;name:string})=><>{bot.name}{s.bots.filter(other=>other.name===bot.name).length>1&&<span className="agent-id"> · {bot.id.slice(-4)}</span>}</>;
   const labelFor=(id:string)=>{const bot=s.bots.find(item=>item.id===id);return bot?botLabel(bot):'Agent'};
   const relevant=s.inbox.filter(i=>i.botId===s.selected);
   const submission=s.draft.submission;
