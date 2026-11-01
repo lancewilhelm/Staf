@@ -107,7 +107,12 @@ fallback exists.
 
 ## Local shared instance preview
 
-The workspace is served at `/`. The former Advanced page is not served.
+The workspace is served at `/`. Its persistent agent list selects main chats,
+and duplicate names display the last four characters of their stable IDs.
+Suffixes can coincide; full IDs remain available through the API and CLI. The UI
+calls these records agents; the
+existing `bots` API paths, fields, and CLI command remain unchanged. The former
+Advanced page is not served.
 Its appearance preference is stored in browser localStorage under
 `staf-appearance`, with `light`, `dark`, or `system` values. Missing or invalid
 values use System, which follows the device color scheme. This preference is

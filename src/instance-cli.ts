@@ -32,7 +32,7 @@ export async function instanceCommand(args: string[]) {
   if (action === 'create') {
     const option=values.findIndex(value=>value.startsWith('--'));
     const names=option < 0 ? values : values.slice(0,option);
-    if (!names.join(' ').trim()) throw Error('Bot name required. Use instance create URL CREDENTIAL_FILE NAME [--instructions TEXT]');
+    if (!names.join(' ').trim()) throw Error('Agent name required. Use instance create URL CREDENTIAL_FILE NAME [--instructions TEXT]');
     const options:Record<string,string>={};
     for(let i=option < 0 ? values.length : option;i<values.length;i+=2) {
       const key=values[i],value=values[i+1];

@@ -78,7 +78,7 @@ test('CLI clients share bot instructions and conversation across service restart
    [['Ada','--instructions','text','--instructions','other'],/must appear once/],
    [['Ada','--instructions','text','extra'],/Unknown create option/],
    [['Ada','--unknown','text'],/Unknown create option/],
-   [['--instructions','text'],/Bot name required/],
+   [['--instructions','text'],/Agent name required/],
   ]) await assert.rejects(cli('create',url(),a,...args),error=>{assert.match(error.stderr,pattern);return true});
   assert.equal(JSON.parse(await cli('bots',url(),a)).length,2);
   const sent=await cli('send',url(),a,bot.id,'Hello from first client');
