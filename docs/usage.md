@@ -153,12 +153,16 @@ of other browsers; clearing browser storage resets it to System.
 **Settings**
 shows the Codex sign-in for this instance. A saved sign-in is reused across
 bots; it does not establish that the provider or a model is available. Select
-**New bot** to create a bot with a name and optional instructions and model.
+**New bot** to create a bot with a name and optional instructions, provider, and model.
 You can create a bot before signing in or choosing a model. Select the model
 label below a bot's chat to edit its settings and Instructions. Press Enter to send a
 message or Shift+Enter to insert a new line. If no Codex sign-in is available,
 the workspace keeps your draft and directs you to provider settings. If a bot
 has no model, the workspace keeps your draft until you choose one.
+In bot settings, select **Archive bot** to retain its configuration and history
+while preventing new work. To restore it, open **Settings** and select
+**Restore bot** under **Archived bots**. A bot with active chat or background
+work cannot be archived until that work settles.
 
 The inbox shows current task updates, questions, and approval requests. Activity
 opens automatically for a new question or approval for the selected bot. Other
@@ -239,6 +243,11 @@ pnpm start instance status http://127.0.0.1:3210 ~/.staf-client.json COMMAND_ID
 
 The bot name can contain multiple arguments. Pass instructions as one quoted
 argument after `--instructions`; omit the option to use empty instructions.
+Use `--provider PROVIDER` and `--model MODEL` to override creation defaults.
+The CLI prints a creation operation ID to standard error before submitting.
+If the result is uncertain, repeat the same command with `--operation-id ID`
+using that ID. Keep the other arguments unchanged. The browser retains its
+creation operation in local storage for status checks and retries after reload.
 
 The task form has a helper clock scope, also available with `instance task-start URL CREDENTIAL_FILE BOT_ID --delegate-clock OBJECTIVE`. It is off by default and recorded independently from the objective. Selecting it permits a helper to request clock reads, subject to current permissions and approval settings. Retries retain the original scope. Scheduled tasks currently receive no helper action scope.
 
@@ -246,9 +255,8 @@ Discovery searches names and descriptions, excludes the requester and archived b
 
 Both clients report a conflict if another client has changed the profile since
 you inspected it. Refresh the profile and reapply your changes. Archive works
-only while the bot has no active chat request. Archived bots retain their chat
-and cannot accept messages until restored. The current workspace does not list
-archived bots.
+only while the bot has no active chat request or background task. Archived bots
+retain configuration and history and cannot accept new work until restored.
 
 The CLI prints the command ID before submission; check status if its outcome is
 uncertain instead of automatically resending. A busy bot does not accept a new

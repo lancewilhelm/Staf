@@ -113,8 +113,12 @@ Its appearance preference is stored in browser localStorage under
 values use System, which follows the device color scheme. This preference is
 not an instance configuration or a shared API setting.
 Authenticated `GET /api/inbox` projects pending questions and approvals.
-`GET /api/task-updates` returns task summaries for the inbox. A guided Codex bot
-creation uses `POST /api/bots` with `operationId`, `provider`, and `model`;
+`GET /api/task-updates` returns task summaries for the inbox. `POST /api/bots`
+requires a nonblank `name` and accepts optional `instructions`, `provider`,
+`model`, and `operationId`. An omitted provider uses the copied instance
+default. An omitted model uses the default when the provider is omitted, or
+is empty when a provider is specified. A model can override the default.
+For retry-safe creation, clients supply an `operationId`;
 `GET /api/bot-creations/OPERATION_ID` recovers a recorded result. Reusing an
 operation ID with different input conflicts. The transaction copies remaining
 creation defaults into the new bot. The version 27 migration adds the creation
@@ -125,9 +129,11 @@ Shared-instance Codex sign-in uses `POST /api/codex-auth/start`, `GET /api/codex
 `instance serve [DATABASE_PATH] [PORT]` uses the database directory for Codex credentials and defaults to `.staf/instance.sqlite`
 and port `3210`, binding `127.0.0.1` only. `instance pair|clients|revoke|bots|create|inspect|edit|archive|restore|read|send|status`
 use the loopback origin and a separate client credential file; see
-[usage](usage.md#local-shared-instance-offline-preview). `instance create URL CREDENTIAL_FILE NAME [--instructions TEXT]` joins name
-arguments with spaces. The optional flag must appear once at the end, followed
-by one text argument. The server stores
+[usage](usage.md#local-shared-instance-offline-preview). `instance create URL CREDENTIAL_FILE NAME [--instructions TEXT] [--provider PROVIDER] [--model MODEL] [--operation-id ID]` joins name
+arguments with spaces. Each option takes one argument and can appear once.
+The CLI prints the generated operation ID before submission; callers can reuse
+it with unchanged arguments. A direct API creation without an operation ID is
+not retry-safe. The server stores
 SHA-256 token hashes in SQLite and limits JSON request bodies to 64 KiB, except skill import and update requests, which are limited to 1,600,000 bytes. Newly created databases have owner-only permissions, independent of a permissive umask. Existing file permissions are not changed. Restrict the containing directory and any existing database separately. On the tested platform, SQLite rollback journals inherit the owner-only database mode.
 The host issues a one-time code at startup and on each terminal Enter. Browser
 requests with an Origin must match the exact server origin; JSON and bearer
