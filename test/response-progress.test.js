@@ -45,6 +45,7 @@ test('paired clients observe provisional response progress and contention', asyn
       await new Promise(resolve => setTimeout(resolve, 10));
     }
     assert.equal(progress.state, 'completed');
+    assert.equal(progress.responseProgress.text, 'Hello from the streaming response. Finished.');
     const messages = await call(`/api/bots/${bot.id}/messages`, second);
     assert.equal(messages.at(-1).content, 'Hello from the streaming response. Finished.');
   } finally { release(); await app.close(); }
@@ -70,16 +71,44 @@ test('failed progress is provisional, redacted across chunks, and visible to the
     for(let i=0;i<100;i++){progress=await call(`/api/bots/${bot.id}/response`,token);if(progress?.text?.includes('readable'))break;await new Promise(r=>setTimeout(r,10));}
     assert.equal(progress.state,'running');
     assert.doesNotMatch(progress.text,/secret|private=1/);
+    const credential=join(dir,'credential.json');writeFileSync(credential,JSON.stringify({token}));
+    const child=spawn(process.execPath,['dist/cli.js','instance','response-follow',`http://127.0.0.1:${port}`,credential,'failure']);
+    let liveOutput='';child.stdout.on('data',chunk=>liveOutput+=chunk);
+    for(let i=0;i<100&&!liveOutput.includes('"state":"running"');i++)await new Promise(r=>setTimeout(r,10));
+    assert.match(liveOutput,/"state":"running"/);
+    const exited=new Promise((resolve,reject)=>{child.on('error',reject);child.on('exit',code=>code===0?resolve():reject(Error(`CLI exited ${code}`)));});
     release();
+    await exited;
+    assert.match(liveOutput,/"state":"failed"/);
     for(let i=0;i<100;i++){progress=await call('/api/commands/failure',token);if(progress.state==='failed')break;await new Promise(r=>setTimeout(r,10));}
     assert.equal(progress.responseProgress.state,'failed');
     assert.doesNotMatch(JSON.stringify(progress),/secret-value|private=1/);
     assert.deepEqual((await call(`/api/bots/${bot.id}/messages`,token)).map(m=>m.role),['user']);
     await app.close();app=startInstance(join(dir,'db'),0,{env:{OPENROUTER_API_KEY:'secret-value'}});port=await app.listen();
     assert.equal((await call(`/api/bots/${bot.id}/response`,token)).state,'failed');
-    const credential=join(dir,'credential.json');writeFileSync(credential,JSON.stringify({token}));
     const output=await new Promise((resolve,reject)=>{const child=spawn(process.execPath,['dist/cli.js','instance','response-follow',`http://127.0.0.1:${port}`,credential,'failure']);let out='';child.stdout.on('data',chunk=>out+=chunk);child.on('error',reject);child.on('exit',code=>code===0?resolve(out):reject(Error(`CLI exited ${code}`)));});
     assert.match(output,/"state":"failed"/);
     assert.doesNotMatch(output,/secret-value|private=1/);
   } finally {release();await app.close();rmSync(dir,{recursive:true,force:true});}
+});
+
+test('restart retains interrupted progress without committing an assistant message', async () => {
+  const dir=mkdtempSync(join(tmpdir(),'staf-interrupted-response-'));
+  const providerFactory=async()=>({name:'synthetic',capabilities:{toolCalls:true,incrementalText:true,transport:'responses'},async *stream(_messages,_tools,{signal}){
+    yield {type:'text_delta',text:'Partial response that must remain provisional. '};
+    await new Promise(resolve=>signal.addEventListener('abort',resolve,{once:true}));
+    signal.throwIfAborted();
+  },async complete(){throw Error('unexpected');}});
+  let app=startInstance(join(dir,'db'),0,{providerFactory,env:{}}),port=await app.listen();
+  const call=async(route,token,body)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return response.json();};
+  try {
+    const token=(await call('/api/pair','',{code:app.code})).token;
+    const bot=await call('/api/bots',token,{name:'Interrupted'});
+    await call('/api/commands',token,{id:'interrupted',botId:bot.id,content:'go'});
+    for(let i=0;i<100;i++){const p=await call(`/api/bots/${bot.id}/response`,token);if(p?.text?.includes('Partial response'))break;await new Promise(r=>setTimeout(r,10));}
+    await app.close();app=startInstance(join(dir,'db'),0,{env:{}});port=await app.listen();
+    const progress=await call(`/api/bots/${bot.id}/response`,token);
+    assert.equal(progress.state,'interrupted');assert.match(progress.text,/Partial response/);
+    assert.deepEqual((await call(`/api/bots/${bot.id}/messages`,token)).map(m=>m.role),['user']);
+  } finally {await app.close();rmSync(dir,{recursive:true,force:true});}
 });

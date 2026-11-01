@@ -36,9 +36,15 @@ export async function loadEnvironment(path: string, shell: Environment = process
 }
 
 /** Redact known credential values before output or conversation persistence. */
-export function redactor(env: Environment): (text: string) => string {
-  const secrets = [env.OPENROUTER_API_KEY, env.STAF_API_KEY, env.OPENAI_API_KEY, env.CODEX_API_KEY, env.LMSTUDIO_API_KEY]
+function credentialValues(env: Environment): string[] {
+  return [env.OPENROUTER_API_KEY, env.STAF_API_KEY, env.OPENAI_API_KEY, env.CODEX_API_KEY, env.LMSTUDIO_API_KEY]
     .filter((value): value is string => typeof value === 'string' && value.length > 0);
+}
+export function redactionTailLength(env: Environment): number {
+  return Math.max(0, ...credentialValues(env).flatMap(value => [value.length - 1, JSON.stringify(value).length - 3]));
+}
+export function redactor(env: Environment): (text: string) => string {
+  const secrets = credentialValues(env);
   return text => secrets.reduce((result, value) => result.split(value).join('[REDACTED]')
     .split(JSON.stringify(value).slice(1, -1)).join('[REDACTED]'), text)
     .replace(/sk-or-v1-[A-Za-z0-9_-]+/g, '[REDACTED]');
