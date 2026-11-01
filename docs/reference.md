@@ -54,6 +54,16 @@ Codex uses direct Responses and a separate Staf OAuth grant. A credential alone
 does not select a provider. Per-bot endpoint overrides are not implemented.
 See [model selection](model-selection.md) and [Codex sign-in](codex-direct.md).
 
+In the browser's agent settings, Demo is always selectable and Codex or
+OpenRouter is selectable when the instance reports a saved connection. Existing
+disconnected or host-configured selections remain visible. LM Studio and live
+are configured on the host and are not offered as new browser choices. The
+browser retains the model on a provider change, asks the owner to review it,
+and confirms possible conversation-history disclosure before saving. This
+selection policy is a browser convenience; the paired service, CLI, and direct
+files continue to accept supported provider configurations independently of
+connection presence.
+
 ## Scripts
 
 | Command | Effect |

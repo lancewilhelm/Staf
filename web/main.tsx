@@ -1,7 +1,7 @@
 import {useEffect,useLayoutEffect,useRef,useState,useSyncExternalStore,type ReactNode} from 'react';
 import {createRoot} from 'react-dom/client';
 import Markdown from 'react-markdown';
-import {Controller,type BotProfile,type InboxItem} from './controller';
+import {Controller,type BotProfile,type InboxItem,type Workspace} from './controller';
 import './style.css';
 
 const app=new Controller();
@@ -39,7 +39,7 @@ function Item({item}:{item:InboxItem}){
   </article>;
 }
 
-function BotModelSettings({id,onClose,saving,setSaving}:{id:string;onClose:()=>void;saving:boolean;setSaving:(saving:boolean)=>void}){
+function BotModelSettings({id,onClose,onOpenSettings,saving,setSaving,credential,openrouter}:{id:string;onClose:()=>void;onOpenSettings:()=>void;saving:boolean;setSaving:(saving:boolean)=>void;credential:Workspace['credential'];openrouter:Workspace['openrouter']}){
   const [profile,setProfile]=useState<BotProfile|null>(null);
   const [name,setName]=useState('');
   const [provider,setProvider]=useState('');
@@ -48,10 +48,13 @@ function BotModelSettings({id,onClose,saving,setSaving}:{id:string;onClose:()=>v
   const [status,setStatus]=useState('');
   const [compareAvailable,setCompareAvailable]=useState(false);
   const [latest,setLatest]=useState<BotProfile|null>(null);
+  const providers=[{id:'demo',label:'Demo',available:true,status:''},{id:'codex',label:'Codex',available:credential==='signed-in',status:credential==='unknown'?'checking':'disconnected'},{id:'openrouter',label:'OpenRouter',available:openrouter==='saved',status:openrouter==='unknown'?'checking':openrouter==='error'?'status unavailable':'disconnected'},{id:'lmstudio',label:'LM Studio',available:false,status:'not managed in Settings'},{id:'live',label:'HTTP compatible',available:false,status:'not managed in Settings'}];
+  const available=(id:string)=>providers.some(item=>item.id===id&&item.available);
   useEffect(()=>{let active=true;void app.botProfile(id).then(p=>{if(active){setProfile(p);setName(p.name);setProvider(p.provider);setModel(p.model||'');setInstructions(p.instructions)}}).catch(e=>{if(active)setStatus('Could not load agent settings. '+String(e))});return()=>{active=false}},[id]);
   async function save(){
     if(!profile)return;
     if(!name.trim()){setStatus('Enter a name for this agent.');return}
+    if(provider!==profile.provider&&!available(provider)){setStatus('Connect the selected provider in global Settings before saving. Your edits are retained.');return}
     if(provider!==profile.provider&&!window.confirm('Changing the provider may send this conversation history to the new provider. Continue?'))return;
     setSaving(true);setStatus('');setLatest(null);
     try{await app.saveBotProfile(profile,{name,provider,model,instructions});onClose()}catch(e){setCompareAvailable(true);setStatus('The save failed or its result is uncertain. Your edits are retained. Compare the current settings before retrying. '+String(e))}finally{setSaving(false)}
@@ -68,7 +71,7 @@ function BotModelSettings({id,onClose,saving,setSaving}:{id:string;onClose:()=>v
     try{await app.setArchived(profile,true);onClose()}catch(e){setCompareAvailable(true);setStatus('Could not archive the agent, or the result is uncertain. Compare the current settings before retrying. '+String(e))}finally{setSaving(false)}
   }
   return <div className="setup"><span className="eyebrow">AGENT SETTINGS</span><h2>{profile?.name||'Agent settings'}</h2>
-    {profile&&<><p>Provider connections are shared by the instance.</p><label>Name<input disabled={saving} value={name} onChange={e=>setName(e.target.value)}/></label><label>Provider<select disabled={saving} value={provider} onChange={e=>setProvider(e.target.value)}><option value="demo">Demo</option><option value="codex">Codex</option><option value="openrouter">OpenRouter</option><option value="lmstudio">LM Studio</option><option value="live">HTTP compatible</option></select></label><label>Model<input disabled={saving} value={model} onChange={e=>setModel(e.target.value)}/></label><label>Instructions<textarea disabled={saving} value={instructions} onChange={e=>setInstructions(e.target.value)}/></label><p className="meta">Configuration: <code>{profile.configDir}</code></p><div className="row"><button disabled={saving} onClick={()=>void save()}>Save settings</button><button disabled={saving} className="quiet" onClick={onClose}>Cancel</button></div></>}
+    {profile&&<><p>Provider connections are shared by the instance. A saved connection does not verify account or model access.</p><label>Name<input disabled={saving} value={name} onChange={e=>setName(e.target.value)}/></label><label>Provider<select disabled={saving} value={provider} onChange={e=>setProvider(e.target.value)}>{providers.map(item=><option key={item.id} value={item.id} disabled={!item.available&&item.id!==profile.provider}>{item.label}{!item.available?` (${item.status})`:''}</option>)}</select></label>{!available(provider)&&<p>The selected provider is disconnected or unavailable in global Settings. The saved provider remains unchanged until you save.</p>}<button disabled={saving} className="quiet" onClick={onOpenSettings}>Open provider settings</button><label>Model<input disabled={saving} value={model} onChange={e=>setModel(e.target.value)}/></label>{provider!==profile.provider&&<p>Review the model for the selected provider. The existing model has been retained; a model for a different provider may not work.</p>}<label>Instructions<textarea disabled={saving} value={instructions} onChange={e=>setInstructions(e.target.value)}/></label><p className="meta">Configuration: <code>{profile.configDir}</code></p><div className="row"><button disabled={saving} onClick={()=>void save()}>Save settings</button><button disabled={saving} className="quiet" onClick={onClose}>Cancel</button></div></>}
     {profile&&!profile.archived&&<button disabled={saving} className="quiet" onClick={()=>void archive()}>Archive agent</button>}
     <p role="status">{saving?'Loading or saving…':status}</p>
     {compareAvailable&&<button disabled={saving} className="quiet" onClick={()=>void compare()}>Compare latest settings</button>}
@@ -108,17 +111,17 @@ function App(){
   const labelFor=(id:string)=>{const bot=s.bots.find(item=>item.id===id);return bot?botLabel(bot):'Agent'};
   const relevant=s.inbox.filter(i=>i.botId===s.selected);
   const submission=s.draft.submission;
-  const openBotCreation=()=>{setView('chat');app.openSetup()};
+  const openBotCreation=()=>{setSettingsBotId(null);setView('chat');app.openSetup()};
   const openSettings=()=>{app.closeSetup();setView('settings')};
   const chooseAppearance=(value:Appearance)=>{setAppearance(value);applyAppearance(value);try{localStorage.setItem(appearanceKey,value)}catch{/* Appearance still applies for this page. */}};
-  const openChat=(id:string)=>{app.closeSetup();setView('chat');app.select(id)};
+  const openChat=(id:string)=>{setSettingsBotId(null);app.closeSetup();setView('chat');app.select(id)};
   return <div className="shell"><aside className="side">
     <div className="brand">✳ <span>staf</span></div>
     <button disabled={botSaving} onClick={openBotCreation}>＋ &nbsp; New agent</button>
     <div className="caption" id="agents-label">Your agents</div>
     <nav aria-labelledby="agents-label">{s.bots.filter(b=>!b.archived).map(b=>{const active=b.id===s.selected&&view==='chat'&&s.setup.kind==='closed';return <button disabled={botSaving} key={b.id} aria-current={active?'page':undefined} className={active?'active':''} onClick={()=>openChat(b.id)}>◉ &nbsp; {botLabel(b)} <span className="dots">{s.inbox.filter(i=>i.botId===b.id).length||''}</span></button>})}</nav>
     <div className="caption">Inbox</div>
-    <button disabled={botSaving} className={view==='inbox'?'active':''} onClick={()=>{app.closeSetup();setView(view==='inbox'?'chat':'inbox')}}>◉ &nbsp; Updates <span className="dots">{s.inbox.length||''}</span></button>
+    <button disabled={botSaving} className={view==='inbox'?'active':''} onClick={()=>{setSettingsBotId(null);app.closeSetup();setView(view==='inbox'?'chat':'inbox')}}>◉ &nbsp; Updates <span className="dots">{s.inbox.length||''}</span></button>
     <div className="minor"><button disabled={botSaving} className={view==='settings'?'active':''} onClick={openSettings}>⚙ &nbsp; Settings</button></div>
   </aside><main className="main">
     <header className="top"><div className="avatar">{selected?.name[0]?.toUpperCase()||'✳'}</div><div><div className="title">{view==='settings'?'Settings':selected?botLabel(selected):'Welcome to Staf'}</div><div className="sub">{s.connection.kind==='ready'?(view==='settings'?'Provider connections':view==='bot'?'Agent settings':'Your ongoing conversation'):s.connection.kind}</div></div><div className="spacer"/>
@@ -126,8 +129,8 @@ function App(){
     </header>
     {s.notice&&<div className="banner" role="status">{s.notice}</div>}
     {s.connection.kind==='offline'&&<div className="banner" role="alert">{s.connection.message} {s.freshness}</div>}
-    {view==='bot'&&settingsBotId?<BotModelSettings key={settingsBotId} id={settingsBotId} saving={botSaving} setSaving={setBotSaving} onClose={()=>{setSettingsBotId(null);setView('chat')}}/>
-    :s.connection.kind==='pairing'?<div className="setup"><span className="eyebrow">WELCOME TO STAF</span><h2>Pair this browser</h2><p>Enter the one-time code shown on the host.</p><label>Pairing code<input value={code} onChange={e=>setCode(e.target.value)}/></label><button onClick={()=>void app.pair(code)}>Pair</button><p role="alert">{s.connection.message}</p></div>
+    {settingsBotId&&<div style={{display:view==='bot'?'contents':'none'}}><BotModelSettings key={settingsBotId} id={settingsBotId} saving={botSaving} setSaving={setBotSaving} credential={s.credential} openrouter={s.openrouter} onOpenSettings={openSettings} onClose={()=>{setSettingsBotId(null);setView('chat')}}/></div>}
+    {view==='bot'&&settingsBotId?null:s.connection.kind==='pairing'?<div className="setup"><span className="eyebrow">WELCOME TO STAF</span><h2>Pair this browser</h2><p>Enter the one-time code shown on the host.</p><label>Pairing code<input value={code} onChange={e=>setCode(e.target.value)}/></label><button onClick={()=>void app.pair(code)}>Pair</button><p role="alert">{s.connection.message}</p></div>
     :s.setup.kind==='create'?<div className="setup"><span className="eyebrow">YOUR AGENT</span><h2>Create your agent</h2><p>Give your agent a name. Instructions and provider settings are optional.</p>
       <label>Name<input value={s.setup.name} disabled={!!s.setup.operationId} onChange={e=>app.setupField('name',e.target.value)}/></label>
       <label>What should this agent help with?<textarea value={s.setup.instructions} disabled={!!s.setup.operationId} onChange={e=>app.setupField('instructions',e.target.value)}/></label>
@@ -142,7 +145,7 @@ function App(){
       <div className="provider provider-settings"><strong>Codex</strong><p>{s.credential==='signed-in'?'Saved sign-in found for this instance.':s.credential==='signed-out'?'No usable sign-in found for this instance.':'Checking the sign-in for this instance.'}</p>{s.credential==='signed-in'&&<p className="meta">This saved sign-in has not been checked against the provider.</p>}
         {s.authAttempt&&<p>Sign-in {s.authAttempt.phase}</p>}
         <div className="row"><button onClick={()=>void app.startAuth()}>{s.credential==='signed-in'?'Sign in again':'Connect Codex'}</button>{s.authUrl&&<a href={s.authUrl} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer">Continue sign-in</a>}{s.authAttempt&&['waiting','exchanging','committing'].includes(s.authAttempt.phase)&&<button className="quiet" onClick={()=>void app.cancelAuth()}>Cancel sign-in</button>}{s.credential==='signed-in'&&<button className="quiet" onClick={()=>{if(window.confirm('Sign out of Codex for this Staf instance? All agents using it will need a new sign-in.'))void app.signOutAuth()}}>Sign out</button>}</div>
-      </div><div className="provider provider-settings"><strong>OpenRouter</strong><p>{s.openrouter==='saved'?'API key saved for this instance.':s.openrouter==='missing'?'No OpenRouter API key saved.':s.openrouter==='error'?'OpenRouter credential storage is unavailable. Replace or disconnect the key.':'Checking the OpenRouter connection.'}</p><p className="meta">A saved key does not verify account or model access.</p><label>OpenRouter API key<input type="password" autoComplete="off" value={routerKey} disabled={routerBusy} onChange={e=>setRouterKey(e.target.value)}/></label><div className="row"><button disabled={routerBusy||!routerKey} onClick={()=>void saveRouter()}>{s.openrouter==='saved'?'Replace OpenRouter key':'Save OpenRouter key'}</button>{(s.openrouter==='saved'||s.openrouter==='error')&&<button className="quiet" disabled={routerBusy} onClick={()=>void disconnectRouter()}>Disconnect OpenRouter</button>}</div><p role="status">{routerStatus}</p></div><div className="row"><button className="quiet" onClick={()=>setView('chat')}>Back to chat</button>{!s.bots.length&&<button onClick={openBotCreation}>Create an agent</button>}</div>
+      </div><div className="provider provider-settings"><strong>OpenRouter</strong><p>{s.openrouter==='saved'?'API key saved for this instance.':s.openrouter==='missing'?'No OpenRouter API key saved.':s.openrouter==='error'?'OpenRouter credential storage is unavailable. Replace or disconnect the key.':'Checking the OpenRouter connection.'}</p><p className="meta">A saved key does not verify account or model access.</p><label>OpenRouter API key<input type="password" autoComplete="off" value={routerKey} disabled={routerBusy} onChange={e=>setRouterKey(e.target.value)}/></label><div className="row"><button disabled={routerBusy||!routerKey} onClick={()=>void saveRouter()}>{s.openrouter==='saved'?'Replace OpenRouter key':'Save OpenRouter key'}</button>{(s.openrouter==='saved'||s.openrouter==='error')&&<button className="quiet" disabled={routerBusy} onClick={()=>void disconnectRouter()}>Disconnect OpenRouter</button>}</div><p role="status">{routerStatus}</p></div><div className="row">{settingsBotId&&<button className="quiet" onClick={()=>setView('bot')}>Back to agent settings</button>}<button className="quiet" onClick={()=>{setSettingsBotId(null);setView('chat')}}>Back to chat</button>{!s.bots.length&&<button onClick={openBotCreation}>Create an agent</button>}</div>
     </div>:<div className="workspace"><div className="chat">{view==='inbox'?<div className="messages"><h2>Inbox</h2><p>Questions and approvals that need your attention.</p>
       {s.inbox.length?s.inbox.map(item=><div key={item.kind+item.id}><button className="inbox-link" onClick={()=>{if(item.botId)app.select(item.botId);app.activity(true);setView('chat')}}>{item.botId?labelFor(item.botId):'Instance-wide'} · {item.kind==='question'?'Question':item.approvalKind+' approval'}</button>{!item.botId&&<Item item={item}/>}</div>):<p>Nothing needs attention right now.</p>}
       <h3>Task updates</h3>{s.taskUpdates.length?s.taskUpdates.map(task=><article className="item" key={task.id}><button className="inbox-link" onClick={()=>{app.select(task.botId);app.activity(true);setView('chat')}}>{labelFor(task.botId)} · {task.objective}</button><div className="meta">{task.state} · {task.id}</div>{task.outcome&&<p>{task.outcome}</p>}</article>):<p>No task updates yet.</p>}

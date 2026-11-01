@@ -140,3 +140,13 @@ from supported conversation and output paths; the key is rejected from agent
 configuration writes. In-flight work may retain a previous key. Service, CLI,
 and served-browser coverage uses synthetic credentials and providers; live
 OpenRouter access remains unverified.
+
+The agent editor combines its revisioned profile with the authenticated Codex
+and OpenRouter presence statuses to offer configured shared connections and the
+offline Demo provider. It retains an existing disconnected provider, blocks a
+new unavailable selection, and keeps unsaved edits mounted while the owner
+visits global Settings. Model text is retained and must be reviewed on a switch;
+the browser confirms the potential history disclosure before its profile save.
+The service still accepts supported configurations without requiring a saved
+connection, so direct edits and other clients can configure an agent before
+connecting. The editor does not run inference or verify provider access.
