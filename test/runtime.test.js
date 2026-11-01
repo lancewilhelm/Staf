@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { spawnSync } from 'node:child_process';
 import { Store } from '../dist/store.js';
 import { runTurn } from '../dist/runtime.js';
 import { demoProvider, liveProvider } from '../dist/providers.js';
@@ -57,18 +56,14 @@ test('storage refuses path traversal and concurrent writers', async t => {
   await (await store.lock(session.id))();
 });
 
-test('CLI subprocess saves, lists and resumes a conversation', async t => {
-  const { root } = await fixture(t);
-  const cli = (...args) => spawnSync(process.execPath, ['dist/cli.js', '--data-dir', root, ...args], { input: 'hello\n/quit\n', encoding: 'utf8' });
-  const first = cli();
-  assert.equal(first.status, 0, first.stderr);
-  const id = first.stdout.match(/session ([0-9a-f-]{36})/)[1];
-  assert.match(cli('sessions').stdout, new RegExp(id));
-  const resumed = cli('--session', id);
-  assert.equal(resumed.status, 0, resumed.stderr);
-  assert.match(resumed.stdout, /User turns saved: 2/);
-  assert.equal(JSON.parse(await readFile(join(root, `${id}.json`))).messages.length, 4);
-  assert.equal(cli('--typo').status, 1);
+test('store saves, lists and resumes a conversation', async t => {
+  const { root, store, session } = await fixture(t);
+  await runTurn({ store, session, provider: demoProvider, text: 'hello' });
+  assert.ok((await store.list()).includes(session.id));
+  const resumed = await store.load(session.id);
+  await runTurn({ store, session: resumed, provider: demoProvider, text: 'hello' });
+  assert.match(resumed.messages.at(-1).content, /User turns saved: 2/);
+  assert.equal(JSON.parse(await readFile(join(root, `${session.id}.json`))).messages.length, 4);
 });
 
 test('live configuration is explicit; runtime preserves history across selected provider switches', async t => {
@@ -97,10 +92,9 @@ test('missing, corrupt and structurally incomplete sessions fail clearly without
     await writeFile(store.path(session.id), value);
     await assert.rejects(store.load(session.id), /damaged/);
     assert.equal(await readFile(store.path(session.id), 'utf8'), value);
-    const result = spawnSync(process.execPath, ['dist/cli.js', '--data-dir', root, '--session', session.id], { encoding: 'utf8' });
-    assert.equal(result.status, 1);
-    assert.match(result.stderr, /damaged/);
-    // CLI releases the lock even when loading fails.
+    const release = await store.lock(session.id);
+    try { await assert.rejects(store.load(session.id), /damaged/); }
+    finally { await release(); }
     await (await store.lock(session.id))();
   }
 });
@@ -142,17 +136,16 @@ test('save failure does not announce success or alter conversation', async t => 
   assert.equal(events.at(-1), 'error');
 });
 
-test('offline CLI remains offline even with live environment settings', async t => {
-  const { root } = await fixture(t);
-  const guard = 'data:text/javascript,' + encodeURIComponent("globalThis.fetch = () => { throw new Error('NETWORK ATTEMPT'); };");
-  const result = spawnSync(process.execPath, ['--import', guard, 'dist/cli.js', '--data-dir', root], {
-    input: 'time\nhello\n/quit\n', encoding: 'utf8',
-    env: { ...process.env, STAF_API_KEY: 'fake-test-value', STAF_MODEL: 'fake', STAF_BASE_URL: 'https://invalid.example/' },
-  });
-  assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /DEMO — offline/);
-  assert.match(result.stdout, /tool_result/);
-  assert.doesNotMatch(result.stdout + result.stderr, /NETWORK ATTEMPT/);
+test('demo provider remains offline with live environment settings', async t => {
+  const { store, session } = await fixture(t);
+  const { selectProvider } = await import('../dist/registry.js');
+  t.mock.method(globalThis, 'fetch', () => { throw new Error('NETWORK ATTEMPT'); });
+  const { provider } = await selectProvider('demo', { env: { STAF_API_KEY: 'fake-test-value', STAF_MODEL: 'fake', STAF_BASE_URL: 'https://invalid.example/' } });
+  const events = [];
+  await runTurn({ store, session, provider, text: 'time', clock: () => 'fixed', emit: event => events.push(event) });
+  await runTurn({ store, session, provider, text: 'hello' });
+  assert.ok(events.some(event => event.type === 'tool_result'));
+  assert.match((await store.load(session.id)).messages.at(-1).content, /User turns saved: 2/);
 });
 
 test('pre-TypeScript version-1 snapshot resumes without migration', async t => {
@@ -161,12 +154,9 @@ test('pre-TypeScript version-1 snapshot resumes without migration', async t => {
   const raw = await readFile(new URL('./fixtures/session-v1.json', import.meta.url), 'utf8');
   const legacy = JSON.parse(raw);
   await writeFile(store.path(legacy.id), raw);
-  const result = spawnSync(process.execPath, ['dist/cli.js', '--data-dir', root, '--session', legacy.id], {
-    input: 'hello\n/quit\n', encoding: 'utf8',
-  });
-  assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /User turns saved: 2/);
   const resumed = await store.load(legacy.id);
+  await runTurn({ store, session: resumed, provider: demoProvider, text: 'hello' });
+  assert.match((await store.load(legacy.id)).messages.at(-1).content, /User turns saved: 2/);
   assert.equal(resumed.version, 1);
   assert.deepEqual(resumed.messages.slice(0, legacy.messages.length), legacy.messages);
   assert.deepEqual(resumed.events.slice(0, legacy.events.length), legacy.events);

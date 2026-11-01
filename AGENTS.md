@@ -23,3 +23,20 @@ Keep this file short. Link the canonical docs instead of duplicating provider
 setup here. [Decision records](docs/decisions.md) capture consequential choices;
 [session architecture](docs/session-architecture.md) contains unimplemented design
 proposals and must not be presented as current runtime behavior.
+
+## Agent skills
+
+### Issue tracker
+
+Track issues and specs in GitHub Issues for `lancewilhelm/Staf`.
+Read `docs/agents/issue-tracker.md` before ticket operations.
+
+### Triage labels
+
+Use the five default triage labels.
+Read `docs/agents/triage-labels.md` before triage.
+
+### Domain docs
+
+Use a single-context layout.
+Read `docs/agents/domain.md` before codebase exploration.

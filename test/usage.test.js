@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import {mkdtemp,rm,readFile,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {spawnSync} from 'node:child_process';
 import {httpUsage,codexUsage,sanitizeMetrics,usageText,isUsageObservation} from '../dist/usage.js';
 import {openRouterProvider,lmStudioProvider,liveProvider,demoProvider} from '../dist/providers.js';
 import {codexProvider} from '../dist/codex.js';
@@ -59,8 +58,10 @@ test('legacy sessions disclose incomplete coverage and mixed providers keep per-
  assert.equal(validSession({...session,turns:[{start:-1,end:2,provider:'bad'}]},session.id),false);
 });
 
-test('usage CLI is deterministic, plain, nonsecret and persists across separate processes without model access',async t=>{
- const {root}=await fixture(t);const run=(args,input)=>spawnSync(process.execPath,['dist/cli.js','--provider','demo','--data-dir',root,...args],{input,encoding:'utf8',env:{...process.env,NO_COLOR:''}});
- const first=run([],'/usage\nwhat time is it?\n/usage details\n/usage help\n/quit\n');assert.equal(first.status,0,first.stderr);assert.match(first.stdout,/not-applicable/);assert.match(first.stdout,/Calls observed: 2/);assert.match(first.stdout,/writes may be charged/);assert.ok(!first.stdout.includes('\x1b'));
- const id=first.stdout.match(/session ([0-9a-f-]{36})/)[1];const next=run(['--session',id],'/usage\n/quit\n');assert.equal(next.status,0,next.stderr);assert.match(next.stdout,/Calls observed: 2/);assert.match(next.stdout,/Account quota.*unavailable/);
+test('usage is deterministic, plain, nonsecret and persists after a demo conversation is reloaded',async t=>{
+ const {store,session}=await fixture(t);
+ await runTurn({store,session,provider:demoProvider,text:'what time is it?',clock:()=> 'fixed'});
+ const resumed=await store.load(session.id), details=usageText(resumed,true), summary=usageText(resumed);
+ assert.match(details,/not-applicable/);assert.match(details,/Calls observed: 2/);assert.match(details,/writes may be charged/);assert.ok(!details.includes('\x1b'));
+ assert.match(summary,/Calls observed: 2/);assert.match(summary,/Account quota.*unavailable/);
 });

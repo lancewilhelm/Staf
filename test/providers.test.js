@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, readFile, rm, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { spawnSync } from 'node:child_process';
 import { openRouterProvider } from '../dist/providers.js';
 import { codexProvider } from '../dist/codex.js';
 import { loadEnvironment, redactor } from '../dist/config.js';
@@ -123,11 +122,12 @@ test('known credentials redact from model input, output, exceptions, events and 
   await assert.rejects(runTurn({ store, session, provider: { name: 'mock', complete: async () => { throw new Error('dummy-secret'); } }, text: 'hi', redact }), /REDACTED/);
 });
 
-test('CLI model and provider validation fail without network calls', () => {
-  for (const args of [['--provider', 'unknown'], ['--provider', 'demo', '--model', 'x'], ['--live', '--provider', 'codex']]) {
-    const result = spawnSync(process.execPath, ['dist/cli.js', ...args], { encoding: 'utf8' });
-    assert.equal(result.status, 1);
-  }
+test('provider and model validation rejects invalid values without network calls', async () => {
+  const { validateSetting } = await import('../dist/settings.js');
+  const { selectProvider } = await import('../dist/registry.js');
+  assert.throws(() => validateSetting('provider', 'unknown'));
+  assert.throws(() => validateSetting('model.demo', 'x'));
+  await assert.rejects(selectProvider('unknown', { env: {} }), /Provider must/);
 });
 
 test('LM Studio defaults to localhost, omits auth, accepts configured auth and clock calls', async t => {
@@ -156,45 +156,14 @@ test('LM Studio defaults to localhost, omits auth, accepts configured auth and c
   assert.throws(() => lmStudioProvider({ LMSTUDIO_BASE_URL: 'http://remote.example/v1' }, 'model'), /HTTPS/);
 });
 
-test('direct CLI never borrows credentials created by the explicit legacy auth command', async t => {
+test('direct Codex authentication does not borrow isolated CLI credentials', async t => {
   const { root } = await fixture(t);
-  const { chmod, mkdir } = await import('node:fs/promises');
-  const bin = join(root, 'bin'); await mkdir(bin);
-  const executable = join(bin, 'codex');
-  await writeFile(executable, `#!${process.execPath}
-const fs = require('node:fs');
-const args = process.argv.slice(2);
-if (Object.keys(process.env).some(k => /KEY|TOKEN|SECRET|PASSWORD/i.test(k)) || process.env.DATABASE_URL || process.env.NODE_OPTIONS) process.exit(8);
-if (process.cwd() === ${JSON.stringify(process.cwd())}) process.exit(9);
-if (args[0] === 'mcp') { console.log('[]'); process.exit(0); }
-if (!args.includes('cli_auth_credentials_store="file"') || !args.includes('forced_login_method="chatgpt"')) process.exit(10);
-if (process.env.HOME === process.env.ORIGINAL_HOME || !process.env.CODEX_HOME.includes('codex-context')) process.exit(11);
-const auth = require('node:path').join(process.env.CODEX_HOME, 'auth.json');
-if (args[0] === 'login') {
- if (args[1] === 'status') {
-  if (!fs.existsSync(auth)) process.exit(1);
-  console.error('Logged in using ChatGPT');
- } else fs.writeFileSync(auth, 'dummy-owned-auth', {mode:0o600});
- process.exit(0);
-}
-if (args[0] === 'logout') { fs.unlinkSync(auth); process.exit(0); }
-let input=''; process.stdin.on('data', chunk => input += chunk);
-process.stdin.on('end', () => {
- const data=JSON.parse(input.slice(input.indexOf('\\n')+1));
- const kind=data.messages.at(-1).role === 'tool' || data.messages.filter(m=>m.role==='user').length > 1 ? 'text' : 'clock';
- fs.writeFileSync(args[args.indexOf('--output-last-message')+1], JSON.stringify({kind,text:'fake Codex response'}));
-});
-`);
-  await chmod(executable, 0o700);
-  const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, OPENROUTER_API_KEY: 'dummy-secret', DATABASE_URL: 'dummy-db-secret' };
-  const run = (...args) => spawnSync(process.execPath, ['dist/cli.js', '--provider', 'codex', '--model', 'fake-model', '--data-dir', join(root, 'sessions'), ...args], { env, input: 'hello\n/quit\n', encoding: 'utf8' });
-  const missing = run(); assert.equal(missing.status, 0); assert.match(missing.stderr, /auth codex login/);
-  const login = spawnSync(process.execPath, ['dist/cli.js', 'auth', 'codex-legacy', 'login', '--data-dir', join(root, 'sessions')], { env, encoding: 'utf8' });
-  assert.equal(login.status, 0, login.stderr);
-  const first = run(); assert.equal(first.status, 0, first.stderr);
-  assert.match(first.stderr,/direct Codex|auth codex login/);
-  assert.ok(!first.stdout.includes('tool_result')); // legacy login is never a direct credential source
-
+  const { createCodexContext } = await import('../dist/codex-context.js');
+  const { directAuth } = await import('../dist/codex-direct-auth.js');
+  const context = await createCodexContext(root);
+  await writeFile(join(context.codexHome, 'auth.json'), 'dummy-owned-auth', { mode: 0o600 });
+  assert.match(await directAuth('status', root), /not signed in/);
+  assert.equal(await readFile(join(context.codexHome, 'auth.json'), 'utf8'), 'dummy-owned-auth');
 });
 
 test('registry adapters share normalized event contract and explicitly reject unsupported streaming', async t => {
@@ -269,13 +238,20 @@ if(args[0]==='logout') { fs.unlinkSync(auth); process.exit(0); }
 process.exit(12);
 `); await chmod(fake, 0o700);
   const data = join(root, 'data');
-  const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, CODEX_HOME: normal, HOME: root, OPENAI_API_KEY: 'dummy-normal-key', DATABASE_URL: 'dummy-db' };
-  const command = action => spawnSync(process.execPath, ['dist/cli.js', 'auth', 'codex-legacy', action, '--data-dir', data], { env, encoding: 'utf8' });
-  assert.match(command('status').stdout, /not signed in/);
-  const login=command('login'); assert.equal(login.status,0,login.stderr);
-  assert.match(command('status').stdout, /signed in with ChatGPT/);
-  const logout=command('logout'); assert.equal(logout.status,0,logout.stderr);
-  assert.match(command('status').stdout, /not signed in/);
+  const { codexAuth } = await import('../dist/codex.js');
+  const original = { PATH: process.env.PATH, CODEX_HOME: process.env.CODEX_HOME, HOME: process.env.HOME, OPENAI_API_KEY: process.env.OPENAI_API_KEY, DATABASE_URL: process.env.DATABASE_URL };
+  Object.assign(process.env, { PATH: `${bin}:${process.env.PATH}`, CODEX_HOME: normal, HOME: root, OPENAI_API_KEY: 'dummy-normal-key', DATABASE_URL: 'dummy-db' });
+  try {
+    assert.match(await codexAuth('status',data), /not signed in/);
+    await codexAuth('login',data);
+    assert.match(await codexAuth('status',data), /signed in with ChatGPT/);
+    await codexAuth('logout',data);
+    assert.match(await codexAuth('status',data), /not signed in/);
+  } finally {
+    for (const [key,value] of Object.entries(original)) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+  }
   assert.equal(await readFile(join(normal, 'auth.json'), 'utf8'), 'normal-dummy-auth');
   assert.equal(await readFile(join(normal, 'config.toml'), 'utf8'), '[mcp_servers.inherited]\ncommand="must-not-run"');
 });
@@ -309,4 +285,42 @@ test('Codex preflight rejects configured MCP or invalid MCP response before gene
     }));
     assert.equal(generations,0);
   }
+});
+
+test('OpenRouter passes caller cancellation to the HTTP request', async () => {
+  const {openRouterProvider}=await import('../dist/providers.js');
+  const controller=new AbortController(); let captured; let entered;
+  const started=new Promise(resolve=>{entered=resolve});
+  const provider=openRouterProvider({OPENROUTER_API_KEY:'test-only'},'test/model',async (_url,options)=>{
+    captured=options.signal; entered();
+    return new Promise((_resolve,reject)=>{
+      if (captured.aborted) reject(Error('aborted'));
+      else captured.addEventListener('abort',()=>reject(Error('aborted')),{once:true});
+    });
+  });
+  const completion=provider.complete([{role:'user',content:'hello'}],[],{signal:controller.signal});
+  await started; controller.abort();
+  const forwarded=captured.aborted;
+  if (!forwarded) captured.dispatchEvent(new Event('abort'));
+  await assert.rejects(completion);
+  assert.equal(forwarded,true,'caller abort must reach the HTTP request');
+});
+
+test('OpenRouter cancellation closes an active local HTTP request', async () => {
+  const {createServer}=await import('node:http');
+  const {openRouterProvider}=await import('../dist/providers.js');
+  const {runTurn}=await import('../dist/runtime.js');
+  let received, closed;
+  const arrival=new Promise(resolve=>{received=resolve});
+  const disconnect=new Promise(resolve=>{closed=resolve});
+  const server=createServer((req,_res)=>{req.on('close',closed);received();});
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const port=server.address().port, controller=new AbortController();
+  const provider=openRouterProvider({OPENROUTER_API_KEY:'test-only'},'test/model',(_url,options)=>fetch(`http://127.0.0.1:${port}/`,options));
+  try {
+    const session={version:1,id:'test',provider:null,messages:[],events:[]};
+    const completion=runTurn({provider,session,store:{save:async()=>{}},text:'hello',signal:controller.signal});
+    await arrival; controller.abort(); await assert.rejects(completion); await disconnect;
+    assert.deepEqual(session.messages,[]);
+  } finally {server.closeAllConnections(); await new Promise(resolve=>server.close(resolve));}
 });

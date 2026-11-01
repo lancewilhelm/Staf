@@ -16,8 +16,7 @@ provider/model breakdown. `details` adds per-call sources and outcomes. There is
 no reset command or account dashboard in this version.
 
 Each request is one Staf adapter `complete` call. A tool turn can make several
-requests; each can resend history and consume more input tokens. The harness does
-not automatically retry failed requests. A manual retry is a separate attempt.
+requests; each can resend history and consume more input tokens. Staf does not automatically retry failed requests. A manual retry is a separate attempt.
 Historical Codex CLI execution aggregates are not an inventory of every internal
 model request or native tool operation. The current direct adapter records
 Responses request usage.
@@ -66,26 +65,15 @@ the direct path. See [direct accounting](direct-responses.md#inclusive-accountin
 
 ## Persistence, failure and coverage
 
-Version-1 session JSON can optionally contain a `usage` ledger. Each observation
-has a unique local call ID, attempt ID, message-start index, provider identity,
-optional reported model, measured latency, outcome, source and validated metrics.
-New observations also record ISO observation time and explicit `request` versus
-`execution` scope; older records may lack those fields. `/usage details` exposes
-that scope/time. OpenRouter and LM Studio are per HTTP request; Codex is per fresh
-execution aggregate. These scopes are not interchangeable for context occupancy.
-Old sessions without the ledger remain readable and show incomplete coverage.
-The ledger is not sent as part of provider message history. No prompt text,
-credentials, account identifiers, or raw JSONL are added solely for statistics.
+The shared instance stores a private execution session and its usage observations
+in SQLite. Observations have a local call ID, attempt, provider identity, outcome,
+source, and available metrics. The ledger is separate from visible chat and is
+not sent as provider message history. It is not an account-wide billing record.
 
-Successful tool continuation reports remain accounted for if a later request
-fails. Failed calls get an unavailable record, because providers may have charged
-usage they did not return. Failed conversation messages still roll back. Retrying
-does not erase earlier observed consumption. A failed disk write cannot guarantee
-usage durability; a crash before a report is saved can also lose accounting.
-Duplicates are rejected by session validation and ignored defensively in display.
-Invalid, negative, non-finite or fractional counts are discarded; impossible
-subset/total relationships are omitted instead of trusted. This is observability,
-not a billing reconciliation system.
+A tool turn can make several provider requests. An unavailable report does not
+mean the request was free. A crash or storage failure can prevent an observation
+from being saved. `/usage details` shows available sources and scope. Historical
+execution aggregates are distinct from per-request observations.
 
 ## What cached prompts mean
 
@@ -116,8 +104,8 @@ verify this feature.
 
 ## Context and account work
 
-Session accounting remains implemented and persisted. [Context status](context.md)
-is a separate approximate view of supplied history and metadata limits. Account
+The instance persists observed usage. [Context status](context.md) describes
+the last available historical input count and the limits of current occupancy. Account
 quota collection is deferred at the user's request; `/usage` remains local and
 does not launch an app-server or query weekly account limits. Provider-specific
 request normalizers continue to map into the common usage contract.

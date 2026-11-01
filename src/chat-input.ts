@@ -1,4 +1,4 @@
-import { createInterface, type Interface } from 'node:readline';
+import { clearLine, createInterface, cursorTo, type Interface } from 'node:readline';
 
 /** Queue lines independently of readline instances so a raw-mode menu can borrow input. */
 export class ChatInput implements AsyncIterable<string> {
@@ -22,6 +22,12 @@ export class ChatInput implements AsyncIterable<string> {
     if (this.draft) { rl.write(this.draft); this.draft = ''; }
   }
   prompt(): void { if (process.stdin.isTTY && process.stdout.isTTY && !this.ended) this.interface?.prompt(); }
+  display(action: () => void): void {
+    const rl = this.interface, redraw = !!rl && !this.ended && !!process.stdin.isTTY && !!process.stdout.isTTY;
+    if (redraw) { clearLine(process.stdout, 0); cursorTo(process.stdout, 0); }
+    action();
+    if (redraw && !this.ended && this.interface === rl) rl.prompt(true);
+  }
   suspend(): void {
     this.suspended = true;
     this.draft = this.interface?.line || '';

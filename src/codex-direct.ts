@@ -22,10 +22,10 @@ export function responsesInput(messages:Message[],model:string):Record<string,un
  }
  return input;
 }
-export function responsesRequest(messages:Message[],tools:ToolDefinition[],model:string,sessionId:string,effort='default') {
+export function responsesRequest(messages:Message[],tools:ToolDefinition[],model:string,sessionId:string,effort='default',instructions=INSTRUCTIONS) {
  const functions=tools.map(tool=>({type:'function',...tool.function})).sort((a,b)=>a.name.localeCompare(b.name,'en'));
- const key='pck_'+createHash('sha256').update(JSON.stringify([sessionId,model,INSTRUCTIONS,functions])).digest('hex').slice(0,24);
- return {model,instructions:INSTRUCTIONS,input:responsesInput(messages,model),tools:functions,store:false,stream:true,include:['reasoning.encrypted_content'],prompt_cache_key:key,...(effort!=='default'?{reasoning:{effort}}:{})};
+ const key='pck_'+createHash('sha256').update(JSON.stringify([sessionId,model,instructions,functions])).digest('hex').slice(0,24);
+ return {model,instructions,input:responsesInput(messages,model),tools:functions,store:false,stream:true,include:['reasoning.encrypted_content'],prompt_cache_key:key,...(effort!=='default'?{reasoning:{effort}}:{})};
 }
 export function directUsage(response:Record<string,unknown>):UsageReport {
  const raw=isRecord(response.usage)?response.usage:{};
@@ -106,12 +106,12 @@ export async function* responseEvents(response:Response,model:string,signal?:Abo
  try{while(!terminal){signal?.throwIfAborted();const chunk=await reader.read();signal?.throwIfAborted();if(chunk.done){signal?.throwIfAborted();buffer+=decoder.decode();if(buffer){const event=parse(buffer.replace(/\r$/,''));if(event){const value=check(event);if(value)yield value;}}const event=parse('');if(event){const value=check(event);if(value)yield value;}break;}bytes+=chunk.value.byteLength;if(bytes>5*1024*1024)throw Error('Direct event stream exceeds limit');buffer+=decoder.decode(chunk.value,{stream:true});let end;while(!terminal&&(end=buffer.indexOf('\n'))>=0){const line=buffer.slice(0,end).replace(/\r$/,'');buffer=buffer.slice(end+1);const event=parse(line);if(event){signal?.throwIfAborted();const value=check(event);if(value)yield value;}}}if(!terminal)throw Error('Direct stream ended without response.completed; no tools/history committed');}
  finally{signal?.removeEventListener('abort',abort);await reader.cancel().catch(()=>{});reader.releaseLock();}
 }
-export function directCodexProvider(options:{model:string;sessionId:string;dataDir:string;reasoning?:string;request?:typeof fetch;token?:(signal?:AbortSignal)=>Promise<string>}):Provider {
+export function directCodexProvider(options:{model:string;sessionId:string;dataDir:string;reasoning?:string;instructions?:string;request?:typeof fetch;token?:(signal?:AbortSignal)=>Promise<string>}):Provider {
  const request=options.request||fetch;
  const stream=async function*(messages:Message[],tools:ToolDefinition[],call:ProviderCallOptions={}):AsyncGenerator<ProviderEvent>{
   const signal=AbortSignal.any([AbortSignal.timeout(60000),...(call.signal?[call.signal]:[])]);signal.throwIfAborted();
   const token=await(options.token?options.token(signal):directAccessToken(options.dataDir,request,signal));signal.throwIfAborted();
-  let response:Response;try{response=await request(DIRECT_RESPONSES_URL,{method:'POST',redirect:'error',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json','User-Agent':'Staf/0.1'},body:JSON.stringify(responsesRequest(messages,tools,options.model,options.sessionId,options.reasoning)),signal});}catch{if(signal.aborted)throw Error('Direct request cancelled or timed out');throw Error('Direct Responses connection failed');}
+  let response:Response;try{response=await request(DIRECT_RESPONSES_URL,{method:'POST',redirect:'error',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json','User-Agent':'Staf/0.1'},body:JSON.stringify(responsesRequest(messages,tools,options.model,options.sessionId,options.reasoning,options.instructions)),signal});}catch{if(signal.aborted)throw Error('Direct request cancelled or timed out');throw Error('Direct Responses connection failed');}
   if(!response.ok)throw Error(`Direct Responses HTTP ${response.status}; check Staf direct sign-in, plan permission and model. No paid API fallback.`);
   let withheld='';
   const redact=(text:string)=>text.split(token).join('[REDACTED]');
@@ -123,7 +123,7 @@ export function directCodexProvider(options:{model:string;sessionId:string;dataD
       if(ready){yield {type:'text_delta',text:withheld.slice(0,ready)};withheld=withheld.slice(ready);}
     }else if(event.type==='message'){
       if(withheld)yield {type:'text_delta',text:redact(withheld)};
-      const message=redactValue(event.message,redact);if(!isAssistantMessage(message))throw Error('Cannot safely redact direct response');
+      const message=redactValue(event.message,redact);if(!isAssistantMessage(message) || !isDeepStrictEqual(event.message.responseReplay?.items.filter(item=>item.type==='reasoning'),message.responseReplay?.items.filter(item=>item.type==='reasoning')))throw Error('Cannot safely redact direct response');
       yield {type:'message',message};
     }else yield event;
   }}catch(error){if(signal.aborted)throw Error('Direct request cancelled or timed out');throw error;}

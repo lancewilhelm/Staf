@@ -21,6 +21,7 @@ export class TerminalView {
   event(event: RuntimeEvent): string {
     switch (event.type) {
       case 'assistant': return `\n${this.style('staf>', 'heading')} ${cleanText(event.text)}\n`;
+      case 'assistant_observed': return this.style(`[observed] ${event.text}`, 'dim');
       case 'provider_start': return this.style(`[provider_start] ${event.provider}`, 'dim');
       case 'tool_start': return this.style(`[tool_start] ${event.name}`, 'status');
       case 'tool_result': return this.style(`[tool_result] ${event.name} [${event.success ? 'ok' : 'failed'}]: ${event.content}`, event.success ? 'success' : 'error');

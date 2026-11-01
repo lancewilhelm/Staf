@@ -1,0 +1,7 @@
+ts	phase	decision	why	evidence	result
+2026-11-01T02:37:24Z	frame	Port the terminal experience to shared instance ownership	The menu must edit the shared bot instead of a separate local session	src/terminal-instance.ts, docs/adr/0002-copy-bot-creation-defaults.md	in progress
+2026-11-01T02:38:46Z	baseline	Exercised the standalone demo clock and settings menu in a terminal	Capture the behavior to carry into the shared client	src/terminal-view.ts, src/settings-menu.ts	baseline observed
+2026-11-01T02:43:50Z	implementation	Kept settings and tool activity in the shared instance	Multiple clients must see the same bot state and real tool events	src/instance-service.ts, src/terminal-instance.ts	offline terminal flow exercised
+2026-11-01T02:51:49Z	review	Added provider-change disclosure, pending draft recovery, and automatic delayed replies	A reviewer and terminal checks found risks to history and normal chat	src/terminal-instance.ts, test/terminal-instance.test.js	verified offline
+2026-11-01T02:51:49Z	verification	Ran terminal checks and the full offline suite	Verify real input, settings and persisted shared chat	/tmp/staf-terminal-suite-complete.log, test/terminal.test.js	379 passed, 3 skipped, 0 failed
+2026-11-01T02:52:51Z	audit	Baseline and interactive output were observed but no terminal transcript was saved	The earlier rows link source rather than a recording of the terminal session	test/terminal.test.js, /tmp/staf-terminal-suite-complete.log	PTY suite retained; baseline recording unavailable

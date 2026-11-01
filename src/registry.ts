@@ -7,7 +7,7 @@ import type { Provider } from './types.js';
 import { demoProvider, liveProvider, openRouterProvider, lmStudioProvider } from './providers.js';
 import { resolve } from 'node:path';
 
-interface ProviderOptions { env: Environment; model?: string; reasoning?: string; dataDir?: string; sessionId?: string }
+interface ProviderOptions { env: Environment; model?: string; reasoning?: string; dataDir?: string; sessionId?: string; instructions?: string }
 interface Registration {
   description: string;
   create(options: ProviderOptions): Provider | Promise<Provider>;
@@ -19,14 +19,14 @@ export const providerRegistry: Readonly<Record<string, Registration>> = {
     if (model) throw new Error('--model requires a live provider');
     return demoProvider;
   } },
-  openrouter: { description: 'OPENROUTER — API credits/charges', create: ({ env, model, reasoning }) => openRouterProvider(env, model, fetch, reasoning) },
-  codex: { description: 'CODEX DIRECT — Staf ChatGPT-plan registration; no CLI fallback', create: async ({ model, reasoning, dataDir, sessionId }) => {
+  openrouter: { description: 'OPENROUTER — API credits/charges', create: ({ env, model, reasoning, instructions }) => openRouterProvider(env, model, fetch, reasoning, instructions) },
+  codex: { description: 'CODEX DIRECT — Staf ChatGPT-plan registration; no CLI fallback', create: async ({ model, reasoning, dataDir, sessionId, instructions }) => {
     if(!model)throw Error('Choose an account-available model for direct Codex');
     await loadDirectCredential(dataDir || resolve('.staf'));
-    return directCodexProvider({model,reasoning,dataDir:dataDir||resolve('.staf'),sessionId:sessionId||randomUUID()});
+    return directCodexProvider({model,reasoning,dataDir:dataDir||resolve('.staf'),sessionId:sessionId||randomUUID(),instructions});
   } },
-  lmstudio: { description: 'LM STUDIO — configured server', create: ({ env, model }) => lmStudioProvider(env, model) },
-  live: { description: 'LIVE — API charges may apply', create: ({ env, model }) => liveProvider({ ...env, STAF_MODEL: model || env.STAF_MODEL }) },
+  lmstudio: { description: 'LM STUDIO — configured server', create: ({ env, model, instructions }) => lmStudioProvider(env, model, fetch, instructions) },
+  live: { description: 'LIVE — API charges may apply', create: ({ env, model, instructions }) => liveProvider({ ...env, STAF_MODEL: model || env.STAF_MODEL }, fetch, instructions) },
 };
 
 export async function selectProvider(name: string, options: ProviderOptions): Promise<{ provider: Provider; description: string }> {

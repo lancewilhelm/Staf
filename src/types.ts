@@ -24,7 +24,7 @@ export interface ToolDefinition {
   function: {
     name: string;
     description: string;
-    parameters: { type: 'object'; properties: Record<string, never>; additionalProperties: false };
+    parameters: { type: 'object'; properties: Record<string, {type:string}>; required?: string[]; additionalProperties: false };
   };
 }
 export interface ProviderCapabilities {
@@ -36,7 +36,7 @@ export type ProviderEvent =
   | { type: 'message'; message: AssistantMessage }
   | { type: 'text_delta'; text: string }
   | { type: 'error'; message: string };
-export interface ProviderCallOptions { signal?: AbortSignal }
+export interface ProviderCallOptions { signal?: AbortSignal; currentUserInput?: string }
 export interface Provider {
   name: string;
   capabilities: ProviderCapabilities;
@@ -48,6 +48,7 @@ export type RuntimeEvent =
   | { type: 'tool_start'; id: string; name: string }
   | { type: 'tool_result'; id: string; name: string; success: boolean; content: string }
   | { type: 'assistant'; text: string }
+  | { type: 'assistant_observed'; text: string }
   | { type: 'error'; message: string };
 export interface Session {
   version: 1;

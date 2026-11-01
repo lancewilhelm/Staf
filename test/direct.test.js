@@ -4,6 +4,8 @@ import {mkdtemp,rm,writeFile,readFile,mkdir,lstat,symlink} from 'node:fs/promise
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {generateKeyPairSync,sign} from 'node:crypto';
+import {request as httpRequest} from 'node:http';
+import {InstanceAuth} from '../dist/instance-auth.js';
 import {directCodexProvider,responsesRequest,responsesInput,responseEvents,directUsage,DIRECT_RESPONSES_URL} from '../dist/codex-direct.js';
 import {authorizationUrl,completeDirectLogin,loadDirectCredential,directAccessToken,directAuth,validateIdToken} from '../dist/codex-direct-auth.js';
 import {tools,runTurn} from '../dist/runtime.js';
@@ -120,7 +122,7 @@ test('abort suppresses late results, failed terminal never dispatches tools, and
 const keys=generateKeyPairSync('rsa',{modulusLength:2048});
 function jwt(subject='subject',nonce='nonce'){const header=Buffer.from(JSON.stringify({alg:'RS256',kid:'key'})).toString('base64url');const body=Buffer.from(JSON.stringify({iss:'https://auth.openai.com',sub:subject,aud:'oaiapp_staf',nonce,exp:Math.floor(Date.now()/1000)+3600})).toString('base64url');return header+'.'+body+'.'+sign('RSA-SHA256',Buffer.from(header+'.'+body),keys.privateKey).toString('base64url');}
 const attempt={state:'state',nonce:'nonce',verifier:'verifier',redirectUri:'http://127.0.0.1:12345/auth/callback',hostId:'urn:uuid:host',clientId:'dynamic_agent_client'};
-function authFetch(subject='subject'){return async(url,init)=>{if(String(url).endsWith('/jwks.json'))return Response.json({keys:[{...keys.publicKey.export({format:'jwk'}),kid:'key'}]});assert.equal(String(url),'https://auth.openai.com/api/accounts/oauth/token');const params=new URLSearchParams(init.body);assert.equal(params.get('client_id'),'oaiapp_staf');assert.equal(params.get('resource'),'https://api.openai.com/v1');return Response.json({token_type:'Bearer',access_token:'dummy-access',refresh_token:'dummy-refresh',id_token:jwt(subject),expires_in:3600,scope:'openid resource.invoke chatgpt.tokens.use.direct offline_access'});};}
+function authFetch(subject='subject',nonce='nonce'){return async(url,init)=>{if(String(url).endsWith('/jwks.json'))return Response.json({keys:[{...keys.publicKey.export({format:'jwk'}),kid:'key'}]});assert.equal(String(url),'https://auth.openai.com/api/accounts/oauth/token');const params=new URLSearchParams(init.body);assert.equal(params.get('client_id'),'oaiapp_staf');assert.equal(params.get('resource'),'https://api.openai.com/v1');return Response.json({token_type:'Bearer',access_token:'dummy-access',refresh_token:'dummy-refresh',id_token:jwt(subject,nonce),expires_in:3600,scope:'openid resource.invoke chatgpt.tokens.use.direct offline_access'});};}
 
 test('fresh direct registration binds PKCE/state/nonce/client/identity and writes separate private records only after consent callback',async t=>{
  const root=await fixture(t),url=new URL(authorizationUrl(attempt));assert.equal(url.hostname,'auth.openai.com');assert.equal(url.searchParams.get('agent_name_hint'),'Staf');assert.equal(url.searchParams.get('client_id'),'dynamic_agent_client');assert.equal(url.searchParams.get('ext_agent_host_id'),'urn:uuid:host');assert.equal(url.searchParams.get('code_challenge_method'),'S256');
@@ -134,10 +136,111 @@ test('fresh direct registration binds PKCE/state/nonce/client/identity and write
  assert.ok(!authorizationUrl({...attempt,previous:saved,clientId:saved.clientId}).includes(saved.idToken));
 });
 
+test('pending login preserves logout and invalid credential records',async t=>{
+ for(const change of ['logout','malformed','symlink','replacement']){
+  const root=await fixture(t),callback=new URL(attempt.redirectUri+'?code=x&state=state&client_id=oaiapp_staf');
+  await completeDirectLogin(root,attempt,callback,authFetch());
+  const previous=await loadDirectCredential(root),path=join(root,'auth','codex-direct.json');
+  let entered,release;const started=new Promise(r=>entered=r),gate=new Promise(r=>release=r);
+  const pending=completeDirectLogin(root,{...attempt,clientId:previous.clientId,previous},callback,async(url,init)=>{
+   if(!String(url).endsWith('/jwks.json')){entered();await gate;}
+   return authFetch()(url,init);
+  });
+  await started;
+  if(change==='logout')await directAuth('logout',root);
+  else if(change==='malformed')await writeFile(path,'invalid credential');
+  else if(change==='replacement')await writeFile(path,JSON.stringify({...previous,accessToken:'newer-token'}));
+  else{await rm(path);await symlink(join(root,'missing'),path);}
+  release();await assert.rejects(pending);
+  if(change==='logout')await assert.rejects(lstat(path),{code:'ENOENT'});
+  else if(change==='malformed')assert.equal(await readFile(path,'utf8'),'invalid credential');
+  else if(change==='replacement')assert.equal((await loadDirectCredential(root)).accessToken,'newer-token');
+  else assert.equal((await lstat(path)).isSymbolicLink(),true);
+ }
+});
+
 test('direct refresh is serialized, rotating and endpoint-bound; CLI tokens are never loaded or changed',async t=>{
  const root=await fixture(t);await mkdir(join(root,'codex-context','codex'),{recursive:true});await writeFile(join(root,'codex-context','codex','auth.json'),'do-not-read-or-copy');assert.match(await directAuth('status',root),/not signed in/);
  await completeDirectLogin(root,attempt,new URL(attempt.redirectUri+'?code=x&state=state&client_id=oaiapp_staf'),authFetch());const path=join(root,'auth','codex-direct.json');const record=await loadDirectCredential(root);await writeFile(path,JSON.stringify({...record,expiresAt:0}),{mode:0o600});
  let release;const gate=new Promise(r=>release=r);let count=0;const refresh=async(url,init)=>{count++;assert.equal(String(url),'https://auth.openai.com/api/accounts/oauth/token');assert.equal(new URLSearchParams(init.body).get('grant_type'),'refresh_token');await gate;return Response.json({token_type:'Bearer',access_token:'rotated-access',refresh_token:'rotated-refresh',expires_in:3600,scope:'resource.invoke chatgpt.tokens.use.direct'});};
- const one=directAccessToken(root,refresh);await new Promise(r=>setTimeout(r,20));await assert.rejects(directAccessToken(root,refresh),/busy/);release();assert.equal(await one,'rotated-access');assert.equal(count,1);assert.equal((await loadDirectCredential(root)).refreshToken,'rotated-refresh');assert.equal(await readFile(join(root,'codex-context','codex','auth.json'),'utf8'),'do-not-read-or-copy');
+ const one=directAccessToken(root,refresh);await new Promise(r=>setTimeout(r,20));const two=directAccessToken(root,refresh);await new Promise(r=>setTimeout(r,20));assert.equal(count,1);release();assert.deepEqual(await Promise.all([one,two]),['rotated-access','rotated-access']);assert.equal(count,1);assert.equal((await loadDirectCredential(root)).refreshToken,'rotated-refresh');assert.equal(await readFile(join(root,'codex-context','codex','auth.json'),'utf8'),'do-not-read-or-copy');
  await rm(path);await symlink(join(root,'codex-context','codex','auth.json'),path);await assert.rejects(loadDirectCredential(root));
+});
+
+async function expiredDirectFixture(t){
+ const root=await fixture(t);
+ await completeDirectLogin(root,attempt,new URL(attempt.redirectUri+'?code=x&state=state&client_id=oaiapp_staf'),authFetch());
+ const path=join(root,'auth','codex-direct.json'),record=await loadDirectCredential(root);
+ await writeFile(path,JSON.stringify({...record,expiresAt:0}),{mode:0o600});
+ return root;
+}
+function deferredRefresh(){let resolve;const promise=new Promise(done=>{resolve=done;});return{promise,resolve};}
+
+test('a cancelled refresh waiter does not cancel another caller',async t=>{
+ const root=await expiredDirectFixture(t),entered=deferredRefresh(),release=deferredRefresh(),controller=new AbortController();let count=0,requestSignal;
+ const refresh=async(url,init)=>{count++;requestSignal=init.signal;entered.resolve();await release.promise;return Response.json({token_type:'Bearer',access_token:'rotated',refresh_token:'rotated-refresh',expires_in:3600,scope:'resource.invoke chatgpt.tokens.use.direct'});};
+ const first=directAccessToken(root,refresh);await entered.promise;
+ const second=directAccessToken(root,refresh,controller.signal);const rejected=assert.rejects(second,/cancelled/);
+ await new Promise(r=>setTimeout(r,20));controller.abort(Error('waiter cancelled'));await rejected;
+ assert.equal(requestSignal.aborted,false);release.resolve();assert.equal(await first,'rotated');assert.equal(count,1);
+});
+
+test('overlapping failed refreshes share the failure without retrying the exchange',async t=>{
+ const root=await expiredDirectFixture(t),entered=deferredRefresh(),release=deferredRefresh();let count=0;
+ const refresh=async()=>{count++;entered.resolve();await release.promise;throw Error('connection lost');};
+ const first=directAccessToken(root,refresh);const firstResult=assert.rejects(first,/connection failed/);await entered.promise;
+ const second=directAccessToken(root,refresh);const secondResult=assert.rejects(second,/connection failed/);await new Promise(r=>setTimeout(r,20));
+ release.resolve();await Promise.all([firstResult,secondResult]);assert.equal(count,1);assert.equal((await loadDirectCredential(root)).refreshToken,'dummy-refresh');
+});
+
+test('a preexisting external refresh lock fails closed and remains in place',async t=>{
+ const root=await expiredDirectFixture(t),path=join(root,'auth','codex-direct.lock');await writeFile(path,'external lock');let count=0;
+ await assert.rejects(directAccessToken(root,async()=>{count++;throw Error('unexpected');}),/busy/);
+ assert.equal(count,0);assert.equal(await readFile(path,'utf8'),'external lock');
+});
+
+test('a successful refresh still saves a rotated token after all callers cancel',async t=>{
+ const root=await expiredDirectFixture(t),entered=deferredRefresh(),release=deferredRefresh(),controller=new AbortController();let requestSignal;
+ const refresh=async(url,init)=>{requestSignal=init.signal;entered.resolve();await release.promise;return Response.json({token_type:'Bearer',access_token:'rotated',refresh_token:'rotated-refresh',expires_in:3600,scope:'resource.invoke chatgpt.tokens.use.direct'});};
+ const call=directAccessToken(root,refresh,controller.signal);const rejected=assert.rejects(call,/cancelled/);await entered.promise;
+ controller.abort(Error('caller cancelled'));await rejected;assert.equal(requestSignal.aborted,true);
+ release.resolve();
+ // A second caller joins the still-running exchange and observes its committed result.
+ const observer=directAccessToken(root,async()=>{throw Error('unexpected second exchange');});
+ assert.equal(await observer,'rotated');
+ assert.equal((await loadDirectCredential(root)).refreshToken,'rotated-refresh');
+});
+
+test('direct adapter rejects token collisions in opaque replay without altering it', async () => {
+ const request=async()=>sse([completed([{type:'reasoning',id:'r',encrypted_content:'prefix-dummy-access-suffix'},message('safe')])]);
+ await assert.rejects(provider(request).complete([],[]),/safely redact/);
+});
+
+function requestLocal(port,path,method='GET'){return new Promise((resolve,reject)=>{const req=httpRequest({host:'127.0.0.1',port,path,method},res=>{res.resume();res.on('end',()=>resolve(res.statusCode));});req.on('error',reject);req.end();});}
+
+test('standalone loopback rejects invalid requests without consuming a valid callback',async t=>{
+ const root=await fixture(t);let show;const shown=new Promise(r=>show=r);let nonce;const originalFetch=globalThis.fetch;
+ globalThis.fetch=(url,init)=>authFetch('subject',nonce)(url,init);t.after(()=>{globalThis.fetch=originalFetch;});
+ const login=directAuth('login',root,text=>show(new URL(text.split('\n').at(-1))));const auth=await shown;nonce=auth.searchParams.get('nonce');const redirect=new URL(auth.searchParams.get('redirect_uri')),state=auth.searchParams.get('state');
+ const path='/auth/callback?'+new URLSearchParams({state,code:'synthetic',client_id:'oaiapp_staf'});
+ assert.equal(await requestLocal(redirect.port,path,'POST'),400);
+ assert.equal(await requestLocal(redirect.port,'/auth/callback?state=wrong&code=x'),400);
+ assert.equal(await requestLocal(redirect.port,path+'&state=duplicate'),400);
+ assert.equal(await requestLocal(redirect.port,'/auth/callback?bad#fragment'),400);
+ assert.equal(await requestLocal(redirect.port,'/auth/callback?state=%ZZ'),400);
+ assert.equal(await requestLocal(redirect.port,path),200);assert.match(await login,/registration saved/);assert.equal((await loadDirectCredential(root)).subject,'subject');
+});
+
+test('real credential commit honors revocation, cancellation and the committing boundary',async t=>{
+ for(const action of ['revoke','cancel','commit']){
+  const root=await fixture(t);let authorized=true,entered,release;const enteredPromise=new Promise(r=>entered=r),gate=new Promise(r=>release=r);let nonce;
+  const coordinator=new InstanceAuth({redirectUri:'http://127.0.0.1:3210/auth/callback',prepare:async()=>({hostId:'host',clientId:'dynamic_agent_client'}),authorized:async()=>authorized,complete:async(a,c,signal,beforeCommit)=>completeDirectLogin(root,a,c,authFetch('subject',nonce),signal,async()=>{
+   if(action==='commit'){await beforeCommit();entered();await gate;}else{entered();await gate;await beforeCommit();}
+  })});
+  const started=await coordinator.start('owner'),url=new URL(started.url);nonce=url.searchParams.get('nonce');const target='/auth/callback?'+new URLSearchParams({state:url.searchParams.get('state'),code:'synthetic',client_id:'oaiapp_staf'});
+  const result=coordinator.accept('GET',target);await enteredPromise;
+  if(action==='revoke')authorized=false;else assert.equal(coordinator.cancel('owner',started.id).phase,action==='commit'?'committing':'cancelled');
+  release();assert.equal(await result,action==='commit'?'accepted':'rejected');
+  if(action==='commit')assert.equal((await loadDirectCredential(root)).subject,'subject');else await assert.rejects(loadDirectCredential(root));
+ }
 });

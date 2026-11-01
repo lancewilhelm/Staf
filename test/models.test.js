@@ -102,11 +102,12 @@ test('shared model/reasoning shortcuts retain scope and expose demo discovery wi
 });
 
 
-test('terminal selector commands parse provider/model/reasoning flags outside menu arguments',async t=>{
- const {spawnSync}=await import('node:child_process');
- const dir=await mkdtemp(join(tmpdir(),'staf-selector-cli-'));t.after(()=>rm(dir,{recursive:true,force:true}));
- const set=spawnSync(process.execPath,['dist/cli.js','settings','model','default','manual-code-model','--provider','codex','--data-dir',dir],{encoding:'utf8'});
- assert.equal(set.status,0,set.stderr);assert.match(set.stdout,/Default saved/);
- const show=spawnSync(process.execPath,['dist/cli.js','settings','show','--provider','codex','--model','manual-override','--reasoning','high','--data-dir',dir],{encoding:'utf8'});
- assert.equal(show.status,0,show.stderr);assert.match(show.stdout,/manual-override/);assert.match(show.stdout,/"value": "high"/);
+test('model and reasoning settings preserve explicit values and defaults',async t=>{
+ const dir=await mkdtemp(join(tmpdir(),'staf-selector-settings-'));t.after(()=>rm(dir,{recursive:true,force:true}));
+ const store=new SettingsStore(dir),session=await SettingsSession.begin(store,{file:{},shell:{},cli:{provider:'codex'}});
+ const {settingsCommand}=await import('../dist/settings-commands.js');
+ assert.match(await settingsCommand(store,session,['model','default','manual-code-model']),/remembered as my default/);
+ const override=await SettingsSession.begin(new SettingsStore(dir),{file:{},shell:{},cli:{provider:'codex',model:'manual-override',reasoning:'high'}});
+ assert.equal((await store.load()).defaults['model.codex'],'manual-code-model');
+ assert.equal(override.effective().model.value,'manual-override');assert.equal(override.effective().reasoning.value,'high');
 });

@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, writeFile, readFile, mkdir, symlink, lstat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { spawnSync } from 'node:child_process';
 import { SettingsStore, SettingsSession, resolveSettings, validateSetting } from '../dist/settings.js';
 import { settingsCommand } from '../dist/settings-commands.js';
 
@@ -14,11 +13,6 @@ async function setup(t) {
   return {root,store};
 }
 const input={file:{},shell:{},cli:{}};
-function cli(root,args=[],text='/quit\n',extra={}) {
-  const env={...process.env,...extra};
-  for(const key of ['STAF_MODEL','STAF_CODEX_MODEL','LMSTUDIO_MODEL','LMSTUDIO_BASE_URL','STAF_BASE_URL']) if(!Object.hasOwn(extra,key)) delete env[key];
-  return spawnSync(process.execPath,['dist/cli.js',...args,'--data-dir',root],{input:text,encoding:'utf8',env});
-}
 
 test('versioned defaults survive restart; session overrides and terminal-style default writes remain separate',async t=>{
   const {store,root}=await setup(t);
@@ -92,41 +86,38 @@ test('same deterministic menu operations support repetition/cancel and forbid te
   assert.match(await settingsCommand(store,session,['show']),/built-in/);
 });
 
-test('CLI settings bootstrap works without keys/model; commands never enter messages or settings secrets',async t=>{
+test('settings bootstrap works without keys or a model and saves no secrets',async t=>{
   const {root,store}=await setup(t);
-  let result=cli(root,['settings','set','default','provider','openrouter']);assert.equal(result.status,0,result.stderr);
-  result=cli(root,['settings','show']);assert.match(result.stdout,/OPENROUTER_API_KEY|model identifier/);
-  result=cli(root,[], '/settings\n/settings cancel\nhello\n/settings set session provider demo\nwhat time is it?\n/settings set default provider codex\n/settings show\n/settings set session provider openrouter\n/quit\n',{OPENROUTER_API_KEY:''});
-  assert.equal(result.status,0,result.stderr);assert.match(result.stdout,/tool_result/);assert.ok(!result.stderr.includes('fixed after'));
-  const {readdir}=await import('node:fs/promises');
-  const file=(await readdir(root)).find(name=>name.endsWith('.json'));
-  const saved=JSON.parse(await readFile(join(root,file),'utf8'));
-  assert.equal(saved.messages.filter(m=>m.role==='user').length,1);
-  assert.ok(!JSON.stringify(saved).includes('/settings'));
+  const session=await SettingsSession.begin(store,input);
+  await settingsCommand(store,session,['set','default','provider','openrouter']);
+  assert.match(await settingsCommand(store,session,['show']),/OPENROUTER_API_KEY|model identifier/);
+  await settingsCommand(store,session,['set','default','provider','codex']);
+  assert.equal(session.effective().provider.value,'codex');
   assert.equal((await store.load()).defaults.provider,'codex');
-  assert.match(result.stdout,/"value": "codex"/); // remembered edit switches current session
-  const next=cli(root,['settings','show']);assert.match(next.stdout,/"value": "codex"/);
+  const next=await SettingsSession.begin(new SettingsStore(root),input);
+  assert.equal(next.effective().provider.value,'codex');
+  assert.doesNotMatch(await readFile(store.path,'utf8'),/OPENROUTER_API_KEY|\/settings/);
 });
 
-test('corruption still allows menu/path recovery; separate-process demo resume and session override nonpersistence',async t=>{
+test('corrupt settings remain available for recovery; session overrides do not persist',async t=>{
   const {root,store}=await setup(t);await mkdir(join(root,'config'));await writeFile(store.path,'broken');
-  const bad=cli(root,[], '/settings\n/settings path\n/settings reload\n/quit\n');
-  assert.equal(bad.status,0);assert.match(bad.stdout,/settings.json/);assert.equal(await readFile(store.path,'utf8'),'broken');
+  await assert.rejects(store.load());assert.match(store.path,/settings.json/);assert.equal(await readFile(store.path,'utf8'),'broken');
   await rm(store.path);
-  const first=cli(root,[], '/settings set session provider demo\nhello\n/quit\n');assert.equal(first.status,0,first.stderr);
-  const id=first.stdout.match(/session ([0-9a-f-]{36})/)[1];
-  const next=cli(root,['--session',id],'hello again\n/quit\n');assert.equal(next.status,0,next.stderr);assert.match(next.stdout,/User turns saved: 2/);
+  const session=await SettingsSession.begin(store,input);session.setSession('provider','demo');
+  const next=await SettingsSession.begin(new SettingsStore(root),input);
+  assert.equal(next.effective().provider.value,'demo');assert.equal(next.effective().provider.source,'built-in');
   assert.deepEqual((await store.load()).defaults,{});
 });
 
-test('completed and resumed chat edits apply next request while remembered defaults survive restart',async t=>{
- const {root}=await setup(t);
- const first=cli(root,[], 'hello\n/settings set default provider lmstudio\n/settings set default model.lmstudio local\n/settings show\n/settings set session provider demo\nhello again\n/quit\n');
- assert.equal(first.status,0,first.stderr);assert.match(first.stdout,/User turns saved: 2/);assert.match(first.stdout,/Applied to next request and remembered/);
- const id=first.stdout.match(/session ([0-9a-f-]{36})/)[1];
- const resumed=cli(root,['--session',id],'/settings set session provider demo\nhello third\n/quit\n');
- assert.equal(resumed.status,0,resumed.stderr);assert.match(resumed.stdout,/User turns saved: 3/);
- const next=cli(root,['settings','show']);assert.match(next.stdout,/"value": "lmstudio"/);assert.match(next.stdout,/"value": "local"/);
+test('settings edits apply to subsequent requests while remembered defaults survive restart',async t=>{
+ const {root,store}=await setup(t);
+ const session=await SettingsSession.begin(store,input);
+ assert.match(await settingsCommand(store,session,['set','default','provider','lmstudio']),/Applied to next request and remembered/);
+ await settingsCommand(store,session,['set','default','model.lmstudio','local']);
+ assert.equal(session.effective().provider.value,'lmstudio');assert.equal(session.effective().model.value,'local');
+ session.setSession('provider','demo');assert.equal(session.effective().provider.value,'demo');
+ const next=await SettingsSession.begin(new SettingsStore(root),input);
+ assert.equal(next.effective().provider.value,'lmstudio');assert.equal(next.effective().model.value,'local');
 });
 
 test('launch input snapshots cannot be mutated by a caller and later explicit session edits remain available',async t=>{

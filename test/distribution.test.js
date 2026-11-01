@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, cp, writeFile, mkdir, readdir } from 'node:fs/promises';
+import { mkdtemp, rm, cp, writeFile, mkdir, readdir, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 test('package excludes synthetic developer settings/auth/env and fresh extracted CLI uses product defaults',async t=>{
- const root=await mkdtemp(join(tmpdir(),'staf-distribution-'));t.after(()=>rm(root,{recursive:true,force:true}));
+ const root=await mkdtemp(join(tmpdir(),'staf-distribution-'));t.after(async()=>{try{const descriptor=JSON.parse(await readFile(join(root,'fresh-data','terminal-service.json'),'utf8'));process.kill(descriptor.pid,'SIGTERM');await new Promise(resolve=>setTimeout(resolve,250));}catch{}await rm(root,{recursive:true,force:true});});
  const project=join(root,'development');await mkdir(project);
  // Copy only explicitly shipped code/docs, never the real user's runtime data.
  for(const name of ['src','dist','test','docs','package.json','tsconfig.json','pnpm-lock.yaml','README.md','AGENTS.md','.env.example','.gitignore','.npmignore']) {
@@ -23,5 +23,5 @@ test('package excludes synthetic developer settings/auth/env and fresh extracted
  const fresh=join(root,'fresh');await mkdir(fresh);const unpack=spawnSync('tar',['-xzf',join(root,archive),'-C',fresh],{encoding:'utf8'});assert.equal(unpack.status,0);
  const data=join(root,'fresh-data');
  const shown=spawnSync(process.execPath,[join(fresh,'package','dist','cli.js'),'settings','show','--data-dir',data],{cwd:fresh,encoding:'utf8'});
- assert.equal(shown.status,0,shown.stderr);assert.match(shown.stdout,/"value": "demo"/);assert.match(shown.stdout,/built-in/);assert.ok(!shown.stdout.includes('developer-only-model'));
+ assert.equal(shown.status,0,shown.stderr);assert.match(shown.stdout,/Provider: demo/);assert.match(shown.stdout,/Model: \(provider default\)/);assert.ok(!shown.stdout.includes('developer-only-model'));
 });

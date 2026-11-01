@@ -1,0 +1,26 @@
+# Keep agent configuration in directly editable files
+
+Accepted in the GUI and agent-management interview on 2026-11-01. This is a
+design decision; runtime implementation is pending.
+
+Agent configuration files are authoritative. The GUI, CLI, and future clients
+edit the same configuration through the shared service, while terminal tools and
+external agents can maintain the files directly. Conversations and operational
+records remain in the shared instance database, and provider credentials remain
+in the instance credential store. This replaces database-owned profiles as the
+target design because direct file maintenance is an explicit owner requirement.
+A separate exported copy would require reconciliation between two editable
+configurations. Separate agent databases and processes are not required.
+
+The service validates saved configuration before accepting the next message.
+Existing work retains its captured settings. Invalid files stay intact and block
+new messages for the affected agent with an actionable error. Concurrent client
+edits report conflicts and preserve unsaved edits. Each agent has a directory
+keyed by its stable ID, so renaming preserves the path. Agent Settings and the
+CLI expose the path. Structured settings belong in agent.toml. One soul.md holds
+personality, role, and standing guidance, with one Instructions editor in the GUI.
+Preserve both existing texts when consolidating them. The mechanics for publishing
+consistent configuration revisions remain implementation design work.
+
+See the [interview decisions](../decisions.md#chat-gui-polish-and-agent-terminology)
+and [copied creation defaults](0002-copy-bot-creation-defaults.md).

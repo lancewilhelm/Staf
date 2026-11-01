@@ -49,13 +49,16 @@ function isEvent(value: unknown): value is RuntimeEvent {
     case 'tool_start': return typeof value.id === 'string' && typeof value.name === 'string';
     case 'tool_result': return typeof value.id === 'string' && typeof value.name === 'string' &&
       typeof value.success === 'boolean' && typeof value.content === 'string';
-    case 'assistant': return typeof value.text === 'string';
+    case 'assistant':
+    case 'assistant_observed': return typeof value.text === 'string';
     case 'error': return typeof value.message === 'string';
     default: return false;
   }
 }
 // Validate structure AND complete turn/tool ordering before accepting untrusted JSON.
-export function validSession(value: unknown, id: string): value is Session {
+// Interrupted task snapshots may end after every requested tool has a result.
+// The default remains strict for completed conversations and ordinary resumes.
+export function validSession(value: unknown, id: string, options: { allowPairedToolEnding?: boolean } = {}): value is Session {
   if (!isRecord(value) || value.version !== 1 || value.id !== id ||
       !(value.provider === null || typeof value.provider === 'string') ||
       !isArray(value.messages) || !value.messages.every(isMessage) ||
@@ -74,8 +77,9 @@ export function validSession(value: unknown, id: string): value is Session {
   }
   let expected: Message['role'] = 'user';
   let pending: string[] = [];
+  let previous: Message['role'] | undefined;
   for (const message of value.messages) {
-    if (message.role !== expected) return false;
+    if (message.role !== expected && !(message.role === 'user' && expected === 'assistant' && previous === 'tool')) return false;
     if (message.role === 'user') expected = 'assistant';
     else if (message.role === 'assistant') {
       const calls = message.tool_calls ?? [];
@@ -85,6 +89,7 @@ export function validSession(value: unknown, id: string): value is Session {
       if (message.tool_call_id !== pending.shift()) return false;
       expected = pending.length ? 'tool' : 'assistant';
     }
+    previous = message.role;
   }
-  return expected === 'user' && (!value.messages.length || typeof value.provider === 'string');
+  return (expected === 'user' || (options.allowPairedToolEnding === true && expected === 'assistant' && previous === 'tool' && pending.length === 0)) && (!value.messages.length || typeof value.provider === 'string');
 }

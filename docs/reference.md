@@ -1,237 +1,86 @@
 # Configuration reference
 
-## CLI flags
+## Shared terminal
 
-| Flag or command | Meaning |
-| --- | --- |
-| `--provider NAME` | `demo`, `openrouter`, `codex`, `lmstudio`, or `live`. Uses saved provider default, otherwise `demo`. |
-| `--reasoning LEVEL` | Provider-specific effort override; `default` omits the override. |
-| `--model ID` | Explicit model override. Rejected with demo. |
-| `--session ID` | Resume a UUID from the selected data directory. |
-| `--data-dir PATH` | Session directory. Defaults to `.staf/` relative to the current directory. |
-| `sessions` | List saved session IDs without calling a provider. |
-| `--live` | Legacy alias for `--provider live`. Conflicts with another selected provider. |
-| `auth codex login` | Start explicit browser sign-in for the Staf direct grant. |
-| `auth codex status` | Report local direct sign-in readiness without refreshing. |
-| `auth codex logout` | Remove local direct tokens; does not revoke the server grant. |
-| `--help` | Print usage without loading credentials or calling a provider. |
+`staf` starts or connects to a detached, loopback-only shared instance and opens
+its persistent main chat. `--data-dir PATH` selects its data directory, which
+defaults to `~/.staf/terminal-instance`. `--instance URL --credential FILE`
+connects to an explicitly paired loopback instance. The service inherits the
+launch environment and does not load `.env`. The terminal's `/help` lists its
+settings, approval and command-status controls. Settings phrases affect the
+current bot profile and use its revision. Natural-language settings support the
+phrases listed in [usage](usage.md#start-the-shared-terminal).
 
-## Environment variables
+The local database, client credential, service descriptor and daemon log are in
+the data directory. The client does not restore a revoked credential. The
+descriptor records the daemon PID and port. The daemon continues after the
+terminal exits and restarts on the next launch if stopped. It is not registered
+as an operating-system service.
 
-Staf loads `.env` from the current directory. Only the settings below are accepted
-from that file. Existing shell variables take precedence. CLI model overrides take
-precedence over variables. A live provider is selected by an explicit flag or saved default; a key alone
-does not select a provider. Explicit session settings can override the selection.
+## Terminal commands and environment
 
-| Variable | Used by | Default |
+`staf --help` lists launch options. `staf --data-dir PATH` selects the local
+instance directory. `staf --instance URL --credential FILE` connects to a paired
+loopback instance. `staf instance help` lists one-shot instance commands. `staf settings show`,
+`staf settings defaults`, `staf settings set provider|model|reasoning VALUE`,
+`staf settings set-default provider|model|reasoning VALUE`, and `staf auth codex
+login|status|cancel|logout` operate through the same shared instance. These
+commands accept the same trailing connection options. A one-shot provider change requires `--confirm-provider-change`, acknowledging that future requests may send conversation history to the new provider. Use `staf settings unset model|reasoning` or `staf settings unset-default model|reasoning` to clear saved values.
+
+The terminal supports `/help`, `/settings`, `/settings show`, `/settings models`, `/settings reasoning`, `/set provider
+NAME`, `/set model ID`, `/set reasoning LEVEL`, `/models`, `/auth codex
+login|status|cancel|logout`, `/usage [details|help]`, `/context [refresh|help]`,
+`/confirm-provider`, `/cancel-provider`, `/unset model|reasoning`, `/unset-default model|reasoning`, `/status ID`, `/retry ID`, `/discard ID`, `/defaults`, `/set-default provider|model|reasoning VALUE`, `/approvals`, `/approve ID`, `/deny ID`, and `/quit`. Settings
+commands edit the current bot profile; creation defaults are separate. See
+[settings](settings.md) for behavior and controls.
+
+The instance inherits its host environment at startup. It does not load `.env`.
+Changing the environment of a later terminal does not change a running instance.
+Models and reasoning belong to the bot profile, not environment variables.
+
+| Variable | Provider | Meaning |
 | --- | --- | --- |
-| `OPENROUTER_API_KEY` | OpenRouter | Required |
-| `STAF_MODEL` | OpenRouter and legacy live | Required unless `--model` is supplied |
-| `OPENROUTER_REASONING_EFFORT` | OpenRouter | `default` |
-| `STAF_CODEX_REASONING` | Codex | `default` |
-| `LMSTUDIO_REASONING_EFFORT` | LM Studio | Only `default` supported |
-| `STAF_REASONING_EFFORT` | Legacy live | Only `default` supported |
-| `STAF_CODEX_MODEL` | Codex | Required unless supplied by `--model` or saved settings |
-| `LMSTUDIO_MODEL` | LM Studio | Required unless `--model` is supplied |
-| `LMSTUDIO_BASE_URL` | LM Studio | `http://localhost:1234/v1/` |
-| `LMSTUDIO_API_KEY` | LM Studio | No authentication header |
-| `STAF_API_KEY` | Legacy live | Required |
-| `STAF_BASE_URL` | Legacy live | `https://api.openai.com/v1/` |
+| `OPENROUTER_API_KEY` | OpenRouter | Required API key. |
+| `LMSTUDIO_BASE_URL` | LM Studio | API root; defaults to `http://localhost:1234/v1/`. |
+| `LMSTUDIO_API_KEY` | LM Studio | Optional API key. |
+| `STAF_BASE_URL` | live | API root; defaults to `https://api.openai.com/v1/`. |
+| `STAF_API_KEY` | live | Required API key. |
 
-The legacy live adapter uses OpenAI-compatible Chat Completions and can incur
-API charges. It remains available for compatibility with earlier Staf usage.
-OpenRouter fixes its endpoint to `https://openrouter.ai/api/v1/chat/completions`.
-
-The `.env` parser accepts literal `KEY=value`, optional `export`, and matching
-single or double outer quotes. Blank lines and full-line comments are accepted.
-It does not expand variables, decode escape sequences, or parse inline comments.
-Symlinks, nonregular files, and files larger than 64 KiB are rejected. No setting
-in `.env` changes PATH, `CODEX_HOME`, or the official Codex login store.
-
-HTTP endpoints require HTTPS except on `localhost`, `127.0.0.1`, or `[::1]`.
-Base URLs cannot contain credentials, query parameters, or fragments. Redirects
-are rejected. Requests have a 60-second timeout and no automatic retries.
-Buffered Codex subprocesses have a 120-second timeout and a 4 MiB captured-output
-limit. Explicit interactive login has a ten-minute timeout and inherits the terminal.
+The supported bot providers are demo, Codex, OpenRouter, LM Studio, and live.
+Live providers require an explicit bot model. The demo echoes messages without a
+model. OpenRouter uses its fixed Chat Completions endpoint. The live adapter uses
+a generic OpenAI-compatible Chat Completions endpoint and can incur API charges.
+Codex uses direct Responses and a separate Staf OAuth grant. A credential alone
+does not select a provider. Per-bot endpoint overrides are not implemented.
+See [model selection](model-selection.md) and [Codex sign-in](codex-direct.md).
 
 ## Scripts
 
 | Command | Effect |
 | --- | --- |
-| `pnpm run build` | Compile strict application source to `dist/`. |
-| `pnpm run check` | Check application types without emitting output. |
+| `pnpm run build` | Build the Vite browser workspace and compile server source to `dist/`. |
+| `pnpm run check` | Check server and browser TypeScript without emitting output. |
 | `pnpm test` | Build and run JavaScript tests against compiled output. |
-| `pnpm start` | Build and start the CLI. |
+| `pnpm start` | Build and start the shared terminal. |
 
-## Capability facts
+## Usage and context
 
-Codex uses direct Responses at a fixed public endpoint, with Staf-owned function
-tools and normalized streaming events. The CLI buffers assistant display until
-completion. OpenRouter, LM Studio and legacy HTTP retain buffered Chat
-Completions. Clock is the only executable tool. No native Codex tool is exposed.
-Signed registration/refresh edge cases are offline-tested. Direct `gpt-6-luna`
-text generation, a history follow-up and a resumed clock-tool round trip were
-live-tested with an existing grant
-on 2026-10-26; this does not establish access for other accounts or models.
+`/usage` reports available provider observations saved with the main chat. It
+does not query account quota or reconcile billing. `/context` reports any latest
+historical input observation and explains that the next request's occupancy is
+unavailable. Staf does not compact history. See [usage accounting](usage-accounting.md)
+and [context display](context.md).
 
 ## Direct Codex authentication
 
-In chat, `/auth codex login|status|logout` manages the direct grant using the
-running chat's data directory. `/settings` offers sign-in after confirmed Codex
-selection when a valid local credential record is missing, and includes a
-**Codex sign-in / reconnect** action. Interactive startup with Codex selected
-also offers setup if needed. Choosing sign-in explicitly starts authorization;
-menu sign-in success resumes model selection. Textual login returns to chat.
-Denied/failed login returns to chat. Ctrl-C cancels pending login and exits chat.
-Cancellation reaches the token exchange and identity checks. An active callback
-settles before cancellation is reported. Once atomic credential replacement has
-started, its actual outcome is reported rather than an early cancellation.
-The URL is printed in full outside the menu. These actions make no generation
-request and do not borrow CLI credentials. Status does not validate server access
-or token freshness; existing records may still need reconnecting after rejection.
-
-The standalone `auth codex login|status|logout [--data-dir PATH]` also manages the direct grant under
-`DATA_DIR/auth`. Login listens on loopback for up to ten minutes and requires user
-browser consent. Status reads local readiness without refreshing. Logout removes
-local tokens only. The host ID stays stable. Token exchanges time out after 15
-seconds and serialized refreshes rotate atomically. No `.env` or CLI auth record
-is used. See [sign-in](codex-direct.md) and [auth contract](direct-responses.md).
-
-The explicit `auth codex-legacy` alias manages the old isolated CLI context for
-compatibility. It is not selected by `--provider codex` and cannot provide direct
-generation credentials. The public OAuth endpoints and JWKS were verified without
-a grant. Offline generation tests use dummy responses; the earlier live smoke
-checks are listed under capability facts.
-
-## Provider selection and identity
-
-| Adapter | Model sources below session overrides | Endpoint or runtime | Session provider identity |
-| --- | --- | --- | --- |
-| demo | No model allowed | In-process deterministic reply | `demo` |
-| openrouter | `--model`, `STAF_MODEL`, saved per-provider model | Fixed OpenRouter Chat Completions URL | `openrouter:MODEL` |
-| codex | Explicit `--model`, `STAF_CODEX_MODEL`, or saved model | Public Responses with separate Staf OAuth grant | `codex-direct:MODEL` |
-| lmstudio | `--model`, `LMSTUDIO_MODEL`, saved model | `LMSTUDIO_BASE_URL`, then loopback default | `lmstudio:ORIGIN/API_ROOT/:MODEL` |
-| live | `--model`, `STAF_MODEL`, saved per-provider model | `STAF_BASE_URL`, then OpenAI default | `live:FULL_CHAT_ENDPOINT:MODEL` |
-
-Provider names are case-sensitive. There is no `STAF_PROVIDER` variable,
-`--base-url` flag, automatic model discovery, automatic `.env.local` loading, or
-API-key login option in Staf. Explicit `settings models` discovery is available. Configuration and model choice are not automatically restored from a transcript;
-resume uses current settings, shows the previous provider, and preserves history.
-Direct Codex requires an explicit account-available model ID. Historical
-`codex:MODEL` identities remain execution aggregates.
-
-HTTP API roots gain a trailing slash if needed, then `chat/completions` is appended.
-For example, LM Studio's default becomes
-`http://localhost:1234/v1/chat/completions`. OpenRouter ignores STAF_BASE_URL and
-STAF_API_KEY. LM Studio ignores STAF_BASE_URL, STAF_MODEL, and STAF_API_KEY.
-Empty model values trigger the next fallback. Empty shell values for the same
-variable still override `.env` values because the file is merged before selection.
-
-## HTTP request and response facts
-
-The shared HTTP transport sends one POST with `model`, the complete normalized
-message history prefixed by Staf's system message, and tool definitions. It sends
-no streaming option. OpenRouter adds `reasoning.effort` only for an explicit
-supported effort; generic transports do not receive that control. A configured key
-becomes a Bearer Authorization header; LM Studio omits that header without a key.
-
-The adapter accepts `choices[0].message`, validates its assistant role and text or
-tool-call shape, and normalizes the supported fields. Supported provider usage
-fields are normalized into the separate session ledger; raw usage objects, other
-choices, reasoning metadata and unsupported provider fields are not preserved.
-See [usage mappings](usage-accounting.md#provider-contracts). Malformed JSON or an
-invalid message aborts the turn. It does not download or discover models.
-
-The adapter declares tool-protocol support, not proof that every selected model
-supports tools. The harness executes only the allowlisted clock with empty object
-arguments, sends its result back, and allows at most four provider steps and eight
-tool requests per response. Requests for unsupported tools become tool errors.
-Configured-MCP rejection applies to Codex's own runtime, not to HTTP transports.
-
-The shared Chat Completions adapters buffer output and do not retry automatically.
-HTTP status errors expose only the status and a generic hint; raw response bodies
-are not logged. Network, redirect and timeout failures share the connection error.
-Provider setup is lazy. A missing key/login or failed call keeps chat settings
-available. Invalid explicit CLI choices still fail at launch. Failed turns retain
-the last completed conversation snapshot. Observed usage can still be persisted,
-but failed activity is not durably audited.
-
-A saved provider identity does not bind the session to an account or API key.
-Changing a key or signing in to another scoped Codex account can send the same
-conversation to that account. Credentials are not stored as part of session identity.
-
-## Versioned nonsecret settings
-
-The canonical settings guide is [settings.md](settings.md). The file is
-`DATA_DIR/config/settings.json`, version 1, with a `defaults` object. Supported
-keys are `provider`, `model.openrouter`, `model.codex`, `model.lmstudio`,
-`model.live`, `endpoint.lmstudio`, and `endpoint.live`. Draft defaults may lack
-credentials or a model; `show` reports setup warnings without constructing an adapter.
-
-Precedence is built-in, saved default, project `.env`, shell, CLI, then this-session
-settings. `/settings set session KEY VALUE` applies on the next request.
-Chat `/settings set default KEY VALUE` applies now and persists; terminal
-`settings set default` affects future launches only. Provider/model changes reset
-reasoning to default, and selecting another provider's field activates that provider. `/settings show` lists effective sources and saved values
-separately. Each chat turn selects an adapter from the current effective values,
-including changes made through `model` and `reasoning` shortcuts. The `Provider:`
-notice appears on the first selection or an adapter identity change; per-request
-progress and adapter construction do not create new conversations. Ctrl-C during
-provider preparation prevents that turn from starting generation.
-`/settings reload` rereads config before a completed turn. `back` and
-`cancel` do not undo applied edits. A corrupt config is never silently reset.
-
-Model IDs permit up to 200 characters in the supported identifier alphabet.
-Values must be nonempty and at most 2048 characters. API roots use the transport's
-scheme and credential restrictions and must not end in `/chat/completions`.
-These validations apply to saved, environment-derived, and explicit settings;
-previously accepted model prose or full chat endpoint URLs now fail coherently.
-Unknown config versions and fields fail safely. Credentials remain in their
-existing separate stores. Configuration operations do not construct adapters or call network clients.
-
-## Model catalogs and effort
-
-The canonical reference is [model-selection.md](model-selection.md). Additional
-settings keys are `reasoning.openrouter`, `reasoning.codex`, `reasoning.lmstudio`,
-and `reasoning.live`. Nondefault effort is supported only for OpenRouter and Codex
-when per-model metadata advertises the requested backend string. Default identities
-remain unchanged; explicit effort adds `:reasoning=LEVEL` to the provider identity.
-`settings models [refresh]` and `settings reasoning [refresh]` expose metadata only.
-Shared selection verifies effort support before constructing a live adapter.
-
-No settings JSON is bundled as a product default. Package files are allowlisted;
-`.staf/`, actual `.env` files, auth, logs, and private vision/interview notes are
-excluded from the distribution. Developer defaults remain in local ignored data.
-
-## Usage commands
-
-`/usage [details|help]` reads the local session ledger. It never queries account
-quotas, adds generation calls, or estimates dollar costs. Optional session `usage`
-records are backward compatible with files lacking them. See the complete
-[field mappings and accounting rules](usage-accounting.md).
-
-## Context commands
-
-`/context [refresh|help]` explains the running payload proxy/window display. Only
-`refresh` triggers existing metadata discovery; passive display makes no network
-request. Window mappings are OpenRouter `context_length` and Codex account-catalog
-`context_window`, positive integers for the exact selected model. Others remain
-unknown. See [context status](context.md). Staf compaction is not implemented.
-
-New optional usage observation fields: `scope: request|execution` and ISO
-`observedAt`. Old sessions remain readable. Context rendering shows historical
-last-request input separately from next-payload estimates; no measured-plus-delta
-baseline is asserted without exact payload lineage.
-
-The recurring context footer shows `Context: demo` for demo or a labeled visible
-payload estimate for direct Codex and other HTTP providers. When same-model Codex
-replay contains opaque reasoning, `(visible est.)` identifies the projection that
-excludes its ciphertext. `/context` reports excluded item count and unknown token
-occupancy separately from provider-reported historical input. Unsent replay and
-per-message usage metadata are excluded for other HTTP adapters. The display does
-not modify history, replay, requests or the ledger. `/context` retains timestamps,
-sources and compaction caveats;
-`/usage` retains consumption accounting. No context/usage fields were removed.
+A paired client starts a sign-in attempt on the instance. The instance owns the
+loopback callback and stores the Staf grant under its data directory. Status is
+local and does not establish account access. Logout removes local tokens and
+does not revoke the server grant. A paired client can cancel its own pending
+attempt. No official Codex CLI credential is imported. See
+[sign-in and recovery](codex-direct.md) and the [auth contract](direct-responses.md).
+Shared-instance sign-in and inference have synthetic coverage and remain
+unverified with a live account.
 
 ## Direct Responses request facts
 
@@ -255,3 +104,81 @@ Reasoning effort is forwarded only when an explicit nondefault value is selected
 contract. Assistant `refusal` parts display their explanation as canonical text
 and retain their native type for same-model replay. No API-key or native-runtime
 fallback exists.
+
+## Local shared instance preview
+
+The workspace is served at `/`. The former Advanced page is not served.
+Authenticated `GET /api/inbox` projects pending questions and approvals.
+`GET /api/task-updates` returns task summaries for the inbox. A guided Codex bot
+creation uses `POST /api/bots` with `operationId`, `provider`, and `model`;
+`GET /api/bot-creations/OPERATION_ID` recovers a recorded result. Reusing an
+operation ID with different input conflicts. The transaction copies remaining
+creation defaults into the new bot. The version 27 migration adds the creation
+journal after a database backup. These operations do not change existing bots.
+
+Shared-instance Codex sign-in uses `POST /api/codex-auth/start`, `GET /api/codex-auth/current`, `GET /api/codex-auth/ATTEMPT_ID`, `POST /api/codex-auth/ATTEMPT_ID/cancel`, and `GET /api/codex-auth/credential`, and `POST /api/codex-auth/logout`. The initiating paired client owns an attempt and can recover its status and cancel it after a page refresh. Other paired clients cannot inspect it. The OAuth callback is a loopback route at `/auth/callback`; it does not expose callback parameters in its response. Cancellation, client revocation, expiry, and shutdown prevent a pending commit. Synthetic tests cover these boundaries; live sign-in is unverified.
+
+`instance serve [DATABASE_PATH] [PORT]` uses the database directory for Codex credentials and defaults to `.staf/instance.sqlite`
+and port `3210`, binding `127.0.0.1` only. `instance pair|clients|revoke|bots|create|inspect|edit|archive|restore|read|send|status`
+use the loopback origin and a separate client credential file; see
+[usage](usage.md#local-shared-instance-offline-preview). `instance create URL CREDENTIAL_FILE NAME [--instructions TEXT]` joins name
+arguments with spaces. The optional flag must appear once at the end, followed
+by one text argument. The server stores
+SHA-256 token hashes in SQLite and limits JSON request bodies to 64 KiB, except skill import and update requests, which are limited to 1,600,000 bytes. Newly created databases have owner-only permissions, independent of a permissive umask. Existing file permissions are not changed. Restrict the containing directory and any existing database separately. On the tested platform, SQLite rollback journals inherit the owner-only database mode.
+The host issues a one-time code at startup and on each terminal Enter. Browser
+requests with an Origin must match the exact server origin; JSON and bearer
+credentials are required for protected writes. No network transport beyond
+loopback is implemented here. Codex, OpenRouter, LM Studio and live use host credentials and an explicit bot model. Paired clients have derived
+identifiers; any paired client can list and revoke them. Every paired client is trusted to act for the sole owner, including managing approvals and settings; there is no separate owner role check.
+
+An optional profile description is directory metadata visible to other bots. A profile edit that omits it preserves its current value. The paired `POST /api/bot-discovery` endpoint accepts `requesterId` and `query`, and returns matching active or busy bots by name and description, without selecting a helper. Archived bots and the requester are excluded. Matching and limits are provisional; discovery itself does not execute collaboration. The version 12 migration backs up existing databases and initializes descriptions as empty strings. Version 13 separately records an owner-selected helper clock scope on task acceptance. Version 14 installs the collaboration journal and interrupts active assignments on restart. Version 15 installs the exact-message disclosure approval journal; pending and unused approvals are interrupted on restart. The exchange runtime has been exercised with synthetic providers, not live providers. Every request, question, answer, and result requires approval of its exact recipient and text. The helper clock scope defaults to false, retries retain it, and it does not enable a disabled capability. Version 16 journals main-chat task starts by command and tool-call ID. Version 17 adds revision-safe bot creation defaults.
+
+Bot profile edits and archive operations require the current revision. Stale
+revisions return HTTP 409. The service stores a profile snapshot for each
+accepted chat command. Archive rejects active chat commands. The instance captures the profile for each turn, stores full provider history privately, and exposes only visible chat. New command IDs use a private keyed fingerprint to distinguish exact retries from different input that redacts to the same text. Older commands without a fingerprint remain queryable, but reuse of their IDs is rejected because the original input cannot be verified. Provider-specific settings are checked during execution. A pre-journal SQLite database is copied with `VACUUM INTO` before migration. The backup path
+is printed by `instance serve`; this is not a complete backup/restore workflow.
+
+OpenRouter and other chat-completions adapters combine caller cancellation with
+their 60-second timeout. Offline tests verify that cancellation closes a local
+HTTP request.
+
+A paired client can inspect and update copied bot defaults with `GET` and `POST /api/creation-defaults`; updates require the current revision. Provider, model, and reasoning are copied into new bots, never inherited by existing bots. The loopback instance task preview adds `task-start`, `tasks`, `task`, `task-stop`, `task-retry`, `task-replace`, `task-direct`, `task-answer`, and `task-follow` commands. See [background task preview](usage.md#background-task-preview) for syntax and limitations. The service accepts an optional `limitMs` from 1,000 through 86,400,000 and defaults to 300,000.
+
+
+### Shared-instance skills API
+
+Authenticated clients use `GET` and `POST /api/skills` to list or import. Imports require `name`, `description`, `provenance` and literal `body` strings. `GET /api/skills/ID` inspects the current revision. `POST /api/skills/ID/update` adds a revision with those fields and the expected `revision`. `POST /api/skills/ID/enabled` takes a boolean `enabled`; `POST /api/skills/ID/availability` takes `botId` and boolean `available`. `GET /api/bots/BOT_ID/skills` lists currently enabled skills available to that bot. Known configured credentials are redacted before storage and from returned skill content. The catalog `digest` identifies the original submitted bytes, before redaction. Load evidence identifies this as `sourceDigest` and adds `loadedContentDigest`, the SHA-256 of the UTF-8 redacted body placed in the tool result. Older load evidence lacks a loaded-content digest. Existing stored records and backups are not rewritten. See [usage](usage.md#skills-in-the-shared-instance) for CLI syntax, selection and revocation limits.
+
+### Shared-instance memory API
+
+Authenticated clients use `GET` and `POST /api/memories/user` or `/api/memories/bot/BOT_ID` to list or create entries. `POST` to `/MEMORY_ID/edit` takes `version` and `text`; `POST` to `/MEMORY_ID/delete` takes `version`. A stale or wrong-scope ID returns HTTP 409. Descriptive main-chat lookups return a bounded exact-scope candidate preview without mutation; edits and deletes still require an explicit ID and current version. See [usage](usage.md#scoped-memory-in-the-shared-instance) for scope, retrieval, and deletion limits.
+
+### Shared-instance clock approval API
+
+Paired clients can inspect `GET /api/approvals`, decide a pending request once with `POST /api/approvals/{id}/approve` or `/deny`, and read or update `GET` or `POST /api/approval-settings/{scope}`. Settings updates require `{ "mode": "ask-every-time" | "ask-for-risky-actions" | "never-ask" | null, "clockEnabled": boolean }`. Scope is `instance`, `bot:{id}`, or `task:{attemptId}`; null mode inherits and is invalid for the instance. Requests and decisions are persisted; interrupted requests cannot be approved after restart. The clock is the only supported capability in this API. See [usage](usage.md#clock-approvals-in-the-shared-instance) for limits.
+
+The shared instance schedule preview exposes `schedule-create`, `schedule-list`, `schedule-inspect`, `schedule-disable`, `schedule-enable`, `schedule-revoke`, and `schedule-resolve`. See [recurring schedules](usage.md#recurring-schedules-preview) for JSON shape, time semantics, authorization and recovery. Schedule operations require a paired client.
+
+### Shared-instance web reading
+
+`GET` and `POST /api/web-permissions/{instance|bot:ID|task:ID}` inspect or set an explicit boolean `enabled`. Reads require instance and bot permission; ordinary tasks also require task permission. A scheduled web attempt receives its exact captured URL scope, subject to an explicit task disable; helpers are blocked. Task readback includes `override`, `inheritedSchedule`, `scopeEnabled`, `effective` and `scheduledUrl`. `GET /api/web-approvals` returns pending exact hop targets only to paired clients, and `POST /api/web-approvals/ID/approve|deny` decides a pending hop. Decisions and action records store keyed fingerprints and generic status, not the target. The version 18 migration installs disabled-by-default permissions and action recovery. URL and source content can still be retained in conversation or provider replay as described in [usage](usage.md#public-web-reading). Known configured secrets are redacted where implemented; arbitrary chat, source and model output may retain unknown secrets that cannot be reliably detected. The feature has synthetic, not live, verification.
+
+### Shared-instance search
+
+`GET` and `POST /api/search-config` inspect and revision-safely update the owner-selected backend origin. The only accepted form is `http://127.0.0.1:PORT`; clearing uses `null`. `GET` and `POST /api/search-permissions/{instance|bot:ID|task:ID}` inspect or set an explicit boolean `enabled`. A search requires instance and bot permission; ordinary tasks also require their task permission. Scheduled tasks may use only their captured exact query and backend, subject to explicit task disable; helpers are excluded. Task readback includes override, inherited scope, current effective access, query and backend. Paired clients inspect pending exact queries with `GET /api/search-approvals` and decide them with `POST /api/search-approvals/ID/approve|deny`. Action records and decisions store keyed fingerprints and generic status, not the query. Search result URLs containing percent-encoded sequences or known configured secrets are omitted. Version 19 installs the search configuration, permission, decision and rate-accounting tables. See [usage](usage.md#search-through-an-owner-configured-backend) for retention and upstream limits.
+
+### Shared-instance scratch shell
+
+`GET` and `POST /api/shell-config` inspect and revision-safely set the owner-selected Docker binary, Unix socket and pinned image ID. `GET` and `POST /api/shell-permissions/{instance|bot:ID|task:ID}` inspect or set an explicit boolean `enabled`; shell requires instance and bot permission, and tasks require task permission. Helpers are blocked; scheduled tasks may use only their captured exact command and Docker configuration, subject to explicit task disable. Task readback includes override, inherited scope, current effective access and command. `GET /api/shell-approvals` shows exact pending commands to paired clients; `POST /api/shell-approvals/ID/approve|deny` decides one. The runtime always supplies the fixed bounded scratch workspace; a model cannot select a host path or daemon. `GET /api/shell-uncertain` lists unresolved actions and recorded endpoint configurations. Endpoint string equality does not prove the binary or socket still identifies the same daemon; the owner must verify daemon identity independently. `POST /api/shell-actions/ID/review` requires acknowledgment `verified-daemon-identity-and-accepted-late-create-risk`; review does not perform cleanup or prove that a late create cannot materialize. Version 20 adds the scratch configuration, permissions, decision snapshots, durable serialization lock and review journal. See [usage](usage.md#scratch-only-shell) for process visibility, swap and retention limits.
+
+### Scheduled exact web authorization
+
+`POST /api/schedules` accepts the existing UTC clock authorization or `{ "action": "web.read", "resource": "https://example.com/report", "limits": { "maxReads": 1 } }`. The resource must be canonical HTTP(S) without credentials or query. The owner sees and saves the exact URL; it remains in the schedule database and backups. Every web request requires a separate owner approval before DNS or HTTP. Other targets and redirects are blocked, and one dispatch per occurrence is shared by its retries. Instance and bot web permission remain required; an explicit task disable overrides the copied scope and is carried to retries. Schedule revocation aborts pending or in-flight reads. No reusable approval or helper scope is granted. Version 22 adds backed-up attempt scopes and occurrence dispatch accounting; existing clock schedules do not gain web access.
+
+### Scheduled exact search authorization
+
+`POST /api/schedules` also accepts `{ "action": "search.read", "resource": "safe query", "limits": { "maxSearches": 1, "origin": "http://127.0.0.1:8888", "revision": 2 } }`, using the currently configured backend origin and revision. The query and backend snapshot are retained in the schedule database and backups; the selected service and upstreams may also retain the query. Each dispatch requires a separate owner decision. One dispatch per occurrence is shared with retries. Current schedule, backend revision, instance and bot permissions, and task scope are checked before dispatch. Explicit task disable persists across retries; revocation aborts in-flight search. Helpers and reusable grants cannot authorize scheduled search. Version 23 adds backed-up attempt scopes and occurrence dispatch accounting.
+
+### Scheduled exact scratch authorization
+
+`POST /api/schedules` also accepts `shell.execute` with the exact command in `resource` and limits containing `maxExecutions: 1`, the current Docker binary, socket, image ID and configuration revision, and the fixed `sizeBytes`, `maxInodes`, `timeoutMs` and `maxOutputBytes` values shown in [usage](usage.md#recurring-schedules-preview). The owner-selected command and configuration are retained in schedule records and backups; command text is visible to the Docker CLI and daemon. Each occurrence requires a separate owner decision. The one-dispatch limit is shared across retries and is reserved atomically with the global shell lock. Current schedule, configuration, instance and bot permissions, and task scope are checked before dispatch. Explicit task disable persists across retries; revocation aborts in-flight work. The existing uncertain-action and owner-review gate remains in force. Host workspaces, helpers and reusable grants are not authorized. Version 24 adds backed-up attempt scopes and occurrence accounting.

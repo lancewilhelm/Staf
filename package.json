@@ -5,18 +5,21 @@
   "license": "Apache-2.0",
   "type": "module",
   "engines": {
-    "node": ">=22",
+    "node": ">=22.16.0",
     "pnpm": ">=10.27.0"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "vite build && tsc -p tsconfig.json",
     "start": "pnpm run build && node dist/cli.js",
     "test": "pnpm run build && node --test test/*.test.js",
-    "check": "tsc -p tsconfig.json --noEmit"
+    "check": "tsc -p tsconfig.json --noEmit && tsc -p web/tsconfig.json --noEmit"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",
-    "typescript": "^7.0.2"
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.5"
   },
   "files": [
     "dist/*.js",
@@ -30,6 +33,16 @@
     "AGENTS.md",
     ".env.example",
     "THIRD_PARTY_NOTICES.md",
-    "LICENSE"
-  ]
+    "LICENSE",
+    "dist/web/**",
+    "web/**",
+    "vite.config.ts"
+  ],
+  "bin": {
+    "staf": "dist/cli.js"
+  },
+  "dependencies": {
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  }
 }

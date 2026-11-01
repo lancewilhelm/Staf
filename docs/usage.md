@@ -1,286 +1,350 @@
-<!-- Normal interactive entry point: pnpm start; provider selection is in /settings. -->
 # Use Staf
 
-## Start the offline demo
+## Start the shared terminal
 
-1. Open a terminal in the project.
+Build and link the CLI once, then start it from your working directory:
 
 ```sh
-git clone https://github.com/lancewilhelm/Staf.git
-cd Staf
 pnpm install --frozen-lockfile
-pnpm start --provider demo
+pnpm run build
+pnpm link --global
+staf
 ```
 
-2. Enter `hello`. Expect an echo marked `Demo (offline)`.
-3. Enter `what time is it?`. Expect `tool_start`, `tool_result`, and a UTC timestamp.
-4. Enter `/quit`. EOF also exits.
+Use `pnpm start` instead if you do not want a global link. Staf starts a detached
+local instance and reconnects to its persistent main bot. The default data
+directory is `~/.staf/terminal-instance`, so launches from different directories
+reconnect to the same instance. Use `staf --data-dir PATH` to
+select another directory. `/quit` closes the terminal and leaves the instance
+running. The next launch displays the saved conversation. A stopped instance
+starts again when you launch the terminal; unfinished requests are marked
+interrupted when the instance restarts.
 
-Demo mode uses no model. Saved defaults can select another provider, so the
-explicit demo flag keeps this exercise offline. A credential alone selects no provider.
-On a new checkout, run `pnpm install --frozen-lockfile` before starting.
+The initial provider is an offline demo that echoes messages. It is not a
+language model. Type `show settings`, `set provider to demo`, `set model to NAME`,
+or `set reasoning to LEVEL` to inspect or change the current bot profile. Use
+`/help` to see deterministic commands, including approval and status commands.
+Other messages go to the selected provider or the instance's existing memory and
+task handlers. Natural-language settings support these documented phrases, not
+arbitrary requests to change configuration.
 
-## Configure OpenRouter
+To use OpenRouter, export `OPENROUTER_API_KEY` in the environment that starts the
+instance, then set the provider and an explicit model in chat. The instance
+inherits that environment at startup and does not load `.env`; changing the shell
+environment does not update an already-running instance. Codex requires a Staf
+owned sign-in grant in the instance data directory and an explicit model. The
+shared-instance sign-in commands below are synthetic-tested, not live-verified.
+The instance does not silently fall back to another provider.
 
-OpenRouter requests can spend API credits. Choose the model and key before making
-a request. Use a model that supports function calling for Staf's clock tool.
-
-1. Create `.env` in the project with your editor if the file does not already exist.
-2. Use [.env.example](../.env.example) for the variable names. Leave any existing `.env` intact.
-3. Set `OPENROUTER_API_KEY` and `STAF_MODEL` to your key and chosen model ID.
-4. Restrict file access.
+To restart the automatic instance after changing its environment, inspect the
+PID in its descriptor and confirm that the command is the Staf terminal daemon
+for this data directory before sending SIGTERM:
 
 ```sh
-chmod 600 .env
+STAF_INSTANCE_PID="$(node -p 'JSON.parse(require("fs").readFileSync(process.env.HOME + "/.staf/terminal-instance/terminal-service.json", "utf8")).pid')"
+ps -p "$STAF_INSTANCE_PID" -o pid=,command=
+kill "$STAF_INSTANCE_PID"
 ```
 
-5. Start the provider.
+A descriptor can be stale after a crash, so do not run `kill` unless the process
+matches. Start `staf` again from a shell containing the required environment.
 
-```sh
-pnpm start --provider openrouter
-```
+For provider setup and a live chat test, follow [Configure a provider](#configure-a-provider).
 
-To choose a different model for one run, replace `PROVIDER/MODEL` below with its ID.
+The automatic instance does not adopt an existing project `.staf/instance.sqlite` database.
+For scripts, `staf instance help` lists the existing one-shot commands. To connect
+an already paired loopback client, use `staf --instance URL --credential FILE`.
+The local terminal credential and service descriptor are stored in the data
+directory. If the credential is missing for an existing database, or has been
+revoked, pair a client explicitly instead of silently restoring access.
 
-```sh
-pnpm start --provider openrouter --model PROVIDER/MODEL
-```
+## Configure a provider
 
-You can keep using exported shell variables instead of `.env`. Shell variables
-override `.env`, including empty values. CLI model flags override both sources.
-Staf does not write OpenRouter credential files. Codex credentials do not belong in `.env`.
+Open `/settings` in an interactive terminal to edit the current bot's provider,
+model, and reasoning. `/settings show` prints the current profile. In plain
+terminals, use `/set provider NAME`, `/set model MODEL_ID`, and `/set reasoning
+LEVEL`. Confirm a provider change with `/confirm-provider` after reviewing the history-transfer notice, or cancel with `/cancel-provider`. Use `/unset model` or `/unset reasoning` to restore the provider default. Changes are saved to the shared bot profile and apply to new work. Bot
+creation defaults are separate and do not change existing bots. Use `/defaults`
+to inspect them and `/set-default provider|model|reasoning VALUE` to edit them. `/models` reads
+model metadata explicitly; a failed discovery does not prevent manual entry.
 
-## Give Staf its own Codex login
+The available providers are `demo`, `codex`, `openrouter`, `lmstudio`, and
+`live`. All except demo require an explicit model in the bot profile. Demo is an
+offline echo and does not use a language model. Switching providers can send the
+existing conversation to the newly selected provider on the next request.
 
-Start Staf with `pnpm start`, then open `/settings`. Choose Provider, a scope,
-Codex, and confirm. Staf offers **Sign in with ChatGPT** if credentials are missing.
-Choose it, open the printed URL, and review Staf's ChatGPT-plan permissions in the
-browser. After consent, the same Staf process resumes model selection. Choose an
-account-available model and confirm before chatting. Starting with Codex already
-selected also offers setup when a local credential record is missing or invalid.
+### Use Codex
 
-For plain terminals, reconnecting, or status checks, use these inside chat:
+1. Start `staf` and enter `/auth codex login`, or select **Codex sign-in** in
+   `/settings`.
+2. Open the printed URL and complete sign-in in the browser. Use `/auth codex
+   status` to inspect the attempt and local credential status.
+3. Select `codex` and an account-available model in `/settings`, or enter
+   `/set provider codex`, confirm with `/confirm-provider`, and enter `/set model MODEL_ID`.
+4. Send a message in chat and inspect the response. A real request uses the
+   account's plan permissions. Do not paste credentials into chat.
 
-```text
-/auth codex login
-/auth codex status
-/auth codex logout
-```
+Sign-in and model calls in the shared instance have synthetic coverage but have
+not been live verified. See [Codex sign-in and recovery](codex-direct.md).
 
-Textual login returns to chat; select a model with `/settings`. The menu also
-provides **Codex sign-in / reconnect**. These actions use the current data directory
-and make no generation request. Status is local only. Standalone
-`pnpm start auth codex login|status|logout` remains available for recovery.
+### Use OpenRouter
 
-Credentials live in `DATA_DIR/auth/codex-direct.json`, separate from the earlier
-isolated CLI login. No credential migration, CLI fallback or app-server is used.
-See the complete [fresh sign-in and recovery guide](codex-direct.md).
+Set `OPENROUTER_API_KEY` in the environment that starts the instance. Restart an
+existing instance after changing that environment, as described above. Select
+`openrouter` and an explicit OpenRouter model in the bot profile. A message can
+spend API credits. Choose a model that supports function calling to use tools.
 
-The direct stream can deliver a finished message before its final completion
-notification. Staf retains that message and displays it only after the response
-succeeds, including when the final notification's output array is empty. Failed
-or interrupted turns still preserve the last completed history. A model refusal
-appears as an assistant reply with its explanation, rather than a parser error. Text generation,
-a history follow-up and a resumed clock-tool round trip with `gpt-6-luna` were live-tested on 2026-10-26 using an existing
-user-authorized grant; other model/account access is not implied.
+### Use LM Studio or a compatible HTTP endpoint
 
-## Use an existing LM Studio server
+For LM Studio, start its server and select `lmstudio` and an available model.
+The instance uses `http://localhost:1234/v1/` by default. Set
+`LMSTUDIO_BASE_URL` on the host to change the API root and set
+`LMSTUDIO_API_KEY` only if the server requires it.
 
-1. Select a model already available in LM Studio.
-2. Start its local server yourself if it is stopped.
-3. Replace `LOADED_MODEL_ID` below with the server's model ID.
+For a generic OpenAI-compatible endpoint, select `live` and a model. Set
+`STAF_API_KEY` and optionally `STAF_BASE_URL` on the host before starting the
+instance. The default API root is `https://api.openai.com/v1/`. This adapter can
+incur API charges. API roots must not include the `chat/completions` suffix.
+Host environment changes require an instance restart. Per-bot endpoints are not
+implemented. These providers have not been live tested in the shared instance.
 
-```sh
-pnpm start --provider lmstudio --model LOADED_MODEL_ID
-```
+## Inspect usage and context
 
-Staf defaults to `http://localhost:1234/v1/`. Use `LMSTUDIO_BASE_URL` for another
-endpoint and `LMSTUDIO_MODEL` for a default model. Set `LMSTUDIO_API_KEY` only if
-your server requires authentication. Staf sends no Authorization header otherwise.
-The implementation did not start a server, download a model, or expose a network port.
-
-## Use the legacy HTTP adapter
-
-This adapter can incur charges at the configured endpoint. Use it for a generic
-OpenAI-compatible Chat Completions server, rather than for Codex subscription auth.
-Staf requires a key for this adapter even if the target server itself does not.
-Use the dedicated `lmstudio` adapter for a local server without authentication.
-
-1. In your shell or project `.env`, set `STAF_API_KEY` and `STAF_MODEL`.
-2. If using another server, set `STAF_BASE_URL` to its API root, such as
-   `https://your-provider.example/v1/`. The `.example` address is a placeholder.
-3. After configuring a real endpoint and approving its cost, start the adapter.
-
-```sh
-pnpm start --provider live
-# Equivalent legacy spelling:
-pnpm start --live
-```
-
-The default API root is `https://api.openai.com/v1/`. The transport appends
-`chat/completions`; do not set the base URL to the complete chat endpoint.
-No model is selected automatically. Pass `--model MODEL_ID` to override
-`STAF_MODEL` for one invocation. `--provider live` always uses API-key billing,
-not ChatGPT subscription login. It does not use OPENROUTER_API_KEY or Codex auth.
-
-## Resume a conversation
-
-1. Copy the session ID printed at startup, or list the stored IDs.
-
-```sh
-pnpm start sessions
-```
-
-2. Resume with the same provider, model, and endpoint used for that session.
-
-```sh
-pnpm start --session SESSION_ID
-pnpm start --provider openrouter --model PROVIDER/MODEL --session SESSION_ID
-pnpm start --provider codex --session SESSION_ID
-pnpm start --provider lmstudio --model LOADED_MODEL_ID --session SESSION_ID
-```
-
-Use the first command for demo sessions. The others are separate alternatives.
-If you used an explicit Codex model before, pass that model again.
-Use `--data-dir PATH` on both runs to store sessions outside the default `.staf/`.
-Start a new session when you change provider or model. Version-1 sessions from
-the original JavaScript version still load without migration.
+`/usage` reports available usage saved for the main chat. `/usage details` shows
+individual observations. Unreported usage remains unavailable. `/context`
+reports the latest available historical input count and explains that the next
+request's context occupancy is unavailable. Dynamic instructions, memory, tools,
+and notices can change the next request. Staf does not compact history. See
+[usage accounting](usage-accounting.md) and [context display](context.md).
 
 ## Resolve common errors
 
-- For `ERR_PNPM_UNSUPPORTED_ENGINE`, run `pnpm --version` and `node --version`.
-  Staf requires pnpm 10.27.0 or later and Node 22 or later. The interactive shell
-  previously selected Corepack pnpm 10.27.0 while automation selected Homebrew 12.11.2.
-  Both now work. You do not need a global update to run Staf.
-- For a missing API key or model, set the named variable or pass `--model`.
-  An empty shell variable overrides a nonempty `.env` value.
-- For HTTP 401, check the selected provider's key. For 402, check credits. For 429,
-  wait before retrying. Staf does not retry paid calls automatically.
-- For an LM Studio connection failure, inspect its server status and endpoint.
-  Staf does not start the server for you.
-- For a model rejecting tools, select a model that supports function calling.
-  Staf cannot prove the selected model's capabilities before the request.
-- For a Codex login error, use `/auth codex status` inside chat, then `/auth codex login` to reconnect. This adapter requires ChatGPT
-  sign-in. Check model access and subscription limits if execution fails.
-- For a damaged conversation, keep the JSON file for inspection and start a new
-  session. Staf refuses to overwrite malformed snapshots.
-- For a session lock after a crash, confirm no Staf process uses that session before
-  removing that session's `.json.lock` file. Do not remove an active session's lock.
+- For `ERR_PNPM_UNSUPPORTED_ENGINE`, check the Node and pnpm versions. Staf
+  requires Node 22.16 or later and pnpm 10.27.0 or later.
+- If a provider reports a missing credential or model, check the host environment
+  and the bot profile. Restart the instance after changing host variables.
+- For HTTP 401, check the selected provider's credential. For 402, check credits.
+  For 429, wait before retrying. Staf does not automatically retry paid calls.
+- For LM Studio connection errors, check the server and API root. Staf does not
+  start the server or download models.
+- For Codex sign-in errors, use `/auth codex status` and retry sign-in when ready.
+- If the local client credential is revoked or missing for an existing database,
+  pair an explicit client. Staf does not restore the credential automatically.
 
-Provider failures leave the last completed turn unchanged and keep the chat open
-for `/settings` or a retry. Invalid launch flags still exit with code 1. Retry the user message after resolving the error. See the
-[configuration reference](reference.md) for parser restrictions and exact settings.
+Use `/help` to list terminal commands. A failed provider request leaves settings
+available; inspect the error and retry the message after correcting the cause.
 
-## Check configuration without generating
+## Local shared instance (offline preview)
 
-These commands build or inspect help and do not call a model.
+Start with `pnpm start instance serve .staf/instance.sqlite 3210` and open
+`http://127.0.0.1:3210/`. Pair with the displayed one-time code. Press Enter
+in the host terminal to replace the code for the next client. Codes and
+credentials grant access to all bots; keep them private. Browser authorization
+is stored in localStorage. Use the paired-client CLI operations to inspect
+and revoke a client. Revoking this browser returns it to pairing. A revoked
+client needs a new host code to reconnect. Clients are identified by an ID,
+not a device name.
+
+The workspace lists persistent bots and shows their main chats. **Settings**
+shows the Codex sign-in for this instance. A saved sign-in is reused across
+bots; it does not establish that the provider or a model is available. Select
+**New bot** to create a bot with a name, role instructions, and its own model.
+You can create a bot before signing in or choosing a model. Select the model
+label below a bot's chat to change that bot's model. Press Enter to send a
+message or Shift+Enter to insert a new line. If no Codex sign-in is available,
+the workspace keeps your draft and directs you to provider settings. If a bot
+has no model, the workspace keeps your draft until you choose one.
+
+The inbox shows current task updates, questions, and approval requests. Activity
+opens automatically for a new question or approval for the selected bot. Other
+updates do not open it. Select a request for another bot to view that bot's
+Activity. Task questions are visible, but answering them in the workspace is
+not yet implemented. The workspace checks for updates while the browser page
+is visible; it does not provide background notifications.
+
+Drafts and pending message IDs are stored in the browser. After a reload, use
+**Recover saved browser drafts or creation** to select an earlier record. If a
+submission result is uncertain, check its status or retry the same message with
+the same ID. Staf does not silently send a new request. Clearing browser storage
+removes locally saved drafts and pending IDs. The former Advanced page has been
+retired. Profile, permission, memory, skill, schedule, and task management are
+not yet fully available in the workspace; the service and CLI operations below
+remain available.
+Bot profiles contain a name, directory description, instructions, soul, provider, model, and reasoning. A later request after a provider change can send existing chat history to the new provider. Creation defaults set provider, model, and reasoning for future bots. The instance copies these settings at creation; changing defaults never changes existing bots. Revisions prevent stale clients from overwriting each other. In the CLI, use `instance defaults URL CREDENTIAL_FILE` and `instance defaults-set URL CREDENTIAL_FILE REVISION PROVIDER MODEL REASONING`; use `-` for an empty model or reasoning. Permission and approval settings remain separate. The description is owner-edited metadata visible to other bots; keep private instructions and memory out of it. Existing bots start with an empty description.
+The deterministic demo provider does not follow the instructions or soul. Select Codex, OpenRouter, LM Studio, or live and an explicit model in the bot profile. OpenRouter uses `OPENROUTER_API_KEY` in the service host environment; the instance command does not load the project `.env` file. Codex uses the Staf grant under the directory containing the instance database. From a paired browser, use Codex sign-in and open the provided link on the instance host. The initiating paired client can check or cancel that attempt, including after refreshing the page. The CLI provides `instance codex-auth-start URL CREDENTIAL_FILE`, `codex-auth-current URL CREDENTIAL_FILE`, `codex-auth-status URL CREDENTIAL_FILE ATTEMPT_ID`, `codex-auth-cancel URL CREDENTIAL_FILE ATTEMPT_ID`, and `codex-auth-credential URL CREDENTIAL_FILE`. The callback listens on the same loopback origin. Revoking the initiating client prevents credential commit. These paths have been tested with synthetic auth only; live sign-in has not been verified. Provider failures do not fall back to another provider. Live provider execution has not been verified in this preview.
+
+CLI examples (use a fresh host code for each client):
 
 ```sh
-pnpm run check
-pnpm test
-pnpm start --help
+pnpm start instance pair http://127.0.0.1:3210 ~/.staf-client.json CODE
+pnpm start instance create http://127.0.0.1:3210 ~/.staf-client.json Ada Lovelace --instructions 'Be concise'
+pnpm start instance clients http://127.0.0.1:3210 ~/.staf-client.json
+pnpm start instance revoke http://127.0.0.1:3210 ~/.staf-client.json CLIENT_ID
+pnpm start instance bots http://127.0.0.1:3210 ~/.staf-client.json
+pnpm start instance inspect http://127.0.0.1:3210 ~/.staf-client.json BOT_ID
+pnpm start instance discover http://127.0.0.1:3210 ~/.staf-client.json REQUESTER_BOT_ID SEARCH_TERMS
+# Run pnpm run build first. Use node directly to keep build output out of JSON.
+node dist/cli.js instance inspect http://127.0.0.1:3210 ~/.staf-client.json BOT_ID > bot.json
+# Edit the profile fields in bot.json and retain its revision.
+pnpm start instance edit http://127.0.0.1:3210 ~/.staf-client.json BOT_ID bot.json
+pnpm start instance archive http://127.0.0.1:3210 ~/.staf-client.json BOT_ID REVISION
+pnpm start instance restore http://127.0.0.1:3210 ~/.staf-client.json BOT_ID REVISION
+pnpm start instance read http://127.0.0.1:3210 ~/.staf-client.json BOT_ID
+pnpm start instance send http://127.0.0.1:3210 ~/.staf-client.json BOT_ID 'Hello'
+pnpm start instance status http://127.0.0.1:3210 ~/.staf-client.json COMMAND_ID
 ```
 
-For a complete local exercise, start demo with a disposable directory, ask for
-the time, quit, then resume its printed ID using the same directory.
+The bot name can contain multiple arguments. Pass instructions as one quoted
+argument after `--instructions`; omit the option to use empty instructions.
+
+The task form has a helper clock scope, also available with `instance task-start URL CREDENTIAL_FILE BOT_ID --delegate-clock OBJECTIVE`. It is off by default and recorded independently from the objective. Selecting it permits a helper to request clock reads, subject to current permissions and approval settings. Retries retain the original scope. Scheduled tasks currently receive no helper action scope.
+
+Discovery searches names and descriptions, excludes the requester and archived bots, and reports busy bots and ambiguous matches. Matching and limits are provisional. Discovery does not itself assign work. During a task, a bot can request one helper; the owner reviews each exact bot message before it is sent. Helpers do not inherit either bot’s chat history or retrieve private memory.
+
+Both clients report a conflict if another client has changed the profile since
+you inspected it. Refresh the profile and reapply your changes. Archive works
+only while the bot has no active chat request. Archived bots retain their chat
+and cannot accept messages until restored. The current workspace does not list
+archived bots.
+
+The CLI prints the command ID before submission; check status if its outcome is
+uncertain instead of automatically resending. A busy bot does not accept a new
+message. The browser retains its draft on busy, failure or uncertain submission;
+use **Check status** to inspect an uncertain outcome. If the command cannot be
+found, the original request may still arrive. The workspace retains its ID and
+offers an explicit retry of that same message and ID. The CLI takes text as an argument and has no interactive draft.
+
+Providers receive the recorded conversation and tool history on each turn; the preview does not compact
+or limit it. It does not import existing file-based sessions. The workspace polls
+while visible; it does not provide push updates or a general backup and restore
+workflow. When an existing preview database
+requires a stored-format migration, Staf creates a SQLite backup next to it before the
+schema change and prints its path. Commands accepted before private fingerprints were introduced remain available through status, but their IDs cannot be resubmitted because their original input cannot be verified. New SQLite database files are created with owner-only permissions. Existing database permissions are left unchanged; restrict them and the containing directory as appropriate. SQLite data and paired client authorizations persist across
+restart. Only one process may own the database at a time. This is loopback-only,
+not a LAN deployment.
+
+## Background task preview
+
+The workspace shows task records in Activity and task updates in the inbox.
+Task creation, direction, stopping, and retry controls are not yet available in
+the workspace. The CLI operations below can start and inspect tasks with a run
+limit of five minutes by default. Stop requests cancellation; the task remains
+stopping until its provider settles. A provider result already returned after
+the request can still complete the task. Retry a failed, stopped, or interrupted
+attempt explicitly. Replace an active task with a changed objective explicitly.
+The replacement waits until the original settles and keeps a link to it.
+
+The loopback CLI uses the same instance and credential file:
 
 ```sh
-pnpm start --provider demo --data-dir /tmp/staf-demo-example
-pnpm start --provider demo --data-dir /tmp/staf-demo-example --session SESSION_ID
+pnpm start instance task-start http://127.0.0.1:3210 ~/.staf-client.json BOT_ID 'Investigate the question'
+pnpm start instance tasks http://127.0.0.1:3210 ~/.staf-client.json BOT_ID
+pnpm start instance task http://127.0.0.1:3210 ~/.staf-client.json ATTEMPT_ID
+pnpm start instance task-direct http://127.0.0.1:3210 ~/.staf-client.json ATTEMPT_ID 'Focus on the report'
+pnpm start instance task-answer http://127.0.0.1:3210 ~/.staf-client.json ATTEMPT_ID QUESTION_ID 'The report'
+pnpm start instance task-stop http://127.0.0.1:3210 ~/.staf-client.json ATTEMPT_ID
+pnpm start instance task-retry http://127.0.0.1:3210 ~/.staf-client.json ATTEMPT_ID
+pnpm start instance task-replace http://127.0.0.1:3210 ~/.staf-client.json ATTEMPT_ID 'Changed objective'
+pnpm start instance task-follow http://127.0.0.1:3210 ~/.staf-client.json ATTEMPT_ID
 ```
 
-Replace SESSION_ID with the UUID from the first run. Existing settings are not
-changed. This example creates local conversation files; it is not a live-provider test.
+The CLI currently uses the default limit. Inspect by attempt ID after an uncertain
+submission; do not silently submit again. The workspace polls while visible. On restart,
+unfinished work is marked interrupted and never restarts automatically. Existing
+databases get a private SQLite backup before the task schema migration.
 
-A configuration example for a new `.env` is shown below. Replace the placeholder
-values yourself before selecting a live adapter. Do not overwrite an existing file.
-Do not put quotes around a shell expression expecting Staf to expand it.
+The selected task accepts explicit directions through `task-direct` or main chat with `direct task ATTEMPT_ID: your direction`. Use `stop task ATTEMPT_ID` in main chat to stop it. A request without a full attempt ID asks for clarification. A tool-capable provider may start a background task from main chat when the work calls for it; the service reports the actual accepted ID or busy rejection. Main-chat task requests do not grant helper clock scope or expand existing permissions. An accepted task can continue if the chat command later fails; inspect Activity before retrying an uncertain submission. These paths have synthetic-provider coverage, not live-provider verification. Input is accepted first and applied at a subsequent safe boundary, with both statuses shown in Activity. A task may use the structured `ask_owner` tool to request clarification; answer the specific question ID with `task-answer`. Waiting for an answer does not consume the execution limit. Input is not approval for a tool action. Accepted but unapplied inputs remain visible after stop or restart. Adapters without tool-call support cannot request clarification.
 
-```dotenv
-OPENROUTER_API_KEY=YOUR_OPENROUTER_KEY
-STAF_MODEL=PROVIDER/MODEL
-STAF_CODEX_MODEL=
-LMSTUDIO_MODEL=LOADED_MODEL_ID
-LMSTUDIO_BASE_URL=http://localhost:1234/v1/
-LMSTUDIO_API_KEY=
+The shared instance also supports separately permitted web reading, local search and scratch-only shell, as described below. A complete recovery workflow is not implemented. Browser task submission does not yet recover an uncertain request automatically. Provider cancellation and live execution require separate live verification.
+
+
+### Scoped memory in the shared instance
+
+Each bot has separate memory. User memory is shared across bots. In main chat, explicit phrases such as “Remember that I like tea” save to the addressed bot. “Remember for all bots: I like tea” proposes shared user memory. The response shows the exact text and warns that all bots can retrieve it. Send `Confirm shared memory PROPOSAL_ID` to save that exact proposal, or `Cancel shared memory PROPOSAL_ID` to cancel it without saving memory. Cancellation removes the text from the active proposal, but the original message and proposal response remain in chat history and may be included in later model requests or task context. Cancellation does not erase backups or data already sent to a provider. The proposal is bound to the addressed bot and survives restart. Repeating confirmation cannot duplicate it. The acknowledgment names the scope. Ambiguous scope or missing content prompts a clarification without saving. Other supported save forms include “Please keep in mind that …”, “Save this for later: …”, and the prefixes “for this bot” or “in shared memory”. For inspection say “List memories in shared memory” or “List memories in this bot memory”. For a specific entry say “Correct memory MEMORY_ID version VERSION in this bot memory to NEW TEXT” or “Forget memory MEMORY_ID version VERSION in shared memory”. Edits and deletions require the exact ID, last observed version, and scope. Scoped save phrases require a colon after the scope; partial bot scopes and recognizable conflicting restrictions require clarification. Phrase recognition is deterministic and cannot reliably infer every implied restriction; review the scope before using shared memory. “Forget that …” asks for an ID and scope rather than guessing which entry to delete. Descriptive requests such as “What do you remember about tea?”, “Forget the memory about tea” and “Correct my memory about tea to coffee” show up to ten matching candidates with IDs and versions; they do not change memory. Unspecified scope means this bot. Add “in shared memory” to preview shared entries. Ambiguous, excluded or other-bot scopes require clarification. A preview does not select an entry or authorize mutation; use the exact ID, current version, scope and replacement text in a separate command. Other natural-language phrasing is not reliably recognized, and task directions and model responses cannot change memory.
+
+Memory management controls are not yet available in the workspace. The CLI uses explicit scopes. Use `memory-list URL CREDENTIAL_FILE user`, `memory-add URL CREDENTIAL_FILE bot:BOT_ID TEXT`, `memory-edit URL CREDENTIAL_FILE bot:BOT_ID MEMORY_ID VERSION TEXT`, and `memory-delete URL CREDENTIAL_FILE bot:BOT_ID MEMORY_ID VERSION`. Use `user` instead of `bot:BOT_ID` for shared user memory. Refresh after a conflict before editing or deleting. All paired clients act for the same owner.
+
+Up to five keyword-matched entries from shared user memory and the addressed bot are included as untrusted data in each provider request. The matching is simple and may miss relevant memories. Injected entries are not added to saved conversation messages. Deleting an entry removes it from active memory and future retrieval; it does not erase prior transcripts, backups, or provider requests already sent or in flight. A memory saved or listed in chat remains in that transcript and can be sent again as ordinary conversation history after deletion. Memory is stored in the instance database and shares its access protections. A migration backup is created before upgrading an existing database. Offline integration tests cover this preview; live providers have not been verified for memory.
+
+### Skills in the shared instance
+
+The workspace does not yet provide skill management controls. A paired client can import explicit skill text, name, description and provenance through the CLI or API. Skill IDs and revisions are stable records; updates create a revision. A disabled skill is unavailable to every bot. All paired clients act for the owner.
+
+For the CLI, use `instance skill-import URL CREDENTIAL_FILE NAME DESCRIPTION PROVENANCE BODY`, `skill-list URL CREDENTIAL_FILE`, `skill-inspect URL CREDENTIAL_FILE ID`, `skill-update URL CREDENTIAL_FILE ID REVISION NAME DESCRIPTION PROVENANCE BODY`, `skill-enabled URL CREDENTIAL_FILE ID true|false`, `skill-availability URL CREDENTIAL_FILE ID BOT_ID true|false`, and `skill-bot-list URL CREDENTIAL_FILE BOT_ID`. BODY is literal text, not a path or URL. Skill text is limited to 256 KiB. These commands do not read files or fetch URLs. Configured credential values are redacted from imported names, descriptions, provenance and text before storage, and from existing entries when read. The catalog `digest` identifies the originally submitted bytes, so it can differ from the displayed text after redaction. Existing database records and backups are not rewritten to remove previously stored credentials.
+
+A tool-capable provider receives at most 32 available skill names, descriptions, IDs, revisions and hashes and may choose one in response to ordinary language. Selection is model-dependent and may be missed or ambiguous. The server validates the exact ID and revision and current availability when loading. Task attempts capture their catalog at acceptance, while live disable or removal stops subsequent model requests and tool actions after a skill was loaded. Successful loads appear in task Activity and in the command status `skillActivity` with name, ID, revision, `sourceDigest` for the original submitted bytes, and `loadedContentDigest` for the UTF-8 bytes of the redacted body loaded into the tool result. Older load records have only the source digest; a loaded-content digest cannot be reconstructed reliably. A recorded load does not establish that a subsequent provider request completed. A provider statement alone does not create a load record. Adapters without tool support cannot load skills.
+
+Imported text is untrusted data in a tool result and does not grant tool permissions or run scripts. It can influence model output. Disabling does not retract content already sent to a provider, remove saved conversation records or backups, or undo actions already completed. Prior skill tool content is not reloaded in later turns; ordinary chat history may still contain information derived from it. Skill management, selection and permission checks are offline-tested with synthetic providers; natural-language selection and behavior with live providers are not verified. The import format and automatic skill creation, update and retirement remain open product decisions.
+
+### Clock approvals in the shared instance
+
+This first-delivery instance treats every paired client as acting for its sole owner; there are no separate owner and client roles. Any paired client can inspect and decide requests and change settings. The shared instance gates its `clock` tool for both main chat and background tasks. The default is **Ask for risky actions**, under which this read is routine. **Ask every time** pauses each clock action until a paired client approves or denies that specific request. **Never ask** still respects instance and bot clock permissions and the task's clock boundary. A task override selects its mode over a bot override, which selects over the instance default. Disabling the clock at any applicable boundary blocks it.
+
+The workspace shows pending clock requests in Activity and can approve or deny them once. Approval settings are not yet available in the workspace. The CLI exposes `instance approvals URL CREDENTIAL_FILE`, `instance approve URL CREDENTIAL_FILE REQUEST_ID`, and `instance deny URL CREDENTIAL_FILE REQUEST_ID`. Inspect settings with `instance approval-settings URL CREDENTIAL_FILE SCOPE`; set them with `instance set-approval-settings URL CREDENTIAL_FILE SCOPE MODE true|false`. Scope is `instance`, `bot:BOT_ID`, or `task:ATTEMPT_ID`; mode is `ask-every-time`, `ask-for-risky-actions`, `never-ask`, or `inherit` for a bot or task. The boolean controls clock access at that boundary.
+
+Pending approval does not consume the task's execution limit. Stop and restart interrupt pending requests; retry is a new attempt and must ask again when required. Approval does not grant access after permissions are revoked. These mode settings apply to the clock. Delegated clock actions also check both bots and the task scope. Web reading, search and scratch shell use separate permissions and exact-action decisions. Reusable grants are not implemented.
+
+## Recurring schedules preview
+
+A paired owner can create and inspect schedules with the CLI below. Schedule controls are not yet available in the workspace. Choose one exact action: read the UTC clock, read one canonical public web URL, search one exact query on the currently configured backend, or run one exact scratch command on the currently configured Docker endpoint and pinned image. A scheduled web occurrence allows at most one dispatch across its original attempt and any retries, with a separate owner approval before DNS or HTTP. Redirects to other targets are blocked; the one-dispatch cap also prevents following another hop. Web access must be enabled separately for the instance and bot. The captured URL supplies only this scheduled attempt’s exact task scope; an explicit task-level disable overrides it and carries to retries. Revoking a schedule cancels its pending or in-flight web read. Clock permissions and approval mode continue to apply. A scheduled search also requires instance and bot search permission, an exact query and backend snapshot, and a separate owner decision before dispatch. Its one-dispatch limit is shared across retries. A backend change blocks the scheduled search; create a new schedule for the new backend. Explicit task disables carry to retries. Scheduled scratch commands require separate instance and bot shell permission and a separate owner approval for each occurrence. The schedule captures the exact command, Docker binary, socket, image and fixed scratch limits. One dispatch is shared across retries, and changing the configuration blocks it. An explicit task disable carries to retries. The global uncertain-action lock and owner review still apply. Other tools, helper access and reusable grants are not authorized by a schedule.
+
+The provisional recurrence policy supports daily or weekly local times in an explicit IANA time zone. A nonexistent local time is skipped and an ambiguous local time uses its first occurrence. On a delayed tick, at most the latest due run starts within the configured lateness window; earlier runs are recorded as skipped. A late or busy run is skipped. Re-enabling a schedule starts from the time of re-enabling. The instance must be running for schedules to execute. The in-process loop checks about every 30 seconds. The maximum lateness window must be at least one minute, although process delays can still cause skips. Docker deployment and a prepared native service setup are documented; native Linux service operation remains unverified.
+
+For CLI creation, save a JSON object with a real bot ID and the intended objective. Weekdays use 0 for Sunday through 6 for Saturday. The example authorizes the UTC clock; an exact web authorization is shown below.
+
+```json
+{"botId":"BOT_ID","objective":"Report the current UTC time","recurrence":{"kind":"weekly","timeZone":"America/New_York","weekday":1,"hour":9,"minute":0},"maxLatenessMs":300000,"authorization":{"action":"clock.read","resource":"utc","limits":{"reads":"permitted"}}}
 ```
 
-Provider selection uses saved defaults, then explicit overrides; absent both, it
-defaults to demo. A key does not select its provider.
-For independent cloud and local models, use STAF_MODEL for OpenRouter and
-LMSTUDIO_MODEL for LM Studio. STAF_BASE_URL affects only legacy live; it cannot
-redirect OpenRouter or Codex. Auth commands ignore this file entirely.
+For a scheduled scratch command, load or configure the Docker endpoint and pinned image first. The authorization object below must use the current configuration and its revision, as shown by `instance shell-config URL CREDENTIAL_FILE`. The command and endpoint are stored in the schedule database and backups. Commands can contain secrets and are visible to the Docker CLI and daemon. Commands for this preview must be single-line, at most 4096 characters, with no asterisks or control characters. The owner must separately approve each occurrence. Only the fixed scratch tmpfs is available; host workspaces are not mounted.
 
-`/settings` opens an arrow/hjkl menu in an interactive terminal. Enter selects;
-Escape backs out without saving. Textual `/settings show` still works.
-[Settings and recovery](settings.md) covers the primary in-chat menu, terminal
-commands, effective sources, persisted defaults, and application timing. Provider
-construction is lazy: entering settings never checks login or starts generation.
+```json
+{"action":"shell.execute","resource":"printf safe","limits":{"maxExecutions":1,"dockerBinary":"/usr/bin/docker","dockerSocket":"/var/run/docker.sock","imageId":"sha256:REPLACE_WITH_64_HEX_DIGEST","revision":2,"sizeBytes":16777216,"maxInodes":1024,"timeoutMs":30000,"maxOutputBytes":65536}}
+```
 
-## Inspect models and choose effort
+For a scheduled search, load or configure the backend first. Replace the authorization object with the exact query, current backend origin and current configuration revision shown by `instance search-config URL CREDENTIAL_FILE`. The query and backend are stored in the schedule database and backups, and the backend can forward or retain the query. Each occurrence still requires a separate owner approval.
 
-Use `/settings models` for an explicit metadata read, then select by model ID
-with `/settings model session ID`. `/settings reasoning` reports the selected
-model's advertised choices. Use `/settings reasoning session LEVEL` before a
-request, or `reasoning default LEVEL` to apply now and remember the choice. `default` means
-leave the provider's effort unchanged, not turn reasoning off. Model and reasoning
-shortcuts apply on the next request even after a completed conversation turn.
-Ctrl-C during provider setup stops that turn before generation starts.
+```json
+{"action":"search.read","resource":"safe query","limits":{"maxSearches":1,"origin":"http://127.0.0.1:8888","revision":2}}
+```
 
-See [model and reasoning selection](model-selection.md) for safe terminal examples,
-manual fallback, provider differences, cache/refresh behavior, and resume identity.
-Saved defaults apply only to your local data directory and are not shipped.
+For a scheduled web read, replace the `authorization` object with the following. The URL must already be canonical HTTP(S), without credentials or a query string. The exact path is stored in the schedule database and backups and can contain unknown secrets.
 
-## What a conversation stores and which tools run
+```json
+{"action":"web.read","resource":"https://example.com/report","limits":{"maxReads":1}}
+```
 
-Successful turns save normalized user/assistant/tool messages, provider identity,
-and activity events in `DATA_DIR/<UUID>.json`, normally `.staf/`. Empty sessions
-can be created before the first turn. Failed turns keep the last completed history;
-settings slash commands never become chat messages. Later turns use the full
-stored history. `--session ID` resumes it across processes. No compaction is present.
+```sh
+pnpm start instance schedule-create http://127.0.0.1:3210 ~/.staf-client.json schedule.json
+pnpm start instance schedule-list http://127.0.0.1:3210 ~/.staf-client.json
+pnpm start instance schedule-inspect http://127.0.0.1:3210 ~/.staf-client.json SCHEDULE_ID
+pnpm start instance schedule-disable http://127.0.0.1:3210 ~/.staf-client.json SCHEDULE_ID VERSION
+pnpm start instance schedule-enable http://127.0.0.1:3210 ~/.staf-client.json SCHEDULE_ID VERSION
+pnpm start instance schedule-revoke http://127.0.0.1:3210 ~/.staf-client.json SCHEDULE_ID VERSION
+```
 
-Nonsecret defaults live separately in `DATA_DIR/config/settings.json`. Direct
-Codex credentials live in `DATA_DIR/auth`; the legacy CLI context remains separate.
-Staf persists its own conversation history regardless of legacy native thread
-options.
+Inspection shows occurrence status, linked task ID, skipped range and reason. An interrupted occurrence is marked uncertain and is not automatically repeated. Inspect its task and any external effects first. Use `schedule-resolve URL CREDENTIAL_FILE SCHEDULE_ID DUE_AT` with the occurrence's epoch-millisecond due time. Review releases the schedule for future runs; it does not retry the task or assert that it completed. A retry is an explicit task retry. It retains the schedule authorization and original objective. A revoked schedule cannot be retried. Scheduled attempts cannot be replaced. Stop the attempt and explicitly start a separate task for a changed objective. Inspection includes the state and outcome of each linked retry. Schedule creation is not yet idempotent: if a response is lost, inspect the list before submitting again. Automated tests use synthetic providers and clocks; live scheduled provider operation has not been verified.
 
-The only Staf-dispatched tool is clock. Demo requests it for time prompts; HTTP
-models can request it through normalized tool calls; the Codex CLI planner returns
-a structured clock decision that Staf executes in the legacy adapter. Direct Codex now returns Responses function calls. The old CLI adapter was a native runtime,
-not a bare API model. Its native access restrictions and limitations are described
-in [architecture](architecture.md). This is not a claim of tool-free or stateless chat.
+### Public web reading
 
-## Menu-first startup
+Web reading is disabled by default. A paired owner must enable it for the instance and bot. Ordinary background tasks additionally require their own task permission. A scheduled task instead receives only its captured exact URL scope, which can be disabled explicitly for the task; helpers cannot use web reading. The task permission readback distinguishes the owner override, inherited scheduled scope and current effective access. Use `instance web-permission URL CREDENTIAL_FILE SCOPE` or `instance web-permission-set URL CREDENTIAL_FILE SCOPE true|false` to manage these switches. `SCOPE` is `instance`, `bot:BOT_ID`, or `task:ATTEMPT_ID`.
 
-Run `pnpm start`, open `/settings`, and choose Provider, then This session.
-Confirm to use the provider on the next request. Remembering a personal default applies now and persists for subsequent launches. Provider-specific flag examples
-above remain valid for scripts; `--provider` is optional. Back/Escape moves up
-the menu hierarchy. Existing conversations can switch between requests while preserving history.
+A tool-capable bot may propose a public HTTP(S) page. A paired owner must approve each exact target, including each redirect, before DNS or HTTP. Use the browser approval list or `instance web-approvals URL CREDENTIAL_FILE`, `instance web-approve URL CREDENTIAL_FILE ACTION_ID`, and `instance web-deny URL CREDENTIAL_FILE ACTION_ID`. Web requests with credentials or query strings are rejected. A started request interrupted by restart is marked uncertain and is not automatically repeated. Revoking permission or stopping a task cancels in-flight reads.
 
-The `Provider:` notice appears on the first request or when the active provider,
-model or reasoning identity changes. `[provider_start]` is request progress, not
-a new chat. All successful turns use the same running session and append to its
-history. Use `--session ID` to resume that conversation after restarting.
+Page text is untrusted data and cannot grant authority. The action journal records keyed fingerprints and generic outcomes. URLs supplied or generated in chat and source text may be retained in conversation, provider replay, Activity, and backups. Configured known secrets are redacted where implemented. Arbitrary chat, page text and model output may retain unknown secrets, and sensitive text cannot be reliably detected. Cancellation does not erase retained records. Synthetic dependencies test the integration; live web and live provider behavior have not been verified.
 
-## Inspect usage
+### Search through an owner-configured backend
 
-Run `/usage` locally in chat, `/usage details` for per-call sources, or `/usage help`
-for the caching explanation. This makes no model/account request. Missing fields
-remain unavailable. See [usage accounting](usage-accounting.md) for provider
-reports, subset rules, failure/resume coverage and subscription limits.
+Search is separate from web reading and is disabled by default. Configure the exact local backend origin in the form `http://127.0.0.1:PORT` with the CLI, then explicitly enable instance and bot search. An ordinary background task also requires its own search permission. A scheduled task can use only its captured exact query and backend scope, subject to an explicit task disable; helpers are not supported. Task readback distinguishes the owner override, inherited schedule scope and current effective access. The selected loopback port can identify any local HTTP service; only configure a backend you trust. In Docker, `127.0.0.1` refers to the container itself.
 
-## Inspect context separately
+Each search requires owner approval of the exact query and backend before dispatch. The CLI supports `instance search-config URL CREDENTIAL_FILE`, `search-config-set URL CREDENTIAL_FILE REVISION ORIGIN` (use `-` to clear), `search-permission URL CREDENTIAL_FILE SCOPE`, `search-permission-set URL CREDENTIAL_FILE SCOPE true|false`, `search-approvals URL CREDENTIAL_FILE`, and `search-approve` or `search-deny` with an approval ID. Search has a limit of two concurrent dispatches within one instance process and ten dispatches per rolling minute per instance database; the rate history survives restart. Separate instance processes do not share a concurrency limit. Interrupted started actions become uncertain and are not automatically replayed.
 
-The short context footer updates after operations. Demo shows `Context: demo`.
-Direct Codex and other HTTP adapters show a labeled estimate and known window when
-available. A direct request with opaque reasoning replay shows `(visible est.)`.
-Its ciphertext is excluded from the estimate without removing it from requests.
-Its actual token occupancy is unknown. `/context` explains the
-visible-payload proxy and selected window; `/context refresh` reads metadata
-explicitly. It does not measure cumulative consumption, and it does not enable
-compaction. See [context display](context.md) for scope and accuracy limits.
+The backend and its upstream search engines may retain queries. Queries, results, snippets and model output may also be retained in chat, provider replay, Activity, and backups. Unknown secrets cannot be reliably detected. Search results are untrusted previews. Result URLs containing percent-encoded sequences or configured secrets are omitted, and Staf does not automatically open result pages. A later public-web read requires its own permissions and approvals. Tests use synthetic providers and a disposable local HTTP fixture; a real SearXNG deployment and live provider behavior have not been verified.
 
-Explicit `/context` output leads with provider-reported input from the latest HTTP
-call, with provider/model/time and historical scope. Its next-payload estimate
-remains separately labeled; native Historical Codex CLI execution aggregates are not request
-occupancy. Missing measurements stay unavailable.
+### Scratch-only shell
+
+Scratch shell is disabled by default. A paired owner must configure an absolute Docker CLI path, an absolute Unix daemon socket path and a pinned `sha256:` image ID, then enable instance and bot permission. Ordinary background tasks also require their own shell permission. Helpers cannot use it. A scheduled task may use only its captured exact command and Docker configuration, subject to an explicit task disable. Task permission readback distinguishes the owner override, inherited scope and effective access. The commands `instance shell-config URL CREDENTIAL_FILE`, `shell-config-set URL CREDENTIAL_FILE REVISION DOCKER_BINARY DOCKER_SOCKET IMAGE_ID`, `shell-permission URL CREDENTIAL_FILE SCOPE`, and `shell-permission-set URL CREDENTIAL_FILE SCOPE true|false` manage configuration and permissions. Use `- - -` to clear the configuration. Existing bot permissions and approval settings remain independent.
+
+Each exact command requires owner approval in the browser or through `shell-approvals`, `shell-approve`, and `shell-deny`. The integration passes only a fixed 16 MiB, 1,024-inode scratch tmpfs to the sandbox, with a 30-second execution limit and 64 KiB output limit. It does not mount a host workspace. The Docker binary, daemon and pinned image must be trusted. The exact command is visible to host process observers and Docker container configuration until removal. Scratch tmpfs may use swap, and Docker can provide runtime-managed mounts. Commands, output and unknown secrets may persist in provider replay, conversations, Activity and backups. Known configured secrets are redacted where supported; arbitrary output may contain secrets that cannot be reliably detected.
+
+An uncertain start, stop or cleanup blocks further scratch commands and daemon configuration changes. Inspect the recorded endpoint with `shell-uncertain` and independently verify the daemon identity before review. Staf compares endpoint configuration strings but cannot prove that the binary or socket still identifies the same daemon. A missing container does not prove that a delayed create cannot appear later. After independently verifying the daemon identity and inspecting it, the owner may explicitly acknowledge the risk with `shell-review URL CREDENTIAL_FILE ACTION_ID --acknowledge-uncertain` to record a review. This records a review; it does not remove a container or retry the action. The original action ID is never reused. Integration tests use a synthetic executor; the scratch component was separately tested with a disposable container, but live model-directed shell execution has not been verified.

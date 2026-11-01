@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import {mkdtemp,rm,readFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {spawnSync} from 'node:child_process';
 import {contextStatus,contextLine,contextDetails,contextFooter} from '../dist/context-status.js';
 import {parseModels,cachedModelCatalog,discoverModels} from '../dist/models.js';
 import {resolveSettings} from '../dist/settings.js';
@@ -51,8 +50,9 @@ test('context recomputes after resume without changing ledger, history, settings
  const before=await readFile(store.path(saved.id),'utf8');const resumed=await store.load(saved.id);
  assert.deepEqual(contextStatus(saved,effective(),undefined,catalog),contextStatus(resumed,effective(),undefined,catalog));
  assert.equal(await readFile(store.path(saved.id),'utf8'),before);assert.equal(resumed.usage.length,1);
- const result=spawnSync(process.execPath,['dist/cli.js','--provider','demo','--data-dir',root,'--session',saved.id],{input:'/context\n/usage\n/settings set session provider lmstudio\n/context\n/quit\n',encoding:'utf8',env:{...process.env,NO_COLOR:''}});
- assert.equal(result.status,0,result.stderr);assert.match(result.stdout,/Context: demo/);assert.match(result.stdout,/next payload ~\d+ tokens \(bytes\/4 proxy\) \/ unknown window/);assert.match(result.stdout,/Compaction: not implemented/);assert.ok(!result.stdout.includes('\x1b'));assert.equal(await readFile(store.path(saved.id),'utf8'),before);
+ const demo=contextDetails(resumed,effective('demo'));
+ const switched=contextDetails(resumed,effective('lmstudio'));
+ assert.match(demo,/Context: demo/);assert.match(switched,/next payload ~\d+ tokens \(bytes\/4 proxy\) \/ unknown window/);assert.match(switched,/Compaction: not implemented/);assert.ok(!switched.includes('\x1b'));assert.equal(await readFile(store.path(saved.id),'utf8'),before);
 });
 
 
@@ -90,7 +90,6 @@ test('recurring footer is concise; detailed measurements remain only on explicit
  assert.ok(!contextFooter({...http,stale:true}).includes('/ 8k'));
  assert.equal(contextFooter(contextStatus(session,effective('demo'))),'Context: demo');
  assert.match(contextDetails(session,effective('codex')),/Direct|direct|Responses/);
- const root=await mkdtemp(join(tmpdir(),'staf-footer-'));t.after(()=>rm(root,{recursive:true,force:true}));
- const result=spawnSync(process.execPath,['dist/cli.js','--provider','demo','--data-dir',root],{input:'hello\n/quit\n',encoding:'utf8',env:{...process.env,NO_COLOR:''}});
- assert.equal(result.status,0,result.stderr);assert.match(result.stdout,/Context: demo/);assert.ok(!/Measured:|bytes\/4|Compaction:/.test(result.stdout));assert.ok(!result.stdout.includes('\x1b'));
+ const footer=contextFooter(contextStatus(session,effective('demo')));
+ assert.match(footer,/Context: demo/);assert.ok(!/Measured:|bytes\/4|Compaction:/.test(footer));assert.ok(!footer.includes('\x1b'));
 });

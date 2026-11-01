@@ -1,0 +1,103 @@
+import {useEffect,useRef,useState,useSyncExternalStore} from 'react';
+import {createRoot} from 'react-dom/client';
+import {Controller,type BotProfile,type InboxItem} from './controller';
+import './style.css';
+
+const app=new Controller();
+
+type View='chat'|'inbox'|'settings'|'bot';
+
+function Item({item}:{item:InboxItem}){
+  return <article className="item">
+    <strong>{item.kind==='question'?'Owner input needed':item.approvalKind+' approval'}</strong>
+    {item.kind==='question'?<>
+      <p>{item.text}</p>
+      <p className="meta">Task {item.attemptId} · Question {item.id}</p>
+      <p className="meta">Replying to task questions in the workspace is not available yet.</p>
+    </>:<>
+      <p className="meta">{item.work.kind} {item.work.id}</p>
+      <p>{item.approvalKind==='shell'?'Commands, output, and unknown secrets may be retained in chat, Activity, and backups. The Docker daemon and image must be trusted.':item.approvalKind==='search'?'The configured search backend may retain and forward this exact query. Queries and results may be retained in chat, Activity, and backups.':item.approvalKind==='web'?'This allows the exact public URL shown. Each redirect requires a separate approval. URLs and source text may be retained in chat, Activity, and backups.':item.approvalKind==='disclosure'?'Review the exact sender, recipient, and message before allowing disclosure.':'This allows one UTC clock read.'}</p>
+      <pre>{typeof item.detail==='string'?item.detail:JSON.stringify(item.detail,null,2)}</pre>
+      <div className="row"><button onClick={()=>void app.decide(item,'approve')}>Approve once</button><button className="quiet" onClick={()=>void app.decide(item,'deny')}>Deny</button></div>
+    </>}
+  </article>;
+}
+
+function BotModelSettings({id,onClose}:{id:string;onClose:()=>void}){
+  const [profile,setProfile]=useState<BotProfile|null>(null);
+  const [model,setModel]=useState('');
+  const [status,setStatus]=useState('');
+  const [saving,setSaving]=useState(false);
+  useEffect(()=>{let active=true;void app.botProfile(id).then(p=>{if(active){setProfile(p);setModel(p.model||'')}}).catch(e=>{if(active)setStatus('Could not load bot settings. '+String(e))});return()=>{active=false}},[id]);
+  async function save(){
+    if(!profile)return;
+    if(!model.trim()){setStatus('Enter a model for this bot.');return}
+    setSaving(true);setStatus('');
+    try{await app.setBotModel(profile,model);onClose()}catch(e){setStatus('Could not save the model. Your edit is retained. '+String(e))}finally{setSaving(false)}
+  }
+  return <div className="setup"><span className="eyebrow">BOT SETTINGS</span><h2>{profile?.name||'Bot settings'}</h2>
+    {profile&&<><p>This model is used by this bot. The {profile.provider==='codex'?'Codex':profile.provider} connection is shared by the instance.</p><label>Model<input value={model} onChange={e=>setModel(e.target.value)}/></label><div className="row"><button disabled={saving} onClick={()=>void save()}>Save model</button><button className="quiet" onClick={onClose}>Cancel</button></div></>}
+    <p role="status">{status}</p>
+  </div>;
+}
+
+function App(){
+  const s=useSyncExternalStore(app.subscribe,app.snapshot);
+  const [code,setCode]=useState('');
+  const [view,setView]=useState<View>('chat');
+  const firstRun=useRef(false);
+  const activityButton=useRef<HTMLButtonElement>(null);
+  const closeButton=useRef<HTMLButtonElement>(null);
+  useEffect(()=>{if(s.activityOpen&&document.activeElement===activityButton.current)closeButton.current?.focus()},[s.activityOpen]);
+  useEffect(()=>{if(!firstRun.current&&s.connection.kind==='ready'){firstRun.current=true;if(!s.bots.length&&s.credential==='signed-out')setView('settings')}},[s.connection.kind,s.bots.length,s.credential]);
+  const selected=s.bots.find(b=>b.id===s.selected);
+  const botLabel=(bot:{id:string;name:string})=>s.bots.filter(other=>!other.archived&&other.name===bot.name).length>1?bot.name+' · '+bot.id:bot.name;
+  const labelFor=(id:string)=>{const bot=s.bots.find(item=>item.id===id);return bot?botLabel(bot):'Bot'};
+  const relevant=s.inbox.filter(i=>i.botId===s.selected);
+  const submission=s.draft.submission;
+  const openBotCreation=()=>{setView('chat');app.openSetup()};
+  const openSettings=()=>{app.closeSetup();setView('settings')};
+  const openChat=(id:string)=>{app.closeSetup();setView('chat');app.select(id)};
+  return <div className="shell"><aside className="side">
+    <div className="brand">✳ <span>staf</span></div>
+    <button onClick={openBotCreation}>＋ &nbsp; New bot</button>
+    <div className="caption">Inbox</div>
+    <button className={view==='inbox'?'active':''} onClick={()=>{app.closeSetup();setView(view==='inbox'?'chat':'inbox')}}>◉ &nbsp; Updates <span className="dots">{s.inbox.length||''}</span></button>
+    <div className="caption">Your bots</div>
+    {s.bots.filter(b=>!b.archived).map(b=><button key={b.id} className={b.id===s.selected&&view==='chat'?'active':''} onClick={()=>openChat(b.id)}>◉ &nbsp; {botLabel(b)} <span className="dots">{s.inbox.filter(i=>i.botId===b.id).length||''}</span></button>)}
+    <div className="minor"><button className={view==='settings'?'active':''} onClick={openSettings}>⚙ &nbsp; Settings</button></div>
+  </aside><main className="main">
+    <header className="top"><div className="avatar">{selected?.name[0]?.toUpperCase()||'✳'}</div><div><div className="title">{view==='settings'?'Settings':selected?botLabel(selected):'Welcome to Staf'}</div><div className="sub">{s.connection.kind==='ready'?(view==='settings'?'Provider connections':view==='bot'?'Bot settings':'Your ongoing conversation'):s.connection.kind}</div></div><div className="spacer"/>
+      <button ref={activityButton} className="iconbutton activity-button" aria-label="Activity" title="Activity" onClick={()=>app.activity(!s.activityOpen)}><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12h4l3-7 4 14 3-7h4"/></svg>{relevant.length>0&&<span className="activity-dot"/>}</button>
+    </header>
+    {s.notice&&<div className="banner" role="status">{s.notice}</div>}
+    {s.connection.kind==='offline'&&<div className="banner" role="alert">{s.connection.message} {s.freshness}</div>}
+    {s.connection.kind==='pairing'?<div className="setup"><span className="eyebrow">WELCOME TO STAF</span><h2>Pair this browser</h2><p>Enter the one-time code shown on the host.</p><label>Pairing code<input value={code} onChange={e=>setCode(e.target.value)}/></label><button onClick={()=>void app.pair(code)}>Pair</button><p role="alert">{s.connection.message}</p></div>
+    :s.setup.kind==='create'?<div className="setup"><span className="eyebrow">YOUR BOT</span><h2>Create your bot</h2><p>Give your bot a name, a role, and its own model.</p>
+      <label>Name<input value={s.setup.name} disabled={!!s.setup.operationId} onChange={e=>app.setupField('name',e.target.value)}/></label>
+      <label>What should this bot help with?<textarea value={s.setup.instructions} disabled={!!s.setup.operationId} onChange={e=>app.setupField('instructions',e.target.value)}/></label>
+      <label>Codex model<input value={s.setup.model} disabled={!!s.setup.operationId} placeholder="Choose a model for this bot" onChange={e=>app.setupField('model',e.target.value)}/></label>
+      <p>The Codex connection is shared by all bots. You can set a model later.</p>
+      <div className="row">{s.setup.operationId?<><button onClick={()=>void app.checkCreate()}>Check creation</button><button onClick={()=>void app.create(true)}>Retry same creation</button></>:<button onClick={()=>void app.create()}>Create bot</button>}<button className="quiet" onClick={()=>app.closeSetup()}>Close</button></div><p role="status">{s.setup.status}</p>
+    </div>:view==='settings'?<div className="setup"><span className="eyebrow">SETTINGS</span><h2>Providers</h2><p>Provider connections belong to this Staf instance and are available to all your bots. Each bot has its own model.</p>
+      <div className="provider provider-settings"><strong>Codex</strong><p>{s.credential==='signed-in'?'Saved sign-in found for this instance.':s.credential==='signed-out'?'No usable sign-in found for this instance.':'Checking the sign-in for this instance.'}</p>{s.credential==='signed-in'&&<p className="meta">This saved sign-in has not been checked against the provider.</p>}
+        {s.authAttempt&&<p>Sign-in {s.authAttempt.phase}</p>}
+        <div className="row"><button onClick={()=>void app.startAuth()}>{s.credential==='signed-in'?'Sign in again':'Connect Codex'}</button>{s.authUrl&&<a href={s.authUrl} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer">Continue sign-in</a>}{s.authAttempt&&['waiting','exchanging','committing'].includes(s.authAttempt.phase)&&<button className="quiet" onClick={()=>void app.cancelAuth()}>Cancel sign-in</button>}{s.credential==='signed-in'&&<button className="quiet" onClick={()=>{if(window.confirm('Sign out of Codex for this Staf instance? All bots using it will need a new sign-in.'))void app.signOutAuth()}}>Sign out</button>}</div>
+      </div><div className="row"><button className="quiet" onClick={()=>setView('chat')}>Back to chat</button>{!s.bots.length&&<button onClick={openBotCreation}>Create a bot</button>}</div>
+    </div>:view==='bot'&&selected?<BotModelSettings key={selected.id} id={selected.id} onClose={()=>setView('chat')}/>
+    :<div className="workspace"><div className="chat">{view==='inbox'?<div className="messages"><h2>Inbox</h2><p>Questions and approvals that need your attention.</p>
+      {s.inbox.length?s.inbox.map(item=><div key={item.kind+item.id}><button className="inbox-link" onClick={()=>{if(item.botId)app.select(item.botId);app.activity(true);setView('chat')}}>{item.botId?labelFor(item.botId):'Instance-wide'} · {item.kind==='question'?'Question':item.approvalKind+' approval'}</button>{!item.botId&&<Item item={item}/>}</div>):<p>Nothing needs attention right now.</p>}
+      <h3>Task updates</h3>{s.taskUpdates.length?s.taskUpdates.map(task=><article className="item" key={task.id}><button className="inbox-link" onClick={()=>{app.select(task.botId);app.activity(true);setView('chat')}}>{labelFor(task.botId)} · {task.objective}</button><div className="meta">{task.state} · {task.id}</div>{task.outcome&&<p>{task.outcome}</p>}</article>):<p>No task updates yet.</p>}
+    </div>:<div className="messages">{selected?s.messages.length?s.messages.map(m=><div className="message" key={m.id}><div className="who">{m.role==='user'?'YOU':selected.name.toUpperCase()}</div><div className={m.role==='user'?'bubble':'bottext'}>{m.content}</div></div>):<div className="empty"><strong>Say hello to {selected.name}</strong><p>This is your ongoing conversation.</p></div>:<div className="empty"><strong>Let's set up your first bot.</strong><p>Create a bot now, even if your provider is not connected.</p><button onClick={openBotCreation}>Create a bot</button></div>}
+      {selected?.provider==='codex'&&s.credential==='signed-out'&&<div className="provider"><strong>Connect Codex to chat</strong><p>Provider connections are shared by this Staf instance.</p><button className="quiet" onClick={openSettings}>Open provider settings</button></div>}
+      {s.recoveries.length>0&&<details><summary>Recover saved browser drafts or creation</summary><p>Drafts are stored locally in this browser. Choose a record to copy it into the selected bot.</p>{s.recoveries.map(r=><div className="row" key={r.key}><span>{r.label}</span><button className="quiet" onClick={()=>r.key.includes(':creation:')?app.recoverCreation(r):app.adopt(r)}>Recover</button></div>)}</details>}
+    </div>}
+    {selected&&view==='chat'&&<div className="composer"><textarea aria-label="Message" placeholder={'Message '+selected.name+'…'} value={s.draft.text} onChange={e=>app.edit(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();void app.send()}}}/>
+      {submission&&<div className="submission">Message {submission.kind}. {submission.error} {submission.kind==='unknown'&&'The original request may still complete.'}<div className="row"><button className="quiet" onClick={()=>void app.checkSubmission()}>Check status</button>{submission.kind==='unknown'&&<button className="quiet" onClick={()=>void app.send(true)}>Retry same message</button>}</div></div>}
+      <div className="actions"><button className="model-button" onClick={()=>setView('bot')} aria-label="Change bot model">{selected.provider} · {selected.model||'Choose model'}</button><button onClick={()=>void app.send()}>Send ↑</button></div>
+    </div>}</div>
+    {s.activityOpen&&<aside className="activity" aria-label="Activity"><h3>Activity <button ref={closeButton} className="quiet close" onClick={()=>{app.activity(false);activityButton.current?.focus()}} aria-label="Close Activity">×</button></h3>{relevant.map(item=><Item key={item.kind+item.id} item={item}/>)}{s.tasks.length?s.tasks.map(task=><article className="item" key={task.id}><strong>{task.objective}</strong><div className="meta">{task.state} · {task.id}</div>{task.outcome&&<p>{task.outcome}</p>}{task.activity?.map((event,index)=><pre key={index}>{JSON.stringify(event,null,2)}</pre>)}</article>):<p className="meta">No tasks recorded for this bot.</p>}</aside>}
+    </div>}
+  </main></div>;
+}
+createRoot(document.getElementById('root')!).render(<App/>);

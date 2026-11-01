@@ -73,8 +73,8 @@ primary provider documentation and does not copy Hermes code or credentials.
 
 Superseded for the default Codex provider on 2026-10-26 by
 [direct Responses with a Staf-owned grant](#use-direct-responses-with-a-staf-owned-grant).
-The isolated CLI context remains available through explicit `auth codex-legacy`
-commands. The following records the earlier integration.
+The isolated CLI auth commands were later removed with the standalone CLI.
+The following records the earlier integration.
 
 Accepted on 2026-10-25. Staf replaces its earlier machine-login
 behavior with scoped CODEX_HOME and HOME directories. Official file storage avoids
@@ -122,4 +122,217 @@ commands available. Credentials stay in existing separate stores.
 
 A model-driven setup assistant would fail during bootstrap or a provider outage.
 The first menu is deterministic, with a terminal recovery interface using the same
-operations. Natural-language shortcuts and remote configuration are deferred.
+operations. The shared terminal now supports a bounded set of natural-language shortcuts for the current bot profile. The deterministic settings commands remain available without a working provider. Broader natural-language configuration remains unimplemented.
+
+## MVP shared-instance delivery boundary
+
+See [ADR-0001](adr/0001-shared-instance-web-first.md) for the accepted product
+boundary. It is not implemented runtime behavior; remaining scope questions live
+in the [MVP interview](mvp.md#mvp-scope-interview--2026-10-26).
+
+## MVP approval modes and permission boundaries
+
+The owner accepted the three approval modes, the default, owner-controlled
+instance/bot/task settings, and the distinction between permissions and approval
+prompts on 2026-10-27. The discussion also settled risky actions, explicit and
+remembered approvals, permission limits, helpers, revocation and unattended work.
+See the [approval decisions](mvp.md#approval-decisions--2026-10-27) for the accepted
+requirements and concrete examples. The owner confirmed the complete decision
+on 2026-10-27; the [resolution](https://github.com/lancewilhelm/Staf/issues/2#issuecomment-6453313751)
+closes the planning ticket. These are future product rules, not changes to the
+current clock-only dispatch boundary.
+
+## Deliver the MVP in usable milestones
+
+Accepted on 2026-10-27. Resolve only the decisions needed for the next usable
+milestone, then specify and build it. The accepted full MVP remains the target;
+later design questions do not gate the first connected bot delivery. This
+replaces the earlier all-MVP-design-first planning boundary so working software
+can inform later choices. See the [incremental plan](mvp.md#wayfinder-planning--2026-10-27)
+and [planning map](https://github.com/lancewilhelm/Staf/issues/1).
+
+## Deployment and owner access requirements
+
+On 2026-10-27, the owner clarified that the service must expose a local-network
+API, with no required public address or external hosting. This supersedes the
+earlier public-HTTPS-first setup assumption. Support for native and Docker
+installation is required, with native installation inside the owner's VM the
+first documented path and Docker an alternative using the same configuration
+and API. Initial setup can be CLI or browser. One owner per instance uses
+lightweight client-device authorization, separate from provider sign-in; household
+memberships and isolation remain later questions. Linux VM is the first native
+platform; setup offers an automatically starting background service with lifecycle
+and log access. Browser and CLI clients pair through a one-time code on the host
+and stay trusted until revoked. Updates are owner-initiated and preserve data and
+configuration, with recoverable backups before stored-format changes. Installer,
+transport, credential storage and enforcement mechanics remain to be designed.
+Online client submission, reconnect recovery and backup/restore remain required.
+The owner confirmed the complete deployment agreement on 2026-10-27. The
+[accepted resolution](https://github.com/lancewilhelm/Staf/issues/5#issuecomment-6454200689)
+closes the planning ticket; installer, transport and security mechanisms remain
+implementation work rather than claims of verified deployment.
+See the [deployment interview](mvp.md#deployment-and-owner-access-interview--2026-10-27)
+and [installation trade-offs](deployment-options.md). No deployment, authentication
+or host permissions changed.
+
+## Bots own their configuration after creation
+
+Accepted on 2026-10-27 during the initial bot-contract review. Instance defaults
+are copied when a bot is created rather than consulted as a live inheritance
+source. Existing bots keep their values until explicitly edited. See
+[ADR-0002](adr/0002-copy-bot-creation-defaults.md) and the
+[accepted bot contract](first-delivery-bot-contract.md). The owner confirmed the
+complete initial bot agreement on 2026-10-27; the
+[resolution](https://github.com/lancewilhelm/Staf/issues/14#issuecomment-6455172896) closes the planning ticket. No runtime behavior changed.
+
+## First-delivery background tasks
+
+On 2026-10-27 the owner accepted the eight task recommendations: one background
+task per bot with responsive chat, explicit task direction, separate Activity,
+observable stopping, preserved failures, client-independent work, explicit retry
+after instance restart and an adjustable five-minute execution default excluding
+approval waits. See the [task review](mvp.md#first-delivery-background-task-review--2026-10-27).
+The owner confirmed the complete agreement on 2026-10-27; the
+[accepted resolution](https://github.com/lancewilhelm/Staf/issues/15#issuecomment-6458013516) closes the planning decision.
+This is future behavior, with storage/API and interaction design still separate
+map work.
+
+## First-delivery chat and Activity interaction
+
+Accepted on 2026-10-30. Use the simple side-by-side layout A as the starting
+direction for desktop web chat and Activity. Chat stays available while Activity
+shows the selected bot's task list and actual task details. The CLI lists,
+inspects and optionally follows the same records. Exact commands, responsive
+behavior and visual polish remain open. See the [interaction record](mvp.md#first-delivery-chat-and-activity-interaction--2026-10-30)
+and [confirmed resolution](https://github.com/lancewilhelm/Staf/issues/16#issuecomment-6537511518). The synthetic prototype is not runtime behavior.
+
+On 2026-10-31 the owner selected an inbox for updates alongside a persistent
+bot list. Activity is hidden when there is no work and opens automatically only
+when the owner must provide input or approve an action. This revises the earlier
+desktop default of showing Activity beside chat. The owner selected guided
+provider and bot setup, with Codex first. A bot can still be created without a
+working provider. The shared instance remains the owner of chat and Activity.
+The current UI and verification status are described in [usage](usage.md).
+
+On 2026-11-01 the owner clarified that provider authentication belongs to the
+instance, while each bot selects its own model. Provider setup belongs in global
+Settings. The owner retired the Advanced browser page and chose to bring other
+controls into the workspace incrementally. The underlying service operations
+remain available; the retired page is not the current GUI.
+
+## First-delivery shared state and client contract
+
+Accepted on 2026-10-30. One Staf instance owns shared records in SQLite and
+serves web and CLI clients. A clean start is sufficient; existing conversation
+files remain untouched and import is not required. Per bot, accept one main-chat
+request at a time; a competing client keeps its unsent text for an explicit retry.
+Live updates, reconnect without duplicate submission and verified backup/restore
+remain required. HTTP with live updates and stable IDs is the recommended
+implementation direction, with exact mechanisms still open. See the
+[shared-state record](mvp.md#first-delivery-shared-state--2026-10-30) and
+[confirmed resolution](https://github.com/lancewilhelm/Staf/issues/17#issuecomment-6537715795). This is not implemented runtime behavior.
+
+## First-delivery acceptance and handoff
+
+The owner confirmed the complete first-delivery acceptance agreement on
+2026-10-30. The full owner journey, offline and operational checks, separately
+authorized live checks for both initial providers, and three delivery slices
+are recorded in the [acceptance review](mvp.md#first-delivery-acceptance-review--2026-10-30)
+and the [accepted resolution](https://github.com/lancewilhelm/Staf/issues/18#issuecomment-6537991279).
+An unrun or failed live provider check remains an acceptance gap. The planning
+decision is closed. The [delivery specification](https://github.com/lancewilhelm/Staf/issues/19)
+and implementation sub-issues are published; the milestone still requires
+implementation and verification.
+
+
+## Shared terminal replaces the standalone CLI
+
+The current terminal connects to the shared instance for chat, settings, and
+Codex sign-in. The earlier standalone commands and isolated Codex CLI auth alias
+described in historical decisions above are no longer available. Existing legacy
+data is not automatically migrated into the shared instance. See
+[usage](usage.md) and [Codex sign-in](codex-direct.md).
+
+
+## Chat GUI polish and agent terminology
+
+On 2026-11-01 the owner selected a focused cleanup of the current chat workspace.
+The immediate goal is chatting with agents, creating and managing agents, polished
+Codex and OpenRouter connection flows, and properly displayed responses. The
+owner chose "agent" as the canonical term for the entity previously called a bot.
+The glossary uses the new term; existing runtime names and historical records
+still use bot terminology. Renaming those is implementation work.
+
+The owner identified Light, Dark, and System appearance choices, sent text
+remaining in the composer with a Check status control, and the saved-browser-record
+recovery disclosure as priorities. Remove that disclosure from the normal chat
+experience. The owner subsequently accepted automatic per-agent draft retention
+and recovery, immediate composer clearing on Send, and submission progress in
+the conversation. Errors and Retry belong beside the affected message. Recovery
+must avoid duplicate messages. Routine Check status controls are removed.
+
+T3 Code is the owner's UI reference, particularly its inbox sidebar. Preserve the
+existing chat direction and prioritize a simple interface. No tools beyond the
+clock tool need implementation in this pass. The owner accepted focusing the
+sidebar on the agent list, New agent, and Settings, deferring inbox expansion
+while retaining access to clock approvals when needed.
+
+The owner accepted Light, Dark, and System in Settings, defaulting to System,
+with the preference remembered separately in each browser. The composer is the
+message input box. It stays visible while responses stream and render Markdown,
+including code blocks with Copy. Responses follow the bottom unless the owner
+has scrolled up to read.
+
+Initial agent management includes creation, renaming, instruction edits, provider
+and model selection, and archiving with retained conversations. Global Settings
+provides Codex browser sign-in and OpenRouter API-key entry, connection status,
+and disconnect controls. Agents select their own provider and model using the
+instance's shared connections.
+
+Agent lifecycle and configuration must be available through the shared service
+to the GUI, CLI, and future apps. The owner requested a backend design discussion
+and selected Hermes profiles as a comparison, without adopting its folder layout.
+The owner confirmed that normal management uses the GUI, CLI, and API, and
+requires configuration files that are easy to inspect and maintain manually.
+Terminal tools and external agents must be able to edit those files directly.
+The owner accepted configuration files as authoritative, with GUI and CLI
+changes writing those same files through the service. Conversations and
+operational records stay in the shared database; credentials remain in the
+instance credential store. See [ADR-0003](adr/0003-editable-agent-configuration.md).
+Saved changes apply automatically to the next message without restarting the
+instance. Work already underway uses its captured configuration. Concurrent
+edits report a conflict and preserve unsaved client changes. An invalid file
+remains intact, produces an actionable error, and blocks new messages for that
+agent while its conversation and other agents remain usable.
+The owner confirmed that cache means provider prompt caching. Preserve the
+requirement to warn about configuration changes that may affect reuse, but defer
+prompt construction, prompt updates, cache-impact rules, and detailed warning
+design to a later discussion. Do not expand this GUI pass into prompt-cache
+engineering or claim a guaranteed cache miss.
+This requirement revises the database-only profile storage recommendation; it
+does not select a separate database or process per agent, or add terminal tools
+to this implementation slice.
+
+Creation requires only a name. Instructions are optional, and provider/model
+choices are prefilled from instance creation defaults, with customization
+available during creation or later. A working provider is not required to create
+an agent. This revises the earlier requirement for nonblank role instructions in
+the [initial agent contract](first-delivery-bot-contract.md#profile-and-creation-defaults).
+Existing agents continue to own their copied configuration. The owner accepted
+a configuration directory keyed by stable agent ID, with its path available in
+agent Settings and through the CLI. Settings belong in agent.toml. After reviewing
+[OpenClaw and Hermes](research/agent-instruction-files.md), the owner selected one
+soul.md document for personality, role, and standing guidance, exposed through a
+single Instructions editor. Preserve existing soul and role text when combining
+them. There is no separate instructions.md in the target layout.
+
+While a response is underway, the owner can type the next message and use Stop.
+Send becomes available after the current response finishes or stops. Keep one
+response at a time per agent and retain the next draft automatically. Steering
+and queuing are explicitly deferred.
+
+The owner confirmed the [consolidated GUI polish plan](chat-polish-plan.md) on
+2026-11-01 and requested specification publication. The implementation spec is
+[Polish agent chat, provider setup, and shared configuration](https://github.com/lancewilhelm/Staf/issues/26),
+labelled ready-for-agent. These are accepted design decisions, not implemented or
+verified GUI behavior.

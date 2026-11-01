@@ -3,8 +3,8 @@
 Staf owns the agent loop, messages, tools and local persistence. The `codex`
 provider now sends direct Responses requests. It does not start `codex exec` or
 app-server, carry native coding-agent instructions, or inherit native tool access.
-The old CLI adapter remains explicit legacy code for compatibility tests and old
-auth management. It is not selected by the registry and is never a fallback.
+The shared instance owns provider execution and the Staf grant. No native CLI
+process or alternate provider is used as a fallback.
 
 ## Supported authentication differs from the reference
 
@@ -22,7 +22,7 @@ is read. No OAuth token belongs in `.env`, settings JSON, a transcript or a requ
 body. Files are owner-only and replaced atomically through an exclusive lock.
 Symlinked credential files and directories are rejected.
 
-User-run login starts a temporary loopback listener on `127.0.0.1` at
+The instance accepts the sign-in callback on its loopback service at
 `/auth/callback`. PKCE, state and nonce are fresh per attempt. Registration starts
 with `dynamic_agent_client` and the actual name Staf. The callback's issued client
 ID is required for exchange. RS256 ID-token verification checks OpenAI's published
@@ -39,7 +39,7 @@ The authorization URL omits optional ID-token hints to keep identity tokens out
 of terminal output. Expired retained ID tokens are not treated as access tokens.
 Refresh uses only the separately issued direct refresh token, with a lock across
 the exchange and atomic rotation. Failed refresh does not replace credentials.
-Two processes do not use the same rotating refresh token concurrently.
+Concurrent callers in one process share an in-flight refresh and can cancel their own wait. A successful rotated credential is saved even if all callers cancel while the response arrives. Other-process and stale locks fail closed. A failed exchange is not automatically retried.
 
 This implementation supports one selected direct registration per data directory.
 Account selection UI and multiple saved direct accounts remain future work.
@@ -50,8 +50,8 @@ collector, legacy-token import or paid API-key fallback is implemented.
 
 `codex-direct.ts` builds separate user/assistant message items, `function_call`
 items and `function_call_output` items. It supplies Staf instructions separately
-and only exposes Staf's function definitions. Clock remains the only executable
-Staf tool. Unknown function names return a tool error and cannot run a shell.
+and only exposes Staf's function definitions. The shared runtime controls which
+tools are offered and applies permissions and approvals before dispatch.
 
 Each request uses `store:false`, `stream:true` and an OAuth bearer bound to the
 fixed public endpoint. Redirects are rejected. The adapter never substitutes an
@@ -75,12 +75,9 @@ explanations appear in canonical assistant text in content order. Same-model rep
 retains the original refusal parts and assistant phase. Other providers receive
 the readable canonical history. Existing version 1 sessions remain readable.
 
-The context display filters opaque reasoning only from its visible-size projection.
-It does not remove or rewrite those items in saved history or actual requests.
-The footer uses `(visible est.)` when opaque items are excluded; `/context` gives
-their count and states that their token occupancy is unknown. Encoded ciphertext
-length is not treated as a token count. Provider-reported input remains a separate
-historical measurement.
+Opaque reasoning remains in same-model replay and is not decoded or displayed.
+The shared terminal does not estimate current context occupancy. `/context`
+reports the latest available historical input count and its limits.
 
 ## Stable cache scope is not a cache guarantee
 
@@ -116,27 +113,21 @@ retry, token-exchange retry or alternate-provider fallback.
 The provider contract exposes streamed events. The current CLI buffers assistant
 display until completion so failed partial output and split secrets are not
 committed or printed. The adapter also redacts the known bearer across delta
-boundaries. Incremental CLI text presentation remains future work. Provider and
-tool progress remain visible today.
+boundaries. Incremental CLI text presentation remains future work. The terminal
+shows command status and recorded tool progress.
 
-The CLI creates each turn's cancellation controller before provider selection.
-Ctrl-C during metadata checks prevents generation after those checks return.
-Each turn builds an adapter from current effective settings; model catalog caching
-remains separate. Model and reasoning shortcuts therefore affect the next request.
-The CLI retains only the last announced adapter name for display and suppresses
-unchanged provider notices. Conversation history and session-bound cache identity
-remain owned by the runtime/session, not by an adapter instance.
+The shared instance captures a bot profile for each accepted turn. Provider
+selection and tool execution happen inside the instance, independently of the
+terminal client. The terminal displays persisted command events.
 
-Ctrl-C aborts fetch and reader consumption. Abort checks suppress late messages,
+Cancellation aborts fetch and reader consumption. Abort checks suppress late messages,
 tool dispatch and successful persistence. The request has a 60-second timeout;
 auth exchanges have bounded timeouts. Failed turns preserve prior history, with
 unavailable usage when no trustworthy report returned. Persisted usage is not a
 billing-reconciliation guarantee after crashes or storage failure.
 
-The loop's four-step limit is unchanged. It executes only completed tool calls.
-The current tool is read-only. Durable exactly-once side-effect journals, tool
-approval rules and recovery for future shell/web tools remain required MVP work.
-A manual retry is a new user attempt and can repeat a reversible clock read.
+The runtime executes only completed tool calls. Shared-instance actions use
+separate permission and approval checks described in [usage](usage.md).
 
 ## Inclusive accounting
 
@@ -155,7 +146,7 @@ request/cache contracts, fragmented streams, cancellation, replay, errors,
 redaction and provider regressions. Public OIDC discovery confirms the issuer,
 RS256 algorithm, authorization/token endpoints and JWKS URI.
 
-On 2026-10-26, the user authorized live diagnosis and verification using an existing
+On 2026-10-26, using the prior CLI, the user authorized live diagnosis and verification using an existing
 Staf direct grant and `gpt-6-luna` with reasoning `high`. Before the fix, a completed
 message item followed by an empty terminal output reproduced the parser error.
 After the fix, the CLI returned `Staf is connected.` and a follow-up correctly
@@ -174,7 +165,7 @@ while the visible estimate excludes it. The last full offline run passed all
 
 The remaining verification gaps are:
 
-- A fresh real browser registration and sign-in through the in-process menu have
+- A fresh real browser registration and sign-in through the shared instance have
   not been recorded as live-verified. Signed dummy OAuth and loopback/PTY tests
   verify the local flow.
 - Live refresh-token rotation has not been recorded as verified. Rotation and

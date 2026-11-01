@@ -1,0 +1,9 @@
+**
+!package.json
+!pnpm-lock.yaml
+!tsconfig.json
+!src/
+!src/**
+!vite.config.ts
+!web/
+!web/**

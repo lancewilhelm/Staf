@@ -1,0 +1,23 @@
+[Unit]
+Description=Staf personal instance
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/.local/share/staf/app
+Environment=STAF_NATIVE_DATA=%h/.local/share/staf/data
+EnvironmentFile=-%h/.config/staf/instance.env
+ExecStart=/usr/bin/node %h/.local/share/staf/app/deploy/native-linux/run.mjs
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+UMask=0077
+RuntimeDirectory=staf
+RuntimeDirectoryMode=0700
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ReadWritePaths=%h/.local/share/staf/data
+
+[Install]
+WantedBy=default.target

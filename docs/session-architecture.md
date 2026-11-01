@@ -5,12 +5,93 @@ not describe features already implemented in Staf. The current CLI processes one
 turn at a time and waits for provider work. It has no agent scheduler or background
 workers. Existing JSON session persistence is not a durable task service.
 
+## Accepted MVP scope update — 2026-10-26
+
+The [MVP scope interview](mvp.md#mvp-scope-interview--2026-10-26) now requires named
+bots, persistent main chats that stay responsive during background work, and a
+separate Activity monitoring space for tasks and actual steps. The web app and
+CLI share an always-on personal instance; see
+[ADR-0001](adr/0001-shared-instance-web-first.md). These are accepted product
+requirements, not implemented features. The next interview round accepted
+bot-to-bot requests and replies, with the requesting bot responsible for the
+result, plus task announcements and steering in main chat. Activity shows detail;
+the CLI offers task listing, inspection and optional live following of the same
+records. The following round clarified that bots collaborate through actual
+messages rather than copied transcripts; bot names and descriptions should be
+discoverable, with discovery behavior to be tested. It also accepted restoration
+of interrupted tasks, safe continuation and review of uncertain action outcomes,
+plus latest-occurrence catch-up within a configurable lateness window. The
+mechanisms below remain proposals; optional task sessions, permission enforcement,
+discovery, detailed recovery and handoff behavior remain open.
+
+## First-delivery task review — 2026-10-27
+
+The owner accepted a bounded initial task lifecycle: one background task per bot,
+responsive main chat, separate durable Activity, explicit direction and
+stop-and-replace for changed objectives, observable stopping and failed attempts,
+client-independent execution, interrupted work after instance restart with explicit
+retry, and an adjustable five-minute execution default excluding approval waits.
+See the [task review](mvp.md#first-delivery-background-task-review--2026-10-27).
+The owner confirmed the complete agreement on 2026-10-27; see the
+[accepted resolution](https://github.com/lancewilhelm/Staf/issues/15#issuecomment-6458013516). This does not implement workers
+or resolve storage/API choices. Safe automatic continuation remains later MVP work.
+
 ## Product direction
 
-The intended experience has one persistent main chat per agent, optional individual
-task sessions, and visibility into actual inter-agent exchanges. Handoff depends
-on what the user expects. Watching another agent's work should not automatically
-transfer control. These expectations still need concrete interaction examples.
+The accepted MVP includes named bots with persistent main chats and background
+work shown in Activity, including actual inter-bot requests and replies. Bots
+can start background tasks within existing permissions and announce them. Users
+can stop or redirect a task through main chat, with clarification for ambiguous
+references and acknowledgment of the request. Stopping is distinct from stopped.
+Collaboration passes relevant context in messages, not a verbatim transcript.
+Helpers must respect the assignment's approved scope and their own permissions.
+The [approval decisions](mvp.md#approval-decisions--2026-10-27) establish three
+approval modes with owner-controlled instance defaults, bot overrides and temporary
+task overrides. Permissions and task scope bound all modes, including Never ask.
+The same decision settles risky and remembered approvals, permission limits,
+helper restrictions, revocation and unattended authorization. Optional task
+sessions, permission-enforcement mechanisms and discovery behavior remain design
+questions. Watching work does not automatically transfer control.
+
+## Incremental delivery — 2026-10-27
+
+The user chose milestone-by-milestone design and delivery. The first connected
+bot delivery establishes the initial service/client boundary and a read-only
+background task before broader memory, skill and collaboration behavior is
+settled. See the [planning boundary](mvp.md#wayfinder-planning--2026-10-27).
+The proposals below remain future design context, not prerequisites that all
+must be resolved before the first milestone can enter specification and build.
+
+## Accepted deployment requirements — 2026-10-27
+
+The owner clarified local-network-first access to an always-on API, with a public
+address and external hosting optional. This replaces the earlier public-HTTPS
+setup assumption. Native installation in the owner's VM is the first documented
+path, with Docker supported using the same configuration and API. Initial setup
+works through CLI or browser. One owner per instance has lightweight client-device
+authorization separate from provider sign-in. Linux VM is the initial native
+platform, with an optionally installed service that starts after reboot. Browser
+and CLI clients pair with a one-time code on the host and remain trusted until
+revoked. Updates are owner-initiated, preserve data/configuration, and back up data
+before format changes. Credential storage, transport and enforcement mechanics
+remain to be designed. Household sharing remains later work; reconnect and
+backup/restore requirements are in the
+[deployment interview](mvp.md#deployment-and-owner-access-interview--2026-10-27).
+The owner confirmed the full agreement on 2026-10-27; the
+[accepted resolution](https://github.com/lancewilhelm/Staf/issues/5#issuecomment-6454200689)
+closes the deployment decision. These are product requirements, not implemented
+service or authentication behavior.
+
+## Bot configuration ownership — 2026-10-27
+
+The owner clarified that a bot owns copies of its initial provider/model/reasoning
+configuration and starter identity settings. Updating creation defaults affects
+future bots only. Explicit bot edits affect new work; already accepted work keeps
+its captured configuration. Permission restrictions and revocations remain live,
+separate from configuration copying. See
+[ADR-0002](adr/0002-copy-bot-creation-defaults.md) and the
+[initial bot review](mvp.md#initial-bot-contract-review--2026-10-27).
+This is an accepted product rule, not implemented persistence behavior.
 
 ## Conversation topology and execution scheduling
 
@@ -85,8 +166,9 @@ checked for this note. It is a supplied reference, not evidence for private inte
 Implemented today: normalized provider adapters, one synchronous conversation
 loop, a clock tool, and local resumable sessions. Proposed here: persistent main
 chats per agent, independent task execution, durable task records, inter-agent
-visibility, scoped shared context, and user-dependent handoff. No new runtime
-architecture is implemented by this documentation change.
+visibility, scoped shared context, and user-dependent handoff. The MVP update above
+accepts the main-chat, background-work and Activity goals without choosing those
+implementation mechanisms. No new runtime architecture is implemented here.
 
 ## Continuity across CLI, desktop, and mobile
 
@@ -136,11 +218,12 @@ this goal.
 This scenario is a future acceptance target, not a runnable test or a claim of
 current UI, scheduling, or synchronization support. This update changes only docs.
 
-## Future direction: bot profiles and task Activity
+## Bot profiles and task Activity
 
-Each persistent bot should have a main coordinating chat, optional task
-sessions, and visible messages exchanged with other bots. The proposed
-bot-profile Activity view has: a task list with title, status, short summary and time;
+The main chat, separate Activity monitoring, actual bot-to-bot exchanges and
+CLI task views are now accepted MVP requirements. Optional task sessions and
+the following layout details remain proposals. The bot-profile Activity view
+has a proposed task list with title, status, short summary and time;
 opening a task shows a timeline, nested worker/subtask steps and selected result
 detail. This combines the user-referenced Muse Activity pattern with Grok Bot's
 visible bot exchanges. It is a product direction, not a claim about either
@@ -150,6 +233,7 @@ The future view should project canonical task/message/activity records. It must
 not invent a separate conflicting UI log. Show actual exchanged messages,
 observable steps, tool outcomes and results; do not fabricate internal reasoning.
 The front chat governs background tasks according to user expectations. Activity
-watching does not automatically transfer control. Schema, storage choice and
-implementation remain open; no database migration, bot runtime or Activity UI
-was implemented by recording this direction.
+watching does not automatically transfer control. SQLite is selected for the first
+shared instance; the schema and implementation remain open. Existing conversation
+import is not required for the first delivery. No database migration, bot runtime
+or Activity UI was implemented by recording this direction.
