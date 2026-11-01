@@ -50,10 +50,14 @@ export function possibleSecretSuffixLength(text: string, secrets: readonly strin
   }
   return longest;
 }
-export function streamingRedactor(env: Environment): (text: string) => string {
-  const secrets=credentialValues(env).flatMap(value=>[value,JSON.stringify(value).slice(1,-1)]);
+export function streamingRedactor(env: Environment, additionalSecrets: () => readonly string[] = () => []): (text: string) => string {
   const redact=redactor(env);
-  return text=>{const safe=redact(text);return safe.slice(0,safe.length-possibleSecretSuffixLength(safe,secrets));};
+  return text=>{
+    const extra=additionalSecrets();
+    const secrets=[...credentialValues(env),...extra].flatMap(value=>[value,JSON.stringify(value).slice(1,-1)]);
+    const safe=extra.reduce((result,key)=>redactor({OPENROUTER_API_KEY:key})(result),redact(text));
+    return safe.slice(0,safe.length-possibleSecretSuffixLength(safe,secrets));
+  };
 }
 export function redactor(env: Environment): (text: string) => string {
   const secrets = credentialValues(env);

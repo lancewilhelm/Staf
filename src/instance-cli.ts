@@ -6,7 +6,7 @@ import { startInstance } from './instance-service.js';
 
 export async function instanceCommand(args: string[]) {
   const [action,...rest]=args;
-  if (!action || action === 'help' || action === '--help') {console.log('Usage: instance serve [DATABASE_PATH] [PORT]\n       instance COMMAND URL CREDENTIAL_FILE [ARGUMENTS]\nCommands: pair, clients, revoke, bots, create, inspect, edit, archive, restore, read, send, status, response-follow, discover, defaults, defaults-set, tasks, task, task-follow, task-start, task-stop, task-retry, task-replace, task-direct, task-answer, approvals, approve, deny, approval-settings, set-approval-settings, disclosures, disclosure-approve, disclosure-deny, web-permission, web-permission-set, web-approvals, web-approve, web-deny, search-config, search-config-set, search-permission, search-permission-set, search-approvals, search-approve, search-deny, shell-config, shell-config-set, shell-permission, shell-permission-set, shell-approvals, shell-approve, shell-deny, shell-uncertain, shell-review, approval-grants, approval-grant-revoke, approval-grant-edit, codex-auth-start, codex-auth-current, codex-auth-status, codex-auth-cancel, codex-auth-credential, memory-*, skill-*, schedule-*\nSee docs/usage.md for arguments and examples.');return;}
+  if (!action || action === 'help' || action === '--help') {console.log('Usage: instance serve [DATABASE_PATH] [PORT]\n       instance COMMAND URL CREDENTIAL_FILE [ARGUMENTS]\nCommands: pair, clients, revoke, bots, create, inspect, edit, archive, restore, read, send, status, response-follow, discover, defaults, defaults-set, tasks, task, task-follow, task-start, task-stop, task-retry, task-replace, task-direct, task-answer, approvals, approve, deny, approval-settings, set-approval-settings, disclosures, disclosure-approve, disclosure-deny, web-permission, web-permission-set, web-approvals, web-approve, web-deny, search-config, search-config-set, search-permission, search-permission-set, search-approvals, search-approve, search-deny, shell-config, shell-config-set, shell-permission, shell-permission-set, shell-approvals, shell-approve, shell-deny, shell-uncertain, shell-review, approval-grants, approval-grant-revoke, approval-grant-edit, openrouter-status, openrouter-set, openrouter-disconnect, codex-auth-start, codex-auth-current, codex-auth-status, codex-auth-cancel, codex-auth-credential, memory-*, skill-*, schedule-*\nSee docs/usage.md for arguments and examples.');return;}
   if (action === 'serve') {
     const path=resolve(rest[0] || '.staf/instance.sqlite'); const port=Number(rest[1] || 3210);
     if (!Number.isInteger(port) || port<1 || port>65535) throw Error('Invalid port');
@@ -59,7 +59,14 @@ export async function instanceCommand(args: string[]) {
     if(values.length!==4 || values[3]!=='--acknowledge-stored-action' || !['bot','all-bots'].includes(values[1]??'') || !['task','remembered'].includes(values[2]??''))throw Error('Use ID [bot|all-bots task|remembered --acknowledge-stored-action]');
     return {grant:{scope:values[1],lifetime:values[2],retentionAcknowledged:true}};
   };
-  if(action==='approval-grants') result=await request('/api/approval-grants',token);
+  if(action==='openrouter-status' && values.length===0) result=await request('/api/openrouter-connection',token);
+  else if(action==='openrouter-disconnect' && values.length===0) result=await request('/api/openrouter-connection/disconnect',token,{});
+  else if(action==='openrouter-set' && values.length===0) {
+    if(process.stdin.isTTY) throw Error('Provide the OpenRouter key on standard input; see docs/usage.md');
+    let input='';for await(const chunk of process.stdin){input+=String(chunk);if(input.length>4098)throw Error('Key input too long');}
+    result=await request('/api/openrouter-connection',token,{key:input.replace(/\r?\n$/, '')});
+  }
+  else if(action==='approval-grants') result=await request('/api/approval-grants',token);
   else if(action==='approval-grant-revoke' && values.length===2 && values[0]) result=await request(`/api/approval-grants/${encodeURIComponent(values[0])}/revoke`,token,{revision:Number(values[1])});
   else if(action==='approval-grant-edit' && values.length===5 && values[0] && values[4]==='--acknowledge-stored-action') {
     const scope=values[2]==='all-bots'?{kind:'all-bots'}:values[2]?.startsWith('bot:')?{kind:'bot',botId:values[2].slice(4)}:null;

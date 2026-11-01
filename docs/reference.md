@@ -40,7 +40,7 @@ Models and reasoning belong to the bot profile, not environment variables.
 
 | Variable | Provider | Meaning |
 | --- | --- | --- |
-| `OPENROUTER_API_KEY` | OpenRouter | Required API key. |
+| `OPENROUTER_API_KEY` | Legacy provider adapter | The shared instance ignores this value; use its managed OpenRouter connection. |
 | `LMSTUDIO_BASE_URL` | LM Studio | API root; defaults to `http://localhost:1234/v1/`. |
 | `LMSTUDIO_API_KEY` | LM Studio | Optional API key. |
 | `STAF_BASE_URL` | live | API root; defaults to `https://api.openai.com/v1/`. |
@@ -143,7 +143,7 @@ SHA-256 token hashes in SQLite and limits JSON request bodies to 64 KiB, except 
 The host issues a one-time code at startup and on each terminal Enter. Browser
 requests with an Origin must match the exact server origin; JSON and bearer
 credentials are required for protected writes. No network transport beyond
-loopback is implemented here. Codex, OpenRouter, LM Studio and live use host credentials and an explicit bot model. Paired clients have derived
+loopback is implemented here. Codex and OpenRouter use instance-owned credentials; LM Studio and live use host configuration. Each requires an explicit bot model. Paired clients have derived
 identifiers; any paired client can list and revoke them. Every paired client is trusted to act for the sole owner, including managing approvals and settings; there is no separate owner role check.
 
 Paired clients can read the latest main-chat progress with `GET /api/bots/{id}/response`, or `responseProgress` within `GET /api/commands/{id}`. The response has the command ID, bot ID, accepted/running/completed/failed/interrupted state, provisional text and a safe error. `instance response-follow URL CREDENTIAL_FILE COMMAND_ID` polls and prints changed progress as JSON lines until a terminal state. Text that could complete a known credential may be withheld at chunk boundaries. The service also holds unfinished words for safe URL handling. Provisional snapshots stop growing at one million UTF-16 code units per provider step; the completed response remains available. Version 28 adds a progress table after a database backup; incomplete output is retained separately from committed conversation messages. Codex direct can emit deltas; Chat Completions and demo adapters are buffered. No live provider verification was performed for this change.
@@ -217,3 +217,16 @@ The shared instance schedule preview exposes `schedule-create`, `schedule-list`,
 ### Scheduled exact scratch authorization
 
 `POST /api/schedules` also accepts `shell.execute` with the exact command in `resource` and limits containing `maxExecutions: 1`, the current Docker binary, socket, image ID and configuration revision, and the fixed `sizeBytes`, `maxInodes`, `timeoutMs` and `maxOutputBytes` values shown in [usage](usage.md#recurring-schedules-preview). The owner-selected command and configuration are retained in schedule records and backups; command text is visible to the Docker CLI and daemon. Each occurrence requires a separate owner decision. The one-dispatch limit is shared across retries and is reserved atomically with the global shell lock. Current schedule, configuration, instance and bot permissions, and task scope are checked before dispatch. Explicit task disable persists across retries; revocation aborts in-flight work. The existing uncertain-action and owner-review gate remains in force. Host workspaces, helpers and reusable grants are not authorized. Version 24 adds backed-up attempt scopes and occurrence accounting.
+
+
+### OpenRouter connection
+
+Paired clients use `GET /api/openrouter-connection` for `{saved: boolean}`,
+`POST /api/openrouter-connection` with `{key: string}` to save or replace, and
+`POST /api/openrouter-connection/disconnect` to remove the key. Responses never
+include the key. `instance openrouter-status`, `openrouter-set`, and
+`openrouter-disconnect` use these operations; `openrouter-set` reads the key from
+standard input. Storage is plaintext in `auth/openrouter.json` (mode 0600) under
+the instance data directory. Presence does not verify account or model access.
+No inference is performed by saving a key or an agent. The shared instance ignores
+the host `OPENROUTER_API_KEY`. In-flight requests may finish with a prior key.

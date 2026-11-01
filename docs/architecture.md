@@ -9,8 +9,8 @@ continues after the terminal exits; it is not an operating-system service.
 The terminal edits a bot profile through the service. Each edit checks its
 revision, and an accepted request captures the current profile. Creation defaults
 are copied to new bots and do not change existing bots. Provider credentials and
-endpoint configuration belong to the host environment or the instance's Codex
-grant. The service does not load a project `.env` file. Changing a provider can
+endpoint configuration belong to the host environment or the instance's managed
+Codex and OpenRouter credentials. The service does not load a project `.env` file. Changing a provider can
 send existing conversation history to the new provider on the next request.
 
 Provider adapters normalize messages and tools for the runtime. Codex uses direct
@@ -68,7 +68,7 @@ CLI client uses a separate credential file. Commands claim a bot and append the
 user message transactionally; completed responses are stored with the command
 state. Restart marks pending commands interrupted. SQLite exclusive locking
 prevents a second process from treating active commands as interrupted. The
-service runs demo, Codex, OpenRouter, LM Studio and live with host-owned credentials and an explicit bot model for each non-demo provider. This preview does not implement the LAN,
+service runs demo, Codex, OpenRouter, LM Studio and live with instance or host credentials and an explicit bot model for each non-demo provider. This preview does not implement the LAN,
 push updates, complete reconnect recovery, or operational features described in the plans above.
 
 Agent settings and instructions live under `agents/ID/current` beside the
@@ -129,3 +129,14 @@ The search tool sends only an approved literal query to the owner-configured loo
 Scratch shell uses only an owner-configured Docker CLI, daemon socket and pinned image, and always supplies a fixed bounded tmpfs workspace without an explicit host bind. A keyed action identity and exact-command owner decision precede daemon work. A durable lock and unresolved-action gate serialize execution; started work is marked uncertain on restart. The recorded endpoint configuration is retained for manual inspection. The owner must independently verify daemon identity because matching paths do not prove that the binary or socket still identifies the same daemon. Explicit owner review acknowledges that an absent observation cannot rule out a late create; it neither retries nor removes the old action. The CLI process and daemon can observe the command, tmpfs can use swap, and unknown output secrets can be retained. Integration tests use a synthetic executor; the component itself has separate disposable-container coverage.
 
 Descriptive memory language is parsed before the broad memory fallback. It lists a bounded set of candidates from the explicitly resolved scope and never mutates an entry. Mutations remain separate exact-ID and version-checked owner commands; shared-save confirmation is unchanged.
+
+
+OpenRouter key entry, replacement, status and disconnect use authenticated
+shared-service operations. A private atomic file in the instance auth directory
+contains the plaintext key; its public status reveals presence only. The service
+uses the managed key for new OpenRouter work and ignores the host environment
+key. Saving does not verify account or model access. Known keys are redacted
+from supported conversation and output paths; the key is rejected from agent
+configuration writes. In-flight work may retain a previous key. Service, CLI,
+and served-browser coverage uses synthetic credentials and providers; live
+OpenRouter access remains unverified.

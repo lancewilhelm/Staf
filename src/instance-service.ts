@@ -31,12 +31,17 @@ import { calculateRecurrence } from './schedule-recurrence.js';
 import { discoverModels } from './models.js';
 import { resolveSettings } from './settings.js';
 import { usageText } from './usage.js';
+import { loadOpenRouterKey, saveOpenRouterKey, disconnectOpenRouter } from './openrouter-credential.js';
 
 export function startInstance(path: string, port = 0, options: {dataDir?: string; env?: Environment; enableCollaboration?: boolean; enableReusableApprovals?: boolean; localBootstrapToken?: string; authNow?:()=>number; authLifetimeMs?:number; webDependencies?:WebDependencies; searchTransport?:SearchTransport; shellExecutor?:typeof executeShellSandbox; authHooks?: {prepare:typeof prepareDirectLogin; complete:typeof completeDirectLogin}; providerFactory?: (profile: {provider:string; model:string | null; reasoning:string | null; instructions:string; chatId:string}, instructions:string) => Promise<Provider>} = {}) {
   const env = options.env ?? process.env;
-  const redact = redactor(env);
-  const redactProgress = streamingRedactor(env);
   const dataDir = options.dataDir ?? resolve(dirname(path));
+  const knownKeys = new Set<string>();
+  try {const initialKey=loadOpenRouterKey(dataDir);if(initialKey) knownKeys.add(initialKey);}catch {/* A damaged store can be replaced or disconnected by a paired client. */}
+  const redactEnv=redactor(env);
+  const redactProgress=streamingRedactor(env,()=>[...knownKeys]);
+  const redact = (text:string) => [...knownKeys].reduce((result,key)=>redactor({OPENROUTER_API_KEY:key})(result),redactEnv(text));
+  const providerEnv = (provider:string) => ({...env,STAF_MODEL:undefined,...(provider==='openrouter'?{OPENROUTER_API_KEY:loadOpenRouterKey(dataDir)}:{})});
   const instance = new Instance(path,redact);
   if (options.localBootstrapToken) instance.bootstrapLocal(options.localBootstrapToken);
   const active = new Set<AbortController>();
@@ -226,7 +231,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
             if (profile.provider !== 'demo' && !profile.model?.trim()) throw Error('Set a model in the agent profile');
             const instructions=`${chatSystemMessage.content}\n\nBot instructions:\n${profile.instructions}`;
             const taskProfile={...profile,chatId:id};
-            const provider=options.providerFactory ? await options.providerFactory(taskProfile,instructions) : (await selectProvider(profile.provider,{env:{...env,STAF_MODEL:undefined},model:profile.model ?? undefined,reasoning:profile.reasoning ?? undefined,dataDir,sessionId:id,instructions})).provider;
+            const provider=options.providerFactory ? await options.providerFactory(taskProfile,instructions) : (await selectProvider(profile.provider,{env:providerEnv(profile.provider),model:profile.model ?? undefined,reasoning:profile.reasoning ?? undefined,dataDir,sessionId:id,instructions})).provider;
             controller.signal.throwIfAborted();
             const messages: import('./types.js').Message[]=[];
             const notices=context.filter(item=>item.isNotice).map(item=>item.content);
@@ -282,6 +287,12 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
       }
       const token = req.headers.authorization?.match(/^Bearer ([A-Za-z0-9_-]+)$/)?.[1];
       if (!token || !instance.authorized(token)) return json(401,{error:'Unauthorized'});
+      if(req.method==='POST' && (req.url==='/api/bots' || req.url==='/api/creation-defaults' || /^\/api\/bots\/[\w-]+\/profile$/.test(req.url ?? '')) && JSON.stringify(redactValue(value,redact))!==JSON.stringify(value)) return json(400,{error:'Agent configuration cannot contain a credential'});
+      if(req.url==='/api/openrouter-connection') {
+        if(req.method==='GET') return json(200,{saved:!!loadOpenRouterKey(dataDir)});
+        if(req.method==='POST') {saveOpenRouterKey({root:dataDir,key:value.key});if(typeof value.key==='string') knownKeys.add(value.key);return json(200,{saved:true});}
+      }
+      if(req.method==='POST' && req.url==='/api/openrouter-connection/disconnect') {disconnectOpenRouter(dataDir);return json(200,{saved:false});}
       if(req.method==='GET' && req.url==='/api/task-updates') return json(200,instance.bots().flatMap(bot=>typeof bot.id==='string' ? instance.taskAttempts(bot.id).slice(0,30) : []));
       if(req.method==='GET' && req.url==='/api/inbox') {
         const questions=instance.openQuestions().map(q=>({kind:'question',id:q.id,botId:q.botId,attemptId:q.attemptId,text:q.text}));
@@ -548,12 +559,12 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
             if (!['demo','codex','openrouter','lmstudio','live'].includes(profile.provider)) throw Error('Unsupported provider');
             if (profile.provider !== 'demo' && !profile.model?.trim()) throw Error('Set a model in the agent profile');
             const instructions = `${chatSystemMessage.content}\n\nBot instructions:\n${profile.instructions}`;
-            const provider = options.providerFactory ? await options.providerFactory(profile,instructions) : (await selectProvider(profile.provider,{env:{...env, STAF_MODEL:undefined},model:profile.model ?? undefined,reasoning:profile.reasoning ?? undefined,dataDir,sessionId:profile.chatId,instructions})).provider;
+            const provider = options.providerFactory ? await options.providerFactory(profile,instructions) : (await selectProvider(profile.provider,{env:providerEnv(profile.provider),model:profile.model ?? undefined,reasoning:profile.reasoning ?? undefined,dataDir,sessionId:profile.chatId,instructions})).provider;
             controller.signal.throwIfAborted();
             await runTurn({session, provider, responseProgress, ...(instance.shellCanOffer({kind:'command',id}) ? {shell:(request:{callId:string;command:string})=>runScratchShell({kind:'command',id},request,controller.signal)} : {}), ...(instance.searchCanOffer({kind:'command',id}) ? {search:(request:{callId:string;query:string})=>searchWeb({kind:'command',id},request,controller.signal)} : {}), ...(instance.webCanOffer({kind:'command',id}) ? {web:(request:{callId:string;url:string})=>readWeb({kind:'command',id},request,controller.signal)} : {}), chatTasks:{start:request=>{const result=instance.startChatTask(id,request.callId,request.objective);if(result.kind==='accepted' && result.attemptId)executeTask(result.attemptId);return result.outcome==='accepted' && result.attemptId ? `Background task ${result.attemptId} accepted. Check Activity for progress.` : 'A background task is already active for this bot. No new task was started.';}}, skills:skillAccess(botId,instance.skills.availableToBot(botId).slice(0,32).map(({id,revision,name,description,digest})=>({id,revision,name,description,digest})),event=>instance.commandSkillLoaded(id,event)), requestText:content, memory:query=>recall(botId,query), text:notices.length ? `Task updates since your last chat turn:\n${notices.join('\n')}\n\nUser message:\n${content}` : content, redact, signal:controller.signal, emit:event=>{if(event.type === 'tool_start' || event.type === 'tool_result'){const allowed=['clock','read_web','search_web','run_scratch_shell','select_skill','start_background_task'];const name=allowed.includes(event.name) ? event.name : 'tool';instance.commandRuntimeEvent(id,event.type === 'tool_start' ? {type:event.type,name} : {type:event.type,name,success:event.success});}}, authorizeClock:()=>authorizeClock(botId,'command',id,controller.signal), store:{save:async updated => instance.saveExecution(id,updated,updated.messages.length > session.messages.length)}});
           } catch (error) {
             const message = error instanceof Error ? error.message : '';
-            const safe = message.startsWith('Clock ') || message === 'Selected skill is no longer available' ? message : message === 'Set a model in the agent profile' ? message : /requires OPENROUTER_API_KEY/.test(message) ? 'Set OPENROUTER_API_KEY on the instance host' : /HTTP 401/.test(message) || /credential|sign.in|login/i.test(message) ? 'Configure the selected provider credentials on the instance host' : /HTTP 402/.test(message) ? 'Provider credits are required' : /HTTP 429/.test(message) ? 'Provider rate limit reached; retry later' : /reasoning|effort/i.test(message) ? 'Check the model and reasoning settings in the agent profile' : /connection|timed out/i.test(message) ? 'Provider connection failed or timed out; check host network access' : 'Provider request failed. Check the instance host configuration.';
+            const safe = message.startsWith('Clock ') || message === 'Selected skill is no longer available' ? message : message === 'Set a model in the agent profile' ? message : /requires OPENROUTER_API_KEY/.test(message) ? 'Connect OpenRouter in Settings' : /HTTP 401/.test(message) || /credential|sign.in|login/i.test(message) ? 'Configure the selected provider credentials on the instance host' : /HTTP 402/.test(message) ? 'Provider credits are required' : /HTTP 429/.test(message) ? 'Provider rate limit reached; retry later' : /reasoning|effort/i.test(message) ? 'Check the model and reasoning settings in the agent profile' : /connection|timed out/i.test(message) ? 'Provider connection failed or timed out; check host network access' : 'Provider request failed. Check the instance host configuration.';
             if (!closing) { try { instance.fail(id,safe); } catch { /* A prior state transition won. */ } }
           } finally { if(!closing)publishResponse(botId);active.delete(controller); } })();
         }

@@ -149,3 +149,32 @@ test('restart retains interrupted progress without committing an assistant messa
     assert.deepEqual((await call(`/api/bots/${bot.id}/messages`,token)).map(m=>m.role),['user']);
   } finally {await app.close();rmSync(dir,{recursive:true,force:true});}
 });
+
+test('streamed progress redacts managed OpenRouter keys saved and replaced during work', async () => {
+  const dir=mkdtempSync(join(tmpdir(),'staf-stream-managed-key-'));
+  const first='managed-router-key-one',second='managed-router-key-two';
+  let release;const gate=new Promise(resolve=>{release=resolve;});
+  const providerFactory=async()=>({name:'fixture',capabilities:{toolCalls:true,incrementalText:true,transport:'responses'},async *stream(){
+    yield {type:'text_delta',text:`Visible first. ${first.slice(0,8)}`};
+    yield {type:'text_delta',text:`${first.slice(8)} next. `};
+    await gate;
+    yield {type:'text_delta',text:`Visible second. ${second.slice(0,8)}`};
+    yield {type:'text_delta',text:`${second.slice(8)} done. `};
+    yield {type:'message',message:{role:'assistant',content:`Visible first. ${first} next. Visible second. ${second} done.`}};
+  },async complete(){throw Error('unexpected');}});
+  const app=startInstance(join(dir,'db'),0,{providerFactory,env:{}}),port=await app.listen();
+  const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return r.json();};
+  try{
+    const token=(await call('/api/pair','',{code:app.code})).token;
+    const agent=await call('/api/bots',token,{name:'Streaming agent'});
+    await call('/api/openrouter-connection',token,{key:first});
+    await call('/api/commands',token,{id:'managed-stream',botId:agent.id,content:'hello'});
+    let progress;
+    for(let i=0;i<100;i++){progress=await call(`/api/bots/${agent.id}/response`,token);if(progress?.text?.includes('Visible first.'))break;await new Promise(r=>setTimeout(r,10));}
+    assert.equal(progress.state,'running');assert.match(progress.text,/\[REDACTED\]/);assert.ok(!progress.text.includes(first));
+    await call('/api/openrouter-connection',token,{key:second});release();
+    for(let i=0;i<100;i++){progress=await call('/api/commands/managed-stream',token);if(progress.state==='completed')break;await new Promise(r=>setTimeout(r,10));}
+    assert.equal(progress.state,'completed');assert.doesNotMatch(JSON.stringify(progress),/managed-router-key-(one|two)/);
+    const messages=await call(`/api/bots/${agent.id}/messages`,token);assert.doesNotMatch(JSON.stringify(messages),/managed-router-key-(one|two)/);
+  }finally{release();await app.close();rmSync(dir,{recursive:true,force:true});}
+});

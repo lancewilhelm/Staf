@@ -2,7 +2,7 @@
 
 Run these commands from the repository root on the Docker host. Docker Compose builds the image using the repository lockfile. The build downloads the pinned pnpm version and dependencies. The Node base image uses a mutable tag, so rebuilding later can select a newer Node 22 image.
 
-Set `OPENROUTER_API_KEY` in the host environment before starting Compose if you use OpenRouter. Compose passes that variable to the container. Restart the container with `docker compose up -d --force-recreate` after changing the variable. The key is visible to Docker administrators and through container inspection. Do not put a real key in the image, command history, or a committed file. Demo mode does not require a key.
+For OpenRouter, use global Settings or the paired CLI to save a key in the instance credential store after startup. The shared instance ignores `OPENROUTER_API_KEY` from the host environment. Keep the instance data volume private; the stored key is plaintext and Docker administrators can access it. Demo mode does not require a key.
 
 ```sh
 docker compose up -d --build

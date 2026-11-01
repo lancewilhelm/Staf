@@ -28,17 +28,15 @@ Other messages go to the selected provider or the instance's existing memory and
 task handlers. Natural-language settings support these documented phrases, not
 arbitrary requests to change configuration.
 
-To use OpenRouter, export `OPENROUTER_API_KEY` in the environment that starts the
-instance, then set the provider and an explicit model in chat. The instance
-inherits that environment at startup and does not load `.env`; changing the shell
-environment does not update an already-running instance. Codex requires a Staf
-owned sign-in grant in the instance data directory and an explicit model. The
-shared-instance sign-in commands below are synthetic-tested, not live-verified.
-The instance does not silently fall back to another provider.
+To use OpenRouter, save an API key in the shared instance through global
+Settings or the paired CLI commands below. Select the provider and an explicit
+model in the bot profile. The instance does not silently fall back to another
+provider. Codex uses a Staf-owned sign-in grant. Shared-instance sign-in and
+provider calls have synthetic coverage; live access remains unverified.
 
-To restart the automatic instance after changing its environment, inspect the
-PID in its descriptor and confirm that the command is the Staf terminal daemon
-for this data directory before sending SIGTERM:
+For LM Studio or generic HTTP environment changes, restart the automatic instance.
+Inspect the PID in its descriptor and confirm that its command is the Staf
+terminal daemon for this data directory before sending SIGTERM:
 
 ```sh
 STAF_INSTANCE_PID="$(node -p 'JSON.parse(require("fs").readFileSync(process.env.HOME + "/.staf/terminal-instance/terminal-service.json", "utf8")).pid')"
@@ -46,8 +44,8 @@ ps -p "$STAF_INSTANCE_PID" -o pid=,command=
 kill "$STAF_INSTANCE_PID"
 ```
 
-A descriptor can be stale after a crash, so do not run `kill` unless the process
-matches. Start `staf` again from a shell containing the required environment.
+A stale descriptor may name a different process; only stop the confirmed daemon.
+Start `staf` again with the desired environment.
 
 For provider setup and a live chat test, follow [Configure a provider](#configure-a-provider).
 
@@ -89,10 +87,39 @@ not been live verified. See [Codex sign-in and recovery](codex-direct.md).
 
 ### Use OpenRouter
 
-Set `OPENROUTER_API_KEY` in the environment that starts the instance. Restart an
-existing instance after changing that environment, as described above. Select
-`openrouter` and an explicit OpenRouter model in the bot profile. A message can
-spend API credits. Choose a model that supports function calling to use tools.
+In the browser, open **Settings**, enter the key under **OpenRouter**, and
+save it. For the default automatic terminal instance, start `staf` and set the
+paired CLI connection arguments:
+
+```sh
+URL="http://127.0.0.1:$(node -p 'JSON.parse(require("fs").readFileSync(process.env.HOME + "/.staf/terminal-instance/terminal-service.json", "utf8")).port')"
+CREDENTIAL_FILE="$HOME/.staf/terminal-instance/terminal-credential.json"
+```
+
+In zsh, use the following to enter a key without echoing it or placing it in
+shell history:
+
+```sh
+staf instance openrouter-status "$URL" "$CREDENTIAL_FILE"
+read -rs 'STAF_ROUTER_KEY?OpenRouter API key: '; printf '\n'
+printf '%s' "$STAF_ROUTER_KEY" | staf instance openrouter-set "$URL" "$CREDENTIAL_FILE"
+unset STAF_ROUTER_KEY
+```
+
+To disconnect, run `staf instance openrouter-disconnect "$URL" "$CREDENTIAL_FILE"`.
+
+Use the paired credential and loopback URL for any other instance. `openrouter-set` reads standard
+input, accepts no key argument, and replaces the existing key. Saving does not
+contact OpenRouter or establish account, credit, or model access. Keys are held
+in the instance's private `auth/openrouter.json` file, not agent configuration;
+protect the data directory and its backups. The key is stored as plaintext with
+mode 0600. Disconnect removes that file and affects subsequent work; requests
+already in flight may still use the previous key. The shared instance ignores
+`OPENROUTER_API_KEY` in its environment, so migrate an existing key into Settings
+or the CLI. Select `openrouter` and an explicit model in each agent. A message
+can spend API credits. Choose a model that supports function calling to use tools.
+These operations have synthetic service, CLI, and browser coverage; live access
+has not been verified.
 
 ### Use LM Studio or a compatible HTTP endpoint
 
@@ -121,7 +148,7 @@ and notices can change the next request. Staf does not compact history. See
 
 - For `ERR_PNPM_UNSUPPORTED_ENGINE`, check the Node and pnpm versions. Staf
   requires Node 22.16 or later and pnpm 10.27.0 or later.
-- If a provider reports a missing credential or model, check the host environment
+- If a provider reports a missing credential or model, check the instance connection or host environment
   and the bot profile. Restart the instance after changing host variables.
 - For HTTP 401, check the selected provider's credential. For 402, check credits.
   For 429, wait before retrying. Staf does not automatically retry paid calls.
@@ -228,7 +255,7 @@ remove the old revision's `.retired` marker after review. The old files remain
 on disk.
 
 A later request after a provider change can send existing chat history to the new provider. Creation defaults set provider, model, and reasoning for future bots. The instance copies these settings at creation; changing defaults never changes existing bots. Revisions prevent stale clients from overwriting each other. In the CLI, use `instance defaults URL CREDENTIAL_FILE` and `instance defaults-set URL CREDENTIAL_FILE REVISION PROVIDER MODEL REASONING`; use `-` for an empty model or reasoning. Permission and approval settings remain separate. The description is owner-edited metadata visible to other bots; keep private instructions and memory out of it. New bots start with an empty description.
-The deterministic demo provider does not follow the instructions. Select Codex, OpenRouter, LM Studio, or live and an explicit model in the bot profile. OpenRouter uses `OPENROUTER_API_KEY` in the service host environment; the instance command does not load the project `.env` file. Codex uses the Staf grant under the directory containing the instance database. From a paired browser, use Codex sign-in and open the provided link on the instance host. The initiating paired client can check or cancel that attempt, including after refreshing the page. The CLI provides `instance codex-auth-start URL CREDENTIAL_FILE`, `codex-auth-current URL CREDENTIAL_FILE`, `codex-auth-status URL CREDENTIAL_FILE ATTEMPT_ID`, `codex-auth-cancel URL CREDENTIAL_FILE ATTEMPT_ID`, and `codex-auth-credential URL CREDENTIAL_FILE`. The callback listens on the same loopback origin. Revoking the initiating client prevents credential commit. These paths have been tested with synthetic auth only; live sign-in has not been verified. Provider failures do not fall back to another provider. Live provider execution has not been verified in this preview.
+The deterministic demo provider does not follow the instructions. Select Codex, OpenRouter, LM Studio, or live and an explicit model in the bot profile. OpenRouter uses the managed instance key described above; the instance command does not load the project `.env` file. Codex uses the Staf grant under the directory containing the instance database. From a paired browser, use Codex sign-in and open the provided link on the instance host. The initiating paired client can check or cancel that attempt, including after refreshing the page. The CLI provides `instance codex-auth-start URL CREDENTIAL_FILE`, `codex-auth-current URL CREDENTIAL_FILE`, `codex-auth-status URL CREDENTIAL_FILE ATTEMPT_ID`, `codex-auth-cancel URL CREDENTIAL_FILE ATTEMPT_ID`, and `codex-auth-credential URL CREDENTIAL_FILE`. The callback listens on the same loopback origin. Revoking the initiating client prevents credential commit. These paths have been tested with synthetic auth only; live sign-in has not been verified. Provider failures do not fall back to another provider. Live provider execution has not been verified in this preview.
 
 CLI examples (use a fresh host code for each client):
 

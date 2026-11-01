@@ -31,7 +31,7 @@ needed. It also offers Light, Dark, and System appearance for this browser;
 System follows the device setting. The persistent agent list switches between main chats; each agent has its own configuration, which you can edit from its chat.
 Instructions live in its `soul.md` file; settings live in `agent.toml`. You can
 [edit these files directly](docs/usage.md#agent-configuration-files) on the instance host.
-You can create an agent with just a name before connecting a provider. Agent settings
+Connect an instance-wide OpenRouter key in global Settings or through the paired CLI; saved presence does not verify account or model access. You can create an agent with just a name before connecting a provider. Agent settings
 include archive, and Settings lists archived agents for restoration. The inbox shows task updates and
 requests for input or approval. The previous Advanced page has been retired;
 other management features remain available through the service and CLI while
