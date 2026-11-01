@@ -37,6 +37,11 @@ Browser-local draft and command journals support explicit recovery;
 the instance remains authoritative for accepted commands and work. A keyed
 bot-creation operation stores its fingerprint and result with the bot in one
 transaction. Version 27 backs up an existing database before adding the journal.
+The browser retains the operation ID locally, and the CLI prints it before
+submission. A client can reuse the ID after a lost response or restart. Requests
+without an ID do not have this guarantee. The shared service serializes archive
+with chat and task acceptance and rejects archive while work is active. It keeps
+the bot identity, configuration, and history for restoration.
 Inbox approvals are projections of existing records and in-memory requests, not
 a second authorization store. This UI does not add LAN transport or establish
 live Codex behavior.
