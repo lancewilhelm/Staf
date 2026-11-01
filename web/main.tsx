@@ -1,4 +1,4 @@
-import {useEffect,useRef,useState,useSyncExternalStore} from 'react';
+import {useEffect,useRef,useState,useSyncExternalStore,type ReactNode} from 'react';
 import {createRoot} from 'react-dom/client';
 import {Controller,type BotProfile,type InboxItem} from './controller';
 import './style.css';
@@ -54,12 +54,24 @@ function BotModelSettings({id,onClose,saving,setSaving}:{id:string;onClose:()=>v
     catch(e){setStatus('Could not load the current settings. Your edits are retained. '+String(e))}
     finally{setSaving(false)}
   }
+  async function archive(){
+    if(!profile || !window.confirm('Archive this agent? Its configuration and conversation will be retained.'))return;
+    setSaving(true);setStatus('');
+    try{await app.setArchived(profile,true);onClose()}catch(e){setCompareAvailable(true);setStatus('Could not archive the agent, or the result is uncertain. Compare the current settings before retrying. '+String(e))}finally{setSaving(false)}
+  }
   return <div className="setup"><span className="eyebrow">AGENT SETTINGS</span><h2>{profile?.name||'Agent settings'}</h2>
     {profile&&<><p>Provider connections are shared by the instance.</p><label>Name<input disabled={saving} value={name} onChange={e=>setName(e.target.value)}/></label><label>Provider<select disabled={saving} value={provider} onChange={e=>setProvider(e.target.value)}><option value="demo">Demo</option><option value="codex">Codex</option><option value="openrouter">OpenRouter</option><option value="lmstudio">LM Studio</option><option value="live">HTTP compatible</option></select></label><label>Model<input disabled={saving} value={model} onChange={e=>setModel(e.target.value)}/></label><label>Instructions<textarea disabled={saving} value={instructions} onChange={e=>setInstructions(e.target.value)}/></label><p className="meta">Configuration: <code>{profile.configDir}</code></p><div className="row"><button disabled={saving} onClick={()=>void save()}>Save settings</button><button disabled={saving} className="quiet" onClick={onClose}>Cancel</button></div></>}
+    {profile&&!profile.archived&&<button disabled={saving} className="quiet" onClick={()=>void archive()}>Archive agent</button>}
     <p role="status">{saving?'Loading or saving…':status}</p>
     {compareAvailable&&<button disabled={saving} className="quiet" onClick={()=>void compare()}>Compare latest settings</button>}
     {latest&&<section className="saved-settings" aria-label="Current saved settings"><h3>Current saved settings</h3><p>Name: {latest.name}</p><p>Provider: {latest.provider}</p><p>Model: {latest.model||'(none)'}</p><p>Instructions:</p><pre>{latest.instructions}</pre></section>}
   </div>;
+}
+
+function ArchivedBot({bot,label}:{bot:{id:string;name:string};label:ReactNode}){
+  const [busy,setBusy]=useState(false);const [status,setStatus]=useState('');
+  async function restore(){setBusy(true);setStatus('');try{const profile=await app.botProfile(bot.id);await app.setArchived(profile,false)}catch(e){setStatus('Could not restore the agent, or the result is uncertain. Refresh and try again. '+String(e));await app.refresh()}finally{setBusy(false)}}
+  return <div className="provider"><strong>{label}</strong><button disabled={busy} onClick={()=>void restore()}>Restore agent</button><p role="status">{status}</p></div>;
 }
 
 function App(){
@@ -99,14 +111,16 @@ function App(){
     {s.connection.kind==='offline'&&<div className="banner" role="alert">{s.connection.message} {s.freshness}</div>}
     {view==='bot'&&settingsBotId?<BotModelSettings key={settingsBotId} id={settingsBotId} saving={botSaving} setSaving={setBotSaving} onClose={()=>{setSettingsBotId(null);setView('chat')}}/>
     :s.connection.kind==='pairing'?<div className="setup"><span className="eyebrow">WELCOME TO STAF</span><h2>Pair this browser</h2><p>Enter the one-time code shown on the host.</p><label>Pairing code<input value={code} onChange={e=>setCode(e.target.value)}/></label><button onClick={()=>void app.pair(code)}>Pair</button><p role="alert">{s.connection.message}</p></div>
-    :s.setup.kind==='create'?<div className="setup"><span className="eyebrow">YOUR AGENT</span><h2>Create your agent</h2><p>Give your agent a name, a role, and its own model.</p>
+    :s.setup.kind==='create'?<div className="setup"><span className="eyebrow">YOUR AGENT</span><h2>Create your agent</h2><p>Give your agent a name. Instructions and provider settings are optional.</p>
       <label>Name<input value={s.setup.name} disabled={!!s.setup.operationId} onChange={e=>app.setupField('name',e.target.value)}/></label>
       <label>What should this agent help with?<textarea value={s.setup.instructions} disabled={!!s.setup.operationId} onChange={e=>app.setupField('instructions',e.target.value)}/></label>
-      <label>Codex model<input value={s.setup.model} disabled={!!s.setup.operationId} placeholder="Choose a model for this agent" onChange={e=>app.setupField('model',e.target.value)}/></label>
-      <p>The Codex connection is shared by all agents. You can set a model later.</p>
+      <label>Provider<select value={s.setup.provider??'codex'} disabled={!!s.setup.operationId} onChange={e=>app.setupField('provider',e.target.value)}><option value="">Instance default</option><option value="demo">Demo</option><option value="codex">Codex</option><option value="openrouter">OpenRouter</option><option value="lmstudio">LM Studio</option><option value="live">HTTP compatible</option></select></label>
+      <label>Model<input value={s.setup.model} disabled={!!s.setup.operationId} placeholder="Choose a model for this agent" onChange={e=>app.setupField('model',e.target.value)}/></label>
+      <p>Provider connections are shared. Defaults are copied when the agent is created.</p>
       <div className="row">{s.setup.operationId?<><button onClick={()=>void app.checkCreate()}>Check creation</button><button onClick={()=>void app.create(true)}>Retry same creation</button></>:<button onClick={()=>void app.create()}>Create agent</button>}<button className="quiet" onClick={()=>app.closeSetup()}>Close</button></div><p role="status">{s.setup.status}</p>
     </div>:view==='settings'?<div className="setup"><span className="eyebrow">SETTINGS</span><h2>Appearance</h2><p>Choose how Staf looks in this browser.</p>
       <fieldset className="appearance"><legend>Appearance</legend>{(['light','dark','system'] satisfies Appearance[]).map(value=><label key={value}><input type="radio" name="appearance" value={value} checked={appearance===value} onChange={()=>chooseAppearance(value)}/>{value[0].toUpperCase()+value.slice(1)}</label>)}</fieldset>
+      {s.bots.some(bot=>bot.archived)&&<><h2>Archived agents</h2>{s.bots.filter(bot=>bot.archived).map(bot=><ArchivedBot key={bot.id} bot={bot} label={botLabel(bot)}/>)}</>}
       <h2>Providers</h2><p>Provider connections belong to this Staf instance and are available to all your agents. Each agent has its own model.</p>
       <div className="provider provider-settings"><strong>Codex</strong><p>{s.credential==='signed-in'?'Saved sign-in found for this instance.':s.credential==='signed-out'?'No usable sign-in found for this instance.':'Checking the sign-in for this instance.'}</p>{s.credential==='signed-in'&&<p className="meta">This saved sign-in has not been checked against the provider.</p>}
         {s.authAttempt&&<p>Sign-in {s.authAttempt.phase}</p>}

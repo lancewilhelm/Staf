@@ -457,7 +457,7 @@ export class Instance {
     try {
       const digest=input.operationId ? createHmac('sha256',this.fingerprintKey).update(JSON.stringify([input.name,input.instructions,input.provider ?? null,input.model ?? null,input.reasoning ?? null])).digest('hex') : null;
       if(input.operationId) { const existing=this.db.prepare('SELECT digest,bot_id FROM bot_creation_operations WHERE id=?').get(input.operationId); if(existing) { if(existing.digest!==digest || typeof existing.bot_id!=='string') throw new BotConflict('Creation operation ID conflict'); const bot=this.bot(existing.bot_id); this.db.exec('COMMIT'); return bot; } }
-      const defaults=this.creationDefaults();const provider=input.provider ?? defaults.provider, model=input.provider === undefined ? defaults.model : input.model ?? null, reasoning=input.provider === undefined ? defaults.reasoning : input.reasoning ?? (input.operationId ? defaults.reasoning : null);
+      const defaults=this.creationDefaults();const provider=input.provider ?? defaults.provider, model=input.model ?? (input.provider === undefined ? defaults.model : null), reasoning=input.reasoning ?? defaults.reasoning;
       this.configs.publish(id,{name:input.name,description:'',provider,model,reasoning,instructions:input.instructions},false);
       this.db.prepare('INSERT INTO bots VALUES (?, ?, ?, ?, ?, ?, ?)').run(id, chatId, '', '', 'demo', null, null);
       this.db.prepare('INSERT INTO bot_profiles (bot_id,revision,soul,archived) VALUES (?, 1, ?, 0)').run(id, '');
