@@ -192,8 +192,10 @@ while preventing new work. To restore it, open **Settings** and select
 **Restore agent** under **Archived agents**. An agent with active chat or background
 work cannot be archived until that work settles.
 
+In the shared terminal, `/stop` requests cancellation of the current main-chat response, including one started by another paired client. A line entered while your terminal command is unresolved is kept as an unsent draft. Use `/edit ID TEXT` to revise it and `/retry ID` after the response settles; drafts are never queued automatically.
+
 While a response runs, the workspace receives provisional text and progress over a shared-instance event stream. If the connection drops, the workspace reconnects and shows the latest saved progress.
-You can type a next draft, but cannot send it until the active response ends.
+You can type a next draft while the response runs. Select **Stop** to request cancellation; the response shows **stopping** until the provider and pending operations settle. Send becomes available after completion or a settled Stop, and the draft remains editable throughout. Stopped partial output stays in the conversation labeled **stopped** and is not treated as a completed provider reply. A provider that does not promptly honor cancellation can keep the agent in stopping until it returns.
 Markdown headings, lists, links and code blocks render in assistant responses;
 use Copy on a code block. Raw HTML is not rendered. The conversation follows new
 output while you are at the bottom and stays in place when you scroll up.
@@ -277,6 +279,7 @@ pnpm start instance read http://127.0.0.1:3210 ~/.staf-client.json BOT_ID
 pnpm start instance send http://127.0.0.1:3210 ~/.staf-client.json BOT_ID 'Hello'
 pnpm start instance status http://127.0.0.1:3210 ~/.staf-client.json COMMAND_ID
 node dist/cli.js instance response-follow http://127.0.0.1:3210 ~/.staf-client.json COMMAND_ID
+node dist/cli.js instance response-stop http://127.0.0.1:3210 ~/.staf-client.json COMMAND_ID
 ```
 
 The bot name can contain multiple arguments. Pass instructions as one quoted

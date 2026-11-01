@@ -66,7 +66,7 @@ its hash. A client ID is derived from the token hash and is not a bearer token.
 The first-delivery trust model treats every paired client as acting for the sole owner, with no separate role check. Any paired client can list and revoke client authorizations and manage approvals and settings. A browser stores its credential and uncertain draft locally, while a
 CLI client uses a separate credential file. Commands claim a bot and append the
 user message transactionally; completed responses are stored with the command
-state. Restart marks pending commands interrupted. SQLite exclusive locking
+state. Stop records a durable request while retaining the pending command and its unique busy lock, aborts the running provider and pending operations, and settles only after the turn returns. A late provider result cannot commit after Stop. The partial output is stored as a stopped conversation entry and excluded from provider replay. Restart marks pending or stopping commands interrupted; it does not resume them. SQLite exclusive locking
 prevents a second process from treating active commands as interrupted. The
 service runs demo, Codex, OpenRouter, LM Studio and live with instance or host credentials and an explicit bot model for each non-demo provider. This preview does not implement the LAN,
 push updates, complete reconnect recovery, or operational features described in the plans above.

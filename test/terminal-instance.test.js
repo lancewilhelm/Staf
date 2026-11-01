@@ -107,3 +107,18 @@ test('a slow accepted response appears without a status command while chat remai
   child.stdin.end('/quit\n');await new Promise((resolve,reject)=>{child.on('error',reject);child.on('exit',code=>code===0?resolve():reject(Error(errors)));});child=undefined;
  }finally{child?.kill();await stop(root);rmSync(root,{recursive:true,force:true});}
 });
+
+test('terminal stop cancels a pending clock approval and permits another message',async()=>{
+ const root=mkdtempSync(join(tmpdir(),'staf-terminal-stop-'));
+ try {
+  let result=cli(root,'/quit\n');assert.equal(result.status,0,result.stderr);
+  await request(root,'/api/approval-settings/instance',{mode:'ask-every-time',clockEnabled:true});
+  result=cli(root,'what time is it?\nNext draft\n/stop\n/quit\n');assert.equal(result.status,0,result.stderr);assert.match(result.stdout,/Response stopping/);
+  const draft=result.stdout.match(/Unsent draft ([\w-]+): Next draft/)[1];
+  const command=result.stdout.match(/Command ID: ([\w-]+)/)[1];
+  for(let i=0;i<50;i++){if((await request(root,`/api/commands/${command}`)).body.state==='stopped')break;await pause(20);}
+  assert.equal((await request(root,`/api/commands/${command}`)).body.state,'stopped');
+  assert.ok(!(await request(root,'/api/approvals')).body.some(x=>x.workId===command && x.state==='pending'));
+  result=cli(root,`/edit ${draft} Revised draft\n/retry ${draft}\n/quit\n`);assert.equal(result.status,0,result.stderr);assert.match(result.stdout,/Demo \(offline\).*Revised draft/);
+ }finally{await stop(root);rmSync(root,{recursive:true,force:true});}
+});
