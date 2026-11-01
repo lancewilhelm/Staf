@@ -107,13 +107,16 @@ fallback exists.
 
 ## Local shared instance preview
 
-The workspace is served at `/`. The former Advanced page is not served.
+The workspace is served at `/`. Its persistent agent list selects main chats,
+and duplicate names display stable IDs. The UI calls these records agents; the
+existing `bots` API paths, fields, and CLI command remain unchanged. The former
+Advanced page is not served.
 Its appearance preference is stored in browser localStorage under
 `staf-appearance`, with `light`, `dark`, or `system` values. Missing or invalid
 values use System, which follows the device color scheme. This preference is
 not an instance configuration or a shared API setting.
 Authenticated `GET /api/inbox` projects pending questions and approvals.
-`GET /api/task-updates` returns task summaries for the inbox. A guided Codex bot
+`GET /api/task-updates` returns task summaries for the inbox. A guided Codex agent
 creation uses `POST /api/bots` with `operationId`, `provider`, and `model`;
 `GET /api/bot-creations/OPERATION_ID` recovers a recorded result. Reusing an
 operation ID with different input conflicts. The transaction copies remaining

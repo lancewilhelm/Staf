@@ -28,15 +28,15 @@ Run `pnpm start instance serve .staf/instance.sqlite 3210` and open
 `http://127.0.0.1:3210/`. Enter the host's pairing code to open the chat workspace.
 **Settings** shows the instance-wide Codex connection and offers sign-in when
 needed. It also offers Light, Dark, and System appearance for this browser;
-System follows the device setting. Each bot has its own configuration, which you can edit from its chat.
+System follows the device setting. The persistent agent list switches between main chats; each agent has its own configuration, which you can edit from its chat.
 Instructions live in its `soul.md` file; settings live in `agent.toml`. You can
 [edit these files directly](docs/usage.md#agent-configuration-files) on the instance host.
-You can create a bot before connecting a provider. The inbox shows task updates and
+You can create an agent before connecting a provider. The inbox shows task updates and
 requests for input or approval. The previous Advanced page has been retired;
 other management features remain available through the service and CLI while
 their GUI is developed. Shared-instance Codex sign-in has synthetic coverage
-but is not live verified. Bots can start background work from main chat and
-request help during tasks; each bot-to-bot message requires owner approval.
+but is not live verified. Agents can start background work from main chat and
+request help during tasks; each agent-to-agent message requires owner approval.
 Public web reading, owner-configured local search and scratch-only shell are off
 by default and require owner approval. Press Enter in the host
 terminal to issue a fresh one-time code for another client. This preview binds

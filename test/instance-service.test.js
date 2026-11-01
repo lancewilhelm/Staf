@@ -69,6 +69,7 @@ test('bot profiles detect stale edits and archive preserves shared chat across r
  try {
   const a=(await call('/api/pair','',{code:app.code}))[1].token;
   const b=(await call('/api/pair','',{code:app.issueCode()}))[1].token;
+  assert.deepEqual(await call('/api/bots/missing',a),[404,{error:'Agent not found'}]);
   const bot=(await call('/api/bots',a,{name:'Ada',instructions:'Help'}))[1];
   const initial=(await call(`/api/bots/${bot.id}`,b))[1];
   const edit={revision:initial.revision,name:'Renamed',instructions:'Be candid\nExplain',provider:'demo',model:null,reasoning:null};
@@ -82,7 +83,7 @@ test('bot profiles detect stale edits and archive preserves shared chat across r
   const demo=(await call(`/api/bots/${bot.id}/profile`,a,{...edit,revision:configured.revision}))[1];
   assert.equal((await call('/api/commands',b,{id:'hello',botId:bot.id,content:'Hello'}))[1].kind,'accepted');
   assert.equal((await call(`/api/bots/${bot.id}/archive`,a,{revision:demo.revision}))[0],200);
-  assert.equal((await call('/api/commands',b,{id:'archived',botId:bot.id,content:'No'}))[0],409);
+  assert.deepEqual(await call('/api/commands',b,{id:'archived',botId:bot.id,content:'No'}),[409,{error:'Agent is archived'}]);
   await app.close(); app=startInstance(path,0,{env:{}}); port=await app.listen();
   const archived=(await call(`/api/bots/${bot.id}`,a))[1]; assert.equal(archived.archived,true);
   assert.equal((await call(`/api/bots/${bot.id}/restore`,b,{revision:archived.revision}))[0],200);

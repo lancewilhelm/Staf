@@ -32,7 +32,7 @@ export async function instanceCommand(args: string[]) {
   if (action === 'create') {
     const option=values.findIndex(value=>value.startsWith('--'));
     const names=option < 0 ? values : values.slice(0,option);
-    if (!names.join(' ').trim()) throw Error('Bot name required. Use instance create URL CREDENTIAL_FILE NAME [--instructions TEXT]');
+    if (!names.join(' ').trim()) throw Error('Agent name required. Use instance create URL CREDENTIAL_FILE NAME [--instructions TEXT]');
     let instructions='';
     if (option >= 0) {
       if (values[option] !== '--instructions') throw Error('Unknown create option. Use --instructions TEXT');

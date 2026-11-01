@@ -145,27 +145,26 @@ and revoke a client. Revoking this browser returns it to pairing. A revoked
 client needs a new host code to reconnect. Clients are identified by an ID,
 not a device name.
 
-The workspace lists persistent bots and shows their main chats. In **Settings**,
-choose Light, Dark, or System appearance. System is the default and follows
-device appearance changes. The choice is saved in this browser, independently
-of other browsers; clearing browser storage resets it to System.
+The workspace keeps an agent list beside the selected main chat, visible while
+the page scrolls. Select an agent to switch conversations; agents with the same
+name, including archived namesakes, show their stable IDs in the list and Updates. **New agent** opens creation, and **Settings** controls appearance and
+instance-wide provider connections. Choose Light, Dark, or System appearance;
+System is the default and follows device appearance changes. The choice is saved
+in this browser, independently of other browsers; clearing browser storage resets it.
 
-**Settings**
-shows the Codex sign-in for this instance. A saved sign-in is reused across
-bots; it does not establish that the provider or a model is available. Select
-**New bot** to create a bot with a name and optional instructions and model.
-You can create a bot before signing in or choosing a model. Select the model
-label below a bot's chat to edit its settings and Instructions. Press Enter to send a
-message or Shift+Enter to insert a new line. If no Codex sign-in is available,
-the workspace keeps your draft and directs you to provider settings. If a bot
-has no model, the workspace keeps your draft until you choose one.
+A saved Codex sign-in is shared by all agents; it does not establish that the
+provider or a model is available. Create an agent with a name and optional
+instructions and model, even before signing in or choosing a model. Select the
+model label below an agent's chat to edit its settings and Instructions. Press
+Enter to send a message or Shift+Enter to insert a new line. The workspace keeps
+your draft if sign-in or a model is missing and when switching agents.
 
-The inbox shows current task updates, questions, and approval requests. Activity
-opens automatically for a new question or approval for the selected bot. Other
-updates do not open it. Select a request for another bot to view that bot's
-Activity. Task questions are visible, but answering them in the workspace is
-not yet implemented. The workspace checks for updates while the browser page
-is visible; it does not provide background notifications.
+**Updates** shows task updates, questions, and approval requests. Activity opens
+automatically for a new question or approval for the selected agent. Other
+updates do not open it. Select a request for another agent to view its Activity.
+Clock approvals can be approved or denied there. Task questions are visible, but
+answering them in the workspace is not yet implemented. The workspace checks
+for updates while the page is visible; it does not provide background notifications.
 
 Drafts and pending message IDs are stored in the browser. After a reload, use
 **Recover saved browser drafts or creation** to select an earlier record. If a
