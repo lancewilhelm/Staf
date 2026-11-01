@@ -28,19 +28,23 @@ export async function instanceCommand(args: string[]) {
     const result=await request('/api/pair','',{code:values[0]});
     await mkdir(dirname(resolve(credential)),{recursive:true,mode:0o700}); await writeFile(credential,JSON.stringify(result),{mode:0o600,flag:'wx'}); console.log('Paired.'); return;
   }
-  let create: {name:string; instructions:string} | undefined;
+  let create: {name:string; instructions:string; operationId:string; provider?:string; model?:string} | undefined;
   if (action === 'create') {
     const option=values.findIndex(value=>value.startsWith('--'));
     const names=option < 0 ? values : values.slice(0,option);
-    if (!names.join(' ').trim()) throw Error('Bot name required. Use instance create URL CREDENTIAL_FILE NAME [--instructions TEXT]');
-    let instructions='';
-    if (option >= 0) {
-      if (values[option] !== '--instructions') throw Error('Unknown create option. Use --instructions TEXT');
-      if (values[option+1] === undefined || values[option+1]?.startsWith('--')) throw Error('--instructions requires TEXT');
-      if (option+2 !== values.length) throw Error('--instructions must appear once at the end, followed by one TEXT argument');
-      instructions=values[option+1] ?? '';
+    if (!names.join(' ').trim()) throw Error('Agent name required. Use instance create URL CREDENTIAL_FILE NAME [--instructions TEXT]');
+    const options:Record<string,string>={};
+    for(let i=option < 0 ? values.length : option;i<values.length;i+=2) {
+      const key=values[i],value=values[i+1];
+      if (!key || !['--instructions','--operation-id','--provider','--model'].includes(key)) throw Error('Unknown create option. Use --instructions TEXT, --operation-id ID, --provider PROVIDER or --model MODEL');
+      if (value === undefined || value.startsWith('--')) throw Error(`${key} requires TEXT`);
+      if (key in options) throw Error(`${key} must appear once`);
+      options[key]=value;
     }
-    create={name:names.join(' '),instructions};
+    const operationId=options['--operation-id'] ?? randomUUID();
+    if(!/^[\w-]{1,100}$/.test(operationId))throw Error('Invalid creation operation ID');
+    console.error(`Creation operation ID: ${operationId}`);
+    create={name:names.join(' '),instructions:options['--instructions'] ?? '',operationId,...(options['--provider'] !== undefined ? {provider:options['--provider']} : {}),...(options['--model'] !== undefined ? {model:options['--model']} : {})};
   }
   const saved: unknown=JSON.parse(await readFile(credential,'utf8'));
   if (!saved || typeof saved !== 'object' || !('token' in saved) || typeof saved.token !== 'string') throw Error('Invalid client credential');
