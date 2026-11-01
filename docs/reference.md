@@ -128,7 +128,7 @@ use the loopback origin and a separate client credential file; see
 [usage](usage.md#local-shared-instance-offline-preview). `instance create URL CREDENTIAL_FILE NAME [--instructions TEXT]` joins name
 arguments with spaces. The optional flag must appear once at the end, followed
 by one text argument. The server stores
-SHA-256 token hashes in SQLite and limits JSON request bodies to 64 KiB, except skill import and update requests, which are limited to 1,600,000 bytes. Newly created databases have owner-only permissions, independent of a permissive umask. Existing file permissions are not changed. Restrict the containing directory and any existing database separately. On the tested platform, SQLite rollback journals inherit the owner-only database mode.
+SHA-256 token hashes in SQLite and limits JSON request bodies to 64 KiB, except skill import and update requests, which are limited to 1,600,000 bytes, and agent configuration file requests, which are limited to 1,000,000 bytes. Newly created databases have owner-only permissions, independent of a permissive umask. Existing file permissions are not changed. Restrict the containing directory and any existing database separately. On the tested platform, SQLite rollback journals inherit the owner-only database mode.
 The host issues a one-time code at startup and on each terminal Enter. Browser
 requests with an Origin must match the exact server origin; JSON and bearer
 credentials are required for protected writes. No network transport beyond
@@ -142,17 +142,22 @@ configuration `revision`. `POST /api/bots/ID/profile` accepts `revision`,
 `name`, optional `description`, `instructions`, `provider`, `model`, and
 `reasoning`. `instructions` is the content of `soul.md`; `soul` is not a
 separate editable field. `agent.toml` accepts only `name`, `description`,
-`provider`, and optional `model` and `reasoning`. Directly edited files are
-validated on read. Invalid files and late edits to a previous revision return
+`provider`, and optional `model` and `reasoning`. `GET /api/bots/ID/config-files`
+returns exact `settings`, `instructions`, and `revision` strings;
+`POST` to that endpoint publishes those strings with the expected `revision`.
+The CLI `config-checkout` and `config-publish` commands use this contract.
+Changes to published files outside that workflow and late edits to a previous revision return
 HTTP 422 with `code` `invalid_agent_configuration` and block new work without
 changing the files. Agent settings and credentials have separate storage.
 An error during the publication switch returns HTTP 503 with `code`
 `configuration_save_uncertain`; the change may have taken effect and the client
-must inspect it before retrying. Direct file editors do not submit revisions and
-cannot detect a stale buffer saved by pathname after a client save.
+must inspect it before retrying. Concurrent uncoordinated writes to a published
+path can overwrite each other before inspection; use a versioned editing directory.
 
 Bot profile edits and archive operations require the current revision. Stale
-revisions return HTTP 409. The service stores a profile snapshot for each
+revisions return HTTP 409. Profile edits preserve TOML comments and surrounding
+formatting; an unsupported layout returns 409 instead of discarding its text and
+can be changed through the file-publication endpoint. The service stores a profile snapshot for each
 accepted chat command. Archive rejects active chat commands. The instance captures the profile for each turn, stores full provider history privately, and exposes only visible chat. New command IDs use a private keyed fingerprint to distinguish exact retries from different input that redacts to the same text. Older commands without a fingerprint remain queryable, but reuse of their IDs is rejected because the original input cannot be verified. Provider-specific settings are checked during execution. A pre-journal SQLite database is copied with `VACUUM INTO` before migration. The backup path
 is printed by `instance serve`; this is not a complete backup/restore workflow.
 

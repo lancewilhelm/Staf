@@ -65,8 +65,14 @@ push updates, complete reconnect recovery, or operational features described in 
 Agent settings and instructions live under `agents/ID/current` beside the
 instance database. The `current` symlink points to a revision directory holding
 `agent.toml` and `soul.md`. The service validates and fsyncs both new files
-before atomically replacing the symlink. A content hash, including archive
-state, detects stale client saves and direct file edits. Before switching the
+before atomically replacing the symlink. A hash of the revision-directory
+identity, content and archive state detects stale client saves even when earlier
+content is restored. Archive and restore create a new revision identity. File editors work in separate directories
+carrying that hash and publish the pair through the same service revision check.
+Each published revision contains a durable `.published` copy; unexpected edits
+to the active files block new work and leave both the edited and published copies
+available for reconciliation. Existing valid configurations without a copy are
+sealed on startup; existing invalid files remain unchanged. Before switching the
 pointer, the service records the previous file hash. A direct edit detected
 during publication causes a conflict and restores the previous pointer. A later
 edit to an open previous file blocks new work until the owner reconciles it.

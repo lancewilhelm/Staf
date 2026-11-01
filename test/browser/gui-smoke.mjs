@@ -1,4 +1,5 @@
-import {spawn} from 'node:child_process';
+import {spawn,execFile} from 'node:child_process';
+import {promisify} from 'node:util';
 import {mkdtemp, readFile, rm, mkdir, writeFile} from 'node:fs/promises';
 import {existsSync} from 'node:fs';
 import {homedir,tmpdir} from 'node:os';
@@ -89,6 +90,22 @@ try{
  await evaluate("window.testFailSave=false;window.testSaveGate=new Promise(resolve=>window.releaseTestSave=resolve);testClick('Save settings')");await until(()=>evaluate("document.querySelector('.setup textarea')?.disabled && [...document.querySelectorAll('.side button')].every(element=>element.disabled)"),'settings retry pending');
  await act("window.releaseTestSave();window.fetch=window.testFetch","!!document.querySelector('[aria-label=Message]')",'save bot settings');
  const updated=await evaluate(`(async()=>{const t=localStorage.getItem('staf-token');return await (await fetch('/api/bots/${bot.id}',{headers:{Authorization:'Bearer '+t}})).json()})()`);assert.equal(updated.model,'fixture-model-v2');assert.equal(updated.instructions,'Help me plan with care');assert.equal(await readFile(join(updated.configDir,'soul.md'),'utf8'),'Help me plan with care');console.log('PASS model and instructions are saved in the agent configuration');
+ await act("document.querySelector('.model-button').click()","!!document.querySelector('.setup textarea')",'reopen agent settings');
+ await evaluate("testInput('.setup textarea','My unsaved instructions')");
+ const cliCredential=join(temp,'gui-client.json'),editDirectory=join(temp,'file-edit');
+ await writeFile(cliCredential,JSON.stringify({token:await evaluate("localStorage.getItem('staf-token')")}));
+ const runCli=promisify(execFile),cli=async(...args)=>runCli(process.execPath,['dist/cli.js','instance',...args],{cwd:root});
+ await cli('config-checkout',url,cliCredential,bot.id,editDirectory);
+ await writeFile(join(editDirectory,'soul.md'),'Instructions from disk');
+ await cli('config-publish',url,cliCredential,editDirectory);
+ await evaluate("testClick('Save settings')");
+ await until(()=>evaluate("document.body.innerText.includes('Profile changed')"),'direct edit conflicts with stale settings');
+ assert.equal(await evaluate("document.querySelector('.setup textarea').value"),'My unsaved instructions');
+ await act("testClick('Compare latest settings')","document.body.innerText.includes('Instructions from disk')",'compare saved settings without losing draft');
+ assert.equal(await evaluate("document.querySelector('.setup textarea').value"),'My unsaved instructions');
+ await evaluate("testInput('.setup textarea','Instructions from disk and my changes');testClick('Save settings')");
+ await until(()=>evaluate("!!document.querySelector('[aria-label=Message]')"),'save reconciled settings');
+ assert.equal(await readFile(join(updated.configDir,'soul.md'),'utf8'),'Instructions from disk and my changes');console.log('PASS direct edit conflict and GUI reconciliation');
  await act("[...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('Settings')).click()","document.body.innerText.includes('Providers')",'provider settings remain global');
  await act("testClick('Back to chat')","!!document.querySelector('[aria-label=Message]')",'return to chat');
 

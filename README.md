@@ -30,6 +30,9 @@ Run `pnpm start instance serve .staf/instance.sqlite 3210` and open
 needed. It also offers Light, Dark, and System appearance for this browser;
 System follows the device setting. Each bot has its own configuration, which you can edit from its chat.
 Instructions live in its `soul.md` file; settings live in `agent.toml`. You can
+edit these files in a versioned directory and publish them with the CLI; see
+[agent configuration](docs/usage.md#agent-configuration-files).
+You can
 create a bot before connecting a provider. The inbox shows task updates and
 requests for input or approval. The previous Advanced page has been retired;
 other management features remain available through the service and CLI while

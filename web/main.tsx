@@ -38,17 +38,27 @@ function BotModelSettings({id,onClose,saving,setSaving}:{id:string;onClose:()=>v
   const [model,setModel]=useState('');
   const [instructions,setInstructions]=useState('');
   const [status,setStatus]=useState('');
+  const [compareAvailable,setCompareAvailable]=useState(false);
+  const [latest,setLatest]=useState<BotProfile|null>(null);
   useEffect(()=>{let active=true;void app.botProfile(id).then(p=>{if(active){setProfile(p);setName(p.name);setProvider(p.provider);setModel(p.model||'');setInstructions(p.instructions)}}).catch(e=>{if(active)setStatus('Could not load bot settings. '+String(e))});return()=>{active=false}},[id]);
   async function save(){
     if(!profile)return;
     if(!name.trim()){setStatus('Enter a name for this agent.');return}
     if(provider!==profile.provider&&!window.confirm('Changing the provider may send this conversation history to the new provider. Continue?'))return;
-    setSaving(true);setStatus('');
-    try{await app.saveBotProfile(profile,{name,provider,model,instructions});onClose()}catch(e){setStatus('The save failed or its result is uncertain. Your edits are retained. Inspect the configuration before retrying. '+String(e))}finally{setSaving(false)}
+    setSaving(true);setStatus('');setLatest(null);
+    try{await app.saveBotProfile(profile,{name,provider,model,instructions});onClose()}catch(e){setCompareAvailable(true);setStatus('The save failed or its result is uncertain. Your edits are retained. Compare the current settings before retrying. '+String(e))}finally{setSaving(false)}
+  }
+  async function compare(){
+    setSaving(true);
+    try{const current=await app.botProfile(id);setProfile(current);setLatest(current);setCompareAvailable(false);setStatus('Review the current settings below and reconcile your edits before saving. A later change will still cause a conflict.')}
+    catch(e){setStatus('Could not load the current settings. Your edits are retained. '+String(e))}
+    finally{setSaving(false)}
   }
   return <div className="setup"><span className="eyebrow">BOT SETTINGS</span><h2>{profile?.name||'Bot settings'}</h2>
     {profile&&<><p>Provider connections are shared by the instance.</p><label>Name<input disabled={saving} value={name} onChange={e=>setName(e.target.value)}/></label><label>Provider<select disabled={saving} value={provider} onChange={e=>setProvider(e.target.value)}><option value="demo">Demo</option><option value="codex">Codex</option><option value="openrouter">OpenRouter</option><option value="lmstudio">LM Studio</option><option value="live">HTTP compatible</option></select></label><label>Model<input disabled={saving} value={model} onChange={e=>setModel(e.target.value)}/></label><label>Instructions<textarea disabled={saving} value={instructions} onChange={e=>setInstructions(e.target.value)}/></label><p className="meta">Configuration: <code>{profile.configDir}</code></p><div className="row"><button disabled={saving} onClick={()=>void save()}>Save settings</button><button disabled={saving} className="quiet" onClick={onClose}>Cancel</button></div></>}
-    <p role="status">{saving?'Saving…':status}</p>
+    <p role="status">{saving?'Loading or saving…':status}</p>
+    {compareAvailable&&<button disabled={saving} className="quiet" onClick={()=>void compare()}>Compare latest settings</button>}
+    {latest&&<section className="saved-settings" aria-label="Current saved settings"><h3>Current saved settings</h3><p>Name: {latest.name}</p><p>Provider: {latest.provider}</p><p>Model: {latest.model||'(none)'}</p><p>Instructions:</p><pre>{latest.instructions}</pre></section>}
   </div>;
 }
 
