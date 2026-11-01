@@ -25,3 +25,12 @@ both files through an atomic revision-directory pointer, as described in the
 
 See the [interview decisions](../decisions.md#chat-gui-polish-and-agent-terminology)
 and [copied creation defaults](0002-copy-bot-creation-defaults.md).
+
+## Revision: direct editing and recovery
+
+For issue #28, the owner chose ordinary direct edits instead of the proposed
+checkout and explicit publish workflow. The service validates files before new
+work, rejects stale client saves, and retains observed valid configurations for
+recovery. Direct file writes are last-write-wins. A version overwritten before
+the service observes it cannot be recovered, and separate writes to the two
+files do not form an atomic pair. See [usage](../usage.md#agent-configuration-files).

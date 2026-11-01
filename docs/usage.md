@@ -175,20 +175,43 @@ removes locally saved drafts and pending IDs. The former Advanced page has been
 retired. Profile, permission, memory, skill, schedule, and task management are
 not yet fully available in the workspace; the service and CLI operations below
 remain available.
-Each bot's `agent.toml` contains its name, directory description, provider, model, and reasoning. Its `soul.md` contains its standing instructions. The **Instructions** editor, CLI, and API use the same files. Inspect the bot in the CLI or open bot settings to find `configDir`; it remains stable when the bot is renamed. The active files can also be edited directly on the instance host. The service validates them when it reads them; an invalid file remains intact and blocks new work for that bot until corrected. Avoid direct file edits while a client save is underway.
+### Agent configuration files
 
-Client saves include a revision and reject stale versions. Ordinary file
-editors do not send a revision: saving an old buffer by pathname after a client
-save can overwrite the newer contents without a conflict. Coordinate direct
-editing with client saves and reload files before saving. If a client reports
+Each agent has `agent.toml` for its name, description, provider, model and
+reasoning, and `soul.md` for its instructions. The GUI, CLI and API publish to
+the same configuration. Settings and `instance inspect` show the stable
+`configDir` for inspecting and editing the files on the instance host. Edit
+`agent.toml` or `soul.md` directly with a text editor or shell tool. Staf reads
+and validates them on inspection and before accepting new work. Valid changes
+apply without a restart; work already underway keeps its captured settings.
+Invalid files remain intact and block new work for that agent until repaired;
+its history and other agents remain available.
+
+Staf retains the original published pair under `configDir/.published` and
+copies of valid direct edits it has observed under `configDir/.history`. When a
+client publishes a new pair, the earlier revision directory, including its
+recovery copies, remains under the agent's `revisions` directory. These copies
+are retained until removed by the owner and may contain private instructions.
+
+Direct file saves are last-write-wins. An editor saving an old buffer can
+overwrite a newer file without Staf being able to identify it as stale. Staf
+cannot recover a version that was overwritten before it read that version.
+If changing both files, finish the edits before sending new work: independent
+file writes are not an atomic pair and Staf may see one before the other.
+GUI changes preserve TOML comments and surrounding formatting; if a layout
+cannot be safely updated, Staf reports an error and retains the file.
+
+Client saves include a revision and reject stale versions. If a client reports
 that a save result is uncertain, inspect the current files before retrying.
+In agent settings, **Compare latest settings** loads the current saved values
+alongside your retained edits after a failed save. Review and reconcile them
+before saving again; another intervening change will still cause a conflict.
 
-An editor may still have a previous revision open when a client publishes a new
-one. If that editor saves late, Staf retains the old files and blocks new work
-for that bot with their path. Compare those files with the files under
-`configDir` and apply the changes you want to keep to the current files. Then
-close the old editor and remove the `.retired` marker in the named previous revision to acknowledge the
-reconciliation. The previous files remain on disk.
+If an editor writes an already retired published revision, Staf blocks new work
+and reports that revision's path. Close the old editor, compare its retained
+files with `configDir`, apply the changes you want to the current files, and
+remove the old revision's `.retired` marker after review. The old files remain
+on disk.
 
 A later request after a provider change can send existing chat history to the new provider. Creation defaults set provider, model, and reasoning for future bots. The instance copies these settings at creation; changing defaults never changes existing bots. Revisions prevent stale clients from overwriting each other. In the CLI, use `instance defaults URL CREDENTIAL_FILE` and `instance defaults-set URL CREDENTIAL_FILE REVISION PROVIDER MODEL REASONING`; use `-` for an empty model or reasoning. Permission and approval settings remain separate. The description is owner-edited metadata visible to other bots; keep private instructions and memory out of it. New bots start with an empty description.
 The deterministic demo provider does not follow the instructions. Select Codex, OpenRouter, LM Studio, or live and an explicit model in the bot profile. OpenRouter uses `OPENROUTER_API_KEY` in the service host environment; the instance command does not load the project `.env` file. Codex uses the Staf grant under the directory containing the instance database. From a paired browser, use Codex sign-in and open the provided link on the instance host. The initiating paired client can check or cancel that attempt, including after refreshing the page. The CLI provides `instance codex-auth-start URL CREDENTIAL_FILE`, `codex-auth-current URL CREDENTIAL_FILE`, `codex-auth-status URL CREDENTIAL_FILE ATTEMPT_ID`, `codex-auth-cancel URL CREDENTIAL_FILE ATTEMPT_ID`, and `codex-auth-credential URL CREDENTIAL_FILE`. The callback listens on the same loopback origin. Revoking the initiating client prevents credential commit. These paths have been tested with synthetic auth only; live sign-in has not been verified. Provider failures do not fall back to another provider. Live provider execution has not been verified in this preview.

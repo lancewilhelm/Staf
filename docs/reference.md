@@ -142,17 +142,19 @@ configuration `revision`. `POST /api/bots/ID/profile` accepts `revision`,
 `name`, optional `description`, `instructions`, `provider`, `model`, and
 `reasoning`. `instructions` is the content of `soul.md`; `soul` is not a
 separate editable field. `agent.toml` accepts only `name`, `description`,
-`provider`, and optional `model` and `reasoning`. Directly edited files are
-validated on read. Invalid files and late edits to a previous revision return
+`provider`, and optional `model` and `reasoning`. Direct edits are validated on
+read and valid changes apply to subsequent work. Invalid content and late edits to a previous revision return
 HTTP 422 with `code` `invalid_agent_configuration` and block new work without
 changing the files. Agent settings and credentials have separate storage.
 An error during the publication switch returns HTTP 503 with `code`
 `configuration_save_uncertain`; the change may have taken effect and the client
-must inspect it before retrying. Direct file editors do not submit revisions and
-cannot detect a stale buffer saved by pathname after a client save.
+must inspect it before retrying. Direct writes can overwrite a file version
+before Staf observes it, and separate edits to both files are not atomic.
 
 Bot profile edits and archive operations require the current revision. Stale
-revisions return HTTP 409. The service stores a profile snapshot for each
+revisions return HTTP 409. Profile edits preserve TOML comments and surrounding
+formatting; an unsupported layout returns 409 instead of discarding its text and
+can be changed by directly editing the file. The service stores a profile snapshot for each
 accepted chat command. Archive rejects active chat commands. The instance captures the profile for each turn, stores full provider history privately, and exposes only visible chat. New command IDs use a private keyed fingerprint to distinguish exact retries from different input that redacts to the same text. Older commands without a fingerprint remain queryable, but reuse of their IDs is rejected because the original input cannot be verified. Provider-specific settings are checked during execution. A pre-journal SQLite database is copied with `VACUUM INTO` before migration. The backup path
 is printed by `instance serve`; this is not a complete backup/restore workflow.
 

@@ -89,6 +89,24 @@ try{
  await evaluate("window.testFailSave=false;window.testSaveGate=new Promise(resolve=>window.releaseTestSave=resolve);testClick('Save settings')");await until(()=>evaluate("document.querySelector('.setup textarea')?.disabled && [...document.querySelectorAll('.side button')].every(element=>element.disabled)"),'settings retry pending');
  await act("window.releaseTestSave();window.fetch=window.testFetch","!!document.querySelector('[aria-label=Message]')",'save bot settings');
  const updated=await evaluate(`(async()=>{const t=localStorage.getItem('staf-token');return await (await fetch('/api/bots/${bot.id}',{headers:{Authorization:'Bearer '+t}})).json()})()`);assert.equal(updated.model,'fixture-model-v2');assert.equal(updated.instructions,'Help me plan with care');assert.equal(await readFile(join(updated.configDir,'soul.md'),'utf8'),'Help me plan with care');console.log('PASS model and instructions are saved in the agent configuration');
+ await act("document.querySelector('.model-button').click()","!!document.querySelector('.setup textarea')",'reopen agent settings');
+ await evaluate("testInput('.setup textarea','My unsaved instructions')");
+ await writeFile(join(updated.configDir,'soul.md'),'Instructions from disk');
+ await evaluate("testClick('Save settings')");
+ await until(()=>evaluate("document.body.innerText.includes('Profile changed')"),'direct edit conflicts with stale settings');
+ assert.equal(await evaluate("document.querySelector('.setup textarea').value"),'My unsaved instructions');
+ await act("testClick('Compare latest settings')","document.body.innerText.includes('Instructions from disk')",'compare saved settings without losing draft');
+ assert.equal(await evaluate("document.querySelector('.setup textarea').value"),'My unsaved instructions');
+ await evaluate("testInput('.setup textarea','Instructions from disk and my changes');testClick('Save settings')");
+ await until(()=>evaluate("!!document.querySelector('[aria-label=Message]')"),'save reconciled settings');
+ assert.equal(await readFile(join(updated.configDir,'soul.md'),'utf8'),'Instructions from disk and my changes');console.log('PASS direct edit conflict and GUI reconciliation');
+ const settingsFile=join(updated.configDir,'agent.toml'),nameBefore=await readFile(settingsFile,'utf8');
+ await writeFile(settingsFile,nameBefore.replace('name = "Mira"','name = "Mira direct edit"'));
+ await cdp('Page.reload');await until(()=>evaluate("document.querySelector('.title')?.textContent==='Mira direct edit'"),'direct agent name after refresh');
+ await writeFile(settingsFile,nameBefore);
+ await until(()=>evaluate("document.querySelector('.title')?.textContent==='Mira'"),'restore agent name after direct edit');
+ await evaluate("window.testInput=(selector,value)=>{const el=document.querySelector(selector);Object.getOwnPropertyDescriptor(el.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,'value').set.call(el,value);el.dispatchEvent(new Event('input',{bubbles:true}))};window.testClick=text=>{const b=[...document.querySelectorAll('button')].find(x=>x.textContent.trim()===text);if(!b)throw Error('Missing button '+text);b.click()}");
+ console.log('PASS direct agent name edit appears after browser refresh');
  await act("[...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('Settings')).click()","document.body.innerText.includes('Providers')",'provider settings remain global');
  await act("testClick('Back to chat')","!!document.querySelector('[aria-label=Message]')",'return to chat');
 
@@ -99,7 +117,7 @@ try{
  await writeFile(join(updated.configDir,'agent.toml'),originalToml);
 
  await evaluate("testInput('[aria-label=Message]','Draft before reload')");await cdp('Page.reload');await until(()=>evaluate("document.body.innerText.includes('Recover saved browser drafts')"),'draft recovery available');
- await act("document.querySelector('details summary').click();[...document.querySelectorAll('button')].find(x=>x.textContent==='Recover').click()","document.querySelector('[aria-label=Message]').value==='Draft before reload'",'recover draft after reload');
+ await act("document.querySelector('details summary').click();[...document.querySelectorAll('details .row')].find(x=>x.textContent.includes('Draft before reload')).querySelector('button').click()","document.querySelector('[aria-label=Message]').value==='Draft before reload'",'recover draft after reload');
  await evaluate(`(async()=>{const t=localStorage.getItem('staf-token');await fetch('/api/tasks',{method:'POST',headers:{Authorization:'Bearer '+t,'Content-Type':'application/json'},body:JSON.stringify({id:crypto.randomUUID(),botId:${JSON.stringify(bot.id)},objective:'Hold for stop'})})})()`);
  await until(()=>evaluate("document.body.innerText.includes('Updates')"),'updates');await sleep(5500);assert.equal(await evaluate("!!document.querySelector('aside[aria-label=Activity]')"),false);console.log('PASS ordinary task does not open Activity');
  await act("[...document.querySelectorAll('button')].find(b=>b.textContent.includes('Updates')).click()","document.body.innerText.includes('Hold for stop')",'actual task appears in inbox');

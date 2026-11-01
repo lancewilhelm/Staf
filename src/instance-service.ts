@@ -247,8 +247,10 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
       let body: unknown = {};
       if (req.method === 'POST') {
         if (!req.headers['content-type']?.startsWith('application/json')) return json(415,{error:'JSON required'});
-        let raw = ''; for await (const chunk of req) { raw += chunk; if (Buffer.byteLength(raw) > ((req.url === '/api/skills' || /^\/api\/skills\/[\w-]+\/update$/.test(req.url ?? '')) ? 1600000 : 65536)) return json(413,{error:'Body too large'}); }
-        body = JSON.parse(raw);
+        const bodyLimit=(req.url === '/api/skills' || /^\/api\/skills\/[\w-]+\/update$/.test(req.url ?? '')) ? 1600000 : 65536;
+        const chunks:Buffer[]=[];let size=0;
+        for await (const chunk of req) { const bytes=Buffer.isBuffer(chunk)?chunk:Buffer.from(chunk);size+=bytes.length;if(size>bodyLimit)return json(413,{error:'Body too large'});chunks.push(bytes); }
+        body = JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(Buffer.concat(chunks)));
       }
       if (!isRecord(body)) return json(400,{error:'Invalid body'});
       const value = body;

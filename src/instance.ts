@@ -136,6 +136,8 @@ export class Instance {
     if (!(key instanceof Uint8Array) || key.length !== 32) throw Error('Invalid instance fingerprint key');
     this.fingerprintKey = key;
     this.db.exec('COMMIT');
+    // Seal valid pre-existing file configurations before accepting clients.
+    this.bots();
     } catch (error) { this.db.close(); if(this.temporaryConfigRoot)rmSync(this.temporaryConfigRoot,{recursive:true,force:true}); throw error; }
   }
   private scheduleOrigin(attemptId:string) {
@@ -496,14 +498,22 @@ export class Instance {
   }
   setArchived(id: string, revision: string, archived: boolean) {
     this.db.exec('BEGIN IMMEDIATE');
+    let published=false;
     try {
       const bot = this.bot(id);
       if (!bot) throw new Error('Bot not found');
       if (bot.revision !== revision) throw new BotConflict('Profile changed. Refresh before editing.');
       if (archived && (this.db.prepare("SELECT 1 FROM commands WHERE bot_id=? AND state='pending'").get(id) || this.db.prepare("SELECT 1 FROM task_attempts WHERE bot_id=? AND state IN ('queued','running','stopping','waiting')").get(id))) throw new BotConflict('Bot is busy');
-      if (bot.archived !== archived) this.db.prepare('UPDATE bot_profiles SET archived=? WHERE bot_id=?').run(archived ? 1 : 0, id);
-      const result = this.bot(id); this.db.exec('COMMIT'); return result;
-    } catch (error) { this.db.exec('ROLLBACK'); throw error; }
+      if (bot.archived !== archived) {
+        const files=this.configs.readFiles(id,bot.archived);
+        this.configs.publishFiles(id,files.settings,files.instructions,bot.archived,revision);
+        published=true;
+        this.db.prepare('UPDATE bot_profiles SET archived=? WHERE bot_id=?').run(archived ? 1 : 0, id);
+      }
+      const result = this.bot(id);
+      try { this.db.exec('COMMIT'); } catch { throw new AgentConfigUncertain('Archive state may have changed. Inspect the agent before retrying.'); }
+      return result;
+    } catch (error) { try { this.db.exec('ROLLBACK'); } catch {} if(published && !(error instanceof AgentConfigUncertain))throw new AgentConfigUncertain('Archive state may have changed. Inspect the agent before retrying.');throw error; }
   }
   taskAttempts(botId: string) {
     return this.db.prepare(`SELECT a.id, a.task_id AS taskId, a.bot_id AS botId, t.objective, a.predecessor,
