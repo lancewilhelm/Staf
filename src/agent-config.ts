@@ -41,13 +41,15 @@ function decodeAgentFile(bytes:Uint8Array):string {
   try { return new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(bytes); }
   catch { throw Error('Configuration files must contain valid UTF-8 text'); }
 }
+function serializedChoices(input:AgentSettings) {
+  const histories=Object.fromEntries(Object.entries({...input.providerChoices,[input.provider]:{model:input.model,reasoning:input.reasoning}}).map(([key,pair])=>[key,{...(pair.model===null?{}:{model:pair.model}),...(pair.reasoning===null?{}:{reasoning:pair.reasoning})}]));
+  parseChoices(histories);return histories;
+}
 function formatAgentToml(input:AgentSettings):string {
   const values={name:input.name,description:input.description,provider:input.provider,...(input.model===null?{}:{model:input.model}),...(input.reasoning===null?{}:{reasoning:input.reasoning})};
   for (const value of [...Object.values(values),input.instructions]) if (Buffer.from(value,'utf8').toString('utf8')!==value) throw Error('Configuration files must contain valid UTF-8 text');
   parseSettings(values,input.instructions);
-  const histories=Object.fromEntries(Object.entries({...input.providerChoices,[input.provider]:{model:input.model,reasoning:input.reasoning}}).map(([key,pair])=>[key,{...(pair.model===null?{}:{model:pair.model}),...(pair.reasoning===null?{}:{reasoning:pair.reasoning})}]));
-  parseChoices(histories);
-  return TOML.stringify({...values,providerChoices:histories});
+  return TOML.stringify({...values,providerChoices:serializedChoices(input)});
 }
 function updateAgentToml(source:string,input:AgentSettings):string {
   const tableStart=source.search(/^\s*\[/m);
@@ -93,9 +95,12 @@ function updateAgentToml(source:string,input:AgentSettings):string {
   for (const [key,value] of Object.entries(values)) if (!found.has(key) && value!==null) result+=(result && !result.endsWith('\n')?'\n':'')+TOML.stringify({[key]:value});
   const parsed=parseAgentFiles(result,input.instructions);
   if (parsed.name!==input.name || parsed.description!==input.description || parsed.provider!==input.provider || parsed.model!==input.model || parsed.reasoning!==input.reasoning) throw new AgentConfigConflict('Cannot safely update this TOML layout. Edit agent.toml directly.');
-  const histories=Object.fromEntries(Object.entries({...input.providerChoices,[input.provider]:{model:input.model,reasoning:input.reasoning}}).map(([key,pair])=>[key,{...(pair.model===null?{}:{model:pair.model}),...(pair.reasoning===null?{}:{reasoning:pair.reasoning})}]));
+  const histories=serializedChoices(input);
   const original=historySource?TOML.parse(historySource).providerChoices??{}:{};
-  return result+(JSON.stringify(original)===JSON.stringify(histories)?historySource:TOML.stringify({providerChoices:histories}));
+  if(JSON.stringify(original)===JSON.stringify(histories))return result+historySource;
+  const leading=/^(?:[ \t]*\r?\n)*/.exec(historySource)?.[0]??'';
+  if(historySource && historySource.slice(leading.length)!==TOML.stringify({providerChoices:original})) throw new AgentConfigConflict('Cannot safely update authored providerChoices formatting. Edit agent.toml directly.');
+  return result+leading+TOML.stringify({providerChoices:histories});
 }
 function writeSnapshot(dir:string,name:string,settings:string,instructions:string) {
   const snapshot=join(dir,name),temporary=join(dir,`.snapshot-${randomUUID()}`);

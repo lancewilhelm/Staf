@@ -176,10 +176,14 @@ agent settings and terminal use the same selection operation. Existing captured
 response profiles remain unchanged by later selections. Global nonsecret defaults
 use atomic JSON replacement and content revisions beside the agent directories.
 They seed first selections, never live inheritance. Creation still copies its
-creation defaults when provider is omitted.
+creation defaults when provider is omitted. An explicitly chosen provider uses
+its own defaults instead of inheriting another provider’s reasoning. Authored
+provider-choice layouts that cannot be edited safely cause a conflict without
+changing the files.
 
 Explicit metadata discovery supports unsaved providers and creation. The service
-retains observed catalog metadata for advertised defaults and reasoning reset;
+retains catalog metadata from both provider and agent discovery for advertised
+defaults and reasoning reset;
 it does not discover or generate during a selection save. Missing reasoning
 metadata remains unknown. Synthetic service and served-browser checks cover
 these flows; they do not establish live provider readiness or Docker behavior.

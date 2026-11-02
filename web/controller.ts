@@ -20,6 +20,19 @@ export type Setup={kind:'closed'}|{kind:'create';name:string;instructions:string
 export type Workspace={connection:Connection;setup:Setup;bots:Bot[];selected:string|null;messages:Message[];response:ResponseProgress|null;responseConnection:'connecting'|'connected'|'reconnecting';tasks:Task[];inbox:InboxItem[];taskUpdates:Array<Task & {botId:string}>;activityOpen:boolean;credential:'signed-in'|'signed-out'|'unknown';openrouter:'saved'|'missing'|'unknown'|'error';authAttempt:{id:string;phase:string}|null;authUrl:string;authUrlAttemptId:string;freshness:string;notice:string;notices:ToastNotice[];authStarting:boolean;authStatus:string;actionError:string;draft:Draft;draftReady:boolean};
 class ApiError extends Error {constructor(message:string,readonly status:number){super(message);}}
 const isRecord=(value:unknown):value is Record<string,unknown>=>typeof value==='object'&&value!==null&&!Array.isArray(value);
+type ProviderDefaults={revision:string;providers:Record<string,{model:string|null;reasoning:string|null}>};
+const isNullableString=(value:unknown):value is string|null=>value===null||typeof value==='string';
+function isChoices(value:unknown):value is ProviderDefaults['providers'] {return isRecord(value)&&Object.values(value).every(pair=>isRecord(pair)&&isNullableString(pair.model)&&isNullableString(pair.reasoning));}
+function parseProviderDefaults(value:unknown):ProviderDefaults {if(!isRecord(value)||typeof value.revision!=='string'||!isChoices(value.providers))throw Error('Invalid provider defaults response. Refresh and retry; your edits are retained.');return {revision:value.revision,providers:value.providers};}
+function parseModelCatalog(value:unknown):ModelCatalog {
+ if(!isRecord(value)||!Array.isArray(value.models)||(value.defaultModel!==undefined&&typeof value.defaultModel!=='string')||!value.models.every((model:unknown)=>isRecord(model)&&typeof model.id==='string'&&typeof model.label==='string'&&['advertised','unknown','unsupported-transport'].includes(String(model.reasoningStatus))&&(model.reasoning===null||Array.isArray(model.reasoning)&&model.reasoning.every((effort:unknown)=>typeof effort==='string'))&&(model.reasoningStatus!=='advertised'||Array.isArray(model.reasoning))))throw Error('Invalid model catalog. Enter a model ID manually or retry discovery.');
+ return {models:value.models,...(typeof value.defaultModel==='string'?{defaultModel:value.defaultModel}:{})};
+}
+function parseSelection(value:unknown):BotProfile {
+ if(!isRecord(value)||typeof value.id!=='string'||typeof value.name!=='string'||typeof value.provider!=='string'||!isNullableString(value.model)||typeof value.archived!=='boolean'||typeof value.revision!=='string'||typeof value.instructions!=='string'||typeof value.description!=='string'||!isNullableString(value.reasoning)||typeof value.configDir!=='string'||(value.providerChoices!==undefined&&!isChoices(value.providerChoices)))throw Error('Invalid selection response. Compare the current settings before retrying.');
+ return {id:value.id,name:value.name,provider:value.provider,model:value.model,archived:value.archived,revision:value.revision,instructions:value.instructions,description:value.description,reasoning:value.reasoning,configDir:value.configDir,...(value.providerChoices===undefined?{}:{providerChoices:value.providerChoices})};
+}
+
 function isResponseProgress(value:unknown,botId:string):value is ResponseProgress {
   return isRecord(value)&&typeof value.id==='string'&&value.botId===botId&&typeof value.state==='string'&&['accepted','running','stopping','stopped','completed','failed','interrupted'].includes(value.state)&&typeof value.text==='string'&&(value.error===null||typeof value.error==='string');
 }
@@ -145,8 +158,8 @@ export class Controller {
         if(!await this.claim(key))continue;
         const value=localStorage.getItem(key);if(!value)continue;
         const saved:unknown=JSON.parse(value);
-        if(!isRecord(saved)||saved.kind!=='create'||typeof saved.operationId!=='string'||key!==prefix+'creation:'+saved.operationId||typeof saved.name!=='string'||typeof saved.instructions!=='string'||typeof saved.provider!=='string'||typeof saved.model!=='string')continue;
-        const setup:Extract<Setup,{kind:'create'}>={kind:'create',operationId:saved.operationId,name:saved.name,instructions:saved.instructions,provider:saved.provider,model:saved.model,status:'Recovered creation. Check status or retry the same operation.'};
+        if(!isRecord(saved)||saved.kind!=='create'||typeof saved.operationId!=='string'||key!==prefix+'creation:'+saved.operationId||typeof saved.name!=='string'||typeof saved.instructions!=='string'||typeof saved.provider!=='string'||typeof saved.model!=='string'||(saved.reasoning!==undefined&&(typeof saved.reasoning!=='string'||!['default','none','minimal','low','medium','high','xhigh','max'].includes(saved.reasoning))))continue;
+        const setup:Extract<Setup,{kind:'create'}>={kind:'create',operationId:saved.operationId,name:saved.name,instructions:saved.instructions,provider:saved.provider,model:saved.model,...(saved.reasoning===undefined?{}:{reasoning:saved.reasoning}),status:'Recovered creation. Check status or retry the same operation.'};
         if(this.state.setup.kind!=='closed'||this.retainedCreation)return;
         this.retainedCreation=setup;this.update({setup});return;
       }
@@ -238,10 +251,10 @@ export class Controller {
   }
   async cancelAuth(){const attempt=this.state.authAttempt;if(!attempt)return;try{await this.api('/api/codex-auth/'+attempt.id+'/cancel',{});this.update({authUrl:'',authUrlAttemptId:'',authStatus:''});await this.refresh()}catch{const message='Could not cancel sign-in. Check connection and retry.';this.update({authStatus:message});this.notify(message,'error','auth')}}
   async signOutAuth(){try{await this.api('/api/codex-auth/logout',{});this.update({authUrl:'',authUrlAttemptId:'',authStatus:'',notices:this.state.notices.filter(n=>n.topic!=='auth')});await this.refresh();this.notify('Codex sign-in removed from this instance.','success','auth')}catch(e){this.update({authStatus:'Could not sign out. Check connection and retry.'});this.notify('Could not sign out. Check connection and retry.','error','auth')}}
-  async providerDefaults(){return this.api<{revision:string;providers:Record<string,{model:string|null;reasoning:string|null}>}>('/api/provider-defaults')}
-  async saveProviderDefault(revision:string,provider:string,model:string,reasoning:string){return this.api('/api/provider-defaults',{revision,provider,model:model.trim()||null,reasoning:reasoning==='default'?null:reasoning})}
-  async models(provider:string){return this.api<ModelCatalog>('/api/models',{provider})}
-  async selectProvider(profile:BotProfile,provider:string,edit:{model?:string|null;reasoning?:string|null}={}){const result=await this.api<BotProfile>('/api/bots/'+profile.id+'/selection',{revision:profile.revision,provider,...edit});await this.refresh();return result}
+  async providerDefaults(){return parseProviderDefaults(await this.api<unknown>('/api/provider-defaults'))}
+  async saveProviderDefault(revision:string,provider:string,model:string,reasoning:string){return parseProviderDefaults(await this.api<unknown>('/api/provider-defaults',{revision,provider,model:model.trim()||null,reasoning:reasoning==='default'?null:reasoning}))}
+  async models(provider:string){return parseModelCatalog(await this.api<unknown>('/api/models',{provider}))}
+  async selectProvider(profile:BotProfile,provider:string,edit:{model?:string|null;reasoning?:string|null}={}){const result=parseSelection(await this.api<unknown>('/api/bots/'+profile.id+'/selection',{revision:profile.revision,provider,...edit}));await this.refresh();return result}
   async botProfile(id:string){return this.api<BotProfile>('/api/bots/'+id)}
   async saveBotProfile(profile:BotProfile,edit:{name:string;provider:string;model:string;instructions:string}){await this.api('/api/bots/'+profile.id+'/profile',{revision:profile.revision,name:edit.name,description:profile.description,instructions:edit.instructions,provider:edit.provider,model:edit.model.trim()||null,reasoning:profile.reasoning});await this.refresh()}
   async setArchived(profile:BotProfile,archived:boolean){await this.api('/api/bots/'+profile.id+'/'+(archived?'archive':'restore'),{revision:profile.revision});await this.refresh()}

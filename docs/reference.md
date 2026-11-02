@@ -195,7 +195,7 @@ configuration `revision`. `POST /api/bots/ID/profile` accepts `revision`,
 `name`, optional `description`, `instructions`, `provider`, `model`, and
 `reasoning`. `instructions` is the content of `soul.md`; `soul` is not a
 separate editable field. `agent.toml` accepts only `name`, `description`,
-`provider`, and optional `model` and `reasoning`. Direct edits are validated on
+`provider`, optional `model` and `reasoning`, and optional `providerChoices` tables. Direct edits are validated on
 read and valid changes apply to subsequent work. Invalid content and late edits to a previous revision return
 HTTP 422 with `code` `invalid_agent_configuration` and block new work without
 changing the files. Agent settings and credentials have separate storage.
@@ -276,7 +276,7 @@ plus `[providerChoices.PROVIDER]` tables with optional `model` and `reasoning`.
 An empty table remembers an explicitly unset pair. Top-level values win for the
 active provider, including direct edits; edit an inactive table to change its
 remembered pair. Unknown providers/fields and invalid identifiers are rejected.
-Files and revision conflicts remain authoritative across restart and clients.
+Files and revision conflicts remain authoritative across restart and clients. If an authored providerChoices layout cannot be safely changed, the client save is rejected without changing the files; edit them directly.
 
 Owner defaults live in `agents/provider-defaults.json` beside agent directories,
 a nonsecret map from provider ID to `{model, reasoning}` (nullable). GET/POST

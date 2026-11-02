@@ -459,7 +459,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
       if (req.method === 'POST' && req.url === '/api/bots') {
         if (typeof value.name !== 'string' || !value.name.trim() || value.name.length > 200 || (value.instructions !== undefined && (typeof value.instructions !== 'string' || value.instructions.length > 30000))) return json(400,{error:'Invalid name or instructions'});
         if ((value.reasoning!==undefined&&value.reasoning!==null&&typeof value.reasoning!=='string') || (value.operationId !== undefined && (typeof value.operationId !== 'string' || !/^[\w-]{1,100}$/.test(value.operationId))) || (value.provider !== undefined && (typeof value.provider !== 'string' || !['demo','codex','openrouter','lmstudio','live'].includes(value.provider))) || (value.model !== undefined && value.model !== null && (typeof value.model !== 'string' || value.model.length > 200))) return json(400,{error:'Invalid creation operation'});
-        return json(201,instance.createBot({name:value.name,instructions:typeof value.instructions === 'string' ? value.instructions : '',...(typeof value.operationId === 'string' ? {operationId:value.operationId} : {}),...(typeof value.provider === 'string' ? {provider:value.provider} : {}),...(typeof value.model === 'string' ? {model:value.model} : {}),...(typeof value.reasoning==='string'?{reasoning:value.reasoning}:{})}));
+        return json(201,instance.createBot({name:value.name,instructions:typeof value.instructions === 'string' ? value.instructions : '',...(typeof value.operationId === 'string' ? {operationId:value.operationId} : {}),...(typeof value.provider === 'string' ? {provider:value.provider} : {}),...(typeof value.model === 'string' ? {model:value.model} : {}),...(typeof value.reasoning==='string'?{reasoning:value.reasoning}:{})},typeof value.provider==='string'?selectionCatalogs.get(value.provider)?.defaultModel:undefined));
       }
       const creationMatch=req.url?.match(/^\/api\/bot-creations\/([\w-]+)$/);
       if(req.method==='GET' && creationMatch?.[1]) {const bot=instance.creationOperation(creationMatch[1]);return bot ? json(200,bot) : json(404,{error:'Creation operation not found'});}
@@ -490,7 +490,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
           if(loggingOut)return json(409,{error:'Sign-out in progress'});
           const provider=String(bot.provider),model=typeof bot.model === 'string' ? bot.model : undefined;
           const settings=resolveSettings({saved:{},file:{},shell:env,cli:{provider,...(model ? {model} : {})},session:{}});
-          const controller=new AbortController();active.add(controller);try{return json(200,redactValue(await discoverModels(settings,{env,dataDir,refresh:true,request:options.modelRequest}),redact));}finally{active.delete(controller);}
+          const controller=new AbortController();active.add(controller);try{const catalog=await discoverModels(settings,{env,dataDir,refresh:true,request:options.modelRequest});selectionCatalogs.set(provider,catalog);return json(200,redactValue(catalog,redact));}finally{active.delete(controller);}
         }
       }
       const botSkillsMatch = req.url?.match(/^\/api\/bots\/([\w-]+)\/skills$/);

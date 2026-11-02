@@ -42,13 +42,14 @@ test('metadata handles explicit advertised defaults, unknown reasoning and outag
  const call=async(path,body)=>{const r=await fetch(`http://127.0.0.1:${port}/api/`+path,{method:body?'POST':'GET',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});return {status:r.status,body:await r.json()}};
  try{token=(await call('pair',{code:app.code})).body.token;
  assert.equal((await call('models',{provider:'openrouter'})).status,200);
+ const created=(await call('bots',{operationId:'metadata-create',name:'Created from metadata',provider:'openrouter'})).body;assert.equal(created.model,'advertised');assert.equal(created.reasoning,null);
  let a=(await call('bots',{name:'Metadata'})).body;
  const choose=async(edit)=>{const result=await call(`bots/${a.id}/selection`,{revision:a.revision,provider:'openrouter',...edit});assert.equal(result.status,200,JSON.stringify(result.body));a=result.body;return a};
  await choose({});assert.equal(a.model,'advertised');
  await choose({reasoning:'high'});await choose({model:'plain'});assert.equal(a.reasoning,null);
  await choose({model:'advertised',reasoning:'high'});await choose({model:'unknown'});assert.equal(a.reasoning,'high','missing metadata does not prove incompatibility');
  await choose({model:'manual/not-listed'});assert.equal(a.reasoning,'high');
- fail=true;assert.equal((await call('models',{provider:'openrouter'})).status,400);assert.equal((await call('bots/'+a.id)).body.model,'manual/not-listed');
+ fail=true;assert.equal((await call('models',{provider:'openrouter'})).status,400);assert.equal((await call('bots',{operationId:'metadata-create',name:'Created from metadata',provider:'openrouter'})).body.id,created.id);assert.equal((await call('bots/'+a.id)).body.model,'manual/not-listed');
  assert.equal((await call('models',{})).status,400);assert.equal((await call('provider-defaults',{revision:'stale',provider:'openrouter',model:'no',reasoning:null})).status,409);
  assert.equal(inference,0);assert.equal(requests,2);
  }finally{await app.close();rmSync(dir,{recursive:true,force:true})}
@@ -65,10 +66,28 @@ test('paired CLI and accepted responses observe one authoritative selection with
  try{await cli('pair',app.code);token=(await call('pair',{code:app.issueCode()})).token;
  let a=await call('bots',{name:'Captured',provider:'openrouter',model:'before',reasoning:'high'});
  assert.equal((await call('commands',{id:'captured-command',botId:a.id,content:'Synthetic prompt'})).kind,'accepted');
- await wait(()=>captured);a=await cli('select',a.id,a.revision,'codex','after','low');
+ await wait(()=>captured);await assert.rejects(cli('select',a.id,a.revision,'codex','after','low'),/confirm-provider-change/);assert.equal((await call('bots/'+a.id)).provider,'openrouter');a=await cli('select',a.id,a.revision,'codex','after','low','--confirm-provider-change');
  assert.equal(a.provider,'codex');assert.equal((await call('bots/'+a.id)).model,'after');
  assert.equal(captured.provider,'openrouter');assert.equal(captured.model,'before');assert.equal(captured.reasoning,'high');
- a=await cli('select',a.id,a.revision,'openrouter');assert.equal(a.model,'before');assert.equal(a.reasoning,'high');
+ a=await cli('select',a.id,a.revision,'openrouter','--confirm-provider-change');assert.equal(a.model,'before');assert.equal(a.reasoning,'high');
  release();await wait(async()=>(await call('commands/captured-command')).state==='completed');
  }finally{release();await app.close();rmSync(dir,{recursive:true,force:true})}
+});
+
+test('explicit creation provider never inherits another provider reasoning',async()=>{
+ const dir=mkdtempSync(join(tmpdir(),'staf-create-reasoning-'));const app=startInstance(join(dir,'db'));const port=await app.listen();let token='';
+ const call=async(path,body)=>{const r=await fetch(`http://127.0.0.1:${port}/api/`+path,{method:body?'POST':'GET',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});return r.json()};
+ try{token=(await call('pair',{code:app.code})).token;const d=await call('creation-defaults');await call('creation-defaults',{revision:d.revision,provider:'codex',model:'codex-model',reasoning:'high'});const a=await call('bots',{name:'Other',provider:'openrouter'});assert.equal(a.reasoning,null);assert.equal(a.model,null);const defaults=await call('provider-defaults');await call('provider-defaults',{revision:defaults.revision,provider:'openrouter',model:'owner',reasoning:'low'});const b=await call('bots',{name:'Own defaults',provider:'openrouter'});assert.equal(b.model,'owner');assert.equal(b.reasoning,'low')}finally{await app.close();rmSync(dir,{recursive:true,force:true})}
+});
+
+test('bot model discovery supplies reasoning metadata to subsequent selection',async()=>{
+ const dir=mkdtempSync(join(tmpdir(),'staf-terminal-models-'));const app=startInstance(join(dir,'db'),0,{env:{},modelRequest:async()=>new Response(JSON.stringify({data:[{id:'plain',reasoning:{supported_efforts:[]}}]}))});const port=await app.listen();let token='';
+ const call=async(path,body)=>{const r=await fetch(`http://127.0.0.1:${port}/api/`+path,{method:body?'POST':'GET',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});return r.json()};
+ try{token=(await call('pair',{code:app.code})).token;const a=await call('bots',{name:'Terminal',provider:'openrouter',model:'first',reasoning:'high'});await call(`bots/${a.id}/models`,{});const b=await call(`bots/${a.id}/selection`,{revision:a.revision,provider:'openrouter',model:'plain'});assert.equal(b.reasoning,null)}finally{await app.close();rmSync(dir,{recursive:true,force:true})}
+});
+
+test('provider history edits preserve comments or reject unsafe TOML without changing files',async()=>{
+ const dir=mkdtempSync(join(tmpdir(),'staf-choice-format-'));const app=startInstance(join(dir,'db'));const port=await app.listen();let token='';
+ const call=async(path,body)=>{const r=await fetch(`http://127.0.0.1:${port}/api/`+path,{method:body?'POST':'GET',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});return {status:r.status,body:await r.json()}};
+ try{token=(await call('pair',{code:app.code})).body.token;for(const layout of ['[providerChoices.openrouter]\nmodel = "old" # model comment\nreasoning = "high" # reasoning comment\n','providerChoices.openrouter.model = "old" # dotted comment\nproviderChoices.openrouter.reasoning = "high"\n','providerChoices = { openrouter = { model = "old", reasoning = "high" } } # inline comment\n']){let a=(await call('bots',{name:'Format'})).body;const file=join(a.configDir,'agent.toml');const original='name = "Format"\ndescription = ""\nprovider = "openrouter"\nmodel = "old"\nreasoning = "high"\n'+layout;writeFileSync(file,original);a=(await call('bots/'+a.id)).body;const result=await call(`bots/${a.id}/selection`,{revision:a.revision,provider:'openrouter',model:'new'});if(result.status===200){const text=readFileSync(file,'utf8');assert.match(text,/# (?:model|dotted|inline) comment/);assert.equal(result.body.model,'new')}else{assert.equal(result.status,409,JSON.stringify(result.body));assert.equal(readFileSync(file,'utf8'),original)}}}finally{await app.close();rmSync(dir,{recursive:true,force:true})}
 });
