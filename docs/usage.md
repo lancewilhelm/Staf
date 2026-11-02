@@ -175,7 +175,7 @@ The workspace keeps an agent list beside the selected main chat, visible while
 the chat scrolls. Select an agent to switch conversations; agents with the same
 name, including archived namesakes, show the last four characters of their stable
 IDs in the list and Updates. Suffixes can coincide; full IDs remain available
-through the API or CLI. **New agent** opens creation, and **Settings** controls appearance and
+through the API or CLI. **New agent**, under the **Agents** sidebar heading, opens creation, and **Settings** controls appearance and
 instance-wide provider connections. Choose Light, Dark, or System appearance;
 System is the default and follows device appearance changes. The choice is saved
 in this browser, independently of other browsers; clearing browser storage resets it.
@@ -195,7 +195,10 @@ new one. **Sign out** removes the instance's local credential after confirmation
 finish active work and sign-in first. Agent provider and model selections and
 unsent drafts are retained. Create an agent with a name and optional
 instructions, provider, and model, even before signing in or choosing a model. Select the
-model label below an agent's chat to edit its settings and Instructions. Press
+agent avatar in the chat header to edit its full settings and Instructions. The
+optional **Instructions** field provides standing guidance in the agent's
+`soul.md`. Open **About Instructions** with a click, tap, or keyboard to read
+the explanation; hovering the control also shows it. Press
 Enter to send a message or Shift+Enter to insert a new line. The workspace keeps drafts when switching agents. If sign-in or a model is
 missing, the submitted text remains beside an explanation and Retry control.
 
@@ -211,8 +214,8 @@ and asks for confirmation because future requests can send the existing chat to
 the new provider. Saving settings does not send a model request. Other agents
 keep their own choices.
 In agent settings, select **Archive agent** to retain configuration and history
-while preventing new work. To restore it, open **Settings** and select
-**Restore agent** under **Archived agents**. An agent with active chat or background
+while preventing new work. To restore it, expand **Archived agents** in the **Agents** sidebar and select
+**Restore agent** beside its name. An agent with active chat or background
 work cannot be archived until that work settles.
 
 In the shared terminal, `/stop` requests cancellation of the current main-chat response, including one started by another paired client, and reports its settled state and any stopped partial output. Incremental provider text is labeled provisional until the response settles. A line entered while your terminal command is unresolved is kept as an unsent draft. Use `/edit ID TEXT` to revise it and `/retry ID` after the response settles; drafts are never queued automatically.
