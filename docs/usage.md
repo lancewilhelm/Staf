@@ -180,9 +180,15 @@ instance-wide provider connections. Choose Light, Dark, or System appearance;
 System is the default and follows device appearance changes. The choice is saved
 in this browser, independently of other browsers; clearing browser storage resets it.
 
+Workspace notifications appear as dismissible toasts at the top of the page.
+Informational and success notices expire after six seconds, with a progress bar.
+Hovering or focusing a toast pauses its timer. Errors remain until dismissed;
+correctable errors also remain beside the affected control or message.
+
 A saved Codex sign-in is shared by all agents; it does not establish that the
-provider or a model is available. In **Settings**, use **Connect Codex**, open
-**Continue sign-in** on the instance host, and return to Settings for progress.
+provider or a model is available. In **Settings**, **Connect Codex** opens sign-in
+in a new tab. If the tab is blocked or closed, use **Continue sign-in** for the
+same attempt on the instance host, and return to Settings for progress.
 Cancel a pending attempt or retry a failed or expired one. If the page was
 refreshed and the link is no longer available, cancel the attempt and start a
 new one. **Sign out** removes the instance's local credential after confirmation;
