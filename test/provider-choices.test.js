@@ -36,7 +36,7 @@ test('shared provider choices use first-use defaults, remember pairs and preserv
  }finally{await app.close();rmSync(dir,{recursive:true,force:true})}
 });
 
-test('metadata handles explicit advertised defaults, unknown reasoning, empty catalogs and outages without inference',async()=>{
+test('metadata handles explicit advertised defaults, unknown reasoning and outages without inference',async()=>{
  const dir=mkdtempSync(join(tmpdir(),'staf-metadata-'));let inference=0,fail=false,requests=0;
  const app=startInstance(join(dir,'db'),0,{env:{},providerFactory:async()=>{inference++;throw Error('Inference forbidden')},modelRequest:async()=>{requests++;if(fail)throw Error('Unavailable');return new Response(JSON.stringify({default_model:'advertised',data:[{id:'advertised',reasoning:{supported_efforts:['high']}},{id:'plain',reasoning:{supported_efforts:[]}},{id:'unknown'}]}))}});const port=await app.listen();let token='';
  const call=async(path,body)=>{const r=await fetch(`http://127.0.0.1:${port}/api/`+path,{method:body?'POST':'GET',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});return {status:r.status,body:await r.json()}};
