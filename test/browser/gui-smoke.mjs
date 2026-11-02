@@ -397,17 +397,27 @@ try{
  await until(()=>evaluate(`(async()=>{const t=localStorage.getItem('staf-token');return (await (await fetch('/api/approvals',{headers:{Authorization:'Bearer '+t}})).json()).some(a=>a.id===${JSON.stringify(approvalId)} && a.state==='approved')})()`),'exact approval recorded');console.log('PASS exact clock approval recorded');
  await until(()=>evaluate("document.body.innerText.includes('Demo tool result:')"),'approved chat completes');console.log('PASS approved synthetic request completes');
 
- await until(()=>evaluate("document.querySelector('.chat-work')?.innerText.includes('Succeeded')"),'persisted tool success');
+ await until(()=>evaluate("[...document.querySelectorAll('.chat-work')].some(e=>e.innerText.includes('Succeeded'))"),'persisted tool success');
  const eventCount=await evaluate("document.querySelectorAll('.chat-work details').length");
  server.stdin.write('drop-response-streams\n');
  await sleep(1300);
  assert.equal(await evaluate("document.querySelectorAll('.chat-work details').length"),eventCount,'reconnect does not duplicate outcomes');
  await act("testInput('[aria-label=Message]','What time is it in UTC?');testClick('Send')","!!document.querySelector('.messages .item')",'second exact approval');
  const denyId=await evaluate("(async()=>{const headers={Authorization:'Bearer '+localStorage.getItem('staf-token')};return (await (await fetch('/api/approvals',{headers})).json()).find(a=>a.state==='pending').id})()");
- await evaluate(`(async()=>{const headers={Authorization:'Bearer '+localStorage.getItem('staf-token'),'Content-Type':'application/json'};const r=await fetch('/api/approvals/${denyId}/deny',{method:'POST',headers,body:'{}'});if(!r.ok)throw Error(await r.text())})()`);
+ const approvalCopy=await openCopy();
+ await until(()=>approvalCopy.eval("!!document.querySelector('.messages .item')"),'pending approval in another client');
+ await approvalCopy.eval("location.reload();void 0");
+ await until(()=>approvalCopy.eval("!!document.querySelector('.messages .item')"),'pending approval survives refresh');
+ server.stdin.write('drop-response-streams\n');
+ await approvalCopy.eval("[...document.querySelectorAll('.item button')].find(b=>b.textContent==='Deny').click()");
  await until(()=>evaluate("!document.querySelector('.messages .item') && [...document.querySelectorAll('.chat-work')].some(e=>e.innerText.includes('Failed'))"),'cross-client denial and failure');
  assert.equal(await evaluate("document.querySelectorAll('.chat-work details').length"),eventCount+2,'success and denied request each have their own records');
- await act("testInput('[aria-label=Message]','Start synthetic background work');testClick('Send')","!document.querySelector('[aria-label=Stop]') && document.querySelectorAll('.user-message').length>2",'background request settles without creation');
+ assert.equal(await evaluate(`(async()=>{const headers={Authorization:'Bearer '+localStorage.getItem('staf-token'),'Content-Type':'application/json'};return (await fetch('/api/approvals/${denyId}/approve',{method:'POST',headers,body:'{}'})).status})()`),409,'stale denial cannot approve another action');
+ await browserCdp('Target.closeTarget',{targetId:approvalCopy.id});
+ await until(()=>evaluate("!![...document.querySelectorAll('.submission button')].find(b=>b.textContent==='Dismiss')"),'failed request has explicit recovery');
+ await evaluate("[...document.querySelectorAll('.submission button')].find(b=>b.textContent==='Dismiss').click()");
+
+ await act("testInput('[aria-label=Message]','Start synthetic background work');testClick('Send')","document.querySelector('.messages').innerText.includes('Background tasks are deferred')",'unsolicited background creation rejected');
  assert.equal(await evaluate("[...document.querySelectorAll('.side button')].some(b=>b.textContent.includes('Updates'))"),false,'task update navigation absent');
  const duplicate=await evaluate("(async()=>{const t=localStorage.getItem('staf-token');return await (await fetch('/api/bots',{method:'POST',headers:{Authorization:'Bearer '+t,'Content-Type':'application/json'},body:JSON.stringify({name:'Mira',instructions:'Another role'})})).json()})()");
  await until(()=>evaluate(`document.querySelector('.side').innerText.includes(${JSON.stringify(bot.id.slice(-4))}) && document.querySelector('.side').innerText.includes(${JSON.stringify(duplicate.id.slice(-4))})`),'duplicate agent identity');console.log('PASS duplicate agent names remain distinguishable');

@@ -83,4 +83,4 @@ terminal. Stop the fixture with Ctrl+C when finished.
 4. Commit only the work authorized for that delivery. Do not include unrelated
    working-tree changes.
 
-For inline tool review in the same fixture, send `What time is it in UTC?`. To require a decision first, use the paired approval-settings API or CLI to select `ask-every-time`. Expect a clock request below that message, exact-action Approve once/Deny controls, and a retained tool outcome. Refresh or use another paired client to decide; the original conversation updates on its next poll.
+For inline tool review in the same fixture, send `What time is it in UTC?`. To require a decision first, enter `ask-clock` in the fixture terminal and wait for **Clock approvals enabled**. Expect a clock request below that message, exact-action Approve once/Deny controls, and a retained tool outcome. Refresh or use another paired client to decide; the original conversation updates on its next poll.

@@ -127,10 +127,12 @@ export async function runTurn({ session, store, provider, text, emit = () => {},
         emit(finalEvent);
         return;
       }
+      let deferredBackground=false;
       for (const call of calls) {
         signal?.throwIfAborted();
         ensureSkills();
         const name = call.function.name;
+        if(!task && name==='start_background_task')deferredBackground=true;
         if (task?.hasPending()) {
           const content='Tool not executed because owner input is pending.';
           report({type:'tool_start',id:call.id,name});
@@ -144,7 +146,7 @@ export async function runTurn({ session, store, provider, text, emit = () => {},
           try { args = JSON.parse(call.function.arguments); } catch { /* The tool reports invalid arguments below. */ }
           if (isRecord(args) && !Object.keys(args).length && authorizeClock) {
             await store.save({ ...(task ? checkpoint : history), usage: [...(history.usage || []), ...usage], events: [...history.events, ...events] });
-            try {await authorizeClock();} catch(error) {report({type:'tool_result',id:call.id,name,success:false,content:redact(errorMessage(error))});throw error;}
+            try {await authorizeClock();} catch(error) {const content='Tool not executed: '+redact(errorMessage(error));messages.push({role:'tool',tool_call_id:call.id,content});report({type:'tool_result',id:call.id,name,success:false,content});throw error;}
           }
           signal?.throwIfAborted();
           ensureSkills();
@@ -174,7 +176,7 @@ export async function runTurn({ session, store, provider, text, emit = () => {},
           } else if (name === 'read_web' && web) {
             if (!isRecord(args) || typeof args.url !== 'string' || Object.keys(args).length !== 1) throw Error('Invalid web URL');
             checkedOwnerWebUrl(args.url);content=await web({callId:call.id,url:args.url});
-          } else if (name === 'start_background_task') {
+          } else if (name === 'start_background_task' && !task) {
             throw Error('Background tasks are deferred in main chat. No task was started.');
           } else if (name === 'answer_bot' && task?.answerBot) {
             if (!isRecord(args) || typeof args.assignmentId !== 'string' || typeof args.questionId !== 'string' || typeof args.answer !== 'string' || Object.keys(args).length !== 3 || !args.answer.trim() || Buffer.byteLength(args.answer,'utf8') > 8000) throw Error('Invalid helper answer');
@@ -199,6 +201,12 @@ export async function runTurn({ session, store, provider, text, emit = () => {},
         report({ type: 'tool_result', id: call.id, name, success, content:eventContent });
       }
 
+      if(deferredBackground) {
+        const text='Background tasks are deferred in main chat. No task was started.';
+        const reply:RuntimeEvent={type:'assistant',text};messages.push({role:'assistant',content:text});
+        const updated:Session={...session,usage:[...(history.usage || []),...usage],turns:[...(history.turns || []),{start:history.messages.length,end:messages.length,provider:redact(provider.name)}],provider:redact(provider.name),messages,events:[...history.events,...events,reply]};
+        signal?.throwIfAborted();await store.save(updated);Object.assign(session,updated);emit(reply);return;
+      }
     }
     throw new Error('Tool iteration limit reached');
   } catch (error) {

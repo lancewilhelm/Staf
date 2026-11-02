@@ -125,6 +125,7 @@ export class Instance {
     if(version < 28)this.db.exec("CREATE TABLE IF NOT EXISTS response_progress (command_id TEXT PRIMARY KEY REFERENCES commands(id), text TEXT NOT NULL DEFAULT '')");
     if(version < 29)this.db.exec("CREATE TABLE IF NOT EXISTS response_stops (command_id TEXT PRIMARY KEY REFERENCES commands(id))");
     if(version < 30 && !this.db.prepare("SELECT 1 FROM pragma_table_info('command_runtime_events') WHERE name='detail'").get())this.db.exec('ALTER TABLE command_runtime_events ADD COLUMN detail TEXT');
+    this.db.exec('CREATE INDEX IF NOT EXISTS command_runtime_events_command ON command_runtime_events(command_id,seq)');
     this.db.exec('PRAGMA user_version=30');
     for (const row of this.db.prepare("SELECT id,bot_id FROM task_attempts WHERE state IN ('queued','running','stopping','waiting') ORDER BY rowid").all()) {
       if (typeof row.id !== 'string' || typeof row.bot_id !== 'string') throw Error('Invalid interrupted task');
@@ -876,9 +877,12 @@ export class Instance {
     return this.db.prepare('SELECT type,name,success FROM command_runtime_events WHERE command_id=? ORDER BY seq').all(id).map(row=>row.type === 'tool_result' ? {type:'tool_result' as const,name:String(row.name),success:row.success === 1} : {type:'tool_start' as const,name:String(row.name)});
   }
   chatWork(botId:string) {
+    const events=this.db.prepare('SELECT e.command_id,e.seq AS id,e.type,e.name,e.success,e.detail FROM command_runtime_events e JOIN commands c ON c.id=e.command_id WHERE c.bot_id=? ORDER BY e.seq').all(botId);
+    const byCommand=new Map<string,typeof events>();
+    for(const event of events){const id=String(event.command_id);const group=byCommand.get(id) ?? [];group.push(event);byCommand.set(id,group);}
     const requests=this.db.prepare('SELECT id FROM commands WHERE bot_id=? ORDER BY rowid').all(botId).map(row=>{
       const id=String(row.id);
-      return {id,progress:this.responseProgress(id),events:this.db.prepare('SELECT seq AS id,type,name,success,detail FROM command_runtime_events WHERE command_id=? ORDER BY seq').all(id)};
+      return {id,progress:this.responseProgress(id),events:byCommand.get(id) ?? []};
     });
     return {requests,messages:this.db.prepare('SELECT id,role,content FROM messages WHERE bot_id=? AND id NOT IN (SELECT message_id FROM task_notices) ORDER BY seq').all(botId)};
   }

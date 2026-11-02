@@ -175,3 +175,12 @@ test('runtime rejects malformed provider content and persisted event payloads', 
   await writeFile(store.path(session.id), JSON.stringify({ ...session, events: [{ type: 'tool_result', success: 'yes' }] }));
   await assert.rejects(store.load(session.id), /damaged/);
 });
+
+test('denied clock records exactly one outcome in chat and task execution', async t => {
+ for(const isTask of [false,true]){
+  const {store,session}=await fixture(t),events=[];
+  await assert.rejects(runTurn({store,session,text:'Read time',provider:demoProvider,emit:event=>events.push(event),authorizeClock:async()=>{throw Error('Clock approval denied')},...(isTask?{task:{drain:()=>[],hasPending:()=>false,finish:()=>true,clarify:async()=>''}}:{})}),/Clock approval denied/);
+  assert.equal(events.filter(event=>event.type==='tool_result').length,1);
+  assert.equal(events.find(event=>event.type==='tool_result').success,false);
+ }
+});

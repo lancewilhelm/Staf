@@ -350,7 +350,8 @@ try {
     await evaluate(`document.querySelector('#draft').value=${JSON.stringify(text)};document.querySelector('#send').click()`);
     await until(async()=>{await evaluate("if(localStorage.getItem('staf-pending'))document.querySelector('#status').click()");await sleep(150);return evaluate(`document.querySelector('#messages').textContent.includes(${JSON.stringify(expected)}) && !localStorage.getItem('staf-pending')`)},'chat response '+expected);
   }
-  await sendChatAndWait('Start synthetic background work','accepted. Check Activity for progress.');
+  await sendChatAndWait('Start synthetic background work','Background tasks are deferred in main chat. No task was started.');
+  cli('task-start',url,credential,heldBotId,'Hold chat background');
   let chatTasks=JSON.parse(cli('tasks',url,credential,heldBotId));const chatTask=chatTasks.find(t=>t.objective==='Hold chat background');assert(chatTask);
   await until(()=>{const task=JSON.parse(cli('task',url,credential,chatTask.id));return task.state==='running' && task.activity.some(e=>e.type==='provider_start');},'chat-started task running');
   await sendChatAndWait('stop the task','Please specify the full task attempt ID.');assert.equal(JSON.parse(cli('task',url,credential,chatTask.id)).state,'running');
@@ -358,7 +359,7 @@ try {
   assert(JSON.parse(cli('task',url,credential,chatTask.id)).inbox.inputs.some(i=>i.kind==='direction' && i.text==='Use the primary source' && i.status==='accepted'));
   await sendChatAndWait(`stop task ${chatTask.id}`,`Stop requested for task ${chatTask.id}.`);
   await until(()=>JSON.parse(cli('task',url,credential,chatTask.id)).state==='stopped','chat-stopped task settles');
-  console.log('PASS model-started background task, ambiguous chat, direction and stop');
+  console.log('PASS deferred chat creation and explicit task direction and stop');
   async function startCollaboration(){
     await evaluate(`document.querySelector('#notice').textContent='';document.querySelector('#taskObjective').value=${JSON.stringify('Collaborate with ')}+${JSON.stringify(researcherA.id)}+' private root objective';document.querySelector('#taskStart').click()`);
     await until(()=>evaluate("document.querySelector('#notice').textContent.startsWith('Task accepted:')"),'collaboration task accepted');

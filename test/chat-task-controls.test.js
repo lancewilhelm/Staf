@@ -4,7 +4,7 @@ import {startInstance} from '../dist/instance-service.js';
 
 test('main chat never offers or executes unsolicited background creation; explicit tasks remain available',async()=>{
  let offered;
- const app=startInstance(':memory:',0,{env:{},providerFactory:async()=>({name:'fixture',capabilities:{toolCalls:true},async complete(messages,tools){offered=tools.map(t=>t.function.name);if(messages.at(-1).role==='tool')return {role:'assistant',content:messages.at(-1).content};return {role:'assistant',content:null,tool_calls:[{id:'unsolicited',type:'function',function:{name:'start_background_task',arguments:'{"objective":"Work"}'}}]};}})}),port=await app.listen();
+ const app=startInstance(':memory:',0,{env:{},providerFactory:async()=>({name:'fixture',capabilities:{toolCalls:true},async complete(messages,tools){offered=tools.map(t=>t.function.name);if(messages.at(-1).role==='tool')return {role:'assistant',content:'I started the background task'};return {role:'assistant',content:null,tool_calls:[{id:'unsolicited',type:'function',function:{name:'start_background_task',arguments:'{"objective":"Work"}'}}]};}})}),port=await app.listen();
  const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});return r.json()};
  try{const token=(await call('/api/pair','',{code:app.code})).token,bot=await call('/api/bots',token,{name:'A'});
  await call('/api/commands',token,{id:'deferred',botId:bot.id,content:'Start background work'});
@@ -41,4 +41,3 @@ test('explicit background task remains controllable by chat ID',async()=>{
   messages=(await call(`/api/bots/${bot.id}/messages`,token))[1];assert.ok(messages.some(item=>item.role==='user' && item.content===`stop task ${id}`));assert.ok(messages.some(item=>item.role==='assistant' && item.content===`Stop requested for task ${id}.`));
  }finally{await app.close();}
 });
-

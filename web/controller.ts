@@ -7,7 +7,6 @@ export type BotProfile=Bot & {revision:string;instructions:string;description:st
 export type Message={id:string;role:string;content:string};
 export type ResponseProgress={id:string;botId:string;state:'accepted'|'running'|'stopping'|'stopped'|'completed'|'failed'|'interrupted';text:string;error:string|null};
 export type ChatWork={id:string;progress:ResponseProgress;events:Array<{id:number;type:string;name:string;success:number|null;detail:string|null}>};
-export type Task={id:string;objective:string;state:string;outcome:string|null;activity?:Array<Record<string,unknown>>};
 export type InboxItem={kind:'question';id:string;botId:string|null;attemptId:string;text:string}|{kind:'approval';approvalKind:'clock'|'web'|'search'|'shell'|'disclosure';id:string;botId:string|null;work:{kind:'task'|'command';id:string};detail:unknown};
 type SubmissionIdentity={id:string;text:string};
 export type Submission=SubmissionIdentity & (
@@ -45,7 +44,7 @@ function normalizeDraft(draft:Draft):Draft {
   return draft;
 }
 export class Controller {
-  private writer=crypto.randomUUID(); private checking=false; private listeners=new Set<()=>void>(); private generation=0; private seen=new Set<string>(); private token=localStorage.getItem('staf-token')||''; private currentKey=''; private timer:number; private responseStream:{botId:string;controller:AbortController}|null=null;
+  private writer=crypto.randomUUID(); private checking=false; private listeners=new Set<()=>void>(); private generation=0; private token=localStorage.getItem('staf-token')||''; private currentKey=''; private timer:number; private responseStream:{botId:string;controller:AbortController}|null=null;
   state:Workspace={connection:{kind:'connecting'},setup:{kind:'closed'},bots:[],selected:null,messages:[],work:[],response:null,responseConnection:'connecting',inbox:[],credential:'unknown',openrouter:'unknown',authAttempt:null,authUrl:'',authUrlAttemptId:'',freshness:'',notice:'',notices:[],authStarting:false,authStatus:'',actionError:'',draft:{text:'',submission:null},draftReady:false};
   constructor(){this.timer=window.setInterval(()=>{if(document.visibilityState==='visible')void this.refresh()},1000);window.addEventListener('online',()=>void this.refresh());document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')void this.refresh()});void this.restoreCreation();void this.removeObsoleteRecords();void this.refresh()}
   subscribe=(fn:()=>void)=>{this.listeners.add(fn);return()=>this.listeners.delete(fn)};
