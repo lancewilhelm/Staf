@@ -30,9 +30,15 @@ commands accept the same trailing connection options. A one-shot provider change
 The terminal supports `/help`, `/settings`, `/settings show`, `/settings models`, `/settings reasoning`, `/set provider
 NAME`, `/set model ID`, `/set reasoning LEVEL`, `/models`, `/auth codex
 login|status|cancel|logout`, `/usage [details|help]`, `/context [refresh|help]`,
-`/confirm-provider`, `/cancel-provider`, `/unset model|reasoning`, `/unset-default model|reasoning`, `/status ID`, `/retry ID`, `/discard ID`, `/defaults`, `/set-default provider|model|reasoning VALUE`, `/approvals`, `/approve ID`, `/deny ID`, and `/quit`. Settings
+`/confirm-provider`, `/cancel-provider`, `/unset model|reasoning`, `/unset-default model|reasoning`, `/stop`, `/status ID`, `/edit ID TEXT`, `/retry ID`, `/discard ID`, `/defaults`, `/set-default provider|model|reasoning VALUE`, `/approvals`, `/approve ID`, `/deny ID`, and `/quit`. Settings
 commands edit the current bot profile; creation defaults are separate. See
 [settings](settings.md) for behavior and controls.
+
+The interactive terminal labels streamed text provisional and follows a response
+that it stops, including a response started by another paired client, through its
+settled state. Browser draft recovery uses local storage and Web Locks to keep
+concurrent tabs separate. The browser also requires secure random UUID support;
+the composer waits for the selected draft to load.
 
 The instance inherits its host environment at startup. It does not load `.env`.
 Changing the environment of a later terminal does not change a running instance.
@@ -53,6 +59,16 @@ a generic OpenAI-compatible Chat Completions endpoint and can incur API charges.
 Codex uses direct Responses and a separate Staf OAuth grant. A credential alone
 does not select a provider. Per-bot endpoint overrides are not implemented.
 See [model selection](model-selection.md) and [Codex sign-in](codex-direct.md).
+
+In the browser's agent settings, Demo is always selectable and Codex or
+OpenRouter is selectable when the instance reports a saved connection. Existing
+disconnected or host-configured selections remain visible. LM Studio and live
+are configured on the host and are not offered as new browser choices. The
+browser retains the model on a provider change, asks the owner to review it,
+and confirms possible conversation-history disclosure before saving. This
+selection policy is a browser convenience; the paired service, CLI, and direct
+files continue to accept supported provider configurations independently of
+connection presence.
 
 ## Scripts
 
@@ -82,6 +98,12 @@ attempt. No official Codex CLI credential is imported. See
 Shared-instance sign-in and inference have synthetic coverage and remain
 unverified with a live account.
 
+The paired CLI exposes `instance codex-auth-logout URL CREDENTIAL_FILE` alongside
+start, current, status, cancel, and credential inspection. Credential inspection
+reports a locally readable record and its expiry; it does not contact the
+provider or verify account or model access. Sign-out is rejected while work or
+sign-in is active and does not change agent configuration.
+
 ## Direct Responses request facts
 
 Codex uses POST `https://api.openai.com/v1/responses` with `store:false`,
@@ -106,6 +128,11 @@ and retain their native type for same-model replay. No API-key or native-runtime
 fallback exists.
 
 ## Local shared instance preview
+
+The workspace journals per-agent drafts and command IDs locally. It recovers an
+uncertain submission automatically with the same command ID; busy and definitive
+failures have inline Retry and Dismiss controls. A failed accepted command needs
+a new ID for an explicit retry.
 
 The workspace is served at `/`. Its persistent agent list selects main chats,
 and duplicate names display the last four characters of their stable IDs.
@@ -132,7 +159,7 @@ journal after a database backup. These operations do not change existing bots.
 Shared-instance Codex sign-in uses `POST /api/codex-auth/start`, `GET /api/codex-auth/current`, `GET /api/codex-auth/ATTEMPT_ID`, `POST /api/codex-auth/ATTEMPT_ID/cancel`, and `GET /api/codex-auth/credential`, and `POST /api/codex-auth/logout`. The initiating paired client owns an attempt and can recover its status and cancel it after a page refresh. Other paired clients cannot inspect it. The OAuth callback is a loopback route at `/auth/callback`; it does not expose callback parameters in its response. Cancellation, client revocation, expiry, and shutdown prevent a pending commit. Synthetic tests cover these boundaries; live sign-in is unverified.
 
 `instance serve [DATABASE_PATH] [PORT]` uses the database directory for Codex credentials and defaults to `.staf/instance.sqlite`
-and port `3210`, binding `127.0.0.1` only. `instance pair|clients|revoke|bots|create|inspect|edit|archive|restore|read|send|status|response-follow`
+and port `3210`, binding `127.0.0.1` only. `instance pair|clients|revoke|bots|create|inspect|edit|archive|restore|read|send|status|response-follow|response-stop`
 use the loopback origin and a separate client credential file; see
 [usage](usage.md#local-shared-instance-offline-preview). `instance create URL CREDENTIAL_FILE NAME [--instructions TEXT] [--provider PROVIDER] [--model MODEL] [--operation-id ID]` joins name
 arguments with spaces. Each option takes one argument and can appear once.
@@ -146,9 +173,11 @@ credentials are required for protected writes. No network transport beyond
 loopback is implemented here. Codex and OpenRouter use instance-owned credentials; LM Studio and live use host configuration. Each requires an explicit bot model. Paired clients have derived
 identifiers; any paired client can list and revoke them. Every paired client is trusted to act for the sole owner, including managing approvals and settings; there is no separate owner role check.
 
-Paired clients can read the latest main-chat progress with `GET /api/bots/{id}/response`, or `responseProgress` within `GET /api/commands/{id}`. The response has the command ID, bot ID, accepted/running/completed/failed/interrupted state, provisional text and a safe error. `instance response-follow URL CREDENTIAL_FILE COMMAND_ID` polls and prints changed progress as JSON lines until a terminal state. Text that could complete a known credential may be withheld at chunk boundaries. The service also holds unfinished words for safe URL handling. Provisional snapshots stop growing at one million UTF-16 code units per provider step; the completed response remains available. Version 28 adds a progress table after a database backup; incomplete output is retained separately from committed conversation messages. Codex direct can emit deltas; Chat Completions and demo adapters are buffered. No live provider verification was performed for this change.
+Paired clients can read the latest main-chat progress with `GET /api/bots/{id}/response`, or `responseProgress` within `GET /api/commands/{id}`. The response has the command ID, bot ID, accepted/running/stopping/stopped/completed/failed/interrupted state, provisional text and a safe error. `instance response-follow URL CREDENTIAL_FILE COMMAND_ID` polls and prints changed progress as JSON lines until a terminal state. Text that could complete a known credential may be withheld at chunk boundaries. The service also holds unfinished words for safe URL handling. Provisional snapshots stop growing at one million UTF-16 code units per provider step; the completed response remains available. Version 28 adds a progress table after a database backup; incomplete output is retained separately from committed conversation messages. Codex direct and OpenRouter can emit deltas; LM Studio, generic Chat Completions and demo adapters are buffered. No live provider verification was performed for this change.
 
-The paired `GET /api/bots/{id}/response/stream` endpoint returns `text/event-stream` and requires a bearer authorization header and the same origin checks as other instance requests. An initial `snapshot` event contains the current progress or null. Later JSON events contain either a `snapshot` with `response`, or a `delta` with `id` and text to append. Completed snapshots have empty text; clients read the completed answer from the conversation. Failed and interrupted snapshots retain provisional text. Each reconnection begins with a new snapshot; clients do not resubmit a command. Heartbeat comments keep idle connections open. Revocation closes the revoked client's connections. The instance allows up to 256 response streams and disconnects clients whose pending output exceeds 2 MB; they can reconnect for a current snapshot. The workspace uses authenticated `fetch` to consume the stream. Task and Activity updates still use polling.
+Paired clients request Stop with `POST /api/commands/{id}/stop` or `instance response-stop URL CREDENTIAL_FILE COMMAND_ID`. The result is the current progress, including `stopping` while cancellation settles and `stopped` afterward. Repeating a request against the same command returns its current outcome and cannot stop a newer command. The accepted command keeps the per-agent busy lock while stopping; a noncooperative provider can delay settlement. Restart while stopping reports `interrupted`. Version 29 adds the stop journal after a database backup. Stopped partial output is retained as an `assistant_stopped` conversation message, excluded from provider replay.
+
+The paired `GET /api/bots/{id}/response/stream` endpoint returns `text/event-stream` and requires a bearer authorization header and the same origin checks as other instance requests. An initial `snapshot` event contains the current progress or null. Later JSON events contain either a `snapshot` with `response`, or a `delta` with `id` and text to append. Completed snapshots have empty text; clients read the completed answer from the conversation. Failed, interrupted, stopping, and stopped snapshots retain provisional text. Each reconnection begins with a new snapshot; clients do not resubmit a command. Heartbeat comments keep idle connections open. Revocation closes the revoked client's connections. The instance allows up to 256 response streams and disconnects clients whose pending output exceeds 2 MB; they can reconnect for a current snapshot. The workspace uses authenticated `fetch` to consume the stream. Task and Activity updates still use polling.
 
 An optional profile description is directory metadata visible to other bots. A profile edit that omits it preserves its current value. The paired `POST /api/bot-discovery` endpoint accepts `requesterId` and `query`, and returns matching active or busy bots by name and description, without selecting a helper. Archived bots and the requester are excluded. Matching and limits are provisional; discovery itself does not execute collaboration. The version 12 migration backs up existing databases and initializes descriptions as empty strings. Version 13 separately records an owner-selected helper clock scope on task acceptance. Version 14 installs the collaboration journal and interrupts active assignments on restart. Version 15 installs the exact-message disclosure approval journal; pending and unused approvals are interrupted on restart. The exchange runtime has been exercised with synthetic providers, not live providers. Every request, question, answer, and result requires approval of its exact recipient and text. The helper clock scope defaults to false, retries retain it, and it does not enable a disabled capability. Version 16 journals main-chat task starts by command and tool-call ID. Version 17 adds revision-safe bot creation defaults.
 
@@ -173,7 +202,7 @@ can be changed by directly editing the file. The service stores a profile snapsh
 accepted chat command. Archive rejects active chat commands. The instance captures the profile for each turn, stores full provider history privately, and exposes only visible chat. New command IDs use a private keyed fingerprint to distinguish exact retries from different input that redacts to the same text. Older commands without a fingerprint remain queryable, but reuse of their IDs is rejected because the original input cannot be verified. Provider-specific settings are checked during execution. A pre-journal SQLite database is copied with `VACUUM INTO` before migration. The backup path
 is printed by `instance serve`; this is not a complete backup/restore workflow.
 
-OpenRouter and other chat-completions adapters combine caller cancellation with
+OpenRouter streams Chat Completions with usage requested, reconstructs fragmented function calls, and commits only after a supported finish reason and the stream terminator. An incomplete provider response cannot dispatch its proposed tools or become a completed message; tools completed in earlier response steps remain recorded. Models vary in tool support; missing usage remains unavailable. LM Studio and generic Chat Completions remain buffered. OpenRouter and other chat-completions adapters combine caller cancellation with
 their 60-second timeout. Offline tests verify that cancellation closes a local
 HTTP request.
 

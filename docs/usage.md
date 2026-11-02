@@ -117,9 +117,8 @@ mode 0600. Disconnect removes that file and affects subsequent work; requests
 already in flight may still use the previous key. The shared instance ignores
 `OPENROUTER_API_KEY` in its environment, so migrate an existing key into Settings
 or the CLI. Select `openrouter` and an explicit model in each agent. A message
-can spend API credits. Choose a model that supports function calling to use tools.
-These operations have synthetic service, CLI, and browser coverage; live access
-has not been verified.
+can spend API credits. OpenRouter streams provisional text and reports usage when available. Choose a model that supports function calling to use tools; capabilities vary by model. Interrupted, truncated, or unsupported responses are shown as incomplete. Restore a failed message from the composer to retry it; a newer draft is retained separately.
+Synthetic service, CLI, and served-browser checks exercise the streaming adapter; live OpenRouter conversation and remote-instance access remain unverified.
 
 ### Use LM Studio or a compatible HTTP endpoint
 
@@ -182,18 +181,38 @@ System is the default and follows device appearance changes. The choice is saved
 in this browser, independently of other browsers; clearing browser storage resets it.
 
 A saved Codex sign-in is shared by all agents; it does not establish that the
-provider or a model is available. Create an agent with a name and optional
+provider or a model is available. In **Settings**, use **Connect Codex**, open
+**Continue sign-in** on the instance host, and return to Settings for progress.
+Cancel a pending attempt or retry a failed or expired one. If the page was
+refreshed and the link is no longer available, cancel the attempt and start a
+new one. **Sign out** removes the instance's local credential after confirmation;
+finish active work and sign-in first. Agent provider and model selections and
+unsent drafts are retained. Create an agent with a name and optional
 instructions, provider, and model, even before signing in or choosing a model. Select the
 model label below an agent's chat to edit its settings and Instructions. Press
-Enter to send a message or Shift+Enter to insert a new line. The workspace keeps
-your draft if sign-in or a model is missing and when switching agents.
+Enter to send a message or Shift+Enter to insert a new line. The workspace keeps drafts when switching agents. If sign-in or a model is
+missing, the submitted text remains beside an explanation and Retry control.
+
+In agent settings, Demo is always available; Codex and OpenRouter can be chosen
+when their shared connection is saved. A saved connection does not verify account
+or model access. A disconnected current provider remains visible, and **Open
+provider settings** lets you repair a connection and return to your unsaved
+agent edits. The browser does not offer LM Studio or HTTP compatible as new
+choices because their host configuration is not managed in global Settings;
+existing selections remain visible and can still be edited through the CLI or
+configuration files. A provider switch retains the model text for you to review
+and asks for confirmation because future requests can send the existing chat to
+the new provider. Saving settings does not send a model request. Other agents
+keep their own choices.
 In agent settings, select **Archive agent** to retain configuration and history
 while preventing new work. To restore it, open **Settings** and select
 **Restore agent** under **Archived agents**. An agent with active chat or background
 work cannot be archived until that work settles.
 
+In the shared terminal, `/stop` requests cancellation of the current main-chat response, including one started by another paired client, and reports its settled state and any stopped partial output. Incremental provider text is labeled provisional until the response settles. A line entered while your terminal command is unresolved is kept as an unsent draft. Use `/edit ID TEXT` to revise it and `/retry ID` after the response settles; drafts are never queued automatically.
+
 While a response runs, the workspace receives provisional text and progress over a shared-instance event stream. If the connection drops, the workspace reconnects and shows the latest saved progress.
-You can type a next draft, but cannot send it until the active response ends.
+You can type a next draft while the response runs. Select **Stop** to request cancellation; the response shows **stopping** until the provider and pending operations settle. Send becomes available after completion or a settled Stop, and the draft remains editable throughout. Stopped partial output stays in the conversation labeled **stopped** and is not treated as a completed provider reply. A provider that does not promptly honor cancellation can keep the agent in stopping until it returns.
 Markdown headings, lists, links and code blocks render in assistant responses;
 use Copy on a code block. Raw HTML is not rendered. The conversation follows new
 output while you are at the bottom and stays in place when you scroll up.
@@ -208,14 +227,25 @@ Clock approvals can be approved or denied there. Task questions are visible, but
 answering them in the workspace is not yet implemented. The workspace checks
 for updates while the page is visible; it does not provide background notifications.
 
-Drafts and pending message IDs are stored in the browser. After a reload, use
-**Recover saved browser drafts or creation** to select an earlier record. If a
-submission result is uncertain, check its status or retry the same message with
-the same ID. Staf does not silently send a new request. Clearing browser storage
+Drafts and pending message IDs are stored in the browser's local journal.
+An agent's draft and pending submission recover automatically after reload or
+after closing and reopening a tab. Concurrent tabs keep separate records; if
+several closed tabs left drafts for one agent, one record is loaded at a time
+and the next is recovered when the current draft and submission are cleared.
+The composer waits until the selected agent’s draft is ready. The browser must
+support secure random UUIDs, Web Locks, and local storage for sending. A lost acknowledgment is checked against the shared instance and,
+if no command is found, resubmitted using the same ID. A failure or busy rejection
+remains beside the message with Retry and Dismiss; a newer draft is retained.
+If a retry finds the agent busy while the original request may still arrive,
+the message cannot be dismissed and any retry keeps the original ID.
+Earlier session records can be recovered in Settings. Clearing browser storage
 removes locally saved drafts and pending IDs. The former Advanced page has been
 retired. Profile, permission, memory, skill, schedule, and task management are
 not yet fully available in the workspace; the service and CLI operations below
 remain available.
+
+After updating Staf, reload any already-open workspace tabs so they all use the
+current draft coordination before editing in multiple tabs.
 ### Agent configuration files
 
 Each agent has `agent.toml` for its name, description, provider, model and
@@ -255,7 +285,7 @@ remove the old revision's `.retired` marker after review. The old files remain
 on disk.
 
 A later request after a provider change can send existing chat history to the new provider. Creation defaults set provider, model, and reasoning for future bots. The instance copies these settings at creation; changing defaults never changes existing bots. Revisions prevent stale clients from overwriting each other. In the CLI, use `instance defaults URL CREDENTIAL_FILE` and `instance defaults-set URL CREDENTIAL_FILE REVISION PROVIDER MODEL REASONING`; use `-` for an empty model or reasoning. Permission and approval settings remain separate. The description is owner-edited metadata visible to other bots; keep private instructions and memory out of it. New bots start with an empty description.
-The deterministic demo provider does not follow the instructions. Select Codex, OpenRouter, LM Studio, or live and an explicit model in the bot profile. OpenRouter uses the managed instance key described above; the instance command does not load the project `.env` file. Codex uses the Staf grant under the directory containing the instance database. From a paired browser, use Codex sign-in and open the provided link on the instance host. The initiating paired client can check or cancel that attempt, including after refreshing the page. The CLI provides `instance codex-auth-start URL CREDENTIAL_FILE`, `codex-auth-current URL CREDENTIAL_FILE`, `codex-auth-status URL CREDENTIAL_FILE ATTEMPT_ID`, `codex-auth-cancel URL CREDENTIAL_FILE ATTEMPT_ID`, and `codex-auth-credential URL CREDENTIAL_FILE`. The callback listens on the same loopback origin. Revoking the initiating client prevents credential commit. These paths have been tested with synthetic auth only; live sign-in has not been verified. Provider failures do not fall back to another provider. Live provider execution has not been verified in this preview.
+The deterministic demo provider does not follow the instructions. Select Codex, OpenRouter, LM Studio, or live and an explicit model in the bot profile. OpenRouter uses the managed instance key described above; the instance command does not load the project `.env` file. Codex uses the Staf grant under the directory containing the instance database. From a paired browser, use Codex sign-in and open the provided link on the instance host. The initiating paired client can check or cancel that attempt, including after refreshing the page. The CLI provides `instance codex-auth-start URL CREDENTIAL_FILE`, `codex-auth-current URL CREDENTIAL_FILE`, `codex-auth-status URL CREDENTIAL_FILE ATTEMPT_ID`, `codex-auth-cancel URL CREDENTIAL_FILE ATTEMPT_ID`, `codex-auth-credential URL CREDENTIAL_FILE`, and `codex-auth-logout URL CREDENTIAL_FILE`. The callback listens on the same loopback origin. Revoking the initiating client prevents credential commit. These paths have been tested with synthetic auth only; live sign-in has not been verified. Provider failures do not fall back to another provider. Live provider execution has not been verified in this preview.
 
 CLI examples (use a fresh host code for each client):
 
@@ -277,6 +307,7 @@ pnpm start instance read http://127.0.0.1:3210 ~/.staf-client.json BOT_ID
 pnpm start instance send http://127.0.0.1:3210 ~/.staf-client.json BOT_ID 'Hello'
 pnpm start instance status http://127.0.0.1:3210 ~/.staf-client.json COMMAND_ID
 node dist/cli.js instance response-follow http://127.0.0.1:3210 ~/.staf-client.json COMMAND_ID
+node dist/cli.js instance response-stop http://127.0.0.1:3210 ~/.staf-client.json COMMAND_ID
 ```
 
 The bot name can contain multiple arguments. Pass instructions as one quoted
@@ -298,10 +329,12 @@ retain configuration and history and cannot accept new work until restored.
 
 The CLI prints the command ID before submission; check status if its outcome is
 uncertain instead of automatically resending. A busy bot does not accept a new
-message. The browser retains the submitted text for recovery on busy, failure or uncertain submission and keeps the next draft editable;
-use **Check status** to inspect an uncertain outcome. If the command cannot be
-found, the original request may still arrive. The workspace retains its ID and
-offers an explicit retry of that same message and ID. The CLI takes text as an argument and has no interactive draft.
+message. The browser clears the composer immediately and shows the submitted message and
+status in the conversation while keeping the next draft editable. It automatically
+recovers uncertain outcomes with the original command ID. Busy or rejected work
+can be retried inline; retrying a failed or interrupted accepted command starts a
+new command. Resolve or dismiss that message before sending the next draft. The
+CLI takes text as an argument and has no interactive draft.
 
 Providers receive the recorded conversation and tool history on each turn; the preview does not compact
 or limit it. It does not import existing file-based sessions. The workspace polls
@@ -349,7 +382,7 @@ The shared instance also supports separately permitted web reading, local search
 
 ### Scoped memory in the shared instance
 
-Each bot has separate memory. User memory is shared across bots. In main chat, explicit phrases such as “Remember that I like tea” save to the addressed bot. “Remember for all bots: I like tea” proposes shared user memory. The response shows the exact text and warns that all bots can retrieve it. Send `Confirm shared memory PROPOSAL_ID` to save that exact proposal, or `Cancel shared memory PROPOSAL_ID` to cancel it without saving memory. Cancellation removes the text from the active proposal, but the original message and proposal response remain in chat history and may be included in later model requests or task context. Cancellation does not erase backups or data already sent to a provider. The proposal is bound to the addressed bot and survives restart. Repeating confirmation cannot duplicate it. The acknowledgment names the scope. Ambiguous scope or missing content prompts a clarification without saving. Other supported save forms include “Please keep in mind that …”, “Save this for later: …”, and the prefixes “for this bot” or “in shared memory”. For inspection say “List memories in shared memory” or “List memories in this bot memory”. For a specific entry say “Correct memory MEMORY_ID version VERSION in this bot memory to NEW TEXT” or “Forget memory MEMORY_ID version VERSION in shared memory”. Edits and deletions require the exact ID, last observed version, and scope. Scoped save phrases require a colon after the scope; partial bot scopes and recognizable conflicting restrictions require clarification. Phrase recognition is deterministic and cannot reliably infer every implied restriction; review the scope before using shared memory. “Forget that …” asks for an ID and scope rather than guessing which entry to delete. Descriptive requests such as “What do you remember about tea?”, “Forget the memory about tea” and “Correct my memory about tea to coffee” show up to ten matching candidates with IDs and versions; they do not change memory. Unspecified scope means this bot. Add “in shared memory” to preview shared entries. Ambiguous, excluded or other-bot scopes require clarification. A preview does not select an entry or authorize mutation; use the exact ID, current version, scope and replacement text in a separate command. Other natural-language phrasing is not reliably recognized, and task directions and model responses cannot change memory.
+Each agent has separate memory. User memory is shared across agents. In main chat, explicit phrases such as “Remember that I like tea” save to the addressed agent. “Remember for all agents: I like tea” proposes shared user memory. The response shows the exact text and warns that all agents can retrieve it. Send `Confirm shared memory PROPOSAL_ID` to save that exact proposal, or `Cancel shared memory PROPOSAL_ID` to cancel it without saving memory. Cancellation removes the text from the active proposal, but the original message and proposal response remain in chat history and may be included in later model requests or task context. Cancellation does not erase backups or data already sent to a provider. The proposal is bound to the addressed agent and survives restart. Repeating confirmation cannot duplicate it. The acknowledgment names the scope. Ambiguous scope or missing content prompts a clarification without saving. Other supported save forms include “Please keep in mind that …”, “Save this for later: …”, and the prefixes “for this agent” or “in shared memory”. For inspection say “List memories in shared memory” or “List memories in this agent memory”. For a specific entry say “Correct memory MEMORY_ID version VERSION in this agent memory to NEW TEXT” or “Forget memory MEMORY_ID version VERSION in shared memory”. Edits and deletions require the exact ID, last observed version, and scope. Scoped save phrases require a colon after the scope; partial agent scopes and recognizable conflicting restrictions require clarification. Phrase recognition is deterministic and cannot reliably infer every implied restriction; review the scope before using shared memory. “Forget that …” asks for an ID and scope rather than guessing which entry to delete. Descriptive requests such as “What do you remember about tea?”, “Forget the memory about tea” and “Correct my memory about tea to coffee” show up to ten matching candidates with IDs and versions; they do not change memory. Unspecified scope means this agent. Add “in shared memory” to preview shared entries. Ambiguous, excluded or other-agent scopes require clarification. A preview does not select an entry or authorize mutation; use the exact ID, current version, scope and replacement text in a separate command. Other natural-language phrasing is not reliably recognized, and task directions and model responses cannot change memory. The earlier “bot” wording remains accepted in these chat phrases. CLI scope values such as `bot:BOT_ID` are unchanged.
 
 Memory management controls are not yet available in the workspace. The CLI uses explicit scopes. Use `memory-list URL CREDENTIAL_FILE user`, `memory-add URL CREDENTIAL_FILE bot:BOT_ID TEXT`, `memory-edit URL CREDENTIAL_FILE bot:BOT_ID MEMORY_ID VERSION TEXT`, and `memory-delete URL CREDENTIAL_FILE bot:BOT_ID MEMORY_ID VERSION`. Use `user` instead of `bot:BOT_ID` for shared user memory. Refresh after a conflict before editing or deleting. All paired clients act for the same owner.
 

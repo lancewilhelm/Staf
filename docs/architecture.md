@@ -16,8 +16,7 @@ send existing conversation history to the new provider on the next request.
 Provider adapters normalize messages and tools for the runtime. Codex uses direct
 Responses with a Staf-owned grant and model-bound replay. OpenRouter, LM Studio,
 and the generic live adapter use Chat Completions. The demo returns deterministic
-responses. Provider output is buffered until completion; the terminal displays
-command status and persisted tool progress. The service applies permissions and approval
+responses. Codex and OpenRouter stream provisional text through the shared service; LM Studio and the generic live adapter buffer provider output. Only completed provider responses are committed as completed replies; stopped partial output is labeled separately. The terminal displays provisional text, command status and persisted tool progress. The service applies permissions and approval
 rules before supported actions. See [direct Responses](direct-responses.md),
 [settings](settings.md), and [usage](usage.md).
 
@@ -37,8 +36,20 @@ paths and fields continue to identify these agents. Provider sign-in belongs to
 the instance; each agent owns its model selection. The former Advanced page is not served.
 Appearance is a browser-local preference; CSS follows the device color scheme
 when System is selected. It is not stored by the shared instance.
-Browser-local draft and command journals support explicit recovery;
-the instance remains authoritative for accepted commands and work. A keyed
+A browser journal retains each agent's next draft and submitted command. Each
+open tab claims its records with browser Web Locks; closed-tab records can be
+claimed automatically when that agent is opened again. Concurrent tabs keep
+separate records and command IDs. When several unclaimed records exist for one
+agent, one is loaded at a time; the next is claimed after the current record is cleared.
+After reload or reconnect the browser checks the same command ID and resubmits
+that ID if it is missing; the instance remains authoritative for accepted work.
+Accepted commands use a deterministic user-message ID so the optimistic message
+and the stored conversation appear once. Busy and definitive failures remain
+inline for explicit retry or dismissal; an uncertain original cannot be dismissed
+after a busy retry because it may still arrive. Accepted failed commands get a
+new ID on explicit retry. Local journal storage and Web Locks are required for
+sending. Clearing browser storage removes the journal.
+ A keyed
 bot-creation operation stores its fingerprint and result with the bot in one
 transaction. Version 27 backs up an existing database before adding the journal.
 The browser retains the operation ID locally, and the CLI prints it before
@@ -66,10 +77,10 @@ its hash. A client ID is derived from the token hash and is not a bearer token.
 The first-delivery trust model treats every paired client as acting for the sole owner, with no separate role check. Any paired client can list and revoke client authorizations and manage approvals and settings. A browser stores its credential and uncertain draft locally, while a
 CLI client uses a separate credential file. Commands claim a bot and append the
 user message transactionally; completed responses are stored with the command
-state. Restart marks pending commands interrupted. SQLite exclusive locking
+state. Stop records a durable request while retaining the pending command and its unique busy lock, aborts the running provider and pending operations, and settles only after the turn returns. A late provider result cannot commit after Stop. The partial output is stored as a stopped conversation entry and excluded from provider replay. Restart marks pending or stopping commands interrupted; it does not resume them. SQLite exclusive locking
 prevents a second process from treating active commands as interrupted. The
 service runs demo, Codex, OpenRouter, LM Studio and live with instance or host credentials and an explicit bot model for each non-demo provider. This preview does not implement the LAN,
-push updates, complete reconnect recovery, or operational features described in the plans above.
+all operational features described in the plans above.
 
 Agent settings and instructions live under `agents/ID/current` beside the
 instance database. The `current` symlink points to a revision directory holding
@@ -118,7 +129,7 @@ The version 9 instance migration creates schedule and occurrence tables after a 
 
 The collaboration runtime journals actual bot messages and separate helper attempts. The owner approves each exact message before disclosure. A helper receives only the assignment brief as task context and does not retrieve private memory. Parent stop cancels its helper, and late output remains in helper Activity. Restart interrupts unfinished attempts. Offline synthetic-provider tests cover these paths; live provider behavior remains unverified.
 
-Shared-instance Codex sign-in owns a short-lived in-memory attempt bound to its initiating paired client and the service loopback callback. The credential adapter checks that client remains authorized at the locked credential commit boundary. Callback parameters are not returned in the response. This integration has synthetic tests and has not been verified with live authorization.
+Shared-instance Codex sign-in owns a short-lived in-memory attempt bound to its initiating paired client and the service loopback callback. The credential adapter checks that client remains authorized at the locked credential commit boundary. Callback parameters are not returned in the response. The browser keeps the sign-in URL only for the attempt that produced it and offers cancellation and retry if it is lost or the attempt fails. Paired CLI and GUI sign-out use the same guarded service operation. Credential status is local and does not verify account or model access. This integration has synthetic service, CLI, and served-browser tests and has not been verified with live authorization.
 
 The shared main-chat runtime may request one background task per command through a host-controlled tool. A durable journal binds the command, tool call, objective, and task attempt, so duplicate submissions do not start duplicate work. Explicit main-chat task direction and stop use the attempt ID and do not expand permissions. New bots copy the instance provider, model, and reasoning creation defaults in the creation transaction; later default changes do not alter existing bots. These paths have offline synthetic coverage; live provider behavior remains unverified.
 
@@ -138,5 +149,14 @@ uses the managed key for new OpenRouter work and ignores the host environment
 key. Saving does not verify account or model access. Known keys are redacted
 from supported conversation and output paths; the key is rejected from agent
 configuration writes. In-flight work may retain a previous key. Service, CLI,
-and served-browser coverage uses synthetic credentials and providers; live
-OpenRouter access remains unverified.
+and served-browser coverage uses synthetic credentials and streaming provider responses, including tool calls and recovery; live OpenRouter conversation and remote-instance access remain unverified.
+
+The agent editor combines its revisioned profile with the authenticated Codex
+and OpenRouter presence statuses to offer configured shared connections and the
+offline Demo provider. It retains an existing disconnected provider, blocks a
+new unavailable selection, and keeps unsaved edits mounted while the owner
+visits global Settings. Model text is retained and must be reviewed on a switch;
+the browser confirms the potential history disclosure before its profile save.
+The service still accepts supported configurations without requiring a saved
+connection, so direct edits and other clients can configure an agent before
+connecting. The editor does not run inference or verify provider access.

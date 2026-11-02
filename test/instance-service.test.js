@@ -1,3 +1,4 @@
+import {routerStream} from './openrouter-fixture.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -171,7 +172,7 @@ test('captured profile and private replay survive restart without exposing provi
 test('named adapters send captured prompts and model using offline transports', async () => {
  const {openRouterProvider}=await import('../dist/providers.js'); const {directCodexProvider}=await import('../dist/codex-direct.js');
  const dir=mkdtempSync(join(tmpdir(),'staf-adapters-'));let requests=[];
- const request=async (_url,init)=>{let body=JSON.parse(init.body);requests.push(body);if(body.input){const output=[{type:'reasoning',id:'r',encrypted_content:'opaque bytes'},{type:'message',role:'assistant',status:'completed',content:[{type:'output_text',text:'codex answer'}]}];return new Response(`data: ${JSON.stringify({type:'response.completed',response:{status:'completed',model:body.model,output}})}\n\n`,{status:200});}return Response.json({choices:[{message:{role:'assistant',content:'router answer'}}]});};
+ const request=async (_url,init)=>{let body=JSON.parse(init.body);requests.push(body);if(body.input){const output=[{type:'reasoning',id:'r',encrypted_content:'opaque bytes'},{type:'message',role:'assistant',status:'completed',content:[{type:'output_text',text:'codex answer'}]}];return new Response(`data: ${JSON.stringify({type:'response.completed',response:{status:'completed',model:body.model,output}})}\n\n`,{status:200});}return routerStream({message:{role:'assistant',content:'router answer'}});};
  const factory=async (profile,instructions)=>profile.provider==='codex'?directCodexProvider({model:profile.model,sessionId:profile.chatId,dataDir:dir,instructions,token:async()=>'synthetic-token',request}):openRouterProvider({OPENROUTER_API_KEY:'synthetic-key'},profile.model,request,undefined,instructions);
  const app=startInstance(join(dir,'db'),0,{providerFactory:factory});const port=await app.listen();
  const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return r.json()};
@@ -207,7 +208,7 @@ test('shutdown cancels active work and restart marks it interrupted without a du
 test('production provider selection uses managed OpenRouter and Codex credentials', async () => {
  const {mkdirSync,writeFileSync}=await import('node:fs');const dir=mkdtempSync(join(tmpdir(),'staf-prod-adapters-'));mkdirSync(join(dir,'auth'));
  writeFileSync(join(dir,'auth','codex-direct.json'),JSON.stringify({version:1,issuer:'https://auth.openai.com',subject:'dummy',clientId:'dummy',hostId:'dummy',accessToken:'dummy-token',refreshToken:'dummy-refresh',idToken:'dummy-id',scopes:['resource.invoke','chatgpt.tokens.use.direct'],expiresAt:Date.now()+3600000}),{mode:0o600});
- const original=globalThis.fetch,requests=[];globalThis.fetch=async(input,init)=>{const url=String(input);if(url.startsWith('http://127.0.0.1:'))return original(input,init);if(!['https://openrouter.ai/api/v1/chat/completions','https://api.openai.com/v1/responses'].includes(url))throw Error('Unexpected network access');const body=JSON.parse(init.body);requests.push({url,body,authorization:init.headers.Authorization});if(url.includes('openrouter'))return Response.json({choices:[{message:{role:'assistant',content:'router'}}]});return new Response(`data: ${JSON.stringify({type:'response.completed',response:{status:'completed',model:body.model,output:[{type:'reasoning',encrypted_content:'opaque'},{type:'message',role:'assistant',content:[{type:'output_text',text:'codex'}]}]}})}\n\n`);};
+ const original=globalThis.fetch,requests=[];globalThis.fetch=async(input,init)=>{const url=String(input);if(url.startsWith('http://127.0.0.1:'))return original(input,init);if(!['https://openrouter.ai/api/v1/chat/completions','https://api.openai.com/v1/responses'].includes(url))throw Error('Unexpected network access');const body=JSON.parse(init.body);requests.push({url,body,authorization:init.headers.Authorization});if(url.includes('openrouter'))return routerStream({message:{role:'assistant',content:'router'}});return new Response(`data: ${JSON.stringify({type:'response.completed',response:{status:'completed',model:body.model,output:[{type:'reasoning',encrypted_content:'opaque'},{type:'message',role:'assistant',content:[{type:'output_text',text:'codex'}]}]}})}\n\n`);};
  const app=startInstance(join(dir,'db'),0,{dataDir:dir,env:{OPENROUTER_API_KEY:'dummy-router',STAF_MODEL:'must-not-be-used'}});const port=await app.listen();
  const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return r.json()};
  try{const token=(await call('/api/pair','',{code:app.code})).token;await call('/api/openrouter-connection',token,{key:'dummy-router'});const bot=await call('/api/bots',token,{name:'A'});let revision=bot.revision;
@@ -236,7 +237,7 @@ test('OpenRouter credit and rate-limit errors are useful without exposing respon
  const factory=async(profile,instructions)=>openRouterProvider({OPENROUTER_API_KEY:'dummy-key'},profile.model,async()=>new Response('secret provider body',{status}),undefined,instructions);
  const app=startInstance(join(dir,'db'),0,{providerFactory:factory}),port=await app.listen();const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return r.json()};
  try{const token=(await call('/api/pair','',{code:app.code})).token;const bot=await call('/api/bots',token,{name:'A'});await call(`/api/bots/${bot.id}/profile`,token,{revision:bot.revision,name:'A',instructions:'',provider:'openrouter',model:'fixture/model',reasoning:null});
-  for(const [code,message] of [[402,'Provider credits are required'],[429,'Provider rate limit reached; retry later']]){status=code;await call('/api/commands',token,{id:'http-'+code,botId:bot.id,content:'hello'});let state;for(let i=0;i<100;i++){state=await call('/api/commands/http-'+code,token);if(state.state!=='pending')break;await new Promise(r=>setTimeout(r,5));}assert.equal(state.state,'failed');assert.equal(state.error,message);assert.ok(!JSON.stringify(state).includes('secret provider body'));}
+  for(const [code,message] of [[401,'Configure the selected provider credentials on the instance host'],[402,'Provider credits are required'],[403,'Check the selected OpenRouter model, access and supported capabilities'],[404,'Check the selected OpenRouter model, access and supported capabilities'],[429,'Provider rate limit reached; retry later']]){status=code;await call('/api/commands',token,{id:'http-'+code,botId:bot.id,content:'hello'});let state;for(let i=0;i<100;i++){state=await call('/api/commands/http-'+code,token);if(state.state!=='pending')break;await new Promise(r=>setTimeout(r,5));}assert.equal(state.state,'failed');assert.equal(state.error,message);assert.ok(!JSON.stringify(state).includes('secret provider body'));}
  }finally{await app.close();rmSync(dir,{recursive:true,force:true});}
 });
 test('schedule creation rejects lateness below one minute',async()=>{
@@ -285,4 +286,23 @@ test('compatible providers use host endpoints and profile prompts; discovery is 
   assert.equal(chats[1].url,'https://live.fixture/v1/chat/completions');assert.equal(chats[1].init.headers.Authorization,'Bearer live-key');
   for(const chat of chats){const body=JSON.parse(chat.init.body);assert.equal(body.model,'fixture-model');assert.match(body.messages[0].content,/custom soul[\s\S]*custom instruction/);}
  }finally{await app.close();globalThis.fetch=original;}
+});
+
+
+test('concurrent command recovery is idempotent across clients and restart', async()=>{
+ const dir=mkdtempSync(join(tmpdir(),'staf-command-recovery-')),path=join(dir,'db');let release,calls=0;const gate=new Promise(resolve=>{release=resolve});
+ const factory=async()=>({name:'held',capabilities:{toolCalls:false},async complete(){calls++;await gate;return {role:'assistant',content:'done'}}});
+ let app=startInstance(path,0,{providerFactory:factory}),port=await app.listen();
+ const call=async(route,token,body)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return [response.status,await response.json()]};
+ try{
+  const a=(await call('/api/pair','',{code:app.code}))[1].token,b=(await call('/api/pair','',{code:app.issueCode()}))[1].token;
+  const bot=(await call('/api/bots',a,{name:'Recovery'}))[1],command={id:'recovered',botId:bot.id,content:'One message'};
+  const results=await Promise.all(Array.from({length:8},(_,i)=>call('/api/commands',i%2?a:b,command)));
+  assert.equal(results.filter(([,v])=>v.kind==='accepted').length,1);assert.equal(results.filter(([,v])=>v.kind==='existing').length,7);
+  assert.equal((await call('/api/commands',b,{id:'competing',botId:bot.id,content:'Keep this'}))[1].kind,'busy');
+  release();for(let i=0;i<100;i++){if((await call('/api/commands/recovered',b))[1].state==='completed')break;await new Promise(r=>setTimeout(r,5));}
+  assert.equal((await call('/api/commands/recovered',b))[1].state,'completed');await app.close();app=startInstance(path,0,{providerFactory:factory});port=await app.listen();
+  assert.equal((await call('/api/commands',b,command))[1].kind,'existing');assert.equal(calls,1);
+  assert.equal((await call(`/api/bots/${bot.id}/messages`,a))[1].filter(m=>m.content==='One message').length,1);
+ }finally{release();await app.close();rmSync(dir,{recursive:true,force:true});}
 });

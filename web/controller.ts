@@ -3,24 +3,35 @@ import {responseEvents} from './response-stream';
 export type Bot={id:string;name:string;provider:string;model:string|null;archived:boolean};
 export type BotProfile=Bot & {revision:string;instructions:string;description:string;reasoning:string|null;configDir:string};
 export type Message={id:string;role:string;content:string};
-export type ResponseProgress={id:string;botId:string;state:'accepted'|'running'|'completed'|'failed'|'interrupted';text:string;error:string|null};
+export type ResponseProgress={id:string;botId:string;state:'accepted'|'running'|'stopping'|'stopped'|'completed'|'failed'|'interrupted';text:string;error:string|null};
 export type Task={id:string;objective:string;state:string;outcome:string|null;activity?:Array<Record<string,unknown>>};
 export type InboxItem={kind:'question';id:string;botId:string|null;attemptId:string;text:string}|{kind:'approval';approvalKind:'clock'|'web'|'search'|'shell'|'disclosure';id:string;botId:string|null;work:{kind:'task'|'command';id:string};detail:unknown};
-export type Submission={kind:'submitting'|'pending'|'unknown'|'busy'|'failed'|'interrupted';id:string;text:string;error?:string};
+type SubmissionIdentity={id:string;text:string};
+export type Submission=SubmissionIdentity & (
+  | {kind:'submitting'|'submitting-uncertain'|'pending'}
+  | {kind:'unknown'|'uncertain-busy'|'busy'|'rejected';error:string}
+  | {kind:'failed'|'interrupted';error:string|null}
+);
 export type Draft={text:string;submission:Submission|null};
 export type Connection={kind:'connecting'}|{kind:'pairing';message:string}|{kind:'ready'}|{kind:'offline';message:string};
 export type Setup={kind:'closed'}|{kind:'create';name:string;instructions:string;provider:string;model:string;operationId:string|null;status:string};
-export type Workspace={connection:Connection;setup:Setup;bots:Bot[];selected:string|null;messages:Message[];response:ResponseProgress|null;responseConnection:'connecting'|'connected'|'reconnecting';tasks:Task[];inbox:InboxItem[];taskUpdates:Array<Task & {botId:string}>;activityOpen:boolean;credential:'signed-in'|'signed-out'|'unknown';openrouter:'saved'|'missing'|'unknown'|'error';authAttempt:{id:string;phase:string}|null;authUrl:string;freshness:string;notice:string;draft:Draft;recoveries:Recovery[]};
+export type Workspace={connection:Connection;setup:Setup;bots:Bot[];selected:string|null;messages:Message[];response:ResponseProgress|null;responseConnection:'connecting'|'connected'|'reconnecting';tasks:Task[];inbox:InboxItem[];taskUpdates:Array<Task & {botId:string}>;activityOpen:boolean;credential:'signed-in'|'signed-out'|'unknown';openrouter:'saved'|'missing'|'unknown'|'error';authAttempt:{id:string;phase:string}|null;authUrl:string;authUrlAttemptId:string;freshness:string;notice:string;draft:Draft;draftReady:boolean;recoveries:Recovery[]};
 type Recovery={key:string;label:string;value:string};
 class ApiError extends Error {constructor(message:string,readonly status:number){super(message);}}
 const isRecord=(value:unknown):value is Record<string,unknown>=>typeof value==='object'&&value!==null&&!Array.isArray(value);
 function isResponseProgress(value:unknown,botId:string):value is ResponseProgress {
-  return isRecord(value)&&typeof value.id==='string'&&value.botId===botId&&typeof value.state==='string'&&['accepted','running','completed','failed','interrupted'].includes(value.state)&&typeof value.text==='string'&&(value.error===null||typeof value.error==='string');
+  return isRecord(value)&&typeof value.id==='string'&&value.botId===botId&&typeof value.state==='string'&&['accepted','running','stopping','stopped','completed','failed','interrupted'].includes(value.state)&&typeof value.text==='string'&&(value.error===null||typeof value.error==='string');
 }
 const prefix='staf-workspace-v1:';
+function normalizeDraft(draft:Draft):Draft {
+  const submission=draft.submission;
+  if(submission?.kind==='submitting'||submission?.kind==='submitting-uncertain')return {...draft,submission:{id:submission.id,text:submission.text,kind:'unknown',error:'Recovering the original request.'}};
+  if(submission && submission.kind==='busy' && 'uncertain' in submission && submission.uncertain===true)return {...draft,submission:{id:submission.id,text:submission.text,kind:'uncertain-busy',error:'Another response is in progress. The original request may still arrive.'}};
+  return draft;
+}
 export class Controller {
-  private writer=crypto.randomUUID(); private listeners=new Set<()=>void>(); private generation=0; private seen=new Set<string>(); private token=localStorage.getItem('staf-token')||''; private currentKey=''; private timer:number; private responseStream:{botId:string;controller:AbortController}|null=null;
-  state:Workspace={connection:{kind:'connecting'},setup:{kind:'closed'},bots:[],selected:null,messages:[],response:null,responseConnection:'connecting',tasks:[],inbox:[],taskUpdates:[],activityOpen:false,credential:'unknown',openrouter:'unknown',authAttempt:null,authUrl:'',freshness:'',notice:'',draft:{text:'',submission:null},recoveries:[]};
+  private writer=crypto.randomUUID(); private checking=false; private listeners=new Set<()=>void>(); private generation=0; private seen=new Set<string>(); private token=localStorage.getItem('staf-token')||''; private currentKey=''; private timer:number; private responseStream:{botId:string;controller:AbortController}|null=null;
+  state:Workspace={connection:{kind:'connecting'},setup:{kind:'closed'},bots:[],selected:null,messages:[],response:null,responseConnection:'connecting',tasks:[],inbox:[],taskUpdates:[],activityOpen:false,credential:'unknown',openrouter:'unknown',authAttempt:null,authUrl:'',authUrlAttemptId:'',freshness:'',notice:'',draft:{text:'',submission:null},draftReady:false,recoveries:[]};
   constructor(){this.timer=window.setInterval(()=>{if(document.visibilityState==='visible')void this.refresh()},1000);window.addEventListener('online',()=>void this.refresh());document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')void this.refresh()});this.recoveries();void this.refresh()}
   subscribe=(fn:()=>void)=>{this.listeners.add(fn);return()=>this.listeners.delete(fn)};
   snapshot=()=>this.state;
@@ -53,27 +64,130 @@ export class Controller {
     }})();
   }
   async pair(code:string){try{const result=await this.api<{token:string}>('/api/pair',{code});localStorage.setItem('staf-token',result.token);this.token=result.token;await this.refresh()}catch(e){this.update({connection:{kind:'pairing',message:String(e)}})}}
-  async refresh(){if(!this.token){this.update({connection:{kind:'pairing',message:''}});return}const gen=++this.generation;try{const [bots,inbox,taskUpdates,credential,current,openrouter]=await Promise.all([this.api<Bot[]>('/api/bots'),this.api<InboxItem[]>('/api/inbox'),this.api<Array<Task & {botId:string}>>('/api/task-updates'),this.api<{signedIn:boolean}>('/api/codex-auth/credential'),this.api<{attempt:{id:string;phase:string}|null}>('/api/codex-auth/current'),this.api<{saved:boolean}>('/api/openrouter-connection').catch(()=>({saved:null}))]);const selected=this.state.selected && bots.some(b=>b.id===this.state.selected&&!b.archived)?this.state.selected:bots.find(b=>!b.archived)?.id??null;const [messages,taskList]=selected?await Promise.all([this.api<Message[]>('/api/bots/'+selected+'/messages'),this.api<Task[]>('/api/bots/'+selected+'/tasks')]):[[],[]];const tasks=await Promise.all(taskList.slice(0,30).map(task=>this.api<Task>('/api/tasks/'+task.id)));if(gen!==this.generation)return;const newly=inbox.some(item=>item.botId===selected&&!this.seen.has(item.kind+':'+item.id));inbox.filter(item=>item.botId===selected).forEach(item=>this.seen.add(item.kind+':'+item.id));const changed=selected!==this.state.selected;if(changed)this.loadDraft(selected);this.update({connection:{kind:'ready'},bots,selected,messages,...(changed?{response:null}:{}),tasks,inbox,taskUpdates,credential:credential.signedIn?'signed-in':'signed-out',openrouter:openrouter.saved===null?'error':openrouter.saved?'saved':'missing',authAttempt:current.attempt,activityOpen:newly?true:this.state.activityOpen,freshness:''});this.watchResponse(selected);if(this.state.draft.submission && ['pending','unknown','submitting'].includes(this.state.draft.submission.kind))void this.checkSubmission()}catch(e){if(gen!==this.generation)return;if(e instanceof ApiError&&e.status===401){this.token='';this.watchResponse(null);localStorage.removeItem('staf-token');this.update({connection:{kind:'pairing',message:'Pairing expired or was revoked.'}})}else this.update({connection:{kind:'offline',message:'Connection unavailable. Showing the last successful update.'},freshness:String(e)})}}
-  select(id:string){if(id===this.state.selected)return;this.generation++;this.loadDraft(id);const newAction=this.state.inbox.some(item=>item.botId===id&&!this.seen.has(item.kind+':'+item.id));this.state.inbox.filter(item=>item.botId===id).forEach(item=>this.seen.add(item.kind+':'+item.id));this.update({selected:id,messages:[],response:null,tasks:[],activityOpen:newAction});this.watchResponse(id);void this.refresh()}
-  private loadDraft(id:string|null){this.currentKey=id?prefix+this.writer+':'+id:'';let draft:Draft={text:'',submission:null};try{if(this.currentKey){const saved=localStorage.getItem(this.currentKey);if(saved)draft=JSON.parse(saved)}}catch{this.update({notice:'Browser storage is unavailable. Sending is blocked.'})}this.update({draft})}
-  private save(draft:Draft):boolean{try{if(!this.currentKey)return false;localStorage.setItem(this.currentKey,JSON.stringify(draft));this.update({draft});return true}catch{this.update({notice:'Browser storage is unavailable. Sending is blocked; copy your text before leaving.'});return false}}
+  async refresh(){if(!this.token){this.update({connection:{kind:'pairing',message:''}});return}const gen=++this.generation;try{const [bots,inbox,taskUpdates,credential,current,openrouter]=await Promise.all([this.api<Bot[]>('/api/bots'),this.api<InboxItem[]>('/api/inbox'),this.api<Array<Task & {botId:string}>>('/api/task-updates'),this.api<{signedIn:boolean}>('/api/codex-auth/credential'),this.api<{attempt:{id:string;phase:string}|null}>('/api/codex-auth/current'),this.api<{saved:boolean}>('/api/openrouter-connection').catch(()=>({saved:null}))]);const preferred=this.state.selected||sessionStorage.getItem('staf-selected-agent');const selected=preferred && bots.some(b=>b.id===preferred&&!b.archived)?preferred:bots.find(b=>!b.archived)?.id??null;const [messages,taskList]=selected?await Promise.all([this.api<Message[]>('/api/bots/'+selected+'/messages'),this.api<Task[]>('/api/bots/'+selected+'/tasks')]):[[],[]];const tasks=await Promise.all(taskList.slice(0,30).map(task=>this.api<Task>('/api/tasks/'+task.id)));if(gen!==this.generation)return;const newly=inbox.some(item=>item.botId===selected&&!this.seen.has(item.kind+':'+item.id));inbox.filter(item=>item.botId===selected).forEach(item=>this.seen.add(item.kind+':'+item.id));const changed=selected!==this.state.selected;if(changed){await this.loadDraft(selected,gen);if(gen!==this.generation)return;}this.update({connection:{kind:'ready'},bots,selected,messages,...(changed?{response:null}:{}),tasks,inbox,taskUpdates,credential:credential.signedIn?'signed-in':'signed-out',openrouter:openrouter.saved===null?'error':openrouter.saved?'saved':'missing',authAttempt:current.attempt,activityOpen:newly?true:this.state.activityOpen,freshness:''});this.watchResponse(selected);if(this.state.draft.submission && (['pending','unknown'].includes(this.state.draft.submission.kind)||this.state.draft.submission.kind==='uncertain-busy'))void this.checkSubmission()}catch(e){if(gen!==this.generation)return;if(e instanceof ApiError&&e.status===401){this.token='';this.watchResponse(null);localStorage.removeItem('staf-token');this.update({connection:{kind:'pairing',message:'Pairing expired or was revoked.'}})}else this.update({connection:{kind:'offline',message:'Connection unavailable. Showing the last successful update.'},freshness:String(e)})}}
+  async select(id:string){
+    if(id===this.state.selected)return;
+    sessionStorage.setItem('staf-selected-agent',id);this.generation++;
+    const newAction=this.state.inbox.some(item=>item.botId===id&&!this.seen.has(item.kind+':'+item.id));
+    this.state.inbox.filter(item=>item.botId===id).forEach(item=>this.seen.add(item.kind+':'+item.id));
+    this.currentKey='';this.update({selected:id,messages:[],response:null,tasks:[],draft:{text:'',submission:null},draftReady:false,activityOpen:newAction});
+    this.watchResponse(id);await this.loadDraft(id);if(this.state.selected===id)void this.refresh();
+  }
+  private claims=new Set<string>(); private draftLoad=0; private recovering=false;
+  private async claim(key:string):Promise<boolean>{
+    if(this.claims.has(key))return true;
+    if(!navigator.locks)throw Error('Browser storage locking is unavailable');
+    return new Promise((resolve,reject)=>{
+      void navigator.locks.request('staf-draft:'+key,{ifAvailable:true},async lock=>{
+        if(!lock){resolve(false);return;}
+        this.claims.add(key);resolve(true);
+        await new Promise<void>(()=>{});
+      }).catch(reject);
+    });
+  }
+  private async loadDraft(id:string|null, expectedGeneration?:number){
+    const load=++this.draftLoad;this.currentKey='';this.update({draftReady:false});let draft:Draft={text:'',submission:null};
+    try{
+      if(id){
+        const own=prefix+this.writer+':'+id;
+        const candidates=Array.from({length:localStorage.length},(_,i)=>localStorage.key(i)).filter((key):key is string=>!!key && key.startsWith(prefix) && key.endsWith(':'+id) && !key.includes(':creation:'));
+        const ordered=[...candidates.filter(key=>this.claims.has(key)),...candidates.filter(key=>!this.claims.has(key))];
+        let key=own;
+        for(const candidate of ordered){
+          const saved=localStorage.getItem(candidate);if(!saved)continue;
+          const parsed:unknown=JSON.parse(saved);
+          if(!isRecord(parsed)||typeof parsed.text!=='string'||(!parsed.text && !parsed.submission))continue;
+          if(await this.claim(candidate)){key=candidate;break;}
+        }
+        if(!await this.claim(key))throw Error('Draft is in use');
+        if(load!==this.draftLoad || (expectedGeneration!==undefined && expectedGeneration!==this.generation))return;
+        this.currentKey=key;
+        const saved=localStorage.getItem(key);
+        if(saved)draft=normalizeDraft(JSON.parse(saved));
+      }
+    }catch{if(load===this.draftLoad && (expectedGeneration===undefined || expectedGeneration===this.generation)){this.currentKey='';this.update({notice:'Browser storage or locking is unavailable. Sending is blocked.'})}}
+    if(load===this.draftLoad && (expectedGeneration===undefined || expectedGeneration===this.generation))this.update({draft,draftReady:!!this.currentKey});
+  }
+  private async recoverNext(){
+    const id=this.state.selected,current=this.currentKey;
+    if(this.recovering||!id||!current||this.state.draft.text||this.state.draft.submission)return;
+    this.recovering=true;
+    try{
+      const keys=Array.from({length:localStorage.length},(_,i)=>localStorage.key(i)).filter((key):key is string=>!!key&&key!==current&&key.startsWith(prefix)&&key.endsWith(':'+id)&&!key.includes(':creation:'));
+      for(const key of keys){
+        const saved=localStorage.getItem(key);if(!saved)continue;
+        const candidate:Draft=JSON.parse(saved);if(typeof candidate.text!=='string'||(!candidate.text&&!candidate.submission))continue;
+        if(!await this.claim(key))continue;
+        if(this.currentKey!==current||this.state.selected!==id||this.state.draft.text||this.state.draft.submission)return;
+        const latest=localStorage.getItem(key);if(!latest)continue;
+        const draft=normalizeDraft(JSON.parse(latest));if(typeof draft.text!=='string'||(!draft.text&&!draft.submission))continue;
+        this.currentKey=key;this.update({draft});void this.refresh();return;
+      }
+    }catch{this.update({notice:'Could not recover another saved draft.'})}finally{this.recovering=false}
+  }
+  private save(draft:Draft):boolean{try{if(!this.currentKey)return false;localStorage.setItem(this.currentKey,JSON.stringify(draft));this.update({draft});if(!draft.text&&!draft.submission)void this.recoverNext();return true}catch{this.update({notice:'Browser storage is unavailable. Sending is blocked; copy your text before leaving.'});return false}}
   edit(text:string){this.save({...this.state.draft,text})}
   private recoveries(){const found:Recovery[]=[];try{for(let i=0;i<localStorage.length;i++){const key=localStorage.key(i);if(!key)continue;if((key.startsWith(prefix)&&!key.startsWith(prefix+this.writer+':'))||key==='staf-draft'||key==='staf-pending'){const value=localStorage.getItem(key);if(value){let label=key.startsWith(prefix)?'Saved browser record '+key.slice(-12):'Earlier browser '+key;try{const record=JSON.parse(value);if(typeof record.name==='string')label='Saved agent creation: '+record.name;else if(typeof record.text==='string')label='Saved message: '+record.text.slice(0,80)+(record.submission?' ('+record.submission.kind+')':'')}catch{if(key==='staf-draft')label='Earlier browser draft: '+value.slice(0,80)}found.push({key,label,value})}}}}catch{}this.update({recoveries:found})}
-  adopt(item:Recovery){try{let d:Draft;if(item.key.startsWith(prefix)&&!item.key.endsWith(':'+this.state.selected))throw Error('This draft belongs to another agent');if(item.key==='staf-pending'&&JSON.parse(item.value).botId!==this.state.selected)throw Error('This command belongs to another agent');if(item.key==='staf-draft')d={text:item.value,submission:null};else if(item.key==='staf-pending'){const p=JSON.parse(item.value);d={text:p.text,submission:{kind:'unknown',id:p.id,text:p.text}}}else d=JSON.parse(item.value);if(!this.state.selected)return;if(this.state.draft.text||this.state.draft.submission){localStorage.setItem(prefix+'backup-'+crypto.randomUUID()+':'+this.state.selected,JSON.stringify(this.state.draft))}if(!this.save(d))return;this.recoveries();this.update({notice:'Saved draft copied here. Previous text and the original remain available.'})}catch{this.update({notice:'Could not read that saved draft.'})}}
-  async send(retry=false){const botId=this.state.selected,draft=this.state.draft;if(!botId||(!retry&&!draft.text.trim()))return;if(!retry&&draft.submission?.kind==='busy')return;if(!retry&&this.state.response&&['accepted','running'].includes(this.state.response.state))return;const bot=this.state.bots.find(item=>item.id===botId);if(!retry&&bot?.provider==='codex'&&this.state.credential==='signed-out'){this.update({notice:'Connect Codex in Settings to send. Your draft is saved.'});return}if(!retry&&bot?.provider==='openrouter'&&this.state.openrouter!=='saved'){this.update({notice:'Connect OpenRouter in Settings to send. Your draft is saved.'});return}if(!retry&&bot&&bot.provider!=='demo'&&!bot.model?.trim()){this.update({notice:'Choose a model for this agent to send. Your draft is saved.'});return}let submission=draft.submission;if(!retry){if(submission && !['busy','failed','interrupted'].includes(submission.kind)){this.update({notice:'Check or retry the existing submission first.'});return}submission={kind:'submitting',id:crypto.randomUUID(),text:draft.text}}if(!submission)return;if(!this.save({...draft,text:retry?draft.text:'',submission:{...submission,kind:'submitting'}}))return;try{const result=await this.api<{kind:string}>('/api/commands',{id:submission.id,botId,content:submission.text});if(this.state.selected!==botId)return;if(result.kind==='busy'){this.save({...this.state.draft,text:this.state.draft.text||submission.text,submission:{...submission,kind:'busy'}});return}this.save({...this.state.draft,submission:{...submission,kind:'pending'}});await this.checkSubmission()}catch(e){if(this.state.selected!==botId)return;this.save({...this.state.draft,text:e instanceof ApiError&&e.status===422?(this.state.draft.text||submission.text):this.state.draft.text,submission:{...submission,kind:e instanceof ApiError&&e.status===422?'failed':'unknown',error:String(e)}})}}
-  restoreUnsent(){const submission=this.state.draft.submission;if(!submission||submission.kind!=='busy'||!this.state.selected)return;try{if(this.state.draft.text&&this.state.draft.text!==submission.text)localStorage.setItem(prefix+'backup-'+crypto.randomUUID()+':'+this.state.selected,JSON.stringify({text:this.state.draft.text,submission:null}));if(this.save({text:submission.text,submission:null})){this.recoveries();this.update({notice:'Unsent message restored. Any other draft is available under saved browser drafts.'})}}catch{this.update({notice:'Browser storage is unavailable. Both drafts remain here.'})}}
-  async checkSubmission(){const botId=this.state.selected,submission=this.state.draft.submission;if(!submission||!botId)return;try{const command=await this.api<{state:string;error:string|null}>('/api/commands/'+submission.id);if(this.state.selected!==botId||this.state.draft.submission?.id!==submission.id)return;if(command.state==='completed'){const d=this.state.draft;this.save({text:d.text,submission:null});this.update({notice:'Message completed.'})}else if(command.state==='failed'||command.state==='interrupted')this.save({...this.state.draft,submission:{...submission,kind:command.state,error:command.error??undefined}});else this.save({...this.state.draft,submission:{...submission,kind:'pending'}})}catch(e){if(this.state.selected!==botId||this.state.draft.submission?.id!==submission.id)return;this.save({...this.state.draft,submission:{...submission,kind:'unknown',error:String(e)}})}}
-  openSetup(){this.update({setup:{kind:'create',name:'',instructions:'',provider:'',model:'',operationId:null,status:''}})}
+  adopt(item:Recovery){try{const active=this.state.draft.submission;if(active && ['submitting','submitting-uncertain','pending','unknown','uncertain-busy'].includes(active.kind)){this.update({notice:'The current submission must settle before another saved record can be recovered.'});return;}let d:Draft;if(item.key.startsWith(prefix)&&!item.key.endsWith(':'+this.state.selected))throw Error('This draft belongs to another agent');if(item.key==='staf-pending'&&JSON.parse(item.value).botId!==this.state.selected)throw Error('This command belongs to another agent');if(item.key==='staf-draft')d={text:item.value,submission:null};else if(item.key==='staf-pending'){const p=JSON.parse(item.value);d={text:p.text,submission:{kind:'unknown',id:p.id,text:p.text,error:'Recovering the original request.'}}}else d=JSON.parse(item.value);d=normalizeDraft(d);if(!this.state.selected)return;if(this.state.draft.text||this.state.draft.submission){localStorage.setItem(prefix+'backup-'+crypto.randomUUID()+':'+this.state.selected,JSON.stringify(this.state.draft))}if(!this.save(d))return;this.recoveries();this.update({notice:'Saved draft copied here. Previous text and the original remain available.'})}catch{this.update({notice:'Could not read that saved draft.'})}}
+  async send(retry=false){
+    const botId=this.state.selected,draft=this.state.draft;
+    if(!botId||(!retry&&!draft.text.trim()))return;
+    if(this.state.response&&['accepted','running','stopping'].includes(this.state.response.state))return;
+    let submission=draft.submission;
+    if(!retry){if(submission)return;submission={kind:'submitting',id:crypto.randomUUID(),text:draft.text}}
+    else if(submission && (submission.kind==='failed'||submission.kind==='interrupted'))submission={kind:'submitting',id:crypto.randomUUID(),text:submission.text};
+    if(!submission)return;
+    const current=submission,uncertain=current.kind==='unknown'||current.kind==='uncertain-busy'||current.kind==='submitting-uncertain';
+    if(!this.save({...draft,text:retry?draft.text:'',submission:{id:current.id,text:current.text,kind:uncertain?'submitting-uncertain':'submitting'}}))return;
+    const bot=this.state.bots.find(item=>item.id===botId);
+    const setupError=bot?.provider==='codex'&&this.state.credential==='signed-out'?'Connect Codex in Settings to send.':bot?.provider==='openrouter'&&this.state.openrouter!=='saved'?'Connect OpenRouter in Settings to send.':bot&&bot.provider!=='demo'&&!bot.model?.trim()?'Choose a model for this agent to send.':null;
+    if(setupError){this.save({...this.state.draft,submission:{id:current.id,text:current.text,kind:uncertain?'unknown':'rejected',error:setupError}});return}
+    await this.submit(botId,current);
+  }
+  async stopResponse(){const response=this.state.response;if(!response||!['accepted','running','stopping'].includes(response.state))return;try{await this.api('/api/commands/'+encodeURIComponent(response.id)+'/stop',{});}catch(e){this.update({notice:'Could not stop the response: '+String(e)})}}
+  private async submit(botId:string,submission:Submission){
+    const {id,text}=submission,uncertain=submission.kind==='unknown'||submission.kind==='uncertain-busy'||submission.kind==='submitting-uncertain';
+    try{
+      const result=await this.api<{kind:string}>('/api/commands',{id,botId,content:text});
+      if(this.state.selected!==botId||this.state.draft.submission?.id!==id)return;
+      if(result.kind==='busy'){this.save({...this.state.draft,submission:uncertain?{id,text,kind:'uncertain-busy',error:'Another response is in progress. The original request may still arrive.'}:{id,text,kind:'busy',error:'Another response is in progress.'}});return}
+      this.save({...this.state.draft,submission:{id,text,kind:'pending'}});
+      await this.refresh();
+    }catch(e){
+      if(this.state.selected!==botId||this.state.draft.submission?.id!==id)return;
+      const rejected=!uncertain&&e instanceof ApiError&&e.status>=400&&e.status<500&&e.status!==401;
+      this.save({...this.state.draft,submission:{id,text,kind:rejected?'rejected':'unknown',error:String(e)}});
+    }
+  }
+  dismissSubmission(){const submission=this.state.draft.submission;if(submission&&['busy','rejected','failed','interrupted'].includes(submission.kind))this.save({...this.state.draft,submission:null})}
+  async checkSubmission(){
+    const botId=this.state.selected,submission=this.state.draft.submission;
+    if(!submission||!botId||this.checking)return;
+    this.checking=true;
+    try{
+      const command=await this.api<{state:string;error:string|null}>('/api/commands/'+submission.id);
+      if(this.state.selected!==botId||this.state.draft.submission?.id!==submission.id)return;
+      const {id,text}=submission;
+      if(command.state==='completed'||command.state==='stopped'){this.save({...this.state.draft,submission:null});void this.refresh()}
+      else if(command.state==='failed'||command.state==='interrupted')this.save({...this.state.draft,submission:{id,text,kind:command.state,error:command.error}});
+      else this.save({...this.state.draft,submission:{id,text,kind:'pending'}});
+    }catch(e){
+      if(this.state.selected!==botId||this.state.draft.submission?.id!==submission.id)return;
+      if(e instanceof ApiError&&e.status===404){if(submission.kind!=='uncertain-busy')await this.submit(botId,submission);return}
+      if(submission.kind!=='uncertain-busy')this.save({...this.state.draft,submission:{id:submission.id,text:submission.text,kind:'unknown',error:String(e)}});
+    }finally{this.checking=false}
+  }
+  openSetup(){this.recoveries();this.update({setup:{kind:'create',name:'',instructions:'',provider:'',model:'',operationId:null,status:''}})}
   setupField(field:'name'|'instructions'|'provider'|'model',value:string){const setup=this.state.setup;if(setup.kind==='create'&&!setup.operationId)this.update({setup:{...setup,[field]:value}})}
   closeSetup(){this.update({setup:{kind:'closed'}})}
-  async create(retry=false){let s=this.state.setup;if(s.kind!=='create')return;if(!s.name.trim()){this.update({setup:{...s,status:'Enter a name for your agent.'}});return;}if(!s.operationId)s={...s,operationId:crypto.randomUUID()};const key=prefix+'creation:'+s.operationId;try{localStorage.setItem(key,JSON.stringify(s))}catch{this.update({setup:{...s,status:'Browser storage unavailable. Creation is blocked.'}});return}this.update({setup:{...s,status:retry?'Retrying the same operation.':'Creating…'}});try{const provider=s.provider===undefined?'codex':s.provider;const bot=await this.api<Bot>('/api/bots',{operationId:s.operationId,name:s.name,instructions:s.instructions,...(provider?{provider}:{}),...(s.model.trim()?{model:s.model.trim()}:{})});localStorage.removeItem(key);this.update({setup:{kind:'closed'},selected:bot.id,notice:'Agent created. Provider readiness has not been verified.'});this.loadDraft(bot.id);await this.refresh()}catch(e){this.update({setup:{...s,status:'Result may be uncertain. Your form is retained. Check status or retry the same operation. '+String(e)}})}}
-  async checkCreate(){const s=this.state.setup;if(s.kind!=='create'||!s.operationId)return;try{const bot=await this.api<Bot>('/api/bot-creations/'+s.operationId);localStorage.removeItem(prefix+'creation:'+s.operationId);this.update({setup:{kind:'closed'},selected:bot.id,notice:'Recovered the created agent.'});this.loadDraft(bot.id);await this.refresh()}catch(e){this.update({setup:{...s,status:'Status unavailable. A missing record does not prove an in-flight request cannot finish. '+String(e)}})}}
+  async create(retry=false){let s=this.state.setup;if(s.kind!=='create')return;if(!s.name.trim()){this.update({setup:{...s,status:'Enter a name for your agent.'}});return;}if(!s.operationId)s={...s,operationId:crypto.randomUUID()};const key=prefix+'creation:'+s.operationId;try{localStorage.setItem(key,JSON.stringify(s))}catch{this.update({setup:{...s,status:'Browser storage unavailable. Creation is blocked.'}});return}this.update({setup:{...s,status:retry?'Retrying the same operation.':'Creating…'}});try{const provider=s.provider===undefined?'codex':s.provider;const bot=await this.api<Bot>('/api/bots',{operationId:s.operationId,name:s.name,instructions:s.instructions,...(provider?{provider}:{}),...(s.model.trim()?{model:s.model.trim()}:{})});localStorage.removeItem(key);this.update({setup:{kind:'closed'},selected:bot.id,notice:'Agent created. Provider readiness has not been verified.'});sessionStorage.setItem('staf-selected-agent',bot.id);await this.loadDraft(bot.id);await this.refresh()}catch(e){this.update({setup:{...s,status:'Result may be uncertain. Your form is retained. Check status or retry the same operation. '+String(e)}})}}
+  async checkCreate(){const s=this.state.setup;if(s.kind!=='create'||!s.operationId)return;try{const bot=await this.api<Bot>('/api/bot-creations/'+s.operationId);localStorage.removeItem(prefix+'creation:'+s.operationId);this.update({setup:{kind:'closed'},selected:bot.id,notice:'Recovered the created agent.'});sessionStorage.setItem('staf-selected-agent',bot.id);await this.loadDraft(bot.id);await this.refresh()}catch(e){this.update({setup:{...s,status:'Status unavailable. A missing record does not prove an in-flight request cannot finish. '+String(e)}})}}
   recoverCreation(item:Recovery){try{const setup=JSON.parse(item.value);if(setup.kind==='create'&&typeof setup.operationId==='string')this.update({setup})}catch{this.update({notice:'Could not read creation record.'})}}
   async saveOpenRouter(key:string){await this.api('/api/openrouter-connection',{key});await this.refresh()}
   async disconnectOpenRouter(){await this.api('/api/openrouter-connection/disconnect',{});await this.refresh()}
-  async startAuth(){try{const result=await this.api<{id:string;url:string}>('/api/codex-auth/start',{});this.update({authUrl:result.url,notice:'Open Continue sign-in, then return here.'});await this.refresh()}catch(e){this.update({notice:'Sign-in could not start or its result is uncertain. Check current attempt. '+String(e)});await this.refresh()}}
-  async cancelAuth(){const attempt=this.state.authAttempt;if(!attempt)return;try{await this.api('/api/codex-auth/'+attempt.id+'/cancel',{});this.update({authUrl:''});await this.refresh()}catch(e){this.update({notice:String(e)})}}
-  async signOutAuth(){try{await this.api('/api/codex-auth/logout',{});this.update({authUrl:'',notice:'Codex sign-in removed from this instance.'});await this.refresh()}catch(e){this.update({notice:'Could not sign out. '+String(e)})}}
+  async startAuth(){try{const result=await this.api<{id:string;phase:string;url:string}>('/api/codex-auth/start',{});this.update({authAttempt:{id:result.id,phase:result.phase},authUrl:result.url,authUrlAttemptId:result.id,notice:'Open Continue sign-in, then return here.'});await this.refresh()}catch(e){this.update({authUrl:'',authUrlAttemptId:'',notice:'Sign-in could not start or its result is uncertain. Check the attempt below; cancel it before retrying if needed. '+String(e)});await this.refresh()}}
+  async cancelAuth(){const attempt=this.state.authAttempt;if(!attempt)return;try{await this.api('/api/codex-auth/'+attempt.id+'/cancel',{});this.update({authUrl:'',authUrlAttemptId:'',notice:'Sign-in cancellation requested.'});await this.refresh()}catch(e){this.update({notice:String(e)})}}
+  async signOutAuth(){try{await this.api('/api/codex-auth/logout',{});this.update({authUrl:'',authUrlAttemptId:'',notice:'Codex sign-in removed from this instance.'});await this.refresh()}catch(e){this.update({notice:'Could not sign out. '+String(e)})}}
   async botProfile(id:string){return this.api<BotProfile>('/api/bots/'+id)}
   async saveBotProfile(profile:BotProfile,edit:{name:string;provider:string;model:string;instructions:string}){await this.api('/api/bots/'+profile.id+'/profile',{revision:profile.revision,name:edit.name,description:profile.description,instructions:edit.instructions,provider:edit.provider,model:edit.model.trim()||null,reasoning:profile.reasoning});await this.refresh()}
   async setArchived(profile:BotProfile,archived:boolean){await this.api('/api/bots/'+profile.id+'/'+(archived?'archive':'restore'),{revision:profile.revision});await this.refresh()}

@@ -1,3 +1,4 @@
+import {routerStream} from './openrouter-fixture.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtemp,rm,readFile} from 'node:fs/promises';
@@ -59,7 +60,7 @@ test('context recomputes after resume without changing ledger, history, settings
 test('HTTP measurements show latest tool request, cache subset once and timestamps; reasoning output is not context delta',async t=>{
  const {openRouterProvider}=await import('../dist/providers.js');
  const root=await mkdtemp(join(tmpdir(),'staf-measured-context-'));t.after(()=>rm(root,{recursive:true,force:true}));const store=new Store(root),saved=await store.create();let calls=0;
- const provider=openRouterProvider({OPENROUTER_API_KEY:'dummy'},'test',async()=>{calls++;return Response.json({model:'reported-model',usage:{prompt_tokens:calls===1?100:170,prompt_tokens_details:{cached_tokens:calls===1?50:120},completion_tokens:1000,completion_tokens_details:{reasoning_tokens:900}},choices:[{message:calls===1?{role:'assistant',content:null,tool_calls:[{id:'clock',function:{name:'clock',arguments:'{}'}}]}:{role:'assistant',content:'short visible answer'}}]});});
+ const provider=openRouterProvider({OPENROUTER_API_KEY:'dummy'},'test',async()=>{calls++;return routerStream({model:'reported-model',usage:{prompt_tokens:calls===1?100:170,prompt_tokens_details:{cached_tokens:calls===1?50:120},completion_tokens:1000,completion_tokens_details:{reasoning_tokens:900}},message:calls===1?{role:'assistant',content:null,tool_calls:[{id:'clock',function:{name:'clock',arguments:'{}'}}]}:{role:'assistant',content:'short visible answer'}});});
  await runTurn({session:saved,store,provider,text:'time',clock:()=> 'fixed'});
  assert.equal(saved.usage.length,2);assert.equal(saved.usage[1].scope,'request');assert.ok(Number.isFinite(Date.parse(saved.usage[1].observedAt)));
  const status=contextStatus(saved,effective(),undefined,catalog),display=contextLine(status);

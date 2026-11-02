@@ -1,3 +1,4 @@
+import {routerStream} from './openrouter-fixture.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, readFile, rm, symlink } from 'node:fs/promises';
@@ -24,9 +25,9 @@ test('OpenRouter mock routes model, auth and tools, then resumes local history',
     assert.equal(init.headers.Authorization, 'Bearer dummy-secret');
     assert.equal(init.redirect, 'error');
     const body = JSON.parse(init.body); requests.push(body);
-    return Response.json({ choices: [{ message: body.messages.at(-1).role === 'tool'
+    return routerStream({message: body.messages.at(-1).role === 'tool'
       ? { role: 'assistant', content: 'The result is ready.' }
-      : { role: 'assistant', tool_calls: [{ id: 'clock1', type: 'function', function: { name: 'clock', arguments: '{}' } }] } }] });
+      : { role: 'assistant', tool_calls: [{ id: 'clock1', type: 'function', function: { name: 'clock', arguments: '{}' } }] }});
   };
   const provider = openRouterProvider({ OPENROUTER_API_KEY: 'dummy-secret' }, 'vendor/model', request);
   await runTurn({ store, session, provider, text: 'time' });
@@ -179,7 +180,7 @@ test('registry adapters share normalized event contract and explicitly reject un
   });
   const { lmStudioProvider, demoProvider } = await import('../dist/providers.js');
   const request = async () => Response.json({ choices: [{ message: { role: 'assistant', content: 'hello' } }] });
-  const adapters = [demoProvider, codex, openRouterProvider({ OPENROUTER_API_KEY: 'dummy' }, 'model', request), lmStudioProvider({}, 'model', request)];
+  const adapters = [demoProvider, codex, lmStudioProvider({}, 'model', request)];
   for (const provider of adapters) {
     const events = [];
     for await (const event of providerEvents(provider, [{ role: 'user', content: 'hi' }], [])) events.push(event);
@@ -323,4 +324,49 @@ test('OpenRouter cancellation closes an active local HTTP request', async () => 
     await arrival; controller.abort(); await assert.rejects(completion); await disconnect;
     assert.deepEqual(session.messages,[]);
   } finally {server.closeAllConnections(); await new Promise(resolve=>server.close(resolve));}
+});
+
+test('OpenRouter streams text, fragmented tool calls and reported usage', async () => {
+  const events = [
+    {choices:[{index:0,delta:{content:'Hello '},finish_reason:null}]},
+    {choices:[{index:0,delta:{content:'world',tool_calls:[{index:0,id:'call-1',type:'function',function:{name:'clock',arguments:'{'}}]},finish_reason:null}]},
+    {choices:[{index:0,delta:{tool_calls:[{index:0,function:{arguments:'}'}}]},finish_reason:'tool_calls'}]},
+    {choices:[],model:'vendor/model',usage:{prompt_tokens:3,completion_tokens:2,total_tokens:5}},
+  ];
+  const request = async (_url, init) => {
+    const body=JSON.parse(init.body); assert.equal(body.stream,true); assert.equal(body.stream_options.include_usage,true);
+    return new Response(events.map(e=>`data: ${JSON.stringify(e)}\n\n`).join('')+'data: [DONE]\n\n',{headers:{'Content-Type':'text/event-stream'}});
+  };
+  const provider=openRouterProvider({OPENROUTER_API_KEY:'dummy'},'vendor/model',request);
+  const received=[]; for await (const event of provider.stream([],[])) received.push(event);
+  assert.deepEqual(received.slice(0,2),[{type:'text_delta',text:'Hello '},{type:'text_delta',text:'world'}]);
+  assert.equal(received[2].message.content,'Hello world');
+  assert.deepEqual(received[2].message.tool_calls,[{id:'call-1',type:'function',function:{name:'clock',arguments:'{}'}}]);
+  assert.equal(received[2].message.usage.metrics.total,5);
+});
+
+test('OpenRouter rejects interrupted and provider-error streams without a final message', async () => {
+  for (const suffix of ['', 'data: {"error":{"message":"dummy secret"}}\n\n']) {
+    const provider=openRouterProvider({OPENROUTER_API_KEY:'dummy secret'},'vendor/model',async()=>new Response('data: {"choices":[{"index":0,"delta":{"content":"partial"},"finish_reason":null}]}\n\n'+suffix));
+    const received=[];
+    await assert.rejects(async()=>{for await(const event of provider.stream([],[])) received.push(event);},error=>!error.message.includes('dummy secret'));
+    assert.deepEqual(received,[{type:'text_delta',text:'partial'}]);
+  }
+});
+
+test('OpenRouter parses split UTF-8 SSE frames and rejects truncated tool calls and output limits', async () => {
+  const payload=': keepalive\r\n\r\ndata: '+JSON.stringify({choices:[{index:0,delta:{content:'café'},finish_reason:'stop'}]})+'\r\n\r\ndata: [DONE]\r\n\r\n';
+  const bytes=new TextEncoder().encode(payload);
+  const provider=openRouterProvider({OPENROUTER_API_KEY:'dummy'},'model',async()=>new Response(new ReadableStream({start(controller){for(const byte of bytes)controller.enqueue(Uint8Array.of(byte));controller.close();}})));
+  const events=[];for await(const event of provider.stream([],[]))events.push(event);
+  assert.equal(events.at(-1).message.content,'café');
+  for(const choice of [
+    {delta:{content:'partial'},finish_reason:'length'},
+    {delta:{refusal:'No'},finish_reason:'stop'},
+    {delta:{},finish_reason:'stop'},
+    {delta:{tool_calls:[{index:0,id:'call',type:'function',function:{name:'clock'}}]},finish_reason:'tool_calls'},
+  ]) {
+    const p=openRouterProvider({OPENROUTER_API_KEY:'dummy'},'model',async()=>new Response(`data: ${JSON.stringify({choices:[{index:0,...choice}]})}\n\ndata: [DONE]\n\n`));
+    const output=[];await assert.rejects(async()=>{for await(const event of p.stream([],[]))output.push(event);});assert.ok(!output.some(event=>event.type==='message'));
+  }
 });

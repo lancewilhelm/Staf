@@ -1,3 +1,4 @@
+import {routerStream} from './openrouter-fixture.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
@@ -64,7 +65,7 @@ test('reasoning changes actual HTTP payload/Codex arguments and session identity
  };
  const codex=await codexProvider('c',runner,'high');await codex.complete([],[]);assert.match(codex.name,/reasoning=high/);
  const store=new Store(dir),session=await store.create();
- await runTurn({store,session,provider:openRouterProvider({OPENROUTER_API_KEY:'dummy'},'test-model',async()=>Response.json({choices:[{message:{role:'assistant',content:'ok'}}]}),'high'),text:'hi'});
+ await runTurn({store,session,provider:openRouterProvider({OPENROUTER_API_KEY:'dummy'},'test-model',async()=>routerStream({message:{role:'assistant',content:'ok'}}),'high'),text:'hi'});
  await assert.rejects(runTurn({store,session:await store.load(session.id),provider:{name:'openrouter:test-model',complete:async()=>{throw Error('must not run');}},text:'again'}),/must not run/);
  assert.ok(!(await readFile(store.path(session.id),'utf8')).includes('dummy'));
 });

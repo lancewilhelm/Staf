@@ -50,9 +50,9 @@ export class Instance {
     const hasProfiles = this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='bot_profiles'").get();
     const versionRow = this.db.prepare('PRAGMA user_version').get();
     const version = Number(versionRow?.user_version ?? 0);
-    if (version > 28) throw new Error('Database version is newer than this Staf');
-    if (hasBots && version < 28 && path !== ':memory:') {
-      this.migrationBackup = `${path}.before-${version < 2 ? 'profiles' : version < 3 ? 'tasks' : version < 4 ? 'approvals' : version < 5 ? 'task-inbox' : version < 6 ? 'memory' : version < 7 ? 'memory-confirmation' : version < 8 ? 'skills' : version < 9 ? 'schedules' : version < 10 ? 'schedule-retries' : version < 11 ? 'schedule-lineage' : version < 12 ? 'bot-description' : version < 13 ? 'delegation-scope' : version < 14 ? 'collaboration' : version < 15 ? 'disclosure' : version < 16 ? 'chat-tasks' : version < 17 ? 'creation-defaults' : version < 18 ? 'web-actions' : version < 19 ? 'search-actions' : version < 20 ? 'scratch-shell' : version < 21 ? 'approval-grants' : version < 22 ? 'schedule-web-scope' : version < 23 ? 'schedule-search-scope' : version < 24 ? 'schedule-shell-scope' : version < 25 ? 'main-bot' : version < 26 ? 'command-events' : version < 27 ? 'bot-creation' : 'response-progress'}-${randomUUID()}.sqlite`;
+    if (version > 29) throw new Error('Database version is newer than this Staf');
+    if (hasBots && version < 29 && path !== ':memory:') {
+      this.migrationBackup = `${path}.before-${version < 2 ? 'profiles' : version < 3 ? 'tasks' : version < 4 ? 'approvals' : version < 5 ? 'task-inbox' : version < 6 ? 'memory' : version < 7 ? 'memory-confirmation' : version < 8 ? 'skills' : version < 9 ? 'schedules' : version < 10 ? 'schedule-retries' : version < 11 ? 'schedule-lineage' : version < 12 ? 'bot-description' : version < 13 ? 'delegation-scope' : version < 14 ? 'collaboration' : version < 15 ? 'disclosure' : version < 16 ? 'chat-tasks' : version < 17 ? 'creation-defaults' : version < 18 ? 'web-actions' : version < 19 ? 'search-actions' : version < 20 ? 'scratch-shell' : version < 21 ? 'approval-grants' : version < 22 ? 'schedule-web-scope' : version < 23 ? 'schedule-search-scope' : version < 24 ? 'schedule-shell-scope' : version < 25 ? 'main-bot' : version < 26 ? 'command-events' : version < 27 ? 'bot-creation' : version < 28 ? 'response-progress' : 'response-stop'}-${randomUUID()}.sqlite`;
       const previousUmask = process.umask(0o077);
       try { this.db.prepare('VACUUM INTO ?').run(this.migrationBackup); }
       finally { process.umask(previousUmask); }
@@ -122,7 +122,8 @@ export class Instance {
     if(version < 26)this.db.exec('CREATE TABLE IF NOT EXISTS command_runtime_events (seq INTEGER PRIMARY KEY AUTOINCREMENT, command_id TEXT NOT NULL REFERENCES commands(id), type TEXT NOT NULL, name TEXT NOT NULL, success INTEGER)');
     if(version < 27)this.db.exec('CREATE TABLE IF NOT EXISTS bot_creation_operations (id TEXT PRIMARY KEY, digest TEXT NOT NULL, bot_id TEXT NOT NULL REFERENCES bots(id))');
     if(version < 28)this.db.exec("CREATE TABLE IF NOT EXISTS response_progress (command_id TEXT PRIMARY KEY REFERENCES commands(id), text TEXT NOT NULL DEFAULT '')");
-    this.db.exec('PRAGMA user_version=28');
+    if(version < 29)this.db.exec("CREATE TABLE IF NOT EXISTS response_stops (command_id TEXT PRIMARY KEY REFERENCES commands(id))");
+    this.db.exec('PRAGMA user_version=29');
     for (const row of this.db.prepare("SELECT id,bot_id FROM task_attempts WHERE state IN ('queued','running','stopping','waiting') ORDER BY rowid").all()) {
       if (typeof row.id !== 'string' || typeof row.bot_id !== 'string') throw Error('Invalid interrupted task');
       this.cancelTaskInputs(row.id);
@@ -835,9 +836,27 @@ export class Instance {
   messages(botId: string) { return this.db.prepare('SELECT id, role, content FROM messages WHERE bot_id=? ORDER BY seq').all(botId); }
   hasBot(botId:string) {return !!this.botIdentity(botId);}
   command(id: string) { return this.db.prepare('SELECT id, bot_id AS botId, content, state, error FROM commands WHERE id=?').get(id); }
-  responseProgress(id:string) {return this.db.prepare("SELECT c.id,c.bot_id AS botId,CASE WHEN c.state='pending' THEN CASE WHEN p.command_id IS NULL THEN 'accepted' ELSE 'running' END ELSE c.state END AS state,COALESCE(p.text,'') AS text,c.error FROM commands c LEFT JOIN response_progress p ON p.command_id=c.id WHERE c.id=?").get(id);}
+  responseProgress(id:string) {return this.db.prepare("SELECT c.id,c.bot_id AS botId,CASE WHEN c.state='pending' THEN CASE WHEN EXISTS(SELECT 1 FROM response_stops s WHERE s.command_id=c.id) THEN 'stopping' WHEN p.command_id IS NULL THEN 'accepted' ELSE 'running' END ELSE c.state END AS state,COALESCE(p.text,'') AS text,c.error FROM commands c LEFT JOIN response_progress p ON p.command_id=c.id WHERE c.id=?").get(id);}
   latestResponse(botId:string) {const row=this.db.prepare('SELECT id FROM commands WHERE bot_id=? ORDER BY rowid DESC LIMIT 1').get(botId);return typeof row?.id==='string'?this.responseProgress(row.id):null;}
   updateResponse(id:string,text:string) {this.db.prepare("INSERT INTO response_progress(command_id,text) SELECT id,? FROM commands WHERE id=? AND state='pending' ON CONFLICT(command_id) DO UPDATE SET text=excluded.text").run(text,id);}
+  requestResponseStop(id:string) {
+    const command=this.command(id);
+    if(!command)return null;
+    if(command.state==='pending')this.db.prepare('INSERT OR IGNORE INTO response_stops(command_id) VALUES (?)').run(id);
+    return this.responseProgress(id);
+  }
+  responseStopping(id:string) {return !!this.db.prepare('SELECT 1 FROM response_stops WHERE command_id=?').get(id);}
+  settleResponseStop(id:string) {
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const command=this.command(id),progress=this.responseProgress(id);
+      if(command?.state==='pending' && this.responseStopping(id) && typeof command.botId==='string') {
+        this.db.prepare("INSERT INTO messages VALUES (?, ?, 'assistant_stopped', ?, (SELECT COALESCE(MAX(seq),0)+1 FROM messages WHERE bot_id=?))").run(randomUUID(),command.botId,String(progress?.text ?? ''),command.botId);
+        this.db.prepare("UPDATE commands SET state='stopped',error=NULL WHERE id=? AND state='pending'").run(id);
+      }
+      this.db.exec('COMMIT');
+    } catch(error) {this.db.exec('ROLLBACK');throw error;}
+  }
   commandRuntimeEvent(id:string, event:{type:'tool_start'|'tool_result';name:string;success?:boolean}) {
     this.db.prepare('INSERT INTO command_runtime_events (command_id,type,name,success) VALUES (?,?,?,?)').run(id,event.type,event.name,event.success === undefined ? null : Number(event.success));
   }
@@ -875,7 +894,7 @@ export class Instance {
       this.db.prepare('INSERT INTO command_fingerprints VALUES (?, ?)').run(input.id, digest);
       this.db.prepare('INSERT INTO command_profiles VALUES (?, ?)').run(input.id, JSON.stringify(bot));
       this.db.prepare('INSERT INTO command_notices SELECT ?,message_id FROM task_notices WHERE bot_id=? AND delivered=0').run(input.id,input.botId);
-      this.db.prepare("INSERT INTO messages VALUES (?, ?, 'user', ?, (SELECT COALESCE(MAX(seq),0)+1 FROM messages WHERE bot_id=?))").run(randomUUID(), input.botId, visibleContent, input.botId);
+      this.db.prepare("INSERT INTO messages VALUES (?, ?, 'user', ?, (SELECT COALESCE(MAX(seq),0)+1 FROM messages WHERE bot_id=?))").run('command-user-'+input.id, input.botId, visibleContent, input.botId);
       this.db.exec('COMMIT'); return {kind: 'accepted' as const};
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
   }
@@ -913,19 +932,19 @@ export class Instance {
       if (input) this.memories.create(input);
       if (proposal?.kind === 'propose') {
         this.db.prepare("INSERT INTO memory_proposals VALUES (?,?,?,'pending')").run(id,command.botId,proposal.text);
-        reply=`Proposed shared user memory: ${JSON.stringify(proposal.text)}\nALL bots will see this memory. Nothing has been saved to active memory yet. To save exactly this text, say: Confirm shared memory ${id}\nTo discard it, say: Cancel shared memory ${id}`;
+        reply=`Proposed shared user memory: ${JSON.stringify(proposal.text)}\nALL agents will see this memory. Nothing has been saved to active memory yet. To save exactly this text, say: Confirm shared memory ${id}\nTo discard it, say: Cancel shared memory ${id}`;
       } else if (proposal) {
         const row=this.db.prepare('SELECT text,state FROM memory_proposals WHERE id=? AND bot_id=?').get(proposal.id,command.botId);
-        if (!row) reply='No matching shared memory proposal for this bot. No changes were made.';
+        if (!row) reply='No matching shared memory proposal for this agent. No changes were made.';
         else if (row.state === 'confirmed') reply='That shared memory proposal was already confirmed. No new memory was created.';
         else if (row.state === 'cancelled') reply='That shared memory proposal was cancelled. No changes were made.';
         else if (row.state !== 'pending' || typeof row.text !== 'string') throw Error('Invalid memory proposal');
         else if (proposal.kind === 'cancel') {this.db.prepare("UPDATE memory_proposals SET state='cancelled',text=NULL WHERE id=? AND state='pending'").run(proposal.id); reply='Shared memory proposal cancelled. No memory was saved.';}
-        else {this.memories.create({scope:{kind:'user'},text:row.text}); this.db.prepare("UPDATE memory_proposals SET state='confirmed',text=NULL WHERE id=? AND state='pending'").run(proposal.id);reply='Confirmed and saved to shared user memory. All bots can retrieve it.';}
+        else {this.memories.create({scope:{kind:'user'},text:row.text}); this.db.prepare("UPDATE memory_proposals SET state='confirmed',text=NULL WHERE id=? AND state='pending'").run(proposal.id);reply='Confirmed and saved to shared user memory. All agents can retrieve it.';}
       }
       if (operation) {
         const entries=this.memories.list(operation.scope);
-        const label=operation.scope.kind === 'user' ? 'shared user memory' : 'this bot’s memory';
+        const label=operation.scope.kind === 'user' ? 'shared user memory' : 'this agent’s memory';
         if (operation.kind === 'list') reply=entries.length ? `Entries in ${label}: ` + entries.map(item=>`${item.id} (version ${item.version}): ${item.text}`).join('\n') : `There are no entries in ${label}.`;
         else {
           const target=entries.find(item=>item.id === operation.id);
@@ -949,7 +968,7 @@ export class Instance {
     this.db.exec('BEGIN IMMEDIATE');
     try {
       const command = this.command(id);
-      if (!command || command.state !== 'pending' || typeof command.botId !== 'string') throw Error('Command is not pending');
+      if (!command || command.state !== 'pending' || this.responseStopping(id) || typeof command.botId !== 'string') throw Error('Command is not pending');
       this.db.prepare('INSERT INTO sessions VALUES (?,?) ON CONFLICT(bot_id) DO UPDATE SET session=excluded.session').run(command.botId,JSON.stringify(session));
       if (success) {
         const answer=session.messages.at(-1);

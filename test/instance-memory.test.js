@@ -17,7 +17,7 @@ test('paired clients manage isolated and shared memory across restart and retrie
   const onePath=`/api/memories/bot/${one.id}`, twoPath=`/api/memories/bot/${two.id}`;
   await call('/api/commands',a,{id:'remember-one',botId:one.id,content:'Please remember that I like plums'});
   assert.equal((await call(onePath,b))[1][0].text,'I like plums');
-  assert.match(JSON.stringify((await call(`/api/bots/${one.id}/messages`,a))[1]),/Saved to this bot/);
+  assert.match(JSON.stringify((await call(`/api/bots/${one.id}/messages`,a))[1]),/Saved to this agent/);
   await call('/api/commands',a,{id:'remember-shared',botId:one.id,content:'Remember for all bots: I like tea'});
   assert.equal((await call('/api/memories/user',b))[1].length,0);
   await call('/api/commands',a,{id:'confirm-shared',botId:one.id,content:'Confirm shared memory remember-shared'});
@@ -115,7 +115,7 @@ test('shared proposals require exact owner confirmation, survive restart, cancel
   const send=(id,botId,content)=>call('/api/commands',token,{id,botId,content});
   await send('secret-proposal',one.id,'Remember for all bots: keep this secret from Alice');
   assert.deepEqual((await call('/api/memories/user',token))[1],[]);
-  assert.match((await call(`/api/bots/${one.id}/messages`,token))[1].at(-1).content,/ALL bots will see[\s\S]*secret-proposal/);
+  assert.match((await call(`/api/bots/${one.id}/messages`,token))[1].at(-1).content,/ALL agents will see[\s\S]*secret-proposal/);
   await send('wrong-bot',two.id,'Confirm shared memory secret-proposal');assert.deepEqual((await call('/api/memories/user',token))[1],[]);
   await send('not-exact',one.id,'Confirm shared memory secret-proposal please');assert.deepEqual((await call('/api/memories/user',token))[1],[]);
   await send('model-only',one.id,'hello');for(let i=0;i<100 && (await call('/api/commands/model-only',token))[1].state==='pending';i++)await new Promise(r=>setTimeout(r,5));assert.deepEqual((await call('/api/memories/user',token))[1],[]);
@@ -146,4 +146,23 @@ test('descriptive memory requests preview exact scope without mutation and retai
   await call(`${ownPath}/${own.id}/edit`,token,{version:1,text:'Green tea updated'});const stale=await send('stale',`Forget memory ${own.id} version 1 in this bot memory`);assert.match(stale,/changed.*No changes/i);assert.equal((await call(ownPath,token))[1][0].text,'Green tea updated');
   await send('proposal','Remember for all bots: Shared preference');assert.ok(!(await call('/api/memories/user',token))[1].some(item=>item.text==='Shared preference'));await send('confirm','Confirm shared memory proposal');assert.ok((await call('/api/memories/user',token))[1].some(item=>item.text==='Shared preference'));
  }finally{await app.close();}
+});
+
+test('agent memory language preserves scope and retains bot phrasing compatibility', async () => {
+ const app=startInstance(':memory:',0,{env:{}}),port=await app.listen();
+ const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return [r.status,await r.json()]};
+ try {
+  const token=(await call('/api/pair','',{code:app.code}))[1].token, agent=(await call('/api/bots',token,{name:'Botanist bot'}))[1];
+  const send=async(id,content)=>{await call('/api/commands',token,{id,botId:agent.id,content});return (await call(`/api/bots/${agent.id}/messages`,token))[1].at(-1).content};
+  assert.match(await send('own-agent','Remember for this agent: I like tea'),/this agent.s memory/);
+  const own=(await call(`/api/memories/bot/${agent.id}`,token))[1];assert.equal(own[0].text,'I like tea');
+  assert.match(await send('find-agent','Find memories about tea in this agent memory'),/I like tea/);
+  assert.match(await send('list-agent','List memories in this agent memory'),/I like tea/);
+  assert.match(await send('shared-agent','Remember for all agents: I like coffee'),/ALL agents will see/);
+  assert.equal((await call('/api/memories/user',token))[1].length,0);
+  await send('confirm-agent','Confirm shared memory shared-agent');assert.equal((await call('/api/memories/user',token))[1][0].text,'I like coffee');
+  assert.match(await send('exclude-agent','Remember for all agents except Alice: private'),/clarify|What should I remember/i);
+  assert.equal((await call('/api/memories/user',token))[1].length,1);
+  await send('legacy-bot','Remember for this bot: legacy phrase');assert.ok((await call(`/api/memories/bot/${agent.id}`,token))[1].some(item=>item.text==='legacy phrase'));
+ } finally {await app.close()}
 });

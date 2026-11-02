@@ -7,6 +7,51 @@ import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { directCodexProvider } from '../dist/codex-direct.js';
 import { streamingRedactor } from '../dist/config.js';
+import { openRouterProvider } from '../dist/providers.js';
+
+test('interactive terminal shows held OpenRouter chunks as provisional before completion', async () => {
+  const dir=mkdtempSync(join(tmpdir(),'staf-terminal-router-'));let release,child;
+  const gate=new Promise(resolve=>{release=resolve});
+  const frame=value=>'data: '+JSON.stringify(value)+'\n\n';
+  const providerFactory=async()=>openRouterProvider({OPENROUTER_API_KEY:'synthetic-secret'},'fixture/model',async()=>new Response(new ReadableStream({async start(controller){
+    const send=value=>controller.enqueue(new TextEncoder().encode(value));
+    send(frame({choices:[{index:0,delta:{content:'First provisional router chunk. '},finish_reason:null}]}));
+    await gate;send(frame({choices:[{index:0,delta:{content:'Router finished.'},finish_reason:'stop'}]}));send('data: [DONE]\n\n');controller.close();
+  }})));
+  const app=startInstance(join(dir,'db'),0,{providerFactory,env:{OPENROUTER_API_KEY:'synthetic-secret'}}),port=await app.listen();
+  const call=async(route,token,body)=>{const res=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return res.json();};
+  try{
+    const token=(await call('/api/pair','',{code:app.code})).token,credential=join(dir,'client.json');writeFileSync(credential,JSON.stringify({token}));
+    const bot=await call('/api/main-bot',token,{});await call(`/api/bots/${bot.id}/profile`,token,{...bot,provider:'openrouter',model:'fixture/model'});
+    child=spawn(process.execPath,['dist/cli.js','--instance',`http://127.0.0.1:${port}`,'--credential',credential,'--data-dir',dir],{stdio:['pipe','pipe','pipe']});let out='',err='';child.stdout.on('data',chunk=>out+=chunk);child.stderr.on('data',chunk=>err+=chunk);
+    child.stdin.write('stream now\n');
+    for(let i=0;i<120&&!out.includes('First provisional router chunk.');i++)await new Promise(resolve=>setTimeout(resolve,25));
+    assert.match(out,/staf \(provisional\)> First provisional router chunk\./,err);assert.doesNotMatch(out,/Router finished\./);assert.doesNotMatch(out,/synthetic-secret/);
+    release();for(let i=0;i<120&&!out.includes('Router finished.');i++)await new Promise(resolve=>setTimeout(resolve,25));assert.match(out,/Router finished\./);assert.equal(out.split('First provisional router chunk.').length-1,1,'streamed text is not repeated after completion');
+    child.stdin.end('/quit\n');await new Promise(resolve=>child.once('exit',resolve));child=undefined;
+  }finally{release();child?.kill();await app.close();rmSync(dir,{recursive:true,force:true});}
+});
+
+test('interactive terminal shows stopped partial output for another client response', async () => {
+  const dir=mkdtempSync(join(tmpdir(),'staf-terminal-foreign-stop-'));let child;
+  const providerFactory=async()=>({name:'fixture',capabilities:{toolCalls:true,incrementalText:true,transport:'responses'},async *stream(_messages,_tools,{signal}){
+    yield {type:'text_delta',text:'Partial output before cancellation.'};
+    await new Promise(resolve=>signal.aborted?resolve():signal.addEventListener('abort',resolve,{once:true}));signal.throwIfAborted();
+  },async complete(){throw Error('unexpected');}});
+  const app=startInstance(join(dir,'db'),0,{providerFactory,env:{}}),port=await app.listen();
+  const call=async(route,token,body)=>{const res=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return res.json();};
+  try{
+    const token=(await call('/api/pair','',{code:app.code})).token,credential=join(dir,'client.json');writeFileSync(credential,JSON.stringify({token}));
+    const bot=await call('/api/main-bot',token,{});await call('/api/commands',token,{id:'foreign-stream',botId:bot.id,content:'start elsewhere'});
+    for(let i=0;i<100;i++){if((await call('/api/commands/foreign-stream',token)).responseProgress?.text.includes('Partial output'))break;await new Promise(resolve=>setTimeout(resolve,10));}
+    child=spawn(process.execPath,['dist/cli.js','--instance',`http://127.0.0.1:${port}`,'--credential',credential,'--data-dir',dir],{stdio:['pipe','pipe','pipe']});let out='',err='';child.stdout.on('data',chunk=>out+=chunk);child.stderr.on('data',chunk=>err+=chunk);child.stdin.write('/status foreign-stream\n');
+    for(let i=0;i<160&&!out.includes('staf (provisional)> Partial output before');i++)await new Promise(resolve=>setTimeout(resolve,25));
+    assert.match(out,/staf \(provisional\)> Partial output before/,err);child.stdin.write('/stop\n');
+    for(let i=0;i<160&&!out.includes('staf (stopped)>');i++)await new Promise(resolve=>setTimeout(resolve,25));
+    assert.match(out,/Command foreign-stream: stopped/,err);assert.match(out,/staf \(stopped\)> Response stopped\./);assert.equal(out.split('Partial output before').length-1,1,'streamed text is not repeated after Stop');
+    child.stdin.end('/quit\n');await new Promise(resolve=>child.once('exit',resolve));child=undefined;
+  }finally{child?.kill();await app.close();rmSync(dir,{recursive:true,force:true});}
+});
 
 test('progress withholds only a possible credential suffix, including escaped credentials', () => {
   const secret='synthetic"credential with spaces';
