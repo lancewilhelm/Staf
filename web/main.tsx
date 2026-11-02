@@ -57,22 +57,16 @@ function InstructionsHelp(){
 function BotModelSettings({id,onClose,onOpenSettings,saving,setSaving,credential,openrouter}:{id:string;onClose:()=>void;onOpenSettings:()=>void;saving:boolean;setSaving:(saving:boolean)=>void;credential:Workspace['credential'];openrouter:Workspace['openrouter']}){
   const [profile,setProfile]=useState<BotProfile|null>(null);
   const [name,setName]=useState('');
-  const [provider,setProvider]=useState('');
-  const [model,setModel]=useState('');
   const [instructions,setInstructions]=useState('');
   const [status,setStatus]=useState('');
   const [compareAvailable,setCompareAvailable]=useState(false);
   const [latest,setLatest]=useState<BotProfile|null>(null);
-  const providers=[{id:'demo',label:'Demo',available:true,status:''},{id:'codex',label:'Codex',available:credential==='signed-in',status:credential==='unknown'?'checking':'disconnected'},{id:'openrouter',label:'OpenRouter',available:openrouter==='saved',status:openrouter==='unknown'?'checking':openrouter==='error'?'status unavailable':'disconnected'},{id:'lmstudio',label:'LM Studio',available:false,status:'not managed in Settings'},{id:'live',label:'HTTP compatible',available:false,status:'not managed in Settings'}];
-  const available=(id:string)=>providers.some(item=>item.id===id&&item.available);
-  useEffect(()=>{let active=true;void app.botProfile(id).then(p=>{if(active){setProfile(p);setName(p.name);setProvider(p.provider);setModel(p.model||'');setInstructions(p.instructions)}}).catch(e=>{if(active)setStatus('Could not load agent settings. '+String(e))});return()=>{active=false}},[id]);
+  useEffect(()=>{let active=true;void app.botProfile(id).then(p=>{if(active){setProfile(p);setName(p.name);setInstructions(p.instructions)}}).catch(e=>{if(active)setStatus('Could not load agent settings. '+String(e))});return()=>{active=false}},[id]);
   async function save(){
     if(!profile)return;
     if(!name.trim()){setStatus('Enter a name for this agent.');return}
-    if(provider!==profile.provider&&!available(provider)){setStatus('Connect the selected provider in global Settings before saving. Your edits are retained.');return}
-    if(provider!==profile.provider&&!window.confirm('Changing the provider may send this conversation history to the new provider. Continue?'))return;
     setSaving(true);setStatus('');setLatest(null);
-    try{await app.saveBotProfile(profile,{name,provider,model,instructions});onClose()}catch(e){setCompareAvailable(true);setStatus('The save failed or its result is uncertain. Your edits are retained. Compare the current settings before retrying. '+String(e))}finally{setSaving(false)}
+    try{await app.saveBotProfile(profile,{name,provider:profile.provider,model:profile.model??'',instructions});onClose()}catch(e){setCompareAvailable(true);setStatus('The save failed or its result is uncertain. Your edits are retained. Compare the current settings before retrying. '+String(e))}finally{setSaving(false)}
   }
   async function compare(){
     setSaving(true);
@@ -86,7 +80,7 @@ function BotModelSettings({id,onClose,onOpenSettings,saving,setSaving,credential
     try{await app.setArchived(profile,true);onClose()}catch(e){setCompareAvailable(true);setStatus('Could not archive the agent, or the result is uncertain. Compare the current settings before retrying. '+String(e))}finally{setSaving(false)}
   }
   return <div className="setup"><span className="eyebrow">AGENT SETTINGS</span><h2>{profile?.name||'Agent settings'}</h2>
-    {profile&&<><p>Provider connections are shared by the instance. A saved connection does not verify account or model access.</p><label>Name<input disabled={saving} value={name} onChange={e=>setName(e.target.value)}/></label><ProviderPicker app={app} id={id} disabled={saving} onProfile={p=>{setProfile(p);setProvider(p.provider);setModel(p.model??'')}}/><button disabled={saving} className="quiet" onClick={onOpenSettings}>Open provider settings</button><label>Instructions<textarea disabled={saving} value={instructions} onChange={e=>setInstructions(e.target.value)}/></label><InstructionsHelp/><p className="meta">Configuration: <code>{profile.configDir}</code></p><div className="row"><button disabled={saving} onClick={()=>void save()}>Save settings</button><button disabled={saving} className="quiet" onClick={onClose}>Cancel</button></div></>}
+    {profile&&<><p>Provider connections are shared by the instance. A saved connection does not verify account or model access.</p><label>Name<input disabled={saving} value={name} onChange={e=>setName(e.target.value)}/></label><ProviderPicker app={app} id={id} disabled={saving} onProfile={setProfile}/><button disabled={saving} className="quiet" onClick={onOpenSettings}>Open provider settings</button><label>Instructions<textarea disabled={saving} value={instructions} onChange={e=>setInstructions(e.target.value)}/></label><InstructionsHelp/><p className="meta">Configuration: <code>{profile.configDir}</code></p><div className="row"><button disabled={saving} onClick={()=>void save()}>Save settings</button><button disabled={saving} className="quiet" onClick={onClose}>Cancel</button></div></>}
     {profile&&!profile.archived&&<button disabled={saving} className="quiet" onClick={()=>void archive()}>Archive agent</button>}
     <p role="status">{saving?'Loading or saving…':status}</p>
     {compareAvailable&&<button disabled={saving} className="quiet" onClick={()=>void compare()}>Compare latest settings</button>}
