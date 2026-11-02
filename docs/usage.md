@@ -247,8 +247,13 @@ if no command is found, resubmitted using the same ID. A failure or busy rejecti
 remains beside the message with Retry and Dismiss; a newer draft is retained.
 If a retry finds the agent busy while the original request may still arrive,
 the message cannot be dismissed and any retry keeps the original ID.
-Earlier session records can be recovered in Settings. Clearing browser storage
-removes locally saved drafts and pending IDs. The former Advanced page has been
+Obsolete pre-journal browser records are deleted without importing them. Current
+journal records, including records owned by other open tabs and recoverable closed-tab
+drafts, are retained; there is no manual earlier-record picker. An unfinished agent
+creation is restored automatically after refresh or reopening a tab, with the same
+operation ID for Check creation or Retry same creation. A live tab keeps ownership
+of its creation record. Clearing browser storage removes locally saved drafts,
+pending IDs, and unfinished creation records. The former Advanced page has been
 retired. Profile, permission, memory, skill, schedule, and task management are
 not yet fully available in the workspace; the service and CLI operations below
 remain available.

@@ -159,6 +159,11 @@ For retry-safe creation, clients supply an `operationId`;
 operation ID with different input conflicts. The transaction copies remaining
 creation defaults into the new bot. The version 27 migration adds the creation
 journal after a database backup. These operations do not change existing bots.
+The workspace automatically restores an unfinished creation using its original
+operation ID, guarded by a browser Web Lock. Check creation and Retry same creation
+use that ID. Manual earlier-record pickers are removed. Only the obsolete
+`staf-draft` and `staf-pending` browser keys are deleted; the current
+`staf-workspace-v1:` automatic recovery journal remains intact.
 
 Shared-instance Codex sign-in uses `POST /api/codex-auth/start`, `GET /api/codex-auth/current`, `GET /api/codex-auth/ATTEMPT_ID`, `POST /api/codex-auth/ATTEMPT_ID/cancel`, and `GET /api/codex-auth/credential`, and `POST /api/codex-auth/logout`. The initiating paired client owns an attempt and can recover its status and cancel it after a page refresh. Other paired clients cannot inspect it. The OAuth callback is a loopback route at `/auth/callback`; it does not expose callback parameters in its response. Cancellation, client revocation, expiry, and shutdown prevent a pending commit. Synthetic tests cover these boundaries; live sign-in is unverified.
 
