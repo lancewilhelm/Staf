@@ -31,8 +31,10 @@ try{
  await until(()=>evaluate("document.body.innerText.includes('Pair this browser')"),'pair page');
  await evaluate(`window.testInput=(selector,value)=>{const el=document.querySelector(selector);Object.getOwnPropertyDescriptor(el.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,'value').set.call(el,value);el.dispatchEvent(new Event('input',{bubbles:true}))}; window.testClick=text=>{const b=[...document.querySelectorAll('button')].find(x=>x.textContent.trim()===text);if(!b)throw Error('Missing button '+text);b.click()}`);
  await act(`testInput('input',${JSON.stringify(code)});testClick('Pair')`,"document.body.innerText.includes('Providers') && document.body.innerText.includes('Connect Codex')",'pair browser and open global provider setup');
+ assert.equal(await evaluate("document.querySelector('.brand span').textContent"),'STAF','product wordmark');
+ assert.equal(await evaluate("[...document.querySelectorAll('.setup button')].some(b=>b.textContent==='Create an agent')"),false,'creation belongs in sidebar');
  assert.equal(await evaluate("!![...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('New agent'))"),true,'agent creation is discoverable in navigation');
- assert.equal(await evaluate("document.querySelector('nav[aria-labelledby=agents-label]')?.getAttribute('aria-labelledby')==='agents-label' && document.querySelector('#agents-label')?.textContent==='Your agents'"),true,'navigation has an agent accessible name');
+ assert.equal(await evaluate("document.querySelector('nav[aria-labelledby=agents-label]')?.getAttribute('aria-labelledby')==='agents-label' && document.querySelector('#agents-label')?.textContent==='Agents'"),true,'navigation has an agent accessible name');
  await cdp('Emulation.setEmulatedMedia',{features:[{name:'prefers-color-scheme',value:'light'}]});
  assert.equal(await evaluate("document.querySelector('input[name=appearance][value=system]')?.checked"),true,'fresh browser defaults to System');
  assert.equal(await evaluate("getComputedStyle(document.documentElement).colorScheme"),'light');
@@ -89,7 +91,7 @@ try{
  await evaluate("(async()=>{const state=new URL([...document.querySelectorAll('a')].find(a=>a.textContent==='Continue sign-in').href).searchParams.get('state');await fetch('/auth/callback?code=fail&state='+encodeURIComponent(state))})()");
  await until(()=>evaluate("document.body.innerText.includes('Sign-in failed')"),'show synthetic sign-in failure');
  assert.equal(await evaluate("!![...document.querySelectorAll('a')].find(a=>a.textContent==='Continue sign-in')"),false,'completed attempt must not retain its sign-in link');
- await act("testClick('Create an agent')","document.body.innerText.includes('Create your agent')",'create agent without connecting');
+ await act("[...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('New agent')).click()","document.body.innerText.includes('Create your agent')",'create agent without connecting');
  await evaluate("testInput('.setup input','Mira');testInput('.setup textarea','Help me plan');document.querySelector('.setup select').value='codex';document.querySelector('.setup select').dispatchEvent(new Event('change',{bubbles:true}));testInput('.setup input[placeholder]','fixture-model');testClick('Create agent')");
  await until(()=>evaluate("document.body.innerText.includes('Agent created.') && !!document.querySelector('[aria-label=Message]')"),'create agent');
  const bot=await evaluate("(async()=>{let t=localStorage.getItem('staf-token');return (await (await fetch('/api/bots',{headers:{Authorization:'Bearer '+t}})).json())[0]})()");assert.equal(bot.name,'Mira');assert.equal(bot.provider,'codex');assert.equal(bot.model,'fixture-model');console.log('PASS create Codex agent without connecting');
@@ -320,7 +322,7 @@ try{
  assert.deepEqual(await evaluate("[...document.querySelectorAll('.side nav .agent-id')].map(e=>[e.textContent.trim(),getComputedStyle(e).fontStyle])"),[['· '+bot.id.slice(-4),'italic'],['· '+duplicate.id.slice(-4),'italic']]);
  assert.equal(await evaluate(`document.querySelector('.side nav').textContent.includes(${JSON.stringify(bot.id)}) || document.querySelector('.side nav').textContent.includes(${JSON.stringify(duplicate.id)})`),false);
  assert.equal(await evaluate("[...document.querySelectorAll('.side nav .agent-id')].every(e=>getComputedStyle(e).color!==getComputedStyle(e.parentElement).color)"),true,'agent suffixes are subdued');
- assert.equal(await evaluate("document.querySelector('nav[aria-labelledby=agents-label]')?.previousElementSibling?.textContent"),'Your agents');
+ assert.equal(await evaluate("document.querySelector('#agents-label')?.textContent"),'Agents');
  assert.equal(await evaluate("document.querySelector('.side nav').compareDocumentPosition([...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('Updates'))) & Node.DOCUMENT_POSITION_FOLLOWING"),4);
  await evaluate("testInput('[aria-label=Message]','Draft for first agent')");
  await evaluate("document.querySelectorAll('.side nav button')[1].focus()");
@@ -364,7 +366,7 @@ try{
  await mkdir(join(temp,'auth'),{recursive:true,mode:0o700});
  await writeFile(join(temp,'auth','codex-direct.json'),JSON.stringify({version:1,issuer:'https://auth.openai.com',subject:'synthetic',clientId:'synthetic-client',hostId:'synthetic-host',accessToken:'synthetic',refreshToken:'synthetic',idToken:'synthetic',scopes:['resource.invoke','chatgpt.tokens.use.direct'],expiresAt:Date.now()+3600000}),{mode:0o600});
  await act("[...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('Settings')).click()","document.body.innerText.includes('Saved sign-in found for this instance.')",'existing instance sign-in is recognized');
- assert.equal(await evaluate(`document.querySelector('.setup .provider .agent-id')?.textContent.trim()==='· '+${JSON.stringify(duplicate.id.slice(-4))}`),true,'archived duplicate uses the shortened ID');
+ assert.equal(await evaluate(`document.querySelector('.archived-agents .agent-id')?.textContent.trim()==='· '+${JSON.stringify(duplicate.id.slice(-4))}`),true,'archived duplicate uses the shortened ID');
  await act("[...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('New agent')).click()","document.body.innerText.includes('Create your agent') && !document.body.innerText.includes('Connect Codex')",'new agent does not require another provider sign-in');
  await evaluate("testInput('.setup input','No model');testInput('.setup textarea','Help with research');document.querySelector('.setup select').value='codex';document.querySelector('.setup select').dispatchEvent(new Event('change',{bubbles:true}));testClick('Create agent')");
  await until(()=>evaluate("document.querySelector('.title')?.textContent==='No model' && !!document.querySelector('[aria-label=Message]')"),'create agent without model');
@@ -395,13 +397,32 @@ try{
  assert.equal(await evaluate("document.body.innerText.includes('synthetic-browser-recovery') || JSON.stringify(localStorage).includes('synthetic-browser-recovery')"),false);
  console.log('PASS OpenRouter recovery, streaming, retry and secret non-disclosure');
  await act("[...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('New agent')).click()","document.body.innerText.includes('Create your agent')",'name-only creation form');
+ await cdp('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
+ assert.equal(await evaluate("document.querySelector('.setup label:has(textarea)').firstChild.textContent"),'Instructions');
+ await evaluate("document.querySelector('.instructions-help summary').focus()");
+ await cdp('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',text:'\r',unmodifiedText:'\r',windowsVirtualKeyCode:13,nativeVirtualKeyCode:13});
+ await cdp('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13,nativeVirtualKeyCode:13});
+ await until(()=>evaluate("document.querySelector('.instructions-help').open"),'keyboard expands help');
+ assert.equal(await evaluate("!!document.querySelector('.instructions-help[open]') && document.querySelector('.instructions-help').innerText.includes('soul.md')"),true,'keyboard opens Instructions help');
+ await evaluate("document.querySelector('.instructions-help summary').click()");
+ assert.equal(await evaluate("document.querySelector('.instructions-help').open"),false,'pointer closes help');
+ const helpPoint=await evaluate("(()=>{const r=document.querySelector('.instructions-help summary').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()");
+ await cdp('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[helpPoint]});await cdp('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+ await until(()=>evaluate("document.querySelector('.instructions-help').open"),'touch opens help');
+ assert.equal(await evaluate("document.documentElement.scrollWidth<=innerWidth"),true,'narrow creation fits viewport');
+ for(const appearance of ['light','dark','system']){
+   await evaluate(`document.documentElement.dataset.appearance=${JSON.stringify(appearance)}`);
+   assert.equal(await evaluate("(()=>{const style=s=>getComputedStyle(document.querySelector(s));return ['backgroundColor','color','borderRadius','borderTopColor','paddingTop','fontFamily'].every(k=>style('.setup select')[k]===style('.setup textarea')[k])})()"),true,'shared form styles in '+appearance);
+ }
  await evaluate("testInput('.setup input','Name only');testClick('Create agent')");await until(()=>evaluate("document.querySelector('.title')?.textContent==='Name only'"),'name-only agent created');
  const nameOnly=await evaluate("(async()=>{const t=localStorage.getItem('staf-token');return (await (await fetch('/api/bots',{headers:{Authorization:'Bearer '+t}})).json()).find(b=>b.name==='Name only')})()");assert.equal(nameOnly.instructions,'');assert.equal(nameOnly.provider,'demo');
- await act("document.querySelector('.model-button').click();setTimeout(()=>testClick('Agent settings'),0)","document.body.innerText.includes('AGENT SETTINGS')",'open name-only settings');await until(()=>evaluate("!!document.querySelector('.setup textarea')"),'name-only settings loaded');
- await evaluate("window.confirm=()=>true;testClick('Archive agent')");await until(()=>evaluate("![...document.querySelectorAll('.side button')].some(b=>b.textContent.includes('Name only'))"),'archived agent removed from sidebar');
- await act("[...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('Settings')).click()","document.body.innerText.includes('Archived agents')",'archived agents available');
- await evaluate("[...document.querySelectorAll('.provider')].find(e=>e.textContent.includes('Name only')).querySelector('button').click()");await until(()=>evaluate("[...document.querySelectorAll('.side button')].some(b=>b.textContent.includes('Name only'))"),'restored agent returns');
+ await act("document.querySelector('button[aria-label=\"Open agent settings\"]').click()","document.body.innerText.includes('AGENT SETTINGS')",'header opens name-only settings');await until(()=>evaluate("!!document.querySelector('.setup textarea')"),'name-only settings loaded');
+ await evaluate("window.confirm=()=>true;testClick('Archive agent')");await until(()=>evaluate("![...document.querySelectorAll('.side nav button')].some(b=>b.textContent.includes('Name only'))"),'archived agent removed from sidebar');
+ await act("document.querySelector('.archived-agents summary').click()","!!document.querySelector('.archived-agents[open]')",'archived agents available in sidebar');
+ await evaluate("[...document.querySelectorAll('.archived-agents .provider')].find(e=>e.textContent.includes('Name only')).querySelector('button').click()");await until(()=>evaluate("[...document.querySelectorAll('.side button')].some(b=>b.textContent.includes('Name only'))"),'restored agent returns');
  const restored=await evaluate(`(async()=>{const t=localStorage.getItem('staf-token');return await (await fetch('/api/bots/${nameOnly.id}',{headers:{Authorization:'Bearer '+t}})).json()})()`);assert.equal(restored.chatId,nameOnly.chatId);assert.equal(restored.configDir,nameOnly.configDir);assert.equal(restored.archived,false);console.log('PASS name-only creation, archive, and restore');
+ assert.equal(await evaluate("document.documentElement.scrollWidth<=innerWidth"),true,'narrow agent management fits viewport');
+ await cdp('Emulation.clearDeviceMetricsOverride');
  await act("[...document.querySelectorAll('.side nav button')].find(b=>b.textContent.includes('Name only')).click()","!!document.querySelector('[aria-label=Message]')",'open restored agent chat');
  await act("testInput('[aria-label=Message]','Remember for this agent: I like tea');testClick('Send ↑')","document.body.innerText.includes('Saved to this agent’s memory.')",'chat uses agent memory wording');
  await act("testInput('[aria-label=Message]','Remember for all agents: I like coffee');testClick('Send ↑')","document.body.innerText.includes('ALL agents will see this memory.')",'shared memory warning names agents');
