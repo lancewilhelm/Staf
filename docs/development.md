@@ -36,8 +36,41 @@ node test/browser/gui-smoke.mjs
 The script uses a local Chrome or cached Chromium on macOS. Set `CHROME_PATH`
 to an executable when neither default path exists. It starts a disposable local
 instance and uses synthetic provider and sign-in fixtures. It does not verify
-live provider access. Docker-specific tests may be skipped without Docker;
+live provider access. The chat journey covers the circular Send/Stop action,
+keyboard submission and Stop, delayed cancellation settlement, editable next
+drafts, cross-tab Stop, long Markdown responses, scroll following, code Copy,
+and narrow Light/Dark/System layouts. Docker-specific tests may be skipped without Docker;
 report those skips separately.
+
+## Review chat locally without a provider
+
+After building, run the existing controlled fixture in a terminal:
+
+```sh
+mkdir -p .staf/chat-review
+node test/browser/held-instance.mjs .staf/chat-review/instance.sqlite 3211
+```
+
+Open `http://127.0.0.1:3211`, pair with the code printed by that process,
+and create a Demo agent from **New agent**. This fixture uses synthetic providers
+and stores review data separately under `.staf/chat-review`.
+
+- Send `Streaming markdown fixture`. Expect a long Markdown response, code Copy,
+  a fixed composer and a circular Stop control. Scroll up; incoming text must
+  leave your reading position unchanged.
+- Type a next draft, then activate Stop with a click or keyboard Enter. Expect
+  **Stopping…**, an editable draft, and no submission when Enter is pressed in
+  the draft. Type `stream-next` in the fixture terminal to release the held
+  provider. Expect stopped partial output and the up-arrow Send action; the draft
+  stays unsent until you send it.
+- Open another tab on the same address. Stop a response there; both tabs should
+  show stopping until the fixture is released, while keeping independent drafts.
+- In Settings, try Light, Dark and System; narrow the window to phone width.
+  Expect readable messages and a visible circular action without page overflow.
+  Activity and approval controls should remain available.
+
+To finish a held response normally, enter `stream-next` twice in the fixture
+terminal. Stop the fixture with Ctrl+C when finished.
 
 ## Deliver a ticket
 
