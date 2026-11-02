@@ -490,8 +490,11 @@ An uncertain start, stop or cleanup blocks further scratch commands and daemon c
 
 Open the composer model control to choose provider, model and reasoning. Provider
 and reasoning selections and listed model choices save immediately; manual model text saves when leaving
-the field. List models reads metadata only; model IDs absent from the list remain
-valid manual entries. Provider default reasoning leaves the effort unset. A model
+the field. **List models** reports how many models loaded and shows an **Available models**
+dropdown. If no models are returned, it says so; you can still enter a
+model ID manually or retry. Discovery errors remain beside the controls. Model
+listing reads metadata only and does not verify account access or run inference.
+Model IDs absent from the list remain valid manual entries. Provider default reasoning leaves the effort unset. A model
 with explicitly incompatible advertised reasoning resets the effort visibly.
 Missing metadata leaves the saved effort intact; generation can still reject it.
 Changing providers asks for confirmation before saving. Drafts stay in place.

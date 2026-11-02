@@ -35,8 +35,24 @@ try{
  const api=async(path,body)=>evaluate(`(async()=>{const r=await fetch('/api/'+${JSON.stringify(path)},{method:${JSON.stringify(body?'POST':'GET')},headers:{Authorization:'Bearer '+localStorage.getItem('staf-token'),'Content-Type':'application/json'},${body?'body:JSON.stringify('+JSON.stringify(body)+'),':''}});return r.json()})()`);
  await evaluate("window.confirm=()=>true");
  await evaluate("document.querySelector('[aria-label=\"Provider defaults\"] select').value='openrouter';document.querySelector('[aria-label=\"Provider defaults\"] select').dispatchEvent(new Event('change',{bubbles:true}))");
+ await evaluate("testClick('List models')");
+ await until(()=>evaluate("document.querySelector('[aria-label=\"Provider defaults\"] [role=status]')?.textContent.includes('2 models loaded')"),'model discovery reports loaded models');
+ assert.equal(await evaluate("document.querySelector('[aria-label=\"Available models\"]')?.options.length"),3,'loaded models have a visible picker');
+ if(process.env.STAF_SETTINGS_SCREENSHOT){const shot=await cdp('Page.captureScreenshot',{format:'png'});await writeFile(process.env.STAF_SETTINGS_SCREENSHOT,Buffer.from(shot.data,'base64'))}
+ assert.equal(await evaluate("(()=>{const form=document.querySelector('.setup'),scroller=form.closest('.settings-scroll');return !!scroller&&Math.abs(scroller.getBoundingClientRect().right-document.querySelector('.main').getBoundingClientRect().right)<2})()"),true,'Settings scrolls at the pane edge');
+ assert.equal(await evaluate("(()=>{const section=document.querySelector('[aria-label=\"Provider defaults\"]');return section.querySelector('button:not(fieldset button)').getBoundingClientRect().top-section.querySelector('fieldset').getBoundingClientRect().bottom>=12})()"),true,'provider actions have space below their group');
  await evaluate("testInput('[aria-label=\"Provider defaults\"] input','owner/model');testClick('Save provider defaults')");
  await until(async()=>(await api('provider-defaults')).providers.openrouter?.model==='owner/model','owner defaults persist');await until(()=>evaluate("document.body.innerText.includes('Defaults saved.')"),'defaults save settled');
+ // An empty successful catalog is distinct from both loaded choices and failure.
+ await evaluate("window.realPickerFetch=window.fetch;window.fetch=async(...args)=>args[0]==='/api/models'?new Response(JSON.stringify({models:[]}),{status:200,headers:{'Content-Type':'application/json'}}):window.realPickerFetch(...args);testClick('List models')");
+ await until(()=>evaluate("document.body.innerText.includes('No models were returned.') && !document.querySelector('[aria-label=\"Available models\"]')"),'empty catalog explains manual entry');
+ await evaluate("window.fetch=window.realPickerFetch");
+ for(const appearance of ['light','dark','system']){
+  await evaluate(`document.querySelector('input[name=appearance][value=${appearance}]').click()`);
+  await cdp('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
+  assert.equal(await evaluate("(()=>{const scroller=document.querySelector('.settings-scroll');return document.documentElement.scrollWidth<=innerWidth && scroller.scrollHeight>scroller.clientHeight && Math.abs(scroller.getBoundingClientRect().right-document.querySelector('.main').getBoundingClientRect().right)<2})()"),true,appearance+' narrow Settings scrolls at pane edge without overflow');
+  await cdp('Emulation.clearDeviceMetricsOverride');
+ }
  // A malformed response must leave the form usable for manual entry and retry.
  await evaluate("window.realPickerFetch=window.fetch;window.fetch=async(...args)=>args[0]==='/api/provider-defaults'?new Response(JSON.stringify({revision:'r',providers:{codex:{model:42}}}),{status:200,headers:{'Content-Type':'application/json'}}):window.realPickerFetch(...args);testClick('Compare latest defaults')");
  await until(()=>evaluate("document.body.innerText.includes('Invalid provider defaults response')"),'malformed defaults remain recoverable');
@@ -46,12 +62,12 @@ try{
  await evaluate("[...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('New agent')).click()");
  await until(()=>evaluate("document.body.innerText.includes('Create your agent')"),'creation choices');
  await evaluate("(()=>{const p=document.querySelector('.setup fieldset select');p.value='openrouter';p.dispatchEvent(new Event('change',{bubbles:true}))})()");
- await until(()=>evaluate("document.querySelector('.setup fieldset input').value==='owner/model' && [...document.querySelectorAll('.setup fieldset select')[1]?.options??[]].some(o=>o.value==='high')"),'creation defaults and reasoning options');
- await evaluate("window.fetch=async(...args)=>{const response=await window.realPickerFetch(...args);if(args[0]!=='/api/models')return response;const catalog=await response.json();catalog.models.push({id:'fixture/unknown',label:'Unknown reasoning',reasoning:null,reasoningStatus:'unknown'});return new Response(JSON.stringify(catalog),{status:200,headers:{'Content-Type':'application/json'}})};(()=>{const r=document.querySelectorAll('.setup fieldset select')[1];r.value='high';r.dispatchEvent(new Event('change',{bubbles:true}));testClick('List models')})()");
- await until(()=>evaluate("document.querySelectorAll('.setup datalist option').length===3 && document.querySelectorAll('.setup fieldset select')[1].value==='high'"),'creation catalog and reasoning');
- await evaluate("testInput('.setup fieldset input','fixture/unknown')");assert.equal(await evaluate("document.querySelectorAll('.setup fieldset select')[1].value"),'high','unknown metadata preserves reasoning');await evaluate("window.fetch=window.realPickerFetch");
+ await until(()=>evaluate("document.querySelector('.setup fieldset input').value==='owner/model' && [...document.querySelector('.setup select[aria-label=Reasoning]')?.options??[]].some(o=>o.value==='high')"),'creation defaults and reasoning options');
+ await evaluate("window.fetch=async(...args)=>{const response=await window.realPickerFetch(...args);if(args[0]!=='/api/models')return response;const catalog=await response.json();catalog.models.push({id:'fixture/unknown',label:'Unknown reasoning',reasoning:null,reasoningStatus:'unknown'});return new Response(JSON.stringify(catalog),{status:200,headers:{'Content-Type':'application/json'}})};(()=>{const r=document.querySelector('.setup select[aria-label=Reasoning]');r.value='high';r.dispatchEvent(new Event('change',{bubbles:true}));testClick('List models')})()");
+ await until(()=>evaluate("document.querySelectorAll('.setup datalist option').length===3 && document.querySelector('.setup select[aria-label=Reasoning]').value==='high'"),'creation catalog and reasoning');
+ await evaluate("testInput('.setup fieldset input','fixture/unknown')");assert.equal(await evaluate("document.querySelector('.setup select[aria-label=Reasoning]').value"),'high','unknown metadata preserves reasoning');await evaluate("window.fetch=window.realPickerFetch");
  await evaluate("testInput('.setup fieldset input','fixture/plain')");
- try{await until(()=>evaluate("document.querySelectorAll('.setup fieldset select')[1].value==='default' && document.body.innerText.includes('Reasoning changed to Provider default')"),'creation visibly resets unsupported reasoning')}catch(e){console.error(await evaluate("({text:document.querySelector('.setup').innerText,values:[...document.querySelectorAll('.setup fieldset select')].map(e=>e.value),model:document.querySelector('.setup fieldset input').value})"));throw e}
+ try{await until(()=>evaluate("document.querySelector('.setup select[aria-label=Reasoning]').value==='default' && document.body.innerText.includes('Reasoning changed to Provider default')"),'creation visibly resets unsupported reasoning')}catch(e){console.error(await evaluate("({text:document.querySelector('.setup').innerText,values:[...document.querySelectorAll('.setup fieldset select')].map(e=>e.value),model:document.querySelector('.setup fieldset input').value})"));throw e}
  await evaluate("testClick('Close')");
  const bot=await api('bots',{name:'Picker agent',provider:'demo'});
  await until(()=>evaluate("document.querySelector('.side nav button')?.textContent.includes('Picker agent')"),'agent appears');
@@ -70,10 +86,10 @@ try{
  await until(()=>evaluate("!document.querySelector('[aria-label=\"Provider picker\"] fieldset').disabled"),'selection settled');
  await evaluate("testClick('List models')");
  await until(()=>evaluate("document.querySelectorAll('[aria-label=\"Provider picker\"] datalist option').length===2"),'synthetic catalog listed');
- await evaluate("testInput('[aria-label=\"Provider picker\"] input','fixture/model')");
+ await evaluate("(()=>{const e=document.querySelector('[aria-label=\"Available models\"]');e.value='fixture/model';e.dispatchEvent(new Event('change',{bubbles:true}))})()");
  await until(async()=>(await api('bots/'+bot.id)).model==='fixture/model','catalog model selection saves without blur');
  await until(()=>evaluate("!document.querySelector('[aria-label=\"Provider picker\"] fieldset').disabled"),'model settled');
- await evaluate("(()=>{const e=document.querySelectorAll('[aria-label=\"Provider picker\"] select')[1];e.value='high';e.dispatchEvent(new Event('change',{bubbles:true}))})()");
+ await evaluate("(()=>{const e=document.querySelector('[aria-label=\"Provider picker\"] select[aria-label=Reasoning]');e.value='high';e.dispatchEvent(new Event('change',{bubbles:true}))})()");
  await until(async()=>(await api('bots/'+bot.id)).reasoning==='high','reasoning saves immediately');
  await until(()=>evaluate("!document.querySelector('[aria-label=\"Provider picker\"] fieldset').disabled"),'reasoning settled');
  await evaluate("testInput('[aria-label=\"Provider picker\"] input','fixture/plain');document.querySelector('[aria-label=\"Provider picker\"] input').focus();document.querySelector('[aria-label=\"Provider picker\"] input').blur()");
