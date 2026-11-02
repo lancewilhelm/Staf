@@ -126,11 +126,11 @@ try{
  await cdp('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13,nativeVirtualKeyCode:13});
  assert.equal(await evaluate("document.querySelector('[aria-label=Message]').value"),'');assert.equal(await evaluate("document.querySelector('.messages').innerText.includes('Keep this draft') && document.body.innerText.includes('Connect Codex in Settings to send.')"),true);const beforeConnect=await evaluate(`(async()=>{const t=localStorage.getItem('staf-token');return await (await fetch('/api/bots/${bot.id}/messages',{headers:{Authorization:'Bearer '+t}})).json()})()`);assert.equal(beforeConnect.length,0);console.log('PASS missing connection preserves the draft and explains setup');
  await evaluate("testInput('[aria-label=Message]','Newer setup draft')");
- await act("document.querySelector('.model-button').click()","!!document.querySelector('.setup select')",'open disconnected agent settings');
+ await act("document.querySelector('.model-button').click();setTimeout(()=>testClick('Agent settings'),0)","!!document.querySelector('.setup select')",'open disconnected agent settings');
  assert.equal(await evaluate("document.querySelector('.setup select').value"),'codex');
- assert.match(await evaluate("document.querySelector('.setup select option:checked').textContent"),/disconnected/i);
+ assert.equal(await evaluate("document.querySelector('.setup select option:checked').textContent"),'codex');
  assert.equal(await evaluate("document.querySelector('.setup select option[value=demo]').disabled"),false);
- assert.equal(await evaluate("document.querySelector('.setup select option[value=openrouter]').disabled"),true);
+ assert.equal(await evaluate("document.querySelector('.setup select option[value=openrouter]').disabled"),false);
  await evaluate("testInput('.setup textarea','Unsaved recovery instructions')");
  await act("testClick('Open provider settings')","!!document.querySelector('input[type=password]')",'open provider setup from agent settings');
  await act("testInput('input[type=password]','synthetic-recovery-key');testClick('Save OpenRouter key')","document.body.innerText.includes('API key saved for this instance.')",'connect provider while editing agent');
@@ -138,15 +138,17 @@ try{
  assert.equal(await evaluate("document.querySelector('.setup textarea').value"),'Unsaved recovery instructions');
  assert.equal(await evaluate("document.querySelector('.setup select option[value=openrouter]').disabled"),false);
  assert.match(await evaluate("document.body.innerText"),/does not verify account or model access/i);
- await evaluate("document.querySelector('.setup select').value='openrouter';document.querySelector('.setup select').dispatchEvent(new Event('change',{bubbles:true}))");
- assert.equal(await evaluate("document.querySelector('.setup label:nth-of-type(3) input').value"),'fixture-model');
- assert.match(await evaluate("document.body.innerText"),/Review the model for the selected provider/);
+ await evaluate("window.confirm=()=>true;document.querySelector('.setup select').value='openrouter';document.querySelector('.setup select').dispatchEvent(new Event('change',{bubbles:true}))");
+ await until(()=>evaluate("document.querySelector('.setup select').value==='openrouter'&&!document.querySelector('[aria-label=\"Provider picker\"] fieldset').disabled"),'immediate provider switch');
+ assert.equal(await evaluate("document.querySelector('.setup [aria-label=\"Provider picker\"] input').value"),'');
+
  await act("testClick('Open provider settings')","document.body.innerText.includes('Disconnect OpenRouter')",'reopen provider settings with pending choice');
  await act("testClick('Disconnect OpenRouter')","document.body.innerText.includes('No OpenRouter API key saved.')",'disconnect pending provider');
  await act("testClick('Back to agent settings')","document.body.innerText.includes('AGENT SETTINGS')",'return after pending provider disconnects');
- await evaluate("testClick('Save settings')");
- assert.match(await evaluate("document.body.innerText"),/Connect the selected provider in global Settings before saving/);
+ assert.equal(await evaluate("document.querySelector('.setup select').value"),'openrouter');
  assert.equal(await evaluate("document.querySelector('.setup textarea').value"),'Unsaved recovery instructions');
+ await evaluate("document.querySelector('.setup select').value='codex';document.querySelector('.setup select').dispatchEvent(new Event('change',{bubbles:true}))");
+ await until(()=>evaluate("document.querySelector('.setup select').value==='codex'&&!document.querySelector('[aria-label=\"Provider picker\"] fieldset').disabled"),'return to remembered Codex pair');
  await act("testClick('Cancel')","document.querySelector('[aria-label=Message]')?.value==='Newer setup draft'",'retain chat draft after provider recovery');
  await act("testClick('Open provider settings')","document.body.innerText.includes('Sign-in failed')",'open settings with draft retained');
  await act("testClick('Connect Codex')","!![...document.querySelectorAll('a')].find(a=>a.textContent==='Continue sign-in')",'retry Codex after failure');
@@ -251,19 +253,21 @@ try{
  console.log('PASS busy recovery observes a late original without duplicate work');
 
 
- await act("document.querySelector('.model-button').click()","document.body.innerText.includes('AGENT SETTINGS')",'open agent-specific model settings');
+ await act("document.querySelector('.model-button').click();setTimeout(()=>testClick('Agent settings'),0)","document.body.innerText.includes('AGENT SETTINGS')",'open agent-specific model settings');
  await until(()=>evaluate("document.querySelectorAll('.setup textarea').length===1 && document.body.innerText.includes('Configuration:')"),'settings loaded');console.log('PASS one Instructions editor and configuration location');
  await cdp('Emulation.setDeviceMetricsOverride',{width:600,height:300,deviceScaleFactor:1,mobile:false});
  assert.equal(await evaluate("(()=>{const n=document.querySelector('.setup');n.scrollTop=n.scrollHeight;return n.scrollHeight>n.clientHeight && n.scrollTop>0})()"),true,'settings remain scrollable in a short viewport');
  await cdp('Emulation.clearDeviceMetricsOverride');console.log('PASS settings scroll in a short viewport');
  await evaluate("window.testFetch=window.fetch;window.testFailSave=true;window.testSaveGate=new Promise(resolve=>window.releaseTestSave=resolve);window.fetch=async(...args)=>{if(String(args[0]).endsWith('/profile')){await window.testSaveGate;if(window.testFailSave)return new Response(JSON.stringify({error:'synthetic save failure'}),{status:503,headers:{'Content-Type':'application/json'}})}return window.testFetch(...args)}");
- await evaluate("testInput('.setup label:nth-of-type(3) input','fixture-model-v2');testInput('.setup textarea','Help me plan with care');testClick('Save settings')");
+ await evaluate("testInput('.setup [aria-label=\"Provider picker\"] input','fixture-model-v2');document.querySelector('.setup [aria-label=\"Provider picker\"] input').focus();document.querySelector('.setup [aria-label=\"Provider picker\"] input').blur()");
+ await until(()=>evaluate("document.querySelector('[aria-label=\"Provider picker\"]').innerText.includes('Saved. Applies')"),'immediate model edit');
+ await evaluate("testInput('.setup textarea','Help me plan with care');testClick('Save settings')");
  await until(()=>evaluate("document.querySelector('.setup textarea')?.disabled"),'settings save pending');assert.equal(await evaluate("[...document.querySelectorAll('.setup input,.setup select,.setup textarea,.setup button,.side button')].every(element=>element.disabled)"),true);await evaluate("document.querySelector('.side button').click()");assert.equal(await evaluate("document.body.innerText.includes('AGENT SETTINGS')"),true);console.log('PASS settings and navigation cannot change while saving');
  await evaluate("window.releaseTestSave()");await until(()=>evaluate("document.body.innerText.includes('synthetic save failure')"),'settings failure');assert.equal(await evaluate("document.querySelector('.setup textarea').value"),'Help me plan with care');console.log('PASS failed save retains settings and error');
  await evaluate("window.testFailSave=false;window.testSaveGate=new Promise(resolve=>window.releaseTestSave=resolve);testClick('Save settings')");await until(()=>evaluate("document.querySelector('.setup textarea')?.disabled && [...document.querySelectorAll('.side button')].every(element=>element.disabled)"),'settings retry pending');
  await act("window.releaseTestSave();window.fetch=window.testFetch","!!document.querySelector('[aria-label=Message]')",'save agent settings');
  const updated=await evaluate(`(async()=>{const t=localStorage.getItem('staf-token');return await (await fetch('/api/bots/${bot.id}',{headers:{Authorization:'Bearer '+t}})).json()})()`);assert.equal(updated.model,'fixture-model-v2');assert.equal(updated.instructions,'Help me plan with care');assert.equal(await readFile(join(updated.configDir,'soul.md'),'utf8'),'Help me plan with care');console.log('PASS model and instructions are saved in the agent configuration');
- await act("document.querySelector('.model-button').click()","!!document.querySelector('.setup textarea')",'reopen agent settings');
+ await act("document.querySelector('.model-button').click();setTimeout(()=>testClick('Agent settings'),0)","!!document.querySelector('.setup textarea')",'reopen agent settings');
  await evaluate("testInput('.setup textarea','My unsaved instructions')");
  await writeFile(join(updated.configDir,'soul.md'),'Instructions from disk');
  await evaluate("testClick('Save settings')");
@@ -326,11 +330,11 @@ try{
  assert.equal(await evaluate("document.querySelector('[aria-label=Message]').value"),'');
  assert.equal(await evaluate("document.querySelector('.messages').innerText.includes('Hello from GUI')"),false);
  const firstBeforeSwitch=await evaluate(`(async()=>{const t=localStorage.getItem('staf-token');return await (await fetch('/api/bots/${bot.id}',{headers:{Authorization:'Bearer '+t}})).json()})()`);
- await act("document.querySelector('.model-button').click()","!!document.querySelector('.setup select')",'open second agent settings');
- await evaluate("window.confirmMessages=[];window.confirm=message=>{window.confirmMessages.push(message);return false};document.querySelector('.setup select').value='codex';document.querySelector('.setup select').dispatchEvent(new Event('change',{bubbles:true}));testClick('Save settings')");
+ await act("document.querySelector('.model-button').click();setTimeout(()=>testClick('Agent settings'),0)","!!document.querySelector('.setup select')",'open second agent settings');
+ await evaluate("window.confirmMessages=[];window.confirm=message=>{window.confirmMessages.push(message);return false};document.querySelector('.setup select').value='codex';document.querySelector('.setup select').dispatchEvent(new Event('change',{bubbles:true}))");
  assert.match(await evaluate("window.confirmMessages[0]"),/conversation history.*new provider/i);
  assert.equal((await evaluate(`(async()=>{const t=localStorage.getItem('staf-token');return await (await fetch('/api/bots/${duplicate.id}',{headers:{Authorization:'Bearer '+t}})).json()})()`)).provider,'demo');
- await evaluate("window.confirm=message=>{window.confirmMessages.push(message);return true};testClick('Save settings')");
+ await evaluate("window.confirm=message=>{window.confirmMessages.push(message);return true};document.querySelector('.setup select').value='codex';document.querySelector('.setup select').dispatchEvent(new Event('change',{bubbles:true}));setTimeout(()=>testClick('Save settings'),300)");
  await until(()=>evaluate("!!document.querySelector('[aria-label=Message]')"),'confirmed provider switch');
  const switched=await evaluate(`(async()=>{const t=localStorage.getItem('staf-token');return await (await fetch('/api/bots/${duplicate.id}',{headers:{Authorization:'Bearer '+t}})).json()})()`);
  assert.equal(switched.provider,'codex');assert.equal(switched.model,null);
@@ -393,7 +397,7 @@ try{
  await act("[...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('New agent')).click()","document.body.innerText.includes('Create your agent')",'name-only creation form');
  await evaluate("testInput('.setup input','Name only');testClick('Create agent')");await until(()=>evaluate("document.querySelector('.title')?.textContent==='Name only'"),'name-only agent created');
  const nameOnly=await evaluate("(async()=>{const t=localStorage.getItem('staf-token');return (await (await fetch('/api/bots',{headers:{Authorization:'Bearer '+t}})).json()).find(b=>b.name==='Name only')})()");assert.equal(nameOnly.instructions,'');assert.equal(nameOnly.provider,'demo');
- await act("document.querySelector('.model-button').click()","document.body.innerText.includes('AGENT SETTINGS')",'open name-only settings');await until(()=>evaluate("!!document.querySelector('.setup textarea')"),'name-only settings loaded');
+ await act("document.querySelector('.model-button').click();setTimeout(()=>testClick('Agent settings'),0)","document.body.innerText.includes('AGENT SETTINGS')",'open name-only settings');await until(()=>evaluate("!!document.querySelector('.setup textarea')"),'name-only settings loaded');
  await evaluate("window.confirm=()=>true;testClick('Archive agent')");await until(()=>evaluate("![...document.querySelectorAll('.side button')].some(b=>b.textContent.includes('Name only'))"),'archived agent removed from sidebar');
  await act("[...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('Settings')).click()","document.body.innerText.includes('Archived agents')",'archived agents available');
  await evaluate("[...document.querySelectorAll('.provider')].find(e=>e.textContent.includes('Name only')).querySelector('button').click()");await until(()=>evaluate("[...document.querySelectorAll('.side button')].some(b=>b.textContent.includes('Name only'))"),'restored agent returns');

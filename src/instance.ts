@@ -1,3 +1,4 @@
+import {ProviderDefaultsStore} from './provider-choices.js';
 import { DatabaseSync } from 'node:sqlite';
 import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { closeSync, openSync, mkdtempSync, rmSync } from 'node:fs';
@@ -446,6 +447,12 @@ export class Instance {
   webJournal() {return new ActionJournal(this.db);}
   recordWebDecision(actionId:string,fingerprint:string,decision:'approve'|'deny') {this.db.prepare('INSERT INTO web_action_decisions VALUES (?,?,?)').run(actionId,fingerprint,decision);}
   webActions(work:WorkRef) {return this.db.prepare(`SELECT id,state,summary,result FROM action_journal WHERE ${work.kind==='task' ? 'task_attempt_id' : 'command_id'}=? AND summary='Read public web page' ORDER BY rowid`).all(work.id);}
+  providerDefaults() { return new ProviderDefaultsStore(dirname(dirname(this.configs.location('placeholder')))); }
+  selectBotProvider(id:string,revision:string,provider:string,model?:string|null,reasoning?:string|null) {
+    const current=this.bot(id);if(!current)throw Error('Agent not found');
+    const pair=current.providerChoices?.[provider]??this.providerDefaults().read().providers[provider]??{model:null,reasoning:null};
+    return this.editBot(id,{...current,revision,provider,model:model===undefined?pair.model:model,reasoning:reasoning===undefined?pair.reasoning:reasoning});
+  }
   creationDefaults() {const row=this.db.prepare('SELECT revision,provider,model,reasoning FROM creation_defaults WHERE id=1').get();if(!row || typeof row.revision !== 'number' || typeof row.provider !== 'string' || !(row.model === null || typeof row.model === 'string') || !(row.reasoning === null || typeof row.reasoning === 'string'))throw Error('Invalid creation defaults');return {revision:row.revision,provider:row.provider,model:row.model,reasoning:row.reasoning};}
   setCreationDefaults(input:{revision:number;provider:string;model:string|null;reasoning:string|null}) {
     if(!Number.isSafeInteger(input.revision) || input.revision<1 || !['demo','codex','openrouter','lmstudio','live'].includes(input.provider) || !(input.model === null || typeof input.model === 'string' && input.model.length <= 200) || !(input.reasoning === null || typeof input.reasoning === 'string' && input.reasoning.length <= 100))throw Error('Invalid creation defaults');
@@ -459,8 +466,11 @@ export class Instance {
     try {
       const digest=input.operationId ? createHmac('sha256',this.fingerprintKey).update(JSON.stringify([input.name,input.instructions,input.provider ?? null,input.model ?? null,input.reasoning ?? null])).digest('hex') : null;
       if(input.operationId) { const existing=this.db.prepare('SELECT digest,bot_id FROM bot_creation_operations WHERE id=?').get(input.operationId); if(existing) { if(existing.digest!==digest || typeof existing.bot_id!=='string') throw new BotConflict('Creation operation ID conflict'); const bot=this.bot(existing.bot_id); this.db.exec('COMMIT'); return bot; } }
-      const defaults=this.creationDefaults();const provider=input.provider ?? defaults.provider, model=input.model ?? (input.provider === undefined ? defaults.model : null), reasoning=input.reasoning ?? defaults.reasoning;
-      this.configs.publish(id,{name:input.name,description:'',provider,model,reasoning,instructions:input.instructions},false);
+      const defaults=this.creationDefaults();const provider=input.provider ?? defaults.provider, reasoning=input.reasoning ?? defaults.reasoning;
+      const first=this.providerDefaults().read().providers[provider];
+      const chosenModel=input.model ?? (input.provider===undefined?defaults.model:first?.model??null);
+      const chosenReasoning=input.reasoning ?? (input.provider===undefined?defaults.reasoning:first?first.reasoning:reasoning);
+      this.configs.publish(id,{name:input.name,description:'',provider,model:chosenModel,reasoning:chosenReasoning,instructions:input.instructions,providerChoices:{[provider]:{model:chosenModel,reasoning:chosenReasoning}}},false);
       this.db.prepare('INSERT INTO bots VALUES (?, ?, ?, ?, ?, ?, ?)').run(id, chatId, '', '', 'demo', null, null);
       this.db.prepare('INSERT INTO bot_profiles (bot_id,revision,soul,archived) VALUES (?, 1, ?, 0)').run(id, '');
       if(input.operationId && digest) this.db.prepare('INSERT INTO bot_creation_operations VALUES (?,?,?)').run(input.operationId,digest,id);
@@ -493,7 +503,8 @@ export class Instance {
       const current = this.bot(id);
       if (!current) throw new Error('Agent not found');
       if (current.revision !== edit.revision) throw new BotConflict('Profile changed. Refresh before editing.');
-      const config=this.configs.publish(id,{name:edit.name,description:edit.description ?? current.description,instructions:edit.instructions,provider:edit.provider,model:edit.model,reasoning:edit.reasoning},current.archived,edit.revision);
+      const providerChoices={...current.providerChoices,[current.provider]:{model:current.model,reasoning:current.reasoning},[edit.provider]:{model:edit.model,reasoning:edit.reasoning}};
+      const config=this.configs.publish(id,{name:edit.name,description:edit.description ?? current.description,instructions:edit.instructions,provider:edit.provider,model:edit.model,reasoning:edit.reasoning,providerChoices},current.archived,edit.revision);
       try { this.db.exec('COMMIT'); } catch { throw new AgentConfigUncertain('Configuration save may have taken effect. Inspect the current configuration before retrying.'); }
       return {...current,...config};
     } catch (error) { try { this.db.exec('ROLLBACK'); } catch {} throw error; }

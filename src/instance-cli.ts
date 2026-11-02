@@ -92,6 +92,9 @@ export async function instanceCommand(args: string[]) {
   else if(action==='web-permission-set' && values[0] && ['true','false'].includes(values[1] ?? '')) result=await request(`/api/web-permissions/${encodeURIComponent(values[0]).replace('%3A', ':')}`,token,{enabled:values[1]==='true'});
   else if(action==='web-approvals') result=await request('/api/web-approvals',token);
   else if((action==='web-approve' || action==='web-deny') && values[0]) result=await request(`/api/web-approvals/${encodeURIComponent(values[0])}/${action.slice(4)}`,token,action.endsWith('approve')?grantDecision():{});
+  else if(action==='provider-defaults') result=await request('/api/provider-defaults',token);
+  else if(action==='provider-defaults-set'&&values.length===3) {const current=await request('/api/provider-defaults',token);if(!current||typeof current!=='object'||!('revision' in current))throw Error('Invalid defaults');result=await request('/api/provider-defaults',token,{revision:current.revision,provider:values[0],model:values[1]==='-'?null:values[1],reasoning:values[2]==='-'?null:values[2]});}
+  else if(action==='select'&&values.length>=3) result=await request(`/api/bots/${encodeURIComponent(values[0]!)}/selection`,token,{revision:values[1],provider:values[2],...(values[3]?{model:values[3]==='-'?null:values[3]}:{}),...(values[4]?{reasoning:values[4]==='-'?null:values[4]}:{})});
   else if(action==='defaults') result=await request('/api/creation-defaults',token);
   else if(action==='defaults-set' && values.length===4) result=await request('/api/creation-defaults',token,{revision:Number(values[0]),provider:values[1],model:values[2]==='-'?null:values[2],reasoning:values[3]==='-'?null:values[3]});
   else if(action==='codex-auth-start') result=await request('/api/codex-auth/start',token,{});
