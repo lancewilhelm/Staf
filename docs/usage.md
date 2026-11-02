@@ -484,3 +484,34 @@ Scratch shell is disabled by default. A paired owner must configure an absolute 
 Each exact command requires owner approval in the browser or through `shell-approvals`, `shell-approve`, and `shell-deny`. The integration passes only a fixed 16 MiB, 1,024-inode scratch tmpfs to the sandbox, with a 30-second execution limit and 64 KiB output limit. It does not mount a host workspace. The Docker binary, daemon and pinned image must be trusted. The exact command is visible to host process observers and Docker container configuration until removal. Scratch tmpfs may use swap, and Docker can provide runtime-managed mounts. Commands, output and unknown secrets may persist in provider replay, conversations, Activity and backups. Known configured secrets are redacted where supported; arbitrary output may contain secrets that cannot be reliably detected.
 
 An uncertain start, stop or cleanup blocks further scratch commands and daemon configuration changes. Inspect the recorded endpoint with `shell-uncertain` and independently verify the daemon identity before review. Staf compares endpoint configuration strings but cannot prove that the binary or socket still identifies the same daemon. A missing container does not prove that a delayed create cannot appear later. After independently verifying the daemon identity and inspecting it, the owner may explicitly acknowledge the risk with `shell-review URL CREDENTIAL_FILE ACTION_ID --acknowledge-uncertain` to record a review. This records a review; it does not remove a container or retry the action. The original action ID is never reused. Integration tests use a synthetic executor; the scratch component was separately tested with a disposable container, but live model-directed shell execution has not been verified.
+
+## Provider choices
+
+Open the composer model control to choose provider, model and reasoning. Provider
+and reasoning selections and listed model choices save immediately; manual model text saves when leaving
+the field. List models reads metadata only; model IDs absent from the list remain
+valid manual entries. Provider default reasoning leaves the effort unset. A model
+with explicitly incompatible advertised reasoning resets the effort visibly.
+Missing metadata leaves the saved effort intact; generation can still reject it.
+Changing providers asks for confirmation before saving. Drafts stay in place.
+Agent settings uses the same picker; name and instructions retain their separate
+Save settings action and conflict recovery.
+
+Global Settings → Provider defaults configures each provider's first-use pair.
+Returning to a provider restores that agent's remembered pair. Changing defaults
+does not update existing selections. Creation without an explicit provider keeps
+the copied creation defaults. Configuration does not verify model/account access.
+
+Paired CLI clients can inspect and select the same state:
+
+```sh
+staf instance provider-defaults URL CREDENTIAL_FILE
+staf instance provider-defaults-set URL CREDENTIAL_FILE openrouter owner/model high
+staf instance inspect URL CREDENTIAL_FILE AGENT_ID
+staf instance select URL CREDENTIAL_FILE AGENT_ID REVISION openrouter
+```
+
+`select` optionally accepts model and reasoning after provider; `-` explicitly
+clears a value. Omitted values restore the remembered pair or first-use defaults.
+Use the revision from inspect; conflicts preserve the current configuration. The
+interactive terminal keeps its existing provider-change confirmation.

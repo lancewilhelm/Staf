@@ -113,3 +113,7 @@ Original Staf code is licensed under the [Apache License 2.0](LICENSE).
 Third-party material retains its applicable licenses. The Hermes-derived
 cache/request material in the direct Responses adapter remains subject to the
 MIT notice in [Third-party notices](THIRD_PARTY_NOTICES.md).
+
+Agent provider choices are shared across clients. The composer opens a provider,
+model and reasoning picker; selections save for the next message. Global Settings
+holds per-provider first-use defaults. See [usage](docs/usage.md).

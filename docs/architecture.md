@@ -168,6 +168,22 @@ The service still accepts supported configurations without requiring a saved
 connection, so direct edits and other clients can configure an agent before
 connecting. The editor does not run inference or verify provider access.
 
+## Shared provider choice ownership
+
+Agent files own remembered provider pairs; the active top-level pair is folded
+into that history on reads and revision-checked service writes. The composer,
+agent settings and terminal use the same selection operation. Existing captured
+response profiles remain unchanged by later selections. Global nonsecret defaults
+use atomic JSON replacement and content revisions beside the agent directories.
+They seed first selections, never live inheritance. Creation still copies its
+creation defaults when provider is omitted.
+
+Explicit metadata discovery supports unsaved providers and creation. The service
+retains observed catalog metadata for advertised defaults and reasoning reset;
+it does not discover or generate during a selection save. Missing reasoning
+metadata remains unknown. Synthetic service and served-browser checks cover
+these flows; they do not establish live provider readiness or Docker behavior.
+
 Workspace notifications use reusable dismissible toast components at the top of
 the page. Information and success expire after six seconds of unpaused display;
 pointer hover and focus within the toast pause the countdown and progress bar.

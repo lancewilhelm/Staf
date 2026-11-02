@@ -268,3 +268,24 @@ standard input. Storage is plaintext in `auth/openrouter.json` (mode 0600) under
 the instance data directory. Presence does not verify account or model access.
 No inference is performed by saving a key or an agent. The shared instance ignores
 the host `OPENROUTER_API_KEY`. In-flight requests may finish with a prior key.
+
+## Shared provider selections
+
+`agent.toml` keeps active `provider`, `model`, and `reasoning` at the top level,
+plus `[providerChoices.PROVIDER]` tables with optional `model` and `reasoning`.
+An empty table remembers an explicitly unset pair. Top-level values win for the
+active provider, including direct edits; edit an inactive table to change its
+remembered pair. Unknown providers/fields and invalid identifiers are rejected.
+Files and revision conflicts remain authoritative across restart and clients.
+
+Owner defaults live in `agents/provider-defaults.json` beside agent directories,
+a nonsecret map from provider ID to `{model, reasoning}` (nullable). GET/POST
+`/api/provider-defaults` reads/writes the map using its content revision; POST
+takes `revision`, `provider`, `model`, `reasoning`. POST
+`/api/bots/ID/selection` takes agent `revision`, `provider` and optional nullable
+`model`/`reasoning`. POST `/api/models` takes `provider`, including an unsaved
+provider or creation choice. All require paired authorization. Discovery uses
+existing provider transports and returns metadata only, never credentials.
+An explicitly advertised catalog `default_model` may seed a first selection after
+discovery; list order is never a default. Without a remembered pair, owner default
+or advertised default, the model remains unset and chatting requires a choice.

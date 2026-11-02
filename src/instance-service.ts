@@ -28,12 +28,13 @@ import { isRecord } from './validation.js';
 import type { ApprovalMode } from './approval-policy.js';
 import { ScheduleConflict, type ScheduleInput } from './schedule-store.js';
 import { calculateRecurrence } from './schedule-recurrence.js';
-import { discoverModels } from './models.js';
+import { discoverModels, type ModelCatalog } from './models.js';
 import { resolveSettings } from './settings.js';
 import { usageText } from './usage.js';
 import { loadOpenRouterKey, saveOpenRouterKey, disconnectOpenRouter } from './openrouter-credential.js';
 
-export function startInstance(path: string, port = 0, options: {dataDir?: string; env?: Environment; enableCollaboration?: boolean; enableReusableApprovals?: boolean; localBootstrapToken?: string; authNow?:()=>number; authLifetimeMs?:number; webDependencies?:WebDependencies; searchTransport?:SearchTransport; shellExecutor?:typeof executeShellSandbox; authHooks?: {prepare:typeof prepareDirectLogin; complete:typeof completeDirectLogin}; providerFactory?: (profile: {provider:string; model:string | null; reasoning:string | null; instructions:string; chatId:string}, instructions:string) => Promise<Provider>} = {}) {
+export function startInstance(path: string, port = 0, options: {dataDir?: string; env?: Environment; enableCollaboration?: boolean; enableReusableApprovals?: boolean; localBootstrapToken?: string; authNow?:()=>number; authLifetimeMs?:number; webDependencies?:WebDependencies; searchTransport?:SearchTransport; shellExecutor?:typeof executeShellSandbox; modelRequest?:typeof fetch; authHooks?: {prepare:typeof prepareDirectLogin; complete:typeof completeDirectLogin}; providerFactory?: (profile: {provider:string; model:string | null; reasoning:string | null; instructions:string; chatId:string}, instructions:string) => Promise<Provider>} = {}) {
+  const selectionCatalogs=new Map<string,ModelCatalog>();
   const env = options.env ?? process.env;
   const dataDir = options.dataDir ?? resolve(dirname(path));
   const knownKeys = new Set<string>();
@@ -288,7 +289,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
       }
       const token = req.headers.authorization?.match(/^Bearer ([A-Za-z0-9_-]+)$/)?.[1];
       if (!token || !instance.authorized(token)) return json(401,{error:'Unauthorized'});
-      if(req.method==='POST' && (req.url==='/api/bots' || req.url==='/api/creation-defaults' || /^\/api\/bots\/[\w-]+\/profile$/.test(req.url ?? '')) && JSON.stringify(redactValue(value,redact))!==JSON.stringify(value)) return json(400,{error:'Agent configuration cannot contain a credential'});
+      if(req.method==='POST' && (req.url==='/api/bots' || req.url==='/api/creation-defaults' || req.url==='/api/provider-defaults' || /^\/api\/bots\/[\w-]+\/selection$/.test(req.url??'') || /^\/api\/bots\/[\w-]+\/profile$/.test(req.url ?? '')) && JSON.stringify(redactValue(value,redact))!==JSON.stringify(value)) return json(400,{error:'Agent configuration cannot contain a credential'});
       if(req.url==='/api/openrouter-connection') {
         if(req.method==='GET') return json(200,{saved:!!loadOpenRouterKey(dataDir)});
         if(req.method==='POST') {saveOpenRouterKey({root:dataDir,key:value.key});if(typeof value.key==='string') knownKeys.add(value.key);return json(200,{saved:true});}
@@ -426,6 +427,29 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
         if (!instance.bot(value.requesterId) || instance.bot(value.requesterId)?.archived) return json(404,{error:'Requesting agent not found'});
         return json(200,instance.discoverBots(value.requesterId,value.query));
       }
+      if(req.url==='/api/provider-defaults') {
+        if(req.method==='GET')return json(200,instance.providerDefaults().read());
+        if(req.method==='POST') {if(typeof value.revision!=='string'||typeof value.provider!=='string'||!(value.model===null||typeof value.model==='string')||!(value.reasoning===null||typeof value.reasoning==='string'))return json(400,{error:'Invalid provider defaults'});return json(200,instance.providerDefaults().set(value.revision,value.provider,{model:value.model,reasoning:value.reasoning}));}
+      }
+      if(req.url==='/api/models'&&req.method==='POST') {
+        if(typeof value.provider!=='string'||!['demo','codex','openrouter','lmstudio','live'].includes(value.provider))return json(400,{error:'Invalid provider'});
+        if(loggingOut)return json(409,{error:'Sign-out in progress'});
+        const settings=resolveSettings({saved:{},file:{},shell:env,cli:{provider:value.provider},session:{}});
+        const catalog=await discoverModels(settings,{env,dataDir,refresh:true,request:options.modelRequest});selectionCatalogs.set(value.provider,catalog);return json(200,redactValue(catalog,redact));
+      }
+      const selection=req.url?.match(/^\/api\/bots\/([\w-]+)\/selection$/);
+      if(selection?.[1]&&req.method==='POST') {
+        if(typeof value.revision!=='string'||typeof value.provider!=='string'||!['demo','codex','openrouter','lmstudio','live'].includes(value.provider)||(value.model!==undefined&&value.model!==null&&typeof value.model!=='string')||(value.reasoning!==undefined&&value.reasoning!==null&&typeof value.reasoning!=='string'))return json(400,{error:'Invalid selection'});
+        const current=instance.bot(selection[1]);
+        const advertised=selectionCatalogs.get(value.provider);
+        const first=!current?.providerChoices?.[value.provider]&&!instance.providerDefaults().read().providers[value.provider]?.model;
+        const model=value.model===undefined&&first?advertised?.defaultModel:value.model;
+        const selectedModel=advertised?.models.find(m=>m.id===(model??current?.model));
+        const effort=value.reasoning===undefined?current?.reasoning:value.reasoning;
+        const reset=value.model!==undefined&&selectedModel?.reasoningStatus==='advertised'&&effort&&effort!=='default'&&!selectedModel.reasoning?.includes(effort);
+        const result=instance.selectBotProvider(selection[1],value.revision,value.provider,model,reset?null:value.reasoning);
+        return json(200,result);
+      }
       if(req.url === '/api/creation-defaults') {
         if(req.method === 'GET') return json(200,instance.creationDefaults());
         if(req.method === 'POST') {if(typeof value.revision !== 'number' || typeof value.provider !== 'string' || !(value.model === null || typeof value.model === 'string') || !(value.reasoning === null || typeof value.reasoning === 'string'))return json(400,{error:'Invalid creation defaults'});return json(200,instance.setCreationDefaults({revision:value.revision,provider:value.provider,model:value.model,reasoning:value.reasoning}));}
@@ -434,8 +458,8 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
       if (req.method === 'GET' && req.url === '/api/bots') return json(200,instance.bots());
       if (req.method === 'POST' && req.url === '/api/bots') {
         if (typeof value.name !== 'string' || !value.name.trim() || value.name.length > 200 || (value.instructions !== undefined && (typeof value.instructions !== 'string' || value.instructions.length > 30000))) return json(400,{error:'Invalid name or instructions'});
-        if ((value.operationId !== undefined && (typeof value.operationId !== 'string' || !/^[\w-]{1,100}$/.test(value.operationId))) || (value.provider !== undefined && (typeof value.provider !== 'string' || !['demo','codex','openrouter','lmstudio','live'].includes(value.provider))) || (value.model !== undefined && value.model !== null && (typeof value.model !== 'string' || value.model.length > 200))) return json(400,{error:'Invalid creation operation'});
-        return json(201,instance.createBot({name:value.name,instructions:typeof value.instructions === 'string' ? value.instructions : '',...(typeof value.operationId === 'string' ? {operationId:value.operationId} : {}),...(typeof value.provider === 'string' ? {provider:value.provider} : {}),...(typeof value.model === 'string' ? {model:value.model} : {})}));
+        if ((value.reasoning!==undefined&&value.reasoning!==null&&typeof value.reasoning!=='string') || (value.operationId !== undefined && (typeof value.operationId !== 'string' || !/^[\w-]{1,100}$/.test(value.operationId))) || (value.provider !== undefined && (typeof value.provider !== 'string' || !['demo','codex','openrouter','lmstudio','live'].includes(value.provider))) || (value.model !== undefined && value.model !== null && (typeof value.model !== 'string' || value.model.length > 200))) return json(400,{error:'Invalid creation operation'});
+        return json(201,instance.createBot({name:value.name,instructions:typeof value.instructions === 'string' ? value.instructions : '',...(typeof value.operationId === 'string' ? {operationId:value.operationId} : {}),...(typeof value.provider === 'string' ? {provider:value.provider} : {}),...(typeof value.model === 'string' ? {model:value.model} : {}),...(typeof value.reasoning==='string'?{reasoning:value.reasoning}:{})}));
       }
       const creationMatch=req.url?.match(/^\/api\/bot-creations\/([\w-]+)$/);
       if(req.method==='GET' && creationMatch?.[1]) {const bot=instance.creationOperation(creationMatch[1]);return bot ? json(200,bot) : json(404,{error:'Creation operation not found'});}
@@ -466,7 +490,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
           if(loggingOut)return json(409,{error:'Sign-out in progress'});
           const provider=String(bot.provider),model=typeof bot.model === 'string' ? bot.model : undefined;
           const settings=resolveSettings({saved:{},file:{},shell:env,cli:{provider,...(model ? {model} : {})},session:{}});
-          const controller=new AbortController();active.add(controller);try{return json(200,redactValue(await discoverModels(settings,{env,dataDir,refresh:true}),redact));}finally{active.delete(controller);}
+          const controller=new AbortController();active.add(controller);try{return json(200,redactValue(await discoverModels(settings,{env,dataDir,refresh:true,request:options.modelRequest}),redact));}finally{active.delete(controller);}
         }
       }
       const botSkillsMatch = req.url?.match(/^\/api\/bots\/([\w-]+)\/skills$/);
