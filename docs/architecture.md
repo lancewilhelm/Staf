@@ -129,7 +129,7 @@ The version 9 instance migration creates schedule and occurrence tables after a 
 
 The collaboration runtime journals actual bot messages and separate helper attempts. The owner approves each exact message before disclosure. A helper receives only the assignment brief as task context and does not retrieve private memory. Parent stop cancels its helper, and late output remains in helper Activity. Restart interrupts unfinished attempts. Offline synthetic-provider tests cover these paths; live provider behavior remains unverified.
 
-Shared-instance Codex sign-in owns a short-lived in-memory attempt bound to its initiating paired client and the service loopback callback. The credential adapter checks that client remains authorized at the locked credential commit boundary. Callback parameters are not returned in the response. The browser keeps the sign-in URL only for the attempt that produced it and offers cancellation and retry if it is lost or the attempt fails. Paired CLI and GUI sign-out use the same guarded service operation. Credential status is local and does not verify account or model access. This integration has synthetic service, CLI, and served-browser tests and has not been verified with live authorization.
+Shared-instance Codex sign-in owns a short-lived in-memory attempt bound to its initiating paired client and the service loopback callback. The credential adapter checks that client remains authorized at the locked credential commit boundary. Callback parameters are not returned in the response. The browser reserves a tab synchronously from the connection action and navigates it after asynchronous authorization setup. A blocked tab leaves a manual link for the same attempt. The browser keeps the sign-in URL only for the attempt that produced it and offers cancellation and retry if it is lost or the attempt fails. Paired CLI and GUI sign-out use the same guarded service operation. Credential status is local and does not verify account or model access. This integration has synthetic service, CLI, and served-browser tests and has not been verified with live authorization.
 
 The shared main-chat runtime may request one background task per command through a host-controlled tool. A durable journal binds the command, tool call, objective, and task attempt, so duplicate submissions do not start duplicate work. Explicit main-chat task direction and stop use the attempt ID and do not expand permissions. New bots copy the instance provider, model, and reasoning creation defaults in the creation transaction; later default changes do not alter existing bots. These paths have offline synthetic coverage; live provider behavior remains unverified.
 
@@ -176,3 +176,10 @@ retains observed catalog metadata for advertised defaults and reasoning reset;
 it does not discover or generate during a selection save. Missing reasoning
 metadata remains unknown. Synthetic service and served-browser checks cover
 these flows; they do not establish live provider readiness or Docker behavior.
+
+Workspace notifications use reusable dismissible toast components at the top of
+the page. Information and success expire after six seconds of unpaused display;
+pointer hover and focus within the toast pause the countdown and progress bar.
+Errors persist until dismissed, while correction and retry context stays inline.
+Sign-in transitions replace the previous attempt notice and clear terminal URLs;
+local saved credentials still do not establish provider or model access.
