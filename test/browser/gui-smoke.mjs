@@ -109,7 +109,7 @@ try{
  await until(()=>evaluate("document.body.innerText.includes('Sign-in failed')"),'show synthetic sign-in failure');
  assert.equal(await evaluate("!![...document.querySelectorAll('a')].find(a=>a.textContent==='Continue sign-in')"),false,'completed attempt must not retain its sign-in link');
  await until(()=>evaluate("[...document.querySelectorAll('.toast[data-kind=error]')].some(n=>n.innerText.includes('Sign-in failed'))"),'persistent sign-in error toast');
- await sleep(6200);assert.equal(await evaluate("!!document.querySelector('.toast[data-kind=error]')"),true,'errors do not expire');
+ await sleep(6200);assert.equal(await evaluate("[...document.querySelectorAll('.toast[data-kind=error]')].some(n=>n.innerText.includes('Sign-in failed'))"),true,'errors do not expire');
  await cdp('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
  for(const mode of ['light','dark','system']){
    await evaluate(`document.documentElement.dataset.appearance=${JSON.stringify(mode)}`);
