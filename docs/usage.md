@@ -175,21 +175,30 @@ The workspace keeps an agent list beside the selected main chat, visible while
 the chat scrolls. Select an agent to switch conversations; agents with the same
 name, including archived namesakes, show the last four characters of their stable
 IDs in the list and Updates. Suffixes can coincide; full IDs remain available
-through the API or CLI. **New agent** opens creation, and **Settings** controls appearance and
+through the API or CLI. **New agent**, under the **Agents** sidebar heading, opens creation, and **Settings** controls appearance and
 instance-wide provider connections. Choose Light, Dark, or System appearance;
 System is the default and follows device appearance changes. The choice is saved
 in this browser, independently of other browsers; clearing browser storage resets it.
 
+Workspace notifications appear as dismissible toasts at the top of the page.
+Informational and success notices expire after six seconds, with a progress bar.
+Hovering or focusing a toast pauses its timer. Errors remain until dismissed;
+correctable errors also remain beside the affected control or message.
+
 A saved Codex sign-in is shared by all agents; it does not establish that the
-provider or a model is available. In **Settings**, use **Connect Codex**, open
-**Continue sign-in** on the instance host, and return to Settings for progress.
+provider or a model is available. In **Settings**, **Connect Codex** opens sign-in
+in a new tab. If the tab is blocked or closed, use **Continue sign-in** for the
+same attempt on the instance host, and return to Settings for progress.
 Cancel a pending attempt or retry a failed or expired one. If the page was
 refreshed and the link is no longer available, cancel the attempt and start a
 new one. **Sign out** removes the instance's local credential after confirmation;
 finish active work and sign-in first. Agent provider and model selections and
 unsent drafts are retained. Create an agent with a name and optional
 instructions, provider, and model, even before signing in or choosing a model. Select the
-model label below an agent's chat to edit its settings and Instructions. Press
+agent avatar in the chat header to edit its full settings and Instructions. The
+optional **Instructions** field provides standing guidance in the agent's
+`soul.md`. Open **About Instructions** with a click, tap, or keyboard to read
+the explanation; hovering the control also shows it. Press
 Enter to send a message or Shift+Enter to insert a new line. The workspace keeps drafts when switching agents. If sign-in or a model is
 missing, the submitted text remains beside an explanation and Retry control.
 
@@ -205,14 +214,14 @@ and asks for confirmation because future requests can send the existing chat to
 the new provider. Saving settings does not send a model request. Other agents
 keep their own choices.
 In agent settings, select **Archive agent** to retain configuration and history
-while preventing new work. To restore it, open **Settings** and select
-**Restore agent** under **Archived agents**. An agent with active chat or background
+while preventing new work. To restore it, expand **Archived agents** in the **Agents** sidebar and select
+**Restore agent** beside its name. An agent with active chat or background
 work cannot be archived until that work settles.
 
 In the shared terminal, `/stop` requests cancellation of the current main-chat response, including one started by another paired client, and reports its settled state and any stopped partial output. Incremental provider text is labeled provisional until the response settles. A line entered while your terminal command is unresolved is kept as an unsent draft. Use `/edit ID TEXT` to revise it and `/retry ID` after the response settles; drafts are never queued automatically.
 
 While a response runs, the workspace receives provisional text and progress over a shared-instance event stream. If the connection drops, the workspace reconnects and shows the latest saved progress.
-You can type a next draft while the response runs. Select **Stop** to request cancellation; the response shows **stopping** until the provider and pending operations settle. Send becomes available after completion or a settled Stop, and the draft remains editable throughout. Stopped partial output stays in the conversation labeled **stopped** and is not treated as a completed provider reply. A provider that does not promptly honor cancellation can keep the agent in stopping until it returns.
+The composer has one circular action: an up arrow labeled **Send** when ready, and a square labeled **Stop** during an active response. You can type a next draft while the response runs. Select **Stop** to request cancellation; the response shows **stopping** until the provider and pending operations settle. The circular action stays disabled and labeled **Stopping response** until settlement, then returns to Send. The draft remains editable throughout; Enter cannot submit it during generation or stopping, and nothing is queued. Send it explicitly after the response settles. Stopped partial output stays in the conversation labeled **stopped** and is not treated as a completed provider reply. A provider that does not promptly honor cancellation can keep the agent in stopping until it returns.
 Markdown headings, lists, links and code blocks render in assistant responses;
 use Copy on a code block. Raw HTML is not rendered. The conversation follows new
 output while you are at the bottom and stays in place when you scroll up.
@@ -238,8 +247,13 @@ if no command is found, resubmitted using the same ID. A failure or busy rejecti
 remains beside the message with Retry and Dismiss; a newer draft is retained.
 If a retry finds the agent busy while the original request may still arrive,
 the message cannot be dismissed and any retry keeps the original ID.
-Earlier session records can be recovered in Settings. Clearing browser storage
-removes locally saved drafts and pending IDs. The former Advanced page has been
+Obsolete pre-journal browser records are deleted without importing them. Current
+journal records, including records owned by other open tabs and recoverable closed-tab
+drafts, are retained; there is no manual earlier-record picker. An unfinished agent
+creation is restored automatically after refresh or reopening a tab, with the same
+operation ID for Check creation or Retry same creation. A live tab keeps ownership
+of its creation record. Clearing browser storage removes locally saved drafts,
+pending IDs, and unfinished creation records. The former Advanced page has been
 retired. Profile, permission, memory, skill, schedule, and task management are
 not yet fully available in the workspace; the service and CLI operations below
 remain available.
@@ -270,7 +284,8 @@ cannot recover a version that was overwritten before it read that version.
 If changing both files, finish the edits before sending new work: independent
 file writes are not an atomic pair and Staf may see one before the other.
 GUI changes preserve TOML comments and surrounding formatting; if a layout
-cannot be safely updated, Staf reports an error and retains the file.
+cannot be safely updated, Staf reports an error and retains the file. Authored
+provider-choice tables, dotted keys, or inline tables may require a direct edit.
 
 Client saves include a revision and reject stale versions. If a client reports
 that a save result is uncertain, inspect the current files before retrying.
@@ -470,3 +485,43 @@ Scratch shell is disabled by default. A paired owner must configure an absolute 
 Each exact command requires owner approval in the browser or through `shell-approvals`, `shell-approve`, and `shell-deny`. The integration passes only a fixed 16 MiB, 1,024-inode scratch tmpfs to the sandbox, with a 30-second execution limit and 64 KiB output limit. It does not mount a host workspace. The Docker binary, daemon and pinned image must be trusted. The exact command is visible to host process observers and Docker container configuration until removal. Scratch tmpfs may use swap, and Docker can provide runtime-managed mounts. Commands, output and unknown secrets may persist in provider replay, conversations, Activity and backups. Known configured secrets are redacted where supported; arbitrary output may contain secrets that cannot be reliably detected.
 
 An uncertain start, stop or cleanup blocks further scratch commands and daemon configuration changes. Inspect the recorded endpoint with `shell-uncertain` and independently verify the daemon identity before review. Staf compares endpoint configuration strings but cannot prove that the binary or socket still identifies the same daemon. A missing container does not prove that a delayed create cannot appear later. After independently verifying the daemon identity and inspecting it, the owner may explicitly acknowledge the risk with `shell-review URL CREDENTIAL_FILE ACTION_ID --acknowledge-uncertain` to record a review. This records a review; it does not remove a container or retry the action. The original action ID is never reused. Integration tests use a synthetic executor; the scratch component was separately tested with a disposable container, but live model-directed shell execution has not been verified.
+
+## Provider choices
+
+Open the composer model control to choose provider, model and reasoning. Provider
+and reasoning selections and listed model choices save immediately; manual model text saves when leaving
+the field. **List models** reports how many models loaded and shows an **Available models**
+dropdown. If no models are returned, it says so; you can still enter a
+model ID manually or retry. Discovery errors remain beside the controls. Model
+listing reads metadata only and does not verify account access or run inference.
+Model IDs absent from the list remain valid manual entries. Provider default reasoning leaves the effort unset. A model
+with explicitly incompatible advertised reasoning resets the effort visibly.
+Missing metadata leaves the saved effort intact; generation can still reject it.
+Changing providers asks for confirmation before saving. Drafts stay in place.
+Agent settings uses the same picker; name and instructions retain their separate
+Save settings action and conflict recovery.
+
+Global Settings → Provider defaults configures each provider's first-use pair.
+Returning to a provider restores that agent's remembered pair. Changing defaults
+does not update existing selections. Creation without an explicit provider keeps
+the copied creation defaults. An explicit provider instead uses its own defaults or an explicit choice; after
+discovery, an advertised default model can fill an unset model. It does not
+inherit another provider’s reasoning.
+Configuration does not verify model/account access.
+
+Paired CLI clients can inspect and select the same state:
+
+```sh
+staf instance provider-defaults URL CREDENTIAL_FILE
+staf instance provider-defaults-set URL CREDENTIAL_FILE openrouter owner/model high
+staf instance inspect URL CREDENTIAL_FILE AGENT_ID
+staf instance select URL CREDENTIAL_FILE AGENT_ID REVISION openrouter --confirm-provider-change
+```
+
+`select` optionally accepts model and reasoning after provider; `-` explicitly
+clears a value. Omitted values restore the remembered pair or first-use defaults.
+A provider change can send conversation history to the new provider; inspect the
+agent and review the warning before adding `--confirm-provider-change`. Without
+the flag the provider stays unchanged. Use the revision from inspect; conflicts
+preserve the current configuration. The
+interactive terminal keeps its existing provider-change confirmation.

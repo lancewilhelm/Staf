@@ -102,7 +102,7 @@ const searchBackend=createServer(async(req,res)=>{let body='';for await(const ch
 await new Promise(resolve=>searchBackend.listen(0,'127.0.0.1',resolve));
 console.log('SYNTHETIC_SEARCH_ORIGIN http://127.0.0.1:'+searchBackend.address().port);
 const shellExecutor=async request=>{const {signal,...details}=request;console.log('SYNTHETIC_SHELL '+JSON.stringify(details));if(request.command==='simulate uncertainty')throw Error('Synthetic lost response');return {output:'hello from fake executor',exitCode:0,outputComplete:true,stopped:'completed'};};
-const app = startInstance(path, Number(port), { env: {}, authHooks, webDependencies, shellExecutor, enableReusableApprovals:process.argv[4]==='--grants', providerFactory: async (profile,instructions) => {
+const app = startInstance(path, Number(port), { env: {}, modelRequest:async()=>new Response(JSON.stringify({default_model:"fixture/model",data:[{id:"fixture/model",name:"Fixture reasoning",reasoning:{supported_efforts:["low","high"]}},{id:"fixture/plain",name:"Fixture plain",reasoning:{supported_efforts:[]}}]})), authHooks, webDependencies, shellExecutor, enableReusableApprovals:process.argv[4]==='--grants', providerFactory: async (profile,instructions) => {
   if(profile.provider==='openrouter') return openRouterProvider({OPENROUTER_API_KEY:loadOpenRouterKey(dirname(path))},profile.model,async (_url,init)=>{
     const body=JSON.parse(init.body),last=body.messages.at(-1),frame=value=>`data: ${JSON.stringify(value)}\n\n`;
     if(last.content==='Browser failure fixture' && !routerFailed){routerFailed=true;return new Response(frame({choices:[{index:0,delta:{content:'Partial browser output '},finish_reason:null}]})+frame({error:{message:'synthetic-browser-recovery'}}));}

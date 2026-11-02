@@ -7,7 +7,7 @@ import { createCodexRunner, type CodexRunner } from './codex.js';
 
 export const gatewayEfforts = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
 export interface ModelInfo { contextWindow?: number; id: string; label: string; reasoning: string[] | null; reasoningStatus: 'advertised' | 'unknown' | 'unsupported-transport'; defaultReasoning?: string; reasoningDefaultEnabled?: boolean; reasoningMandatory?: boolean; reasoningBudgetSupported?: boolean; advertisedReasoning?: string[]; note?: string }
-export interface ModelCatalog { source: string; fetchedAt: string; cached: boolean; models: ModelInfo[]; note: string }
+export interface ModelCatalog { defaultModel?:string; source: string; fetchedAt: string; cached: boolean; models: ModelInfo[]; note: string }
 interface DiscoveryOptions { env: Environment; dataDir: string; refresh?: boolean; request?: typeof fetch; codex?: CodexRunner }
 const cache = new Map<string, { time: number; result: ModelCatalog }>();
 const safeId = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,199}$/.test(value);
@@ -85,7 +85,7 @@ export async function discoverModels(effective: EffectiveSettings, options: Disc
       if (text.length > 5 * 1024 * 1024) throw new Error('Catalog too large');
       raw = JSON.parse(text);
     }
-    const result: ModelCatalog = { source, fetchedAt: new Date().toISOString(), cached: false, models: parseModels(raw, provider), note: 'Metadata is not an availability guarantee. Unknown reasoning stays unknown; manual model IDs remain supported.' };
+    const result: ModelCatalog = { source, fetchedAt: new Date().toISOString(), cached: false, models: parseModels(raw, provider), ...(isRecord(raw)&&safeId(raw.default_model)?{defaultModel:raw.default_model}:{}), note: 'Metadata is not an availability guarantee. Unknown reasoning stays unknown; manual model IDs remain supported.' };
     if (!options.request && !options.codex) cache.set(key, { time: Date.now(), result: structuredClone(result) });
     return result;
   } catch { throw new Error('Model discovery unavailable; existing settings are unchanged. Enter a model ID manually and keep reasoning at default, or refresh later.'); }

@@ -24,7 +24,7 @@ The shared instance has synthetic provider and authentication coverage. Earlier
 live Codex checks used the prior CLI path and an existing grant; they do not verify
 shared-instance sign-in or inference. See [verification](direct-responses.md#verification-and-remaining-gaps).
 
-Main-chat progress is owned by the shared service. The version 28 migration stores sanitized provisional snapshots separately from completed messages; restart marks unfinished commands interrupted. The runtime emits provider-step starts and deltas without adding partial text to provider replay or the completed transcript. The GUI subscribes to the shared progress through an authenticated SSE connection; reconnecting starts with the latest saved snapshot. The CLI polls the same shared progress. The GUI preserves a next draft and renders Markdown without raw HTML. Configured credentials and unsafe URLs are withheld or redacted before progress persistence. Buffered providers do not invent deltas. This path is tested with synthetic providers and does not establish live provider behavior.
+Main-chat progress is owned by the shared service. The version 28 migration stores sanitized provisional snapshots separately from completed messages; restart marks unfinished commands interrupted. The runtime emits provider-step starts and deltas without adding partial text to provider replay or the completed transcript. The GUI subscribes to the shared progress through an authenticated SSE connection; reconnecting starts with the latest saved snapshot. The CLI polls the same shared progress. The GUI preserves a next draft and renders Markdown without raw HTML. Its single circular composer action derives Send, Stop, and disabled Stopping states from shared response progress. It stays in Stopping until the shared service settles cancellation, including cancellation requested by another client; draft editing remains available, with no implicit submission or queue. Configured credentials and unsafe URLs are withheld or redacted before progress persistence. Buffered providers do not invent deltas. This path is tested with synthetic providers and does not establish live provider behavior.
 
 ## Local shared instance preview
 
@@ -48,12 +48,19 @@ and the stored conversation appear once. Busy and definitive failures remain
 inline for explicit retry or dismissal; an uncertain original cannot be dismissed
 after a busy retry because it may still arrive. Accepted failed commands get a
 new ID on explicit retry. Local journal storage and Web Locks are required for
-sending. Clearing browser storage removes the journal.
+sending. The obsolete `staf-draft` and `staf-pending` pre-journal keys are deleted
+under Web Locks without importing or backing them up. The `staf-workspace-v1:`
+journal is retained, including unclaimed closed-tab drafts and uncertain commands;
+the retired manual picker also listed these current records. No journal-wide
+legacy cleanup is safe. Clearing browser storage removes the journal.
  A keyed
 bot-creation operation stores its fingerprint and result with the bot in one
 transaction. Version 27 backs up an existing database before adding the journal.
-The browser retains the operation ID locally, and the CLI prints it before
-submission. A client can reuse the ID after a lost response or restart. Requests
+The browser retains the operation ID locally and claims the creation record with
+a Web Lock. On reload or reopening, it automatically restores an unclaimed creation
+form with its original arguments and operation ID; another live tab cannot adopt it.
+Closing and reopening the form in the owning tab retains the operation. The CLI
+prints the ID before submission. A client can reuse the ID after a lost response or restart. Requests
 without an ID do not have this guarantee. The shared service serializes archive
 with chat and task acceptance and rejects archive while work is active. It keeps
 the bot identity, configuration, and history for restoration.
@@ -129,7 +136,7 @@ The version 9 instance migration creates schedule and occurrence tables after a 
 
 The collaboration runtime journals actual bot messages and separate helper attempts. The owner approves each exact message before disclosure. A helper receives only the assignment brief as task context and does not retrieve private memory. Parent stop cancels its helper, and late output remains in helper Activity. Restart interrupts unfinished attempts. Offline synthetic-provider tests cover these paths; live provider behavior remains unverified.
 
-Shared-instance Codex sign-in owns a short-lived in-memory attempt bound to its initiating paired client and the service loopback callback. The credential adapter checks that client remains authorized at the locked credential commit boundary. Callback parameters are not returned in the response. The browser keeps the sign-in URL only for the attempt that produced it and offers cancellation and retry if it is lost or the attempt fails. Paired CLI and GUI sign-out use the same guarded service operation. Credential status is local and does not verify account or model access. This integration has synthetic service, CLI, and served-browser tests and has not been verified with live authorization.
+Shared-instance Codex sign-in owns a short-lived in-memory attempt bound to its initiating paired client and the service loopback callback. The credential adapter checks that client remains authorized at the locked credential commit boundary. Callback parameters are not returned in the response. The browser reserves a tab synchronously from the connection action and navigates it after asynchronous authorization setup. A blocked tab leaves a manual link for the same attempt. The browser keeps the sign-in URL only for the attempt that produced it and offers cancellation and retry if it is lost or the attempt fails. Paired CLI and GUI sign-out use the same guarded service operation. Credential status is local and does not verify account or model access. This integration has synthetic service, CLI, and served-browser tests and has not been verified with live authorization.
 
 The shared main-chat runtime may request one background task per command through a host-controlled tool. A durable journal binds the command, tool call, objective, and task attempt, so duplicate submissions do not start duplicate work. Explicit main-chat task direction and stop use the attempt ID and do not expand permissions. New bots copy the instance provider, model, and reasoning creation defaults in the creation transaction; later default changes do not alter existing bots. These paths have offline synthetic coverage; live provider behavior remains unverified.
 
@@ -160,3 +167,30 @@ the browser confirms the potential history disclosure before its profile save.
 The service still accepts supported configurations without requiring a saved
 connection, so direct edits and other clients can configure an agent before
 connecting. The editor does not run inference or verify provider access.
+
+## Shared provider choice ownership
+
+Agent files own remembered provider pairs; the active top-level pair is folded
+into that history on reads and revision-checked service writes. The composer,
+agent settings and terminal use the same selection operation. Existing captured
+response profiles remain unchanged by later selections. Global nonsecret defaults
+use atomic JSON replacement and content revisions beside the agent directories.
+They seed first selections, never live inheritance. Creation still copies its
+creation defaults when provider is omitted. An explicitly chosen provider uses
+its own defaults instead of inheriting another provider’s reasoning. Authored
+provider-choice layouts that cannot be edited safely cause a conflict without
+changing the files.
+
+Explicit metadata discovery supports unsaved providers and creation. The service
+retains catalog metadata from both provider and agent discovery for advertised
+defaults and reasoning reset;
+it does not discover or generate during a selection save. Missing reasoning
+metadata remains unknown. Synthetic service and served-browser checks cover
+these flows; they do not establish live provider readiness or Docker behavior.
+
+Workspace notifications use reusable dismissible toast components at the top of
+the page. Information and success expire after six seconds of unpaused display;
+pointer hover and focus within the toast pause the countdown and progress bar.
+Errors persist until dismissed, while correction and retry context stays inline.
+Sign-in transitions replace the previous attempt notice and clear terminal URLs;
+local saved credentials still do not establish provider or model access.

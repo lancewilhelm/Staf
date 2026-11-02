@@ -27,13 +27,15 @@ one-shot commands.
 Run `pnpm start instance serve .staf/instance.sqlite 3210` and open
 `http://127.0.0.1:3210/`. Enter the host's pairing code to open the chat workspace.
 **Settings** shows the instance-wide Codex connection and offers sign-in when
-needed, progress, cancellation, retry, and sign-out. A saved sign-in does not
+needed, progress, cancellation, retry, and sign-out. Connect Codex opens a new
+tab; Continue sign-in is available if the browser blocks it. Workspace notices
+appear as dismissible toasts, with actionable errors retained beside controls. A saved sign-in does not
 verify account or model access. It also offers Light, Dark, and System appearance for this browser;
-System follows the device setting. The persistent agent list switches between main chats; each agent has its own configuration, which you can edit from its chat. Submitted messages appear immediately, and per-agent drafts and uncertain submissions recover automatically after a reload or reopening a closed tab in the same browser.
+System follows the device setting. The persistent agent list switches between main chats; each agent has its own configuration, which you can edit from its chat. Submitted messages appear immediately, and per-agent drafts and uncertain submissions recover automatically after a reload or reopening a closed tab in the same browser. Unfinished agent creation also recovers automatically with its original operation ID. Obsolete browser records are deleted; no manual recovery picker is needed.
 Instructions live in its `soul.md` file; settings live in `agent.toml`. You can
 [edit these files directly](docs/usage.md#agent-configuration-files) on the instance host.
 Connect an instance-wide OpenRouter key in global Settings or through the paired CLI; saved presence does not verify account or model access. You can create an agent with just a name before connecting a provider. Agent settings
-offer Demo and configured shared connections, retain disconnected selections, and ask for confirmation before switching providers. Review the agent's model after a switch. Agent settings also include archive, and Settings lists archived agents for restoration. The inbox shows task updates and
+offer Demo and configured shared connections, retain disconnected selections, and ask for confirmation before switching providers. Review the agent's model after a switch. Open full agent settings from the chat header avatar. Agent settings include archive; reveal Archived agents in the Agents sidebar to restore them. The inbox shows task updates and
 requests for input or approval. The previous Advanced page has been retired;
 other management features remain available through the service and CLI while
 their GUI is developed. Shared-instance Codex sign-in has synthetic coverage
@@ -100,7 +102,7 @@ Public OIDC metadata and the documented direct endpoint contract were checked.
 On a new checkout, run
 `pnpm install --frozen-lockfile`. pnpm 10.27.0 is used for verification.
 
-The workspace receives provisional main-chat response progress over an authenticated event stream and renders Markdown with copyable code. Use Stop to end the current response while keeping the next draft; the shared service waits for cancellation to settle before accepting another message. The paired CLI can follow progress with `instance response-follow` and request Stop with `instance response-stop`. Incremental text depends on the provider: Codex direct and OpenRouter support it; LM Studio and generic Chat Completions responses are buffered. The shared terminal labels incremental text provisional and displays command status and recorded tool progress.
+The workspace receives provisional main-chat response progress over an authenticated event stream and renders Markdown with copyable code. The circular composer action switches from an up-arrow Send to Stop during a response. Use Stop to end the current response while keeping the next draft; the shared service waits for cancellation to settle before accepting another message. The paired CLI can follow progress with `instance response-follow` and request Stop with `instance response-stop`. Incremental text depends on the provider: Codex direct and OpenRouter support it; LM Studio and generic Chat Completions responses are buffered. The shared terminal labels incremental text provisional and displays command status and recorded tool progress.
 `/usage` shows reported main-chat consumption. `/context` reports historical input
 when available; current context occupancy is unavailable. Shared-instance provider
 sign-in and live chat have not been verified with real credentials.
@@ -111,3 +113,7 @@ Original Staf code is licensed under the [Apache License 2.0](LICENSE).
 Third-party material retains its applicable licenses. The Hermes-derived
 cache/request material in the direct Responses adapter remains subject to the
 MIT notice in [Third-party notices](THIRD_PARTY_NOTICES.md).
+
+Agent provider choices are shared across clients. The composer opens a provider,
+model and reasoning picker; selections save for the next message. Global Settings
+holds per-provider first-use defaults. See [usage](docs/usage.md).

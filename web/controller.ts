@@ -1,7 +1,9 @@
+import type {ToastNotice} from './toasts';
 import {responseEvents} from './response-stream';
 
-export type Bot={id:string;name:string;provider:string;model:string|null;archived:boolean};
-export type BotProfile=Bot & {revision:string;instructions:string;description:string;reasoning:string|null;configDir:string};
+export type ModelCatalog={models:Array<{id:string;label:string;reasoning:string[]|null;reasoningStatus:string}>;defaultModel?:string};
+export type Bot={revision?:string;id:string;name:string;provider:string;model:string|null;archived:boolean};
+export type BotProfile=Bot & {revision:string;instructions:string;description:string;reasoning:string|null;configDir:string;providerChoices?:Record<string,{model:string|null;reasoning:string|null}>};
 export type Message={id:string;role:string;content:string};
 export type ResponseProgress={id:string;botId:string;state:'accepted'|'running'|'stopping'|'stopped'|'completed'|'failed'|'interrupted';text:string;error:string|null};
 export type Task={id:string;objective:string;state:string;outcome:string|null;activity?:Array<Record<string,unknown>>};
@@ -14,11 +16,23 @@ export type Submission=SubmissionIdentity & (
 );
 export type Draft={text:string;submission:Submission|null};
 export type Connection={kind:'connecting'}|{kind:'pairing';message:string}|{kind:'ready'}|{kind:'offline';message:string};
-export type Setup={kind:'closed'}|{kind:'create';name:string;instructions:string;provider:string;model:string;operationId:string|null;status:string};
-export type Workspace={connection:Connection;setup:Setup;bots:Bot[];selected:string|null;messages:Message[];response:ResponseProgress|null;responseConnection:'connecting'|'connected'|'reconnecting';tasks:Task[];inbox:InboxItem[];taskUpdates:Array<Task & {botId:string}>;activityOpen:boolean;credential:'signed-in'|'signed-out'|'unknown';openrouter:'saved'|'missing'|'unknown'|'error';authAttempt:{id:string;phase:string}|null;authUrl:string;authUrlAttemptId:string;freshness:string;notice:string;draft:Draft;draftReady:boolean;recoveries:Recovery[]};
-type Recovery={key:string;label:string;value:string};
+export type Setup={kind:'closed'}|{kind:'create';name:string;instructions:string;provider:string;model:string;reasoning?:string;operationId:string|null;status:string};
+export type Workspace={connection:Connection;setup:Setup;bots:Bot[];selected:string|null;messages:Message[];response:ResponseProgress|null;responseConnection:'connecting'|'connected'|'reconnecting';tasks:Task[];inbox:InboxItem[];taskUpdates:Array<Task & {botId:string}>;activityOpen:boolean;credential:'signed-in'|'signed-out'|'unknown';openrouter:'saved'|'missing'|'unknown'|'error';authAttempt:{id:string;phase:string}|null;authUrl:string;authUrlAttemptId:string;freshness:string;notice:string;notices:ToastNotice[];authStarting:boolean;authStatus:string;actionError:string;draft:Draft;draftReady:boolean};
 class ApiError extends Error {constructor(message:string,readonly status:number){super(message);}}
 const isRecord=(value:unknown):value is Record<string,unknown>=>typeof value==='object'&&value!==null&&!Array.isArray(value);
+type ProviderDefaults={revision:string;providers:Record<string,{model:string|null;reasoning:string|null}>};
+const isNullableString=(value:unknown):value is string|null=>value===null||typeof value==='string';
+function isChoices(value:unknown):value is ProviderDefaults['providers'] {return isRecord(value)&&Object.values(value).every(pair=>isRecord(pair)&&isNullableString(pair.model)&&isNullableString(pair.reasoning));}
+function parseProviderDefaults(value:unknown):ProviderDefaults {if(!isRecord(value)||typeof value.revision!=='string'||!isChoices(value.providers))throw Error('Invalid provider defaults response. Refresh and retry; your edits are retained.');return {revision:value.revision,providers:value.providers};}
+function parseModelCatalog(value:unknown):ModelCatalog {
+ if(!isRecord(value)||!Array.isArray(value.models)||(value.defaultModel!==undefined&&typeof value.defaultModel!=='string')||!value.models.every((model:unknown)=>isRecord(model)&&typeof model.id==='string'&&typeof model.label==='string'&&['advertised','unknown','unsupported-transport'].includes(String(model.reasoningStatus))&&(model.reasoning===null||Array.isArray(model.reasoning)&&model.reasoning.every((effort:unknown)=>typeof effort==='string'))&&(model.reasoningStatus!=='advertised'||Array.isArray(model.reasoning))))throw Error('Invalid model catalog. Enter a model ID manually or retry discovery.');
+ return {models:value.models,...(typeof value.defaultModel==='string'?{defaultModel:value.defaultModel}:{})};
+}
+function parseSelection(value:unknown):BotProfile {
+ if(!isRecord(value)||typeof value.id!=='string'||typeof value.name!=='string'||typeof value.provider!=='string'||!isNullableString(value.model)||typeof value.archived!=='boolean'||typeof value.revision!=='string'||typeof value.instructions!=='string'||typeof value.description!=='string'||!isNullableString(value.reasoning)||typeof value.configDir!=='string'||(value.providerChoices!==undefined&&!isChoices(value.providerChoices)))throw Error('Invalid selection response. Compare the current settings before retrying.');
+ return {id:value.id,name:value.name,provider:value.provider,model:value.model,archived:value.archived,revision:value.revision,instructions:value.instructions,description:value.description,reasoning:value.reasoning,configDir:value.configDir,...(value.providerChoices===undefined?{}:{providerChoices:value.providerChoices})};
+}
+
 function isResponseProgress(value:unknown,botId:string):value is ResponseProgress {
   return isRecord(value)&&typeof value.id==='string'&&value.botId===botId&&typeof value.state==='string'&&['accepted','running','stopping','stopped','completed','failed','interrupted'].includes(value.state)&&typeof value.text==='string'&&(value.error===null||typeof value.error==='string');
 }
@@ -31,11 +45,15 @@ function normalizeDraft(draft:Draft):Draft {
 }
 export class Controller {
   private writer=crypto.randomUUID(); private checking=false; private listeners=new Set<()=>void>(); private generation=0; private seen=new Set<string>(); private token=localStorage.getItem('staf-token')||''; private currentKey=''; private timer:number; private responseStream:{botId:string;controller:AbortController}|null=null;
-  state:Workspace={connection:{kind:'connecting'},setup:{kind:'closed'},bots:[],selected:null,messages:[],response:null,responseConnection:'connecting',tasks:[],inbox:[],taskUpdates:[],activityOpen:false,credential:'unknown',openrouter:'unknown',authAttempt:null,authUrl:'',authUrlAttemptId:'',freshness:'',notice:'',draft:{text:'',submission:null},draftReady:false,recoveries:[]};
-  constructor(){this.timer=window.setInterval(()=>{if(document.visibilityState==='visible')void this.refresh()},1000);window.addEventListener('online',()=>void this.refresh());document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')void this.refresh()});this.recoveries();void this.refresh()}
+  state:Workspace={connection:{kind:'connecting'},setup:{kind:'closed'},bots:[],selected:null,messages:[],response:null,responseConnection:'connecting',tasks:[],inbox:[],taskUpdates:[],activityOpen:false,credential:'unknown',openrouter:'unknown',authAttempt:null,authUrl:'',authUrlAttemptId:'',freshness:'',notice:'',notices:[],authStarting:false,authStatus:'',actionError:'',draft:{text:'',submission:null},draftReady:false};
+  constructor(){this.timer=window.setInterval(()=>{if(document.visibilityState==='visible')void this.refresh()},1000);window.addEventListener('online',()=>void this.refresh());document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')void this.refresh()});void this.restoreCreation();void this.removeObsoleteRecords();void this.refresh()}
   subscribe=(fn:()=>void)=>{this.listeners.add(fn);return()=>this.listeners.delete(fn)};
   snapshot=()=>this.state;
-  private update(change:Partial<Workspace>){this.state={...this.state,...change};this.listeners.forEach(fn=>fn())}
+  notify(message:string,kind:ToastNotice['kind']='info',topic?:string){this.update({notices:[...this.state.notices.filter(n=>!topic||n.topic!==topic),{id:crypto.randomUUID(),message,kind,...(topic?{topic}:{})}]})}
+  dismissNotice=(id:string)=>{this.update({notices:this.state.notices.filter(n=>n.id!==id)})};
+  private update(change:Partial<Workspace>){
+    if(change.notice){change.notices=[...this.state.notices,{id:crypto.randomUUID(),message:change.notice,kind:'info'}]}
+    this.state={...this.state,...change};this.listeners.forEach(fn=>fn())}
   private async api<T>(path:string,body?:unknown):Promise<T>{const response=await fetch(path,{method:body===undefined?'GET':'POST',headers:{...(body===undefined?{}:{'Content-Type':'application/json'}),...(this.token?{Authorization:'Bearer '+this.token}:{})},...(body===undefined?{}:{body:JSON.stringify(body)})});const data:unknown=await response.json();if(!response.ok){const message=typeof data==='object'&&data!==null&&'error'in data&&typeof data.error==='string'?data.error:'Request failed';throw new ApiError(message,response.status)}return data as T}
   private watchResponse(botId:string|null){
     if(this.responseStream?.botId===botId && !this.responseStream.controller.signal.aborted)return;
@@ -64,7 +82,7 @@ export class Controller {
     }})();
   }
   async pair(code:string){try{const result=await this.api<{token:string}>('/api/pair',{code});localStorage.setItem('staf-token',result.token);this.token=result.token;await this.refresh()}catch(e){this.update({connection:{kind:'pairing',message:String(e)}})}}
-  async refresh(){if(!this.token){this.update({connection:{kind:'pairing',message:''}});return}const gen=++this.generation;try{const [bots,inbox,taskUpdates,credential,current,openrouter]=await Promise.all([this.api<Bot[]>('/api/bots'),this.api<InboxItem[]>('/api/inbox'),this.api<Array<Task & {botId:string}>>('/api/task-updates'),this.api<{signedIn:boolean}>('/api/codex-auth/credential'),this.api<{attempt:{id:string;phase:string}|null}>('/api/codex-auth/current'),this.api<{saved:boolean}>('/api/openrouter-connection').catch(()=>({saved:null}))]);const preferred=this.state.selected||sessionStorage.getItem('staf-selected-agent');const selected=preferred && bots.some(b=>b.id===preferred&&!b.archived)?preferred:bots.find(b=>!b.archived)?.id??null;const [messages,taskList]=selected?await Promise.all([this.api<Message[]>('/api/bots/'+selected+'/messages'),this.api<Task[]>('/api/bots/'+selected+'/tasks')]):[[],[]];const tasks=await Promise.all(taskList.slice(0,30).map(task=>this.api<Task>('/api/tasks/'+task.id)));if(gen!==this.generation)return;const newly=inbox.some(item=>item.botId===selected&&!this.seen.has(item.kind+':'+item.id));inbox.filter(item=>item.botId===selected).forEach(item=>this.seen.add(item.kind+':'+item.id));const changed=selected!==this.state.selected;if(changed){await this.loadDraft(selected,gen);if(gen!==this.generation)return;}this.update({connection:{kind:'ready'},bots,selected,messages,...(changed?{response:null}:{}),tasks,inbox,taskUpdates,credential:credential.signedIn?'signed-in':'signed-out',openrouter:openrouter.saved===null?'error':openrouter.saved?'saved':'missing',authAttempt:current.attempt,activityOpen:newly?true:this.state.activityOpen,freshness:''});this.watchResponse(selected);if(this.state.draft.submission && (['pending','unknown'].includes(this.state.draft.submission.kind)||this.state.draft.submission.kind==='uncertain-busy'))void this.checkSubmission()}catch(e){if(gen!==this.generation)return;if(e instanceof ApiError&&e.status===401){this.token='';this.watchResponse(null);localStorage.removeItem('staf-token');this.update({connection:{kind:'pairing',message:'Pairing expired or was revoked.'}})}else this.update({connection:{kind:'offline',message:'Connection unavailable. Showing the last successful update.'},freshness:String(e)})}}
+  async refresh(){if(!this.token){this.update({connection:{kind:'pairing',message:''}});return}const gen=++this.generation;try{const [bots,inbox,taskUpdates,credential,current,openrouter]=await Promise.all([this.api<Bot[]>('/api/bots'),this.api<InboxItem[]>('/api/inbox'),this.api<Array<Task & {botId:string}>>('/api/task-updates'),this.api<{signedIn:boolean}>('/api/codex-auth/credential'),this.api<{attempt:{id:string;phase:string}|null}>('/api/codex-auth/current'),this.api<{saved:boolean}>('/api/openrouter-connection').catch(()=>({saved:null}))]);const preferred=this.state.selected||sessionStorage.getItem('staf-selected-agent');const selected=preferred && bots.some(b=>b.id===preferred&&!b.archived)?preferred:bots.find(b=>!b.archived)?.id??null;const [messages,taskList]=selected?await Promise.all([this.api<Message[]>('/api/bots/'+selected+'/messages'),this.api<Task[]>('/api/bots/'+selected+'/tasks')]):[[],[]];const tasks=await Promise.all(taskList.slice(0,30).map(task=>this.api<Task>('/api/tasks/'+task.id)));if(gen!==this.generation)return;const newly=inbox.some(item=>item.botId===selected&&!this.seen.has(item.kind+':'+item.id));inbox.filter(item=>item.botId===selected).forEach(item=>this.seen.add(item.kind+':'+item.id));const changed=selected!==this.state.selected;if(changed){await this.loadDraft(selected,gen);if(gen!==this.generation)return;}this.reconcileAuth(current.attempt);this.update({connection:{kind:'ready'},bots,selected,messages,...(changed?{response:null}:{}),tasks,inbox,taskUpdates,credential:credential.signedIn?'signed-in':'signed-out',openrouter:openrouter.saved===null?'error':openrouter.saved?'saved':'missing',authAttempt:current.attempt,activityOpen:newly?true:this.state.activityOpen,freshness:''});this.watchResponse(selected);if(this.state.draft.submission && (['pending','unknown'].includes(this.state.draft.submission.kind)||this.state.draft.submission.kind==='uncertain-busy'))void this.checkSubmission()}catch(e){if(gen!==this.generation)return;if(e instanceof ApiError&&e.status===401){this.token='';this.watchResponse(null);localStorage.removeItem('staf-token');this.update({connection:{kind:'pairing',message:'Pairing expired or was revoked.'}})}else this.update({connection:{kind:'offline',message:'Connection unavailable. Showing the last successful update.'},freshness:String(e)})}}
   async select(id:string){
     if(id===this.state.selected)return;
     sessionStorage.setItem('staf-selected-agent',id);this.generation++;
@@ -105,7 +123,7 @@ export class Controller {
         const saved=localStorage.getItem(key);
         if(saved)draft=normalizeDraft(JSON.parse(saved));
       }
-    }catch{if(load===this.draftLoad && (expectedGeneration===undefined || expectedGeneration===this.generation)){this.currentKey='';this.update({notice:'Browser storage or locking is unavailable. Sending is blocked.'})}}
+    }catch{if(load===this.draftLoad && (expectedGeneration===undefined || expectedGeneration===this.generation)){this.currentKey='';this.update({actionError:'Browser storage or locking is unavailable. Sending is blocked.'});this.notify('Browser storage or locking is unavailable. Sending is blocked.','error')}}
     if(load===this.draftLoad && (expectedGeneration===undefined || expectedGeneration===this.generation))this.update({draft,draftReady:!!this.currentKey});
   }
   private async recoverNext(){
@@ -123,12 +141,30 @@ export class Controller {
         const draft=normalizeDraft(JSON.parse(latest));if(typeof draft.text!=='string'||(!draft.text&&!draft.submission))continue;
         this.currentKey=key;this.update({draft});void this.refresh();return;
       }
-    }catch{this.update({notice:'Could not recover another saved draft.'})}finally{this.recovering=false}
+    }catch{this.update({actionError:'Could not recover another saved draft.'});this.notify('Could not recover another saved draft.','error')}finally{this.recovering=false}
   }
-  private save(draft:Draft):boolean{try{if(!this.currentKey)return false;localStorage.setItem(this.currentKey,JSON.stringify(draft));this.update({draft});if(!draft.text&&!draft.submission)void this.recoverNext();return true}catch{this.update({notice:'Browser storage is unavailable. Sending is blocked; copy your text before leaving.'});return false}}
+  private save(draft:Draft):boolean{try{if(!this.currentKey)return false;localStorage.setItem(this.currentKey,JSON.stringify(draft));this.update({draft});if(!draft.text&&!draft.submission)void this.recoverNext();return true}catch{this.update({actionError:'Browser storage is unavailable. Sending is blocked; copy your text before leaving.'});this.notify('Browser storage is unavailable. Sending is blocked; copy your text before leaving.','error');return false}}
   edit(text:string){this.save({...this.state.draft,text})}
-  private recoveries(){const found:Recovery[]=[];try{for(let i=0;i<localStorage.length;i++){const key=localStorage.key(i);if(!key)continue;if((key.startsWith(prefix)&&!key.startsWith(prefix+this.writer+':'))||key==='staf-draft'||key==='staf-pending'){const value=localStorage.getItem(key);if(value){let label=key.startsWith(prefix)?'Saved browser record '+key.slice(-12):'Earlier browser '+key;try{const record=JSON.parse(value);if(typeof record.name==='string')label='Saved agent creation: '+record.name;else if(typeof record.text==='string')label='Saved message: '+record.text.slice(0,80)+(record.submission?' ('+record.submission.kind+')':'')}catch{if(key==='staf-draft')label='Earlier browser draft: '+value.slice(0,80)}found.push({key,label,value})}}}}catch{}this.update({recoveries:found})}
-  adopt(item:Recovery){try{const active=this.state.draft.submission;if(active && ['submitting','submitting-uncertain','pending','unknown','uncertain-busy'].includes(active.kind)){this.update({notice:'The current submission must settle before another saved record can be recovered.'});return;}let d:Draft;if(item.key.startsWith(prefix)&&!item.key.endsWith(':'+this.state.selected))throw Error('This draft belongs to another agent');if(item.key==='staf-pending'&&JSON.parse(item.value).botId!==this.state.selected)throw Error('This command belongs to another agent');if(item.key==='staf-draft')d={text:item.value,submission:null};else if(item.key==='staf-pending'){const p=JSON.parse(item.value);d={text:p.text,submission:{kind:'unknown',id:p.id,text:p.text,error:'Recovering the original request.'}}}else d=JSON.parse(item.value);d=normalizeDraft(d);if(!this.state.selected)return;if(this.state.draft.text||this.state.draft.submission){localStorage.setItem(prefix+'backup-'+crypto.randomUUID()+':'+this.state.selected,JSON.stringify(this.state.draft))}if(!this.save(d))return;this.recoveries();this.update({notice:'Saved draft copied here. Previous text and the original remain available.'})}catch{this.update({notice:'Could not read that saved draft.'})}}
+  private async removeObsoleteRecords(){
+    // These pre-journal keys are obsolete. The v1 journal also contains live
+    // tabs and closed-tab drafts, so it must never be swept as legacy data.
+    try{for(const key of ['staf-draft','staf-pending'])await navigator.locks.request('staf-draft:'+key,{ifAvailable:true},lock=>{if(lock)localStorage.removeItem(key)})}catch{}
+  }
+  private retainedCreation:Extract<Setup,{kind:'create'}>|null=null;
+  private async restoreCreation(){
+    try{
+      const keys=Array.from({length:localStorage.length},(_,i)=>localStorage.key(i)).filter((key):key is string=>!!key&&key.startsWith(prefix+'creation:'));
+      for(const key of keys){
+        if(!await this.claim(key))continue;
+        const value=localStorage.getItem(key);if(!value)continue;
+        const saved:unknown=JSON.parse(value);
+        if(!isRecord(saved)||saved.kind!=='create'||typeof saved.operationId!=='string'||key!==prefix+'creation:'+saved.operationId||typeof saved.name!=='string'||typeof saved.instructions!=='string'||typeof saved.provider!=='string'||typeof saved.model!=='string'||(saved.reasoning!==undefined&&(typeof saved.reasoning!=='string'||!['default','none','minimal','low','medium','high','xhigh','max'].includes(saved.reasoning))))continue;
+        const setup:Extract<Setup,{kind:'create'}>={kind:'create',operationId:saved.operationId,name:saved.name,instructions:saved.instructions,provider:saved.provider,model:saved.model,...(saved.reasoning===undefined?{}:{reasoning:saved.reasoning}),status:'Recovered creation. Check status or retry the same operation.'};
+        if(this.state.setup.kind!=='closed'||this.retainedCreation)return;
+        this.retainedCreation=setup;this.update({setup});return;
+      }
+    }catch{this.update({actionError:'Could not recover the saved agent creation.'});this.notify('Could not recover the saved agent creation.','error')}
+  }
   async send(retry=false){
     const botId=this.state.selected,draft=this.state.draft;
     if(!botId||(!retry&&!draft.text.trim()))return;
@@ -144,7 +180,7 @@ export class Controller {
     if(setupError){this.save({...this.state.draft,submission:{id:current.id,text:current.text,kind:uncertain?'unknown':'rejected',error:setupError}});return}
     await this.submit(botId,current);
   }
-  async stopResponse(){const response=this.state.response;if(!response||!['accepted','running','stopping'].includes(response.state))return;try{await this.api('/api/commands/'+encodeURIComponent(response.id)+'/stop',{});}catch(e){this.update({notice:'Could not stop the response: '+String(e)})}}
+  async stopResponse(){const response=this.state.response;if(!response||!['accepted','running','stopping'].includes(response.state))return;try{await this.api('/api/commands/'+encodeURIComponent(response.id)+'/stop',{});}catch(e){this.update({actionError:'Could not stop the response. Retry Stop while the response is active.'});this.notify('Could not stop the response. Retry Stop.','error')}}
   private async submit(botId:string,submission:Submission){
     const {id,text}=submission,uncertain=submission.kind==='unknown'||submission.kind==='uncertain-busy'||submission.kind==='submitting-uncertain';
     try{
@@ -177,20 +213,51 @@ export class Controller {
       if(submission.kind!=='uncertain-busy')this.save({...this.state.draft,submission:{id:submission.id,text:submission.text,kind:'unknown',error:String(e)}});
     }finally{this.checking=false}
   }
-  openSetup(){this.recoveries();this.update({setup:{kind:'create',name:'',instructions:'',provider:'',model:'',operationId:null,status:''}})}
-  setupField(field:'name'|'instructions'|'provider'|'model',value:string){const setup=this.state.setup;if(setup.kind==='create'&&!setup.operationId)this.update({setup:{...setup,[field]:value}})}
-  closeSetup(){this.update({setup:{kind:'closed'}})}
-  async create(retry=false){let s=this.state.setup;if(s.kind!=='create')return;if(!s.name.trim()){this.update({setup:{...s,status:'Enter a name for your agent.'}});return;}if(!s.operationId)s={...s,operationId:crypto.randomUUID()};const key=prefix+'creation:'+s.operationId;try{localStorage.setItem(key,JSON.stringify(s))}catch{this.update({setup:{...s,status:'Browser storage unavailable. Creation is blocked.'}});return}this.update({setup:{...s,status:retry?'Retrying the same operation.':'Creating…'}});try{const provider=s.provider===undefined?'codex':s.provider;const bot=await this.api<Bot>('/api/bots',{operationId:s.operationId,name:s.name,instructions:s.instructions,...(provider?{provider}:{}),...(s.model.trim()?{model:s.model.trim()}:{})});localStorage.removeItem(key);this.update({setup:{kind:'closed'},selected:bot.id,notice:'Agent created. Provider readiness has not been verified.'});sessionStorage.setItem('staf-selected-agent',bot.id);await this.loadDraft(bot.id);await this.refresh()}catch(e){this.update({setup:{...s,status:'Result may be uncertain. Your form is retained. Check status or retry the same operation. '+String(e)}})}}
-  async checkCreate(){const s=this.state.setup;if(s.kind!=='create'||!s.operationId)return;try{const bot=await this.api<Bot>('/api/bot-creations/'+s.operationId);localStorage.removeItem(prefix+'creation:'+s.operationId);this.update({setup:{kind:'closed'},selected:bot.id,notice:'Recovered the created agent.'});sessionStorage.setItem('staf-selected-agent',bot.id);await this.loadDraft(bot.id);await this.refresh()}catch(e){this.update({setup:{...s,status:'Status unavailable. A missing record does not prove an in-flight request cannot finish. '+String(e)}})}}
-  recoverCreation(item:Recovery){try{const setup=JSON.parse(item.value);if(setup.kind==='create'&&typeof setup.operationId==='string')this.update({setup})}catch{this.update({notice:'Could not read creation record.'})}}
+  openSetup(){this.update({setup:this.retainedCreation??{kind:'create',name:'',instructions:'',provider:'',model:'',operationId:null,status:''}})}
+  async setupProvider(provider:string){const setup=this.state.setup;if(setup.kind!=='create'||setup.operationId)return;this.update({setup:{...setup,provider,model:'',reasoning:'default'}});try{const defaults=await this.providerDefaults();const pair=defaults.providers[provider];const current=this.state.setup;if(current.kind==='create'&&!current.operationId&&current.provider===provider&&!current.model)this.update({setup:{...current,model:pair?.model??'',reasoning:pair?.reasoning??'default'}})}catch{/* Creation remains possible while defaults are unavailable. */}}
+  setupField(field:'name'|'instructions'|'provider'|'model'|'reasoning',value:string){const setup=this.state.setup;if(setup.kind==='create'&&!setup.operationId)this.update({setup:{...setup,[field]:value}})}
+  closeSetup(){if(this.state.setup.kind==='create'&&this.state.setup.operationId)this.retainedCreation=this.state.setup;this.update({setup:{kind:'closed'}})}
+  async create(retry=false){let s=this.state.setup;if(s.kind!=='create')return;if(!s.name.trim()){this.update({setup:{...s,status:'Enter a name for your agent.'}});return;}if(!s.operationId)s={...s,operationId:crypto.randomUUID()};const key=prefix+'creation:'+s.operationId;this.update({setup:s});try{if(!await this.claim(key))throw Error('Creation is in use');localStorage.setItem(key,JSON.stringify(s));this.retainedCreation=s}catch{this.update({setup:{...s,status:'Browser storage unavailable. Creation is blocked.'}});return}this.update({setup:{...s,status:retry?'Retrying the same operation.':'Creating…'}});try{const provider=s.provider===undefined?'codex':s.provider;const bot=await this.api<Bot>('/api/bots',{operationId:s.operationId,name:s.name,instructions:s.instructions,...(provider?{provider}:{}),...(s.model.trim()?{model:s.model.trim()}:{}),...(s.reasoning?{reasoning:s.reasoning}:{})});localStorage.removeItem(key);this.retainedCreation=null;this.update({setup:{kind:'closed'},selected:bot.id,notice:'Agent created. Provider readiness has not been verified.'});sessionStorage.setItem('staf-selected-agent',bot.id);await this.loadDraft(bot.id);await this.refresh()}catch(e){this.update({setup:{...s,status:'Result may be uncertain. Your form is retained. Check status or retry the same operation. '+String(e)}})}}
+  async checkCreate(){const s=this.state.setup;if(s.kind!=='create'||!s.operationId)return;try{const bot=await this.api<Bot>('/api/bot-creations/'+s.operationId);localStorage.removeItem(prefix+'creation:'+s.operationId);this.retainedCreation=null;this.update({setup:{kind:'closed'},selected:bot.id,notice:'Recovered the created agent.'});sessionStorage.setItem('staf-selected-agent',bot.id);await this.loadDraft(bot.id);await this.refresh()}catch(e){this.update({setup:{...s,status:'Status unavailable. A missing record does not prove an in-flight request cannot finish. '+String(e)}})}}
   async saveOpenRouter(key:string){await this.api('/api/openrouter-connection',{key});await this.refresh()}
   async disconnectOpenRouter(){await this.api('/api/openrouter-connection/disconnect',{});await this.refresh()}
-  async startAuth(){try{const result=await this.api<{id:string;phase:string;url:string}>('/api/codex-auth/start',{});this.update({authAttempt:{id:result.id,phase:result.phase},authUrl:result.url,authUrlAttemptId:result.id,notice:'Open Continue sign-in, then return here.'});await this.refresh()}catch(e){this.update({authUrl:'',authUrlAttemptId:'',notice:'Sign-in could not start or its result is uncertain. Check the attempt below; cancel it before retrying if needed. '+String(e)});await this.refresh()}}
-  async cancelAuth(){const attempt=this.state.authAttempt;if(!attempt)return;try{await this.api('/api/codex-auth/'+attempt.id+'/cancel',{});this.update({authUrl:'',authUrlAttemptId:'',notice:'Sign-in cancellation requested.'});await this.refresh()}catch(e){this.update({notice:String(e)})}}
-  async signOutAuth(){try{await this.api('/api/codex-auth/logout',{});this.update({authUrl:'',authUrlAttemptId:'',notice:'Codex sign-in removed from this instance.'});await this.refresh()}catch(e){this.update({notice:'Could not sign out. '+String(e)})}}
+  private reconcileAuth(attempt:Workspace['authAttempt']){
+    const previous=this.state.authAttempt;
+    if(attempt?.id===previous?.id&&attempt?.phase===previous?.phase)return;
+    this.update({notices:this.state.notices.filter(n=>n.topic!=='auth'),authStatus:'',...(attempt?.phase==='waiting'&&attempt.id===this.state.authUrlAttemptId?{}:{authUrl:'',authUrlAttemptId:''})});
+    if(!attempt)return;
+    if(attempt.phase==='succeeded')this.notify('Codex sign-in saved. Account and model access have not been verified.','success','auth');
+    else if(['failed','expired','cancelled','canceled'].includes(attempt.phase))this.notify('Sign-in '+attempt.phase+'. You can try again.',attempt.phase==='failed'||attempt.phase==='expired'?'error':'info','auth');
+    else if(attempt.phase!=='waiting')this.notify('Sign-in '+attempt.phase+'…','info','auth');
+  }
+  async startAuth(){
+    if(this.state.authStarting||this.state.authAttempt&&['waiting','exchanging','committing'].includes(this.state.authAttempt.phase))return;
+    // Reserve the tab synchronously, before the asynchronous authorization setup.
+    let tab:Window|null=null;
+    try{tab=window.open('about:blank','_blank');if(tab)tab.opener=null}catch{/* Manual link remains available. */}
+    this.update({authStarting:true,authStatus:'Starting sign-in…',notices:this.state.notices.filter(n=>n.topic!=='auth')});
+    try{
+      const result=await this.api<{id:string;phase:string;url:string}>('/api/codex-auth/start',{});
+      this.update({authAttempt:{id:result.id,phase:result.phase},authUrl:result.url,authUrlAttemptId:result.id,authStatus:''});
+      let opened=false;
+      try{if(tab&&!tab.closed){tab.location.replace(result.url);opened=true}}catch{/* Keep the link for the same attempt. */}
+      this.notify(opened?'Sign-in opened in a new tab. Complete it, then return here.':'The sign-in tab was blocked. Select Continue sign-in below.','info','auth');
+      await this.refresh();
+    }catch{
+      tab?.close();
+      const message='Sign-in could not start or its result is uncertain. Check the attempt below; cancel it before retrying if needed.';
+      await this.refresh();this.update({authUrl:'',authUrlAttemptId:'',authStatus:message});this.notify(message,'error','auth');
+    }finally{this.update({authStarting:false})}
+  }
+  async cancelAuth(){const attempt=this.state.authAttempt;if(!attempt)return;try{await this.api('/api/codex-auth/'+attempt.id+'/cancel',{});this.update({authUrl:'',authUrlAttemptId:'',authStatus:''});await this.refresh()}catch{const message='Could not cancel sign-in. Check connection and retry.';this.update({authStatus:message});this.notify(message,'error','auth')}}
+  async signOutAuth(){try{await this.api('/api/codex-auth/logout',{});this.update({authUrl:'',authUrlAttemptId:'',authStatus:'',notices:this.state.notices.filter(n=>n.topic!=='auth')});await this.refresh();this.notify('Codex sign-in removed from this instance.','success','auth')}catch(e){this.update({authStatus:'Could not sign out. Check connection and retry.'});this.notify('Could not sign out. Check connection and retry.','error','auth')}}
+  async providerDefaults(){return parseProviderDefaults(await this.api<unknown>('/api/provider-defaults'))}
+  async saveProviderDefault(revision:string,provider:string,model:string,reasoning:string){return parseProviderDefaults(await this.api<unknown>('/api/provider-defaults',{revision,provider,model:model.trim()||null,reasoning:reasoning==='default'?null:reasoning}))}
+  async models(provider:string){return parseModelCatalog(await this.api<unknown>('/api/models',{provider}))}
+  async selectProvider(profile:BotProfile,provider:string,edit:{model?:string|null;reasoning?:string|null}={}){const result=parseSelection(await this.api<unknown>('/api/bots/'+profile.id+'/selection',{revision:profile.revision,provider,...edit}));await this.refresh();return result}
   async botProfile(id:string){return this.api<BotProfile>('/api/bots/'+id)}
   async saveBotProfile(profile:BotProfile,edit:{name:string;provider:string;model:string;instructions:string}){await this.api('/api/bots/'+profile.id+'/profile',{revision:profile.revision,name:edit.name,description:profile.description,instructions:edit.instructions,provider:edit.provider,model:edit.model.trim()||null,reasoning:profile.reasoning});await this.refresh()}
   async setArchived(profile:BotProfile,archived:boolean){await this.api('/api/bots/'+profile.id+'/'+(archived?'archive':'restore'),{revision:profile.revision});await this.refresh()}
   activity(open:boolean){this.update({activityOpen:open})}
-  async decide(item:Extract<InboxItem,{kind:'approval'}>,decision:'approve'|'deny'){const route={clock:'approvals',web:'web-approvals',search:'search-approvals',shell:'shell-approvals',disclosure:'disclosures'}[item.approvalKind];try{await this.api('/api/'+route+'/'+item.id+'/'+decision,{});this.update({notice:'Decision recorded.'});await this.refresh()}catch(e){this.update({notice:'Decision failed or is uncertain. Refresh before trying again. '+String(e)});await this.refresh()}}
+  async decide(item:Extract<InboxItem,{kind:'approval'}>,decision:'approve'|'deny'){const route={clock:'approvals',web:'web-approvals',search:'search-approvals',shell:'shell-approvals',disclosure:'disclosures'}[item.approvalKind];try{await this.api('/api/'+route+'/'+item.id+'/'+decision,{});this.update({notice:'Decision recorded.'});await this.refresh()}catch(e){this.update({actionError:'Decision failed or is uncertain. Refresh before trying again.'});this.notify('Decision failed or is uncertain. Refresh before trying again.','error');await this.refresh()}}
 }

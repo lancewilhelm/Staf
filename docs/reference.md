@@ -89,6 +89,10 @@ and [context display](context.md).
 
 ## Direct Codex authentication
 
+The GUI reserves a new tab during the Connect Codex click, then navigates it
+when authorization setup returns. Continue sign-in remains a fallback for the
+same attempt. Refreshing loses that URL; cancel and restart if it is needed.
+
 A paired client starts a sign-in attempt on the instance. The instance owns the
 loopback callback and stores the Staf grant under its data directory. Status is
 local and does not establish account access. Logout removes local tokens and
@@ -155,6 +159,11 @@ For retry-safe creation, clients supply an `operationId`;
 operation ID with different input conflicts. The transaction copies remaining
 creation defaults into the new bot. The version 27 migration adds the creation
 journal after a database backup. These operations do not change existing bots.
+The workspace automatically restores an unfinished creation using its original
+operation ID, guarded by a browser Web Lock. Check creation and Retry same creation
+use that ID. Manual earlier-record pickers are removed. Only the obsolete
+`staf-draft` and `staf-pending` browser keys are deleted; the current
+`staf-workspace-v1:` automatic recovery journal remains intact.
 
 Shared-instance Codex sign-in uses `POST /api/codex-auth/start`, `GET /api/codex-auth/current`, `GET /api/codex-auth/ATTEMPT_ID`, `POST /api/codex-auth/ATTEMPT_ID/cancel`, and `GET /api/codex-auth/credential`, and `POST /api/codex-auth/logout`. The initiating paired client owns an attempt and can recover its status and cancel it after a page refresh. Other paired clients cannot inspect it. The OAuth callback is a loopback route at `/auth/callback`; it does not expose callback parameters in its response. Cancellation, client revocation, expiry, and shutdown prevent a pending commit. Synthetic tests cover these boundaries; live sign-in is unverified.
 
@@ -186,7 +195,7 @@ configuration `revision`. `POST /api/bots/ID/profile` accepts `revision`,
 `name`, optional `description`, `instructions`, `provider`, `model`, and
 `reasoning`. `instructions` is the content of `soul.md`; `soul` is not a
 separate editable field. `agent.toml` accepts only `name`, `description`,
-`provider`, and optional `model` and `reasoning`. Direct edits are validated on
+`provider`, optional `model` and `reasoning`, and optional `providerChoices` tables. Direct edits are validated on
 read and valid changes apply to subsequent work. Invalid content and late edits to a previous revision return
 HTTP 422 with `code` `invalid_agent_configuration` and block new work without
 changing the files. Agent settings and credentials have separate storage.
@@ -259,3 +268,24 @@ standard input. Storage is plaintext in `auth/openrouter.json` (mode 0600) under
 the instance data directory. Presence does not verify account or model access.
 No inference is performed by saving a key or an agent. The shared instance ignores
 the host `OPENROUTER_API_KEY`. In-flight requests may finish with a prior key.
+
+## Shared provider selections
+
+`agent.toml` keeps active `provider`, `model`, and `reasoning` at the top level,
+plus `[providerChoices.PROVIDER]` tables with optional `model` and `reasoning`.
+An empty table remembers an explicitly unset pair. Top-level values win for the
+active provider, including direct edits; edit an inactive table to change its
+remembered pair. Unknown providers/fields and invalid identifiers are rejected.
+Files and revision conflicts remain authoritative across restart and clients. If an authored providerChoices layout cannot be safely changed, the client save is rejected without changing the files; edit them directly.
+
+Owner defaults live in `agents/provider-defaults.json` beside agent directories,
+a nonsecret map from provider ID to `{model, reasoning}` (nullable). GET/POST
+`/api/provider-defaults` reads/writes the map using its content revision; POST
+takes `revision`, `provider`, `model`, `reasoning`. POST
+`/api/bots/ID/selection` takes agent `revision`, `provider` and optional nullable
+`model`/`reasoning`. POST `/api/models` takes `provider`, including an unsaved
+provider or creation choice. All require paired authorization. Discovery uses
+existing provider transports and returns metadata only, never credentials.
+An explicitly advertised catalog `default_model` may seed a first selection after
+discovery; list order is never a default. Without a remembered pair, owner default
+or advertised default, the model remains unset and chatting requires a choice.
