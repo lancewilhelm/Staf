@@ -95,13 +95,14 @@ try{
  await evaluate("testInput('.setup input','Mira');testInput('.setup textarea','Help me plan');document.querySelector('.setup select').value='codex';document.querySelector('.setup select').dispatchEvent(new Event('change',{bubbles:true}));testInput('.setup input[placeholder]','fixture-model');testClick('Create agent')");
  await until(()=>evaluate("document.body.innerText.includes('Agent created.') && !!document.querySelector('[aria-label=Message]')"),'create agent');
  const bot=await evaluate("(async()=>{let t=localStorage.getItem('staf-token');return (await (await fetch('/api/bots',{headers:{Authorization:'Bearer '+t}})).json())[0]})()");assert.equal(bot.name,'Mira');assert.equal(bot.provider,'codex');assert.equal(bot.model,'fixture-model');console.log('PASS create Codex agent without connecting');
+ assert.equal(await evaluate("document.querySelectorAll('.composer .composer-control').length"),1,'one accessible Send/Stop composer control');
  // window.open clones the opener's sessionStorage, as a duplicated tab can.
- await evaluate("testInput('[aria-label=Message]','First tab submission');testClick('Send ↑');testInput('[aria-label=Message]','First tab draft')");
+ await evaluate("testInput('[aria-label=Message]','First tab submission');testClick('Send');testInput('[aria-label=Message]','First tab draft')");
  await until(()=>evaluate("document.body.innerText.includes('Connect Codex in Settings to send.')"),'first tab submission retained');
  const openCopy=async()=>{const before=(await browserCdp('Target.getTargets')).targetInfos.map(x=>x.targetId);await evaluate("window.open(location.href,'_blank');void 0");const info=await until(async()=>(await browserCdp('Target.getTargets')).targetInfos.find(x=>x.type==='page'&&!before.includes(x.targetId)),'duplicate tab');const attached=await browserCdp('Target.attachToTarget',{targetId:info.targetId,flatten:true});return {id:info.targetId,eval:async expression=>{const result=await browserCdp('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true},attached.sessionId);if(result.exceptionDetails)throw Error(JSON.stringify(result.exceptionDetails));return result.result.value;}};};
  const copy=await openCopy();await until(()=>copy.eval("!!document.querySelector('[aria-label=Message]')"),'duplicate tab loads');
  assert.equal(await copy.eval("document.querySelector('[aria-label=Message]').value"),'','active tab draft is not adopted by a duplicate');
- await copy.eval("window.testInput=(selector,value)=>{const el=document.querySelector(selector);Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(el,value);el.dispatchEvent(new Event('input',{bubbles:true}))};window.testClick=text=>[...document.querySelectorAll('button')].find(x=>x.textContent.trim()===text).click();testInput('[aria-label=Message]','Second tab submission');testClick('Send ↑');testInput('[aria-label=Message]','Second tab draft')");
+ await copy.eval("window.testInput=(selector,value)=>{const el=document.querySelector(selector);Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(el,value);el.dispatchEvent(new Event('input',{bubbles:true}))};window.testClick=text=>[...document.querySelectorAll('button')].find(x=>x.textContent.trim()===text).click();testInput('[aria-label=Message]','Second tab submission');testClick('Send');testInput('[aria-label=Message]','Second tab draft')");
  await until(()=>copy.eval("document.body.innerText.includes('Connect Codex in Settings to send.')"),'duplicate tab submission retained');
  const records=await evaluate(`Object.entries(localStorage).filter(([k])=>k.startsWith('staf-workspace-v1:')&&k.endsWith(':${bot.id}')).map(([,v])=>JSON.parse(v)).filter(x=>x.submission)`);
  const first=records.find(x=>x.text==='First tab draft'),second=records.find(x=>x.text==='Second tab draft');assert.ok(first&&second,'both drafts remain separately durable');assert.notEqual(first.submission.id,second.submission.id,'duplicate tabs use distinct command IDs');
@@ -176,13 +177,22 @@ try{
  await cdp('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',windowsVirtualKeyCode:13,nativeVirtualKeyCode:13});
  await cdp('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13,nativeVirtualKeyCode:13});
  await until(()=>evaluate("document.body.innerText.includes('Demo (offline): Hello from GUI') && !document.querySelector('.submission')"),'Enter sends the message');console.log('PASS Enter sends the message');
- await evaluate("window.streamTestFetch=window.fetch;window.fetch=(...args)=>{if(/\\/response$/.test(String(args[0])))throw Error('Response snapshot polling is disabled by the test');return window.streamTestFetch(...args)};testInput('[aria-label=Message]','Streaming markdown fixture');testClick('Send ↑')");
+ await evaluate("window.streamTestFetch=window.fetch;window.fetch=(...args)=>{if(/\\/response$/.test(String(args[0])))throw Error('Response snapshot polling is disabled by the test');return window.streamTestFetch(...args)};testInput('[aria-label=Message]','Streaming markdown fixture');testClick('Send')");
  await until(()=>evaluate("document.querySelector('.provisional h1')?.textContent==='Streaming heading' && !!document.querySelector('.provisional pre code')"),'streaming markdown');
+ // Exercise the actual streaming conversation and composer at narrow widths in each appearance.
+ const chatAppearance=await evaluate("document.documentElement.dataset.appearance");
+ await cdp('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
+ for(const appearance of ['light','dark','system']){
+   await evaluate(`document.documentElement.dataset.appearance=${JSON.stringify(appearance)}`);
+   assert.equal(await evaluate("(()=>{const b=document.querySelector('.composer-control'),r=b.getBoundingClientRect(),t=document.querySelector('[aria-label=Message]').getBoundingClientRect();return r.width===40 && r.height===40 && getComputedStyle(b).borderRadius==='50%' && r.right<=innerWidth && t.bottom<innerHeight && document.documentElement.scrollWidth<=innerWidth})()"),true,'streaming composer fits narrow '+appearance);
+ }
+ await evaluate(`document.documentElement.dataset.appearance=${JSON.stringify(chatAppearance)}`);
+ await cdp('Emulation.clearDeviceMetricsOverride');
  assert.equal(await evaluate("!!document.querySelector('.provisional li') && !!document.querySelector('.provisional a[href=\"https://example.com\"]') && !document.querySelector('.provisional img') && !window.pwned"),true);
  await evaluate("Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async value=>{window.copied=value}}});document.querySelector('.provisional .code-block button').click()");
  await until(()=>evaluate("window.copied==='const n = 1;\\n'"),'copy code');
  await evaluate("testInput('[aria-label=Message]','Next draft');(()=>{const node=document.querySelector('.messages');node.scrollTop=100;node.dispatchEvent(new Event('scroll'))})()");
- assert.equal(await evaluate("document.querySelector('[aria-label=Message]').value==='Next draft' && [...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Send ↑').disabled"),true);
+ assert.equal(await evaluate("document.querySelector('[aria-label=Message]').value==='Next draft' && !document.querySelector('.composer-control').disabled && document.querySelector('.composer-control').getAttribute('aria-label')==='Stop'"),true);
  const beforeScroll=await evaluate("document.querySelector('.messages').scrollTop");server.stdin.write('drop-response-streams\n');
  await until(()=>evaluate("document.body.innerText.includes('Live response updates disconnected. Reconnecting')"),'stream disconnect is visible');
  server.stdin.write('stream-next\n');
@@ -193,20 +203,45 @@ try{
  await until(()=>evaluate("!document.querySelector('.provisional') && document.body.innerText.includes('Finished.')"),'stream completion');
  assert.equal(await evaluate("document.querySelector('[aria-label=Message]').value"),'Next draft');
  assert.equal(await evaluate("(()=>{const n=document.querySelector('.messages');return n.scrollHeight-n.scrollTop-n.clientHeight<40})()"),true);console.log('PASS streaming markdown, safe HTML, code copy, draft, and scroll behavior');
- await until(()=>evaluate("![...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Send ↑').disabled"),'ready for stop');
- await evaluate("testInput('[aria-label=Message]','Streaming markdown fixture');testClick('Send ↑')");
+ await until(()=>evaluate("![...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Send').disabled"),'ready for stop');
+ await evaluate("testInput('[aria-label=Message]','Streaming markdown fixture');testClick('Send')");
  await until(()=>evaluate("!!document.querySelector('.provisional h1')"),'stop fixture streaming');
- await evaluate("testInput('[aria-label=Message]','Draft after stop');testClick('Stop')");
+ await cdp('Page.bringToFront');
+ await evaluate("testInput('[aria-label=Message]','Draft after stop');document.querySelector('.composer-control').focus()");
+ assert.equal(await evaluate("document.activeElement===document.querySelector('.composer-control')"),true,'keyboard focus reaches Stop');
+ await cdp('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',text:'\r',unmodifiedText:'\r',windowsVirtualKeyCode:13,nativeVirtualKeyCode:13});
+ await cdp('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13,nativeVirtualKeyCode:13});
  await until(()=>evaluate("document.body.innerText.includes('Stopping…')"),'stopping is visible');
- assert.equal(await evaluate("document.querySelector('[aria-label=Message]').value==='Draft after stop' && [...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Send ↑').disabled"),true);
+ assert.equal(await evaluate("document.querySelector('[aria-label=Message]').value==='Draft after stop' && document.querySelector('.composer-control').disabled && document.querySelector('.composer-control').getAttribute('aria-label')==='Stopping response'"),true);
+ await evaluate("testInput('[aria-label=Message]','Edited while stopping');document.querySelector('[aria-label=Message]').focus()");
+ await cdp('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',windowsVirtualKeyCode:13,nativeVirtualKeyCode:13});
+ await cdp('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13,nativeVirtualKeyCode:13});
+ assert.equal(await evaluate("document.querySelector('[aria-label=Message]').value"),'Edited while stopping','Enter never sends a draft while stopping');
+ await evaluate("testInput('[aria-label=Message]','Draft after stop')");
  server.stdin.write('stream-next\n');
- await until(()=>evaluate("document.body.innerText.includes('· stopped') && ![...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Send ↑').disabled"),'stopped response settles');
+ await until(()=>evaluate("document.body.innerText.includes('· stopped') && document.querySelector('.composer-control')?.getAttribute('aria-label')==='Send' && !document.querySelector('.composer-control').disabled"),'stopped response settles');
  assert.equal(await evaluate("document.querySelector('[aria-label=Message]').value"),'Draft after stop');
- await evaluate("testClick('Send ↑')");
+ await evaluate("testClick('Send')");
  await until(()=>evaluate("document.body.innerText.includes('Demo (offline): Draft after stop')"),'send preserved draft');
  console.log('PASS Stop, settled partial output and preserved next draft');
- await until(()=>evaluate("![...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Send ↑').disabled"),'ready for contention');
- await evaluate("window.nativeFetch=window.fetch;window.delayedSend=new Promise(resolve=>window.releaseSend=resolve);window.fetch=async(...args)=>{if(args[0]==='/api/commands'&&String(args[1]?.body).includes('Rejected draft'))await window.delayedSend;return window.nativeFetch(...args)};testInput('[aria-label=Message]','Rejected draft');testClick('Send ↑')");
+ // A second browser tab sees and stops the same shared response.
+ await until(()=>evaluate("document.querySelector('.composer-control')?.getAttribute('aria-label')==='Send' && !document.querySelector('.composer-control').disabled"),'ready for cross-tab stop');
+ await evaluate("testInput('[aria-label=Message]','Streaming markdown fixture');testClick('Send')");
+ await until(()=>evaluate("!!document.querySelector('.provisional h1')"),'cross-tab stream');
+ const stoppingTab=await openCopy();
+ await until(()=>stoppingTab.eval("document.querySelector('.composer-control')?.getAttribute('aria-label')==='Stop'"),'other tab sees Stop');
+ await stoppingTab.eval("document.querySelector('.composer-control').click()");
+ await until(()=>evaluate("document.querySelector('.composer-control')?.getAttribute('aria-label')==='Stopping response'"),'other client Stop reaches original tab');
+ await evaluate("testInput('[aria-label=Message]','Draft during foreign stop')");
+ await until(()=>stoppingTab.eval("document.querySelector('.composer-control')?.disabled && document.querySelector('.composer-control').getAttribute('aria-label')==='Stopping response'"),'stopping is shared by both tabs');
+ server.stdin.write('stream-next\n');
+ await until(()=>evaluate("document.querySelector('.composer-control')?.getAttribute('aria-label')==='Send' && !document.querySelector('.composer-control').disabled"),'foreign stop settles');
+ assert.equal(await evaluate("document.querySelector('[aria-label=Message]').value"),'Draft during foreign stop');
+ await browserCdp('Target.closeTarget',{targetId:stoppingTab.id});
+ console.log('PASS cross-tab Stop, delayed settlement and independent editable draft');
+
+ await until(()=>evaluate("![...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Send').disabled"),'ready for contention');
+ await evaluate("window.nativeFetch=window.fetch;window.delayedSend=new Promise(resolve=>window.releaseSend=resolve);window.fetch=async(...args)=>{if(args[0]==='/api/commands'&&String(args[1]?.body).includes('Rejected draft'))await window.delayedSend;return window.nativeFetch(...args)};testInput('[aria-label=Message]','Rejected draft');testClick('Send')");
  assert.equal(await evaluate("document.querySelector('[aria-label=Message]').value"),'');
  assert.equal(await evaluate("document.querySelector('.messages').innerText.includes('Rejected draft')"),true,'submitted message appears before acknowledgment');
  await evaluate("testInput('[aria-label=Message]','Newer draft')");
@@ -226,7 +261,7 @@ try{
  assert.equal(await evaluate("document.querySelector('[aria-label=Message]').value"),'Newer draft');
  console.log('PASS paired CLI contention and inline retry retain both drafts');
 
- await evaluate("window.lostFetch=window.fetch;window.fetch=async(...args)=>{if(args[0]==='/api/commands'&&String(args[1]?.body).includes('Lost acknowledgment')){const id=JSON.parse(args[1].body).id;sessionStorage.setItem('test-lost-id',id);await window.lostFetch(...args);throw Error('synthetic lost acknowledgment')}if(String(args[0]).startsWith('/api/commands/'))throw Error('synthetic offline');return window.lostFetch(...args)};testInput('[aria-label=Message]','Lost acknowledgment');testClick('Send ↑');testInput('[aria-label=Message]','Draft after disconnect')");
+ await evaluate("window.lostFetch=window.fetch;window.fetch=async(...args)=>{if(args[0]==='/api/commands'&&String(args[1]?.body).includes('Lost acknowledgment')){const id=JSON.parse(args[1].body).id;sessionStorage.setItem('test-lost-id',id);await window.lostFetch(...args);throw Error('synthetic lost acknowledgment')}if(String(args[0]).startsWith('/api/commands/'))throw Error('synthetic offline');return window.lostFetch(...args)};testInput('[aria-label=Message]','Lost acknowledgment');testClick('Send');testInput('[aria-label=Message]','Draft after disconnect')");
  await until(()=>evaluate("document.body.innerText.includes('Message unknown')"),'lost acknowledgment retained');
  await cdp('Page.reload');
  await until(()=>evaluate("document.querySelector('[aria-label=Message]')?.value==='Draft after disconnect' && !document.querySelector('.submission')"),'reconnect recovers completed command');
@@ -234,14 +269,15 @@ try{
  assert.equal(JSON.parse(await cli('status',url,credential,lostId)).state,'completed');
  const history=JSON.parse(await cli('read',url,credential,bot.id));assert.equal(history.filter(m=>m.content==='Lost acknowledgment').length,1);
  await evaluate("window.testInput=(selector,value)=>{const el=document.querySelector(selector);Object.getOwnPropertyDescriptor(el.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,'value').set.call(el,value);el.dispatchEvent(new Event('input',{bubbles:true}))};window.testClick=text=>{const b=[...document.querySelectorAll('button')].find(x=>x.textContent.trim()===text);if(!b)throw Error('Missing button '+text);b.click()}");
- await evaluate("window.lostFetch=window.fetch;window.failedOnce=false;window.fetch=async(...args)=>{if(args[0]==='/api/commands'&&String(args[1]?.body).includes('Never delivered')&&!window.failedOnce){window.failedOnce=true;throw Error('synthetic disconnect before delivery')}return window.lostFetch(...args)};testInput('[aria-label=Message]','Never delivered');testClick('Send ↑');testInput('[aria-label=Message]','Next after recovery')");
+ await evaluate("window.lostFetch=window.fetch;window.failedOnce=false;window.fetch=async(...args)=>{if(args[0]==='/api/commands'&&String(args[1]?.body).includes('Never delivered')&&!window.failedOnce){window.failedOnce=true;throw Error('synthetic disconnect before delivery')}return window.lostFetch(...args)};testInput('[aria-label=Message]','Never delivered');testClick('Send');testInput('[aria-label=Message]','Next after recovery')");
  await until(()=>evaluate("!document.querySelector('.submission') && document.querySelector('.messages').innerText.includes('Demo (offline): Never delivered')"),'automatically resend missing command using its ID');
  assert.equal(await evaluate("document.querySelector('[aria-label=Message]').value"),'Next after recovery');
  await evaluate("window.fetch=window.lostFetch");
  console.log('PASS lost acknowledgment and undelivered command recover without duplicate work');
 
- await evaluate("window.lateFetch=window.fetch;window.lateGate=new Promise(resolve=>window.releaseLate=resolve);window.lateOnce=false;window.fetch=async(...args)=>{if(args[0]==='/api/commands'&&String(args[1]?.body).includes('Delayed original')&&!window.lateOnce){window.lateOnce=true;window.lateGate.then(()=>window.lateFetch(...args));throw Error('synthetic disconnect')}return window.lateFetch(...args)};testInput('[aria-label=Message]','Delayed original');testClick('Send ↑');testInput('[aria-label=Message]','Draft during uncertainty')");
+ await evaluate("window.lateFetch=window.fetch;window.lateGate=new Promise(resolve=>window.releaseLate=resolve);window.lateOnce=false;window.allowBusyRetry=false;window.fetch=async(...args)=>{if(args[0]==='/api/commands'&&String(args[1]?.body).includes('Delayed original')&&!window.lateOnce){window.lateOnce=true;window.lateGate.then(()=>window.lateFetch(...args));throw Error('synthetic disconnect')}if(args[0]==='/api/commands'&&String(args[1]?.body).includes('Delayed original')&&!window.allowBusyRetry)throw Error('synthetic disconnect before contender accepted');return window.lateFetch(...args)};testInput('[aria-label=Message]','Delayed original');testClick('Send');testInput('[aria-label=Message]','Draft during uncertainty')");
  const blocking=await cli('send',url,credential,bot.id,'Streaming markdown fixture');assert.match(blocking,/Command ID:/);
+ await evaluate("window.allowBusyRetry=true");
  await until(()=>evaluate("document.body.innerText.includes('The original request may still arrive.')"),'busy recovery retains uncertain original');
  assert.equal(await evaluate("[...document.querySelectorAll('.submission button')].some(b=>b.textContent==='Dismiss')"),false,'an uncertain original cannot be dismissed');
  server.stdin.write('stream-next\n');await until(()=>evaluate("document.querySelector('.provisional')?.textContent.includes('More incoming text.')"),'release blocking stream');server.stdin.write('stream-next\n');
@@ -287,7 +323,7 @@ try{
  await act("testClick('Back to chat')","!!document.querySelector('[aria-label=Message]')",'return to chat');
 
  const originalToml=await readFile(join(updated.configDir,'agent.toml'),'utf8');await writeFile(join(updated.configDir,'agent.toml'),'name = [invalid');
- await evaluate("testInput('[aria-label=Message]','Keep this invalid-config draft');testClick('Send ↑')");
+ await evaluate("testInput('[aria-label=Message]','Keep this invalid-config draft');testClick('Send')");
  await until(()=>evaluate("document.body.innerText.includes('Message rejected') && document.body.innerText.includes('Invalid configuration')"),'invalid configuration error');
  await sleep(1500);assert.equal(await evaluate("document.body.innerText.includes('Invalid configuration') && document.querySelector('.messages').innerText.includes('Keep this invalid-config draft')"),true);console.log('PASS invalid configuration error and draft survive refresh');
  await writeFile(join(updated.configDir,'agent.toml'),originalToml);
@@ -302,7 +338,7 @@ try{
  await evaluate("window.testInput=(selector,value)=>{const el=document.querySelector(selector);Object.getOwnPropertyDescriptor(el.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,'value').set.call(el,value);el.dispatchEvent(new Event('input',{bubbles:true}))};window.testClick=text=>{const b=[...document.querySelectorAll('button')].find(x=>x.textContent.trim()===text);if(!b)throw Error('Missing button '+text);b.click()}");
  await evaluate("[...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('Mira')).click()");
  await evaluate("(async()=>{const t=localStorage.getItem('staf-token');const r=await fetch('/api/approval-settings/instance',{method:'POST',headers:{Authorization:'Bearer '+t,'Content-Type':'application/json'},body:JSON.stringify({mode:'ask-every-time',clockEnabled:true})});if(!r.ok)throw Error(await r.text())})()");
- await evaluate("testInput('[aria-label=Message]','What time is it in UTC?');testClick('Send ↑');document.querySelector('[aria-label=Message]').focus()");
+ await evaluate("testInput('[aria-label=Message]','What time is it in UTC?');testClick('Send');document.querySelector('[aria-label=Message]').focus()");
  await until(()=>evaluate("!!document.querySelector('aside[aria-label=Activity]') && document.body.innerText.includes('clock approval')"),'approval opens Activity');
  assert.equal(await evaluate("document.activeElement?.getAttribute('aria-label')"),'Message');console.log('PASS pending approval opens Activity without interrupting chat focus');
  const surfaceColors=()=>evaluate("['.side','.composer','.activity','.item pre'].map(selector=>{const style=getComputedStyle(document.querySelector(selector));return [style.backgroundColor,style.color]})");
@@ -371,7 +407,7 @@ try{
  assert.equal(await evaluate("document.querySelector('[aria-label=Message]').value"),'');assert.equal(await evaluate("document.querySelector('.messages').innerText.includes('Keep this until model selection') && document.body.innerText.includes('Choose a model for this agent to send.')"),true);await evaluate("testClick('Dismiss')");console.log('PASS missing agent model preserves the draft and explains setup');
  await evaluate("(async()=>{const t=localStorage.getItem('staf-token'),headers={Authorization:'Bearer '+t,'Content-Type':'application/json'};const bots=await (await fetch('/api/bots',{headers})).json(),b=bots.find(x=>x.name==='No model');await fetch('/api/bots/'+b.id+'/profile',{method:'POST',headers,body:JSON.stringify({revision:b.revision,name:b.name,instructions:b.instructions,provider:'openrouter',model:'fixture/router',reasoning:null})})})()");
  await until(()=>evaluate("document.body.innerText.includes('Connect OpenRouter to chat')"),'OpenRouter missing connection is shown');
- await evaluate("testInput('[aria-label=Message]','Keep OpenRouter draft');testClick('Send ↑')");
+ await evaluate("testInput('[aria-label=Message]','Keep OpenRouter draft');testClick('Send')");
  assert.equal(await evaluate("document.querySelector('[aria-label=Message]').value"),'');assert.equal(await evaluate("document.querySelector('.messages').innerText.includes('Keep OpenRouter draft') && document.body.innerText.includes('Connect OpenRouter in Settings to send.')"),true);await evaluate("testInput('[aria-label=Message]','Next OpenRouter draft')");
  await act("testClick('Open provider settings')","!!document.querySelector('input[type=password]')",'open OpenRouter settings');
  await act("testInput('input[type=password]','synthetic-browser-recovery');testClick('Save OpenRouter key')","document.body.innerText.includes('API key saved for this instance.')",'recover OpenRouter connection');
@@ -382,10 +418,10 @@ try{
  assert.equal(await evaluate("JSON.stringify(localStorage).includes('synthetic-browser-recovery')"),false);
  server.stdin.write('router-next\n');
  await until(()=>evaluate("!document.querySelector('.submission') && !document.querySelector('.provisional') && document.body.innerText.includes('Router first chunk and finished.')"),'OpenRouter retry completes');
- await evaluate("testClick('Send ↑')");
+ await evaluate("testClick('Send')");
  await until(()=>evaluate("!document.querySelector('.submission') && document.querySelector('.messages').innerText.includes('Next OpenRouter draft')"),'send newer OpenRouter draft');
- await until(()=>evaluate("![...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Send ↑').disabled"),'OpenRouter ready for next message');
- await evaluate("testInput('[aria-label=Message]','Browser failure fixture');testClick('Send ↑')");
+ await until(()=>evaluate("![...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Send').disabled"),'OpenRouter ready for next message');
+ await evaluate("testInput('[aria-label=Message]','Browser failure fixture');testClick('Send')");
  await until(()=>evaluate("document.body.innerText.includes('Message failed.') && [...document.querySelectorAll('.submission button')].some(b=>b.textContent==='Retry')"),'OpenRouter failure offers inline retry');
  await evaluate("testInput('[aria-label=Message]','Newer browser draft');testClick('Retry')");
  await until(()=>evaluate("!document.querySelector('.submission') && !document.body.innerText.includes('Message failed.')"),'OpenRouter retry completed');
@@ -420,8 +456,8 @@ try{
  assert.equal(await evaluate("document.documentElement.scrollWidth<=innerWidth"),true,'narrow agent management fits viewport');
  await cdp('Emulation.clearDeviceMetricsOverride');
  await act("[...document.querySelectorAll('.side nav button')].find(b=>b.textContent.includes('Name only')).click()","!!document.querySelector('[aria-label=Message]')",'open restored agent chat');
- await act("testInput('[aria-label=Message]','Remember for this agent: I like tea');testClick('Send ↑')","document.body.innerText.includes('Saved to this agent’s memory.')",'chat uses agent memory wording');
- await act("testInput('[aria-label=Message]','Remember for all agents: I like coffee');testClick('Send ↑')","document.body.innerText.includes('ALL agents will see this memory.')",'shared memory warning names agents');
+ await act("testInput('[aria-label=Message]','Remember for this agent: I like tea');testClick('Send')","document.body.innerText.includes('Saved to this agent’s memory.')",'chat uses agent memory wording');
+ await act("testInput('[aria-label=Message]','Remember for all agents: I like coffee');testClick('Send')","document.body.innerText.includes('ALL agents will see this memory.')",'shared memory warning names agents');
  await evaluate("document.querySelector('[aria-label=Activity]').click()");
  assert.equal(await evaluate("document.querySelector('aside[aria-label=Activity]')?.innerText.includes('No tasks recorded for this agent.')"),true,'Activity empty state names the agent');
  assert.equal(await evaluate("!!document.querySelector('button[aria-label=\"Close Activity\"]')"),true,'Activity close control is labelled');
