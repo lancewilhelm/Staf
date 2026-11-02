@@ -48,12 +48,19 @@ and the stored conversation appear once. Busy and definitive failures remain
 inline for explicit retry or dismissal; an uncertain original cannot be dismissed
 after a busy retry because it may still arrive. Accepted failed commands get a
 new ID on explicit retry. Local journal storage and Web Locks are required for
-sending. Clearing browser storage removes the journal.
+sending. The obsolete `staf-draft` and `staf-pending` pre-journal keys are deleted
+under Web Locks without importing or backing them up. The `staf-workspace-v1:`
+journal is retained, including unclaimed closed-tab drafts and uncertain commands;
+the retired manual picker also listed these current records. No journal-wide
+legacy cleanup is safe. Clearing browser storage removes the journal.
  A keyed
 bot-creation operation stores its fingerprint and result with the bot in one
 transaction. Version 27 backs up an existing database before adding the journal.
-The browser retains the operation ID locally, and the CLI prints it before
-submission. A client can reuse the ID after a lost response or restart. Requests
+The browser retains the operation ID locally and claims the creation record with
+a Web Lock. On reload or reopening, it automatically restores an unclaimed creation
+form with its original arguments and operation ID; another live tab cannot adopt it.
+Closing and reopening the form in the owning tab retains the operation. The CLI
+prints the ID before submission. A client can reuse the ID after a lost response or restart. Requests
 without an ID do not have this guarantee. The shared service serializes archive
 with chat and task acceptance and rejects archive while work is active. It keeps
 the bot identity, configuration, and history for restoration.

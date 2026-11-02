@@ -29,7 +29,7 @@ Run `pnpm start instance serve .staf/instance.sqlite 3210` and open
 **Settings** shows the instance-wide Codex connection and offers sign-in when
 needed, progress, cancellation, retry, and sign-out. A saved sign-in does not
 verify account or model access. It also offers Light, Dark, and System appearance for this browser;
-System follows the device setting. The persistent agent list switches between main chats; each agent has its own configuration, which you can edit from its chat. Submitted messages appear immediately, and per-agent drafts and uncertain submissions recover automatically after a reload or reopening a closed tab in the same browser.
+System follows the device setting. The persistent agent list switches between main chats; each agent has its own configuration, which you can edit from its chat. Submitted messages appear immediately, and per-agent drafts and uncertain submissions recover automatically after a reload or reopening a closed tab in the same browser. Unfinished agent creation also recovers automatically with its original operation ID. Obsolete browser records are deleted; no manual recovery picker is needed.
 Instructions live in its `soul.md` file; settings live in `agent.toml`. You can
 [edit these files directly](docs/usage.md#agent-configuration-files) on the instance host.
 Connect an instance-wide OpenRouter key in global Settings or through the paired CLI; saved presence does not verify account or model access. You can create an agent with just a name before connecting a provider. Agent settings

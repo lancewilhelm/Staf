@@ -39,7 +39,10 @@ try{
  assert.equal(await evaluate("document.querySelector('input[name=appearance][value=system]')?.checked"),true,'fresh browser defaults to System');
  assert.equal(await evaluate("getComputedStyle(document.documentElement).colorScheme"),'light');
  await act("document.querySelector('input[name=appearance][value=dark]').click()","getComputedStyle(document.documentElement).colorScheme==='dark'",'choose dark appearance');
+ await evaluate("localStorage.setItem('staf-draft','Obsolete draft');localStorage.setItem('staf-pending',JSON.stringify({id:'obsolete-command',text:'Obsolete command'}))");
  await cdp('Page.reload');await until(()=>evaluate("document.querySelector('input[name=appearance][value=dark]')?.checked"),'dark appearance persists');
+ await until(()=>evaluate("localStorage.getItem('staf-draft')===null && localStorage.getItem('staf-pending')===null"),'obsolete browser records are deleted without importing them');
+
  await cdp('Emulation.setEmulatedMedia',{features:[{name:'prefers-color-scheme',value:'dark'}]});
  await cdp('Emulation.setEmulatedMedia',{features:[{name:'prefers-color-scheme',value:'light'}]});assert.equal(await evaluate("getComputedStyle(document.documentElement).colorScheme"),'dark','explicit dark ignores device light');
  await cdp('Emulation.setEmulatedMedia',{features:[{name:'prefers-color-scheme',value:'dark'}]});
@@ -99,8 +102,15 @@ try{
  await evaluate("testInput('[aria-label=Message]','First tab submission');testClick('Send ↑');testInput('[aria-label=Message]','First tab draft')");
  await until(()=>evaluate("document.body.innerText.includes('Connect Codex in Settings to send.')"),'first tab submission retained');
  const openCopy=async()=>{const before=(await browserCdp('Target.getTargets')).targetInfos.map(x=>x.targetId);await evaluate("window.open(location.href,'_blank');void 0");const info=await until(async()=>(await browserCdp('Target.getTargets')).targetInfos.find(x=>x.type==='page'&&!before.includes(x.targetId)),'duplicate tab');const attached=await browserCdp('Target.attachToTarget',{targetId:info.targetId,flatten:true});return {id:info.targetId,eval:async expression=>{const result=await browserCdp('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true},attached.sessionId);if(result.exceptionDetails)throw Error(JSON.stringify(result.exceptionDetails));return result.result.value;}};};
+ await evaluate("localStorage.setItem('staf-draft','Obsolete beside active draft');localStorage.setItem('staf-pending','obsolete')");
  const copy=await openCopy();await until(()=>copy.eval("!!document.querySelector('[aria-label=Message]')"),'duplicate tab loads');
  assert.equal(await copy.eval("document.querySelector('[aria-label=Message]').value"),'','active tab draft is not adopted by a duplicate');
+ await until(()=>copy.eval("localStorage.getItem('staf-draft')===null&&localStorage.getItem('staf-pending')===null"),'cleanup alongside a live tab');
+ await copy.eval("[...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('Settings')).click()");
+ await until(()=>copy.eval("document.body.innerText.includes('Appearance')"),'competing tab Settings');
+ assert.equal(await copy.eval("document.body.innerText.includes('Earlier browser records')"),false,'no manual record picker for another tab');
+ await copy.eval("[...document.querySelectorAll('.side nav button')][0].click()");
+
  await copy.eval("window.testInput=(selector,value)=>{const el=document.querySelector(selector);Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(el,value);el.dispatchEvent(new Event('input',{bubbles:true}))};window.testClick=text=>[...document.querySelectorAll('button')].find(x=>x.textContent.trim()===text).click();testInput('[aria-label=Message]','Second tab submission');testClick('Send ↑');testInput('[aria-label=Message]','Second tab draft')");
  await until(()=>copy.eval("document.body.innerText.includes('Connect Codex in Settings to send.')"),'duplicate tab submission retained');
  const records=await evaluate(`Object.entries(localStorage).filter(([k])=>k.startsWith('staf-workspace-v1:')&&k.endsWith(':${bot.id}')).map(([,v])=>JSON.parse(v)).filter(x=>x.submission)`);
@@ -228,8 +238,10 @@ try{
 
  await evaluate("window.lostFetch=window.fetch;window.fetch=async(...args)=>{if(args[0]==='/api/commands'&&String(args[1]?.body).includes('Lost acknowledgment')){const id=JSON.parse(args[1].body).id;sessionStorage.setItem('test-lost-id',id);await window.lostFetch(...args);throw Error('synthetic lost acknowledgment')}if(String(args[0]).startsWith('/api/commands/'))throw Error('synthetic offline');return window.lostFetch(...args)};testInput('[aria-label=Message]','Lost acknowledgment');testClick('Send ↑');testInput('[aria-label=Message]','Draft after disconnect')");
  await until(()=>evaluate("document.body.innerText.includes('Message unknown')"),'lost acknowledgment retained');
+ await evaluate("localStorage.setItem('staf-draft','Obsolete beside uncertain command');localStorage.setItem('staf-pending','obsolete')");
  await cdp('Page.reload');
  await until(()=>evaluate("document.querySelector('[aria-label=Message]')?.value==='Draft after disconnect' && !document.querySelector('.submission')"),'reconnect recovers completed command');
+ await until(()=>evaluate("localStorage.getItem('staf-draft')===null&&localStorage.getItem('staf-pending')===null"),'cleanup preserves uncertain recovery');
  const lostId=await evaluate("sessionStorage.getItem('test-lost-id')");
  assert.equal(JSON.parse(await cli('status',url,credential,lostId)).state,'completed');
  const history=JSON.parse(await cli('read',url,credential,bot.id));assert.equal(history.filter(m=>m.content==='Lost acknowledgment').length,1);
@@ -392,6 +404,28 @@ try{
  assert.equal(await evaluate("document.querySelector('[aria-label=Message]').value"),'Newer browser draft');
  assert.equal(await evaluate("document.body.innerText.includes('synthetic-browser-recovery') || JSON.stringify(localStorage).includes('synthetic-browser-recovery')"),false);
  console.log('PASS OpenRouter recovery, streaming, retry and secret non-disclosure');
+ // Lose a real synthetic creation acknowledgment while a competing tab opens.
+ await act("[...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('New agent')).click()","document.body.innerText.includes('Create your agent')",'creation recovery fixture');
+ await evaluate("window.creationFetch=window.fetch;window.fetch=async(...args)=>{const response=await window.creationFetch(...args);if(args[0]==='/api/bots'&&args[1]?.method==='POST')throw Error('synthetic lost creation acknowledgment');return response};testInput('.setup input','Recovered creation');testClick('Create agent')");
+ await until(()=>evaluate("document.body.innerText.includes('Result may be uncertain')"),'creation acknowledgment lost');
+ const creationRecord=await evaluate("Object.entries(localStorage).find(([k])=>k.startsWith('staf-workspace-v1:creation:'))");assert.ok(creationRecord);
+ await evaluate("localStorage.setItem('staf-draft','Obsolete beside creation');localStorage.setItem('staf-pending','obsolete')");
+ const creationCopy=await openCopy();await until(()=>creationCopy.eval("!!document.querySelector('[aria-label=Message]')"),'competing tab leaves active creation alone');
+ assert.equal(await creationCopy.eval(`localStorage.getItem(${JSON.stringify(creationRecord[0])})`),creationRecord[1],'live creation record retained');
+ await creationCopy.eval("[...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('New agent')).click()");
+ await until(()=>creationCopy.eval("document.body.innerText.includes('Create your agent')"),'competing creation form');
+ assert.equal(await creationCopy.eval("document.querySelector('.setup input').value"),'','active creation is not adopted by another tab');
+ assert.equal(await creationCopy.eval("document.body.innerText.includes('Recover an agent creation')||document.body.innerText.includes('Earlier browser records')"),false,'no creation recovery picker');
+ await browserCdp('Target.closeTarget',{targetId:creationCopy.id});
+ await cdp('Page.reload');await until(()=>evaluate("document.body.innerText.includes('Recovered creation. Check status')"),'creation recovers automatically after refresh');
+ assert.equal(await evaluate("document.querySelector('.setup input').value"),'Recovered creation');
+ assert.equal(await evaluate(`localStorage.getItem(${JSON.stringify(creationRecord[0])})`),creationRecord[1],'recovery preserves operation identity');
+ await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent==='Retry same creation').click()");
+ await until(()=>evaluate("document.body.innerText.includes('Agent created.') && !!document.querySelector('[aria-label=Message]')"),'retry creation with original identity');
+ assert.equal(await evaluate("(async()=>{const t=localStorage.getItem('staf-token');const bots=await(await fetch('/api/bots',{headers:{Authorization:'Bearer '+t}})).json();return bots.filter(b=>b.name==='Recovered creation').length})()"),1,'accepted creation is not duplicated');
+ assert.equal(await evaluate(`localStorage.getItem(${JSON.stringify(creationRecord[0])})`),null,'settled creation record removed');
+ await evaluate("window.testInput=(selector,value)=>{const el=document.querySelector(selector);Object.getOwnPropertyDescriptor(el.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,'value').set.call(el,value);el.dispatchEvent(new Event('input',{bubbles:true}))};window.testClick=text=>{const b=[...document.querySelectorAll('button')].find(x=>x.textContent.trim()===text);if(!b)throw Error('Missing button '+text);b.click()}");
+ console.log('PASS obsolete cleanup preserves active creation and retry-safe refresh recovery');
  await act("[...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('New agent')).click()","document.body.innerText.includes('Create your agent')",'name-only creation form');
  await cdp('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
  assert.equal(await evaluate("document.querySelector('.setup label:has(textarea)').firstChild.textContent"),'Instructions');
