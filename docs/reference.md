@@ -89,6 +89,10 @@ and [context display](context.md).
 
 ## Direct Codex authentication
 
+The GUI reserves a new tab during the Connect Codex click, then navigates it
+when authorization setup returns. Continue sign-in remains a fallback for the
+same attempt. Refreshing loses that URL; cancel and restart if it is needed.
+
 A paired client starts a sign-in attempt on the instance. The instance owns the
 loopback callback and stores the Staf grant under its data directory. Status is
 local and does not establish account access. Logout removes local tokens and

@@ -81,14 +81,45 @@ try{
  assert.doesNotMatch(await evaluate("document.body.innerText"),/synthetic-browser/);
  await act("testClick('Disconnect OpenRouter')","document.body.innerText.includes('No OpenRouter API key saved.')",'disconnect OpenRouter');
 
+ await evaluate("window.originalOpen=window.open;window.popupCalls=[];window.open=(...args)=>{window.popupCalls.push(args);return null}");
  await act("testClick('Connect Codex')","!![...document.querySelectorAll('a')].find(a=>a.textContent==='Continue sign-in')",'start synthetic Codex sign-in');
+ assert.equal(await evaluate("window.popupCalls.length"),1,'Connect reserves a tab during the user action');
+ assert.equal(await evaluate("!!document.querySelector('.toast [role=progressbar]')"),true,'sign-in instruction is a timed toast');
+ assert.match(await evaluate("document.body.innerText"),/blocked.*Continue sign-in/i);
+ await evaluate("document.querySelector('.toast:last-child').dispatchEvent(new MouseEvent('mouseover',{bubbles:true}))");
+ await sleep(150);const paused=await evaluate("document.querySelector('.toast:last-child [role=progressbar]').getAttribute('aria-valuenow')");
+ await sleep(350);assert.equal(await evaluate("document.querySelector('.toast:last-child [role=progressbar]').getAttribute('aria-valuenow')"),paused,'hover pauses toast');
+ await evaluate("document.querySelector('.toast:last-child button').focus();document.querySelector('.toast:last-child').dispatchEvent(new MouseEvent('mouseout',{bubbles:true,relatedTarget:document.body}))");
+ await sleep(350);assert.equal(await evaluate("document.querySelector('.toast:last-child [role=progressbar]').getAttribute('aria-valuenow')"),paused,'keyboard focus pauses toast after pointer leaves');
+ await evaluate("document.activeElement.blur()");
+ await until(()=>evaluate("!document.querySelector('.toast [role=progressbar]')"),'informational toasts expire after resuming');
+ console.log('PASS toast progress, hover and focus pause, resume and expiry');
+
  await cdp('Page.reload');await until(()=>evaluate("document.body.innerText.includes('sign-in link is no longer available')"),'recover a pending attempt after reload');
  await evaluate("window.testInput=(selector,value)=>{const el=document.querySelector(selector);Object.getOwnPropertyDescriptor(el.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,'value').set.call(el,value);el.dispatchEvent(new Event('input',{bubbles:true}))};window.testClick=text=>{const b=[...document.querySelectorAll('button')].find(x=>x.textContent.trim()===text);if(!b)throw Error('Missing button '+text);b.click()}");
  await act("testClick('Cancel sign-in')","document.body.innerText.includes('Sign-in cancelled') || document.body.innerText.includes('Sign-in canceled')",'cancel synthetic Codex sign-in');
  await act("testClick('Connect Codex')","!![...document.querySelectorAll('a')].find(a=>a.textContent==='Continue sign-in')",'retry Codex after cancellation');
+ const signInHref=await evaluate("[...document.querySelectorAll('a')].find(a=>a.textContent==='Continue sign-in').href");
+ await until(async()=>{const targets=await cdp('Target.getTargets',{},undefined,browserSocket);return targets.targetInfos.some(target=>target.url===signInHref)},'automatic sign-in tab navigates to the same attempt');
+ console.log('PASS automatic sign-in tab navigation');
+
  await evaluate("(async()=>{const state=new URL([...document.querySelectorAll('a')].find(a=>a.textContent==='Continue sign-in').href).searchParams.get('state');await fetch('/auth/callback?code=fail&state='+encodeURIComponent(state))})()");
  await until(()=>evaluate("document.body.innerText.includes('Sign-in failed')"),'show synthetic sign-in failure');
  assert.equal(await evaluate("!![...document.querySelectorAll('a')].find(a=>a.textContent==='Continue sign-in')"),false,'completed attempt must not retain its sign-in link');
+ await until(()=>evaluate("[...document.querySelectorAll('.toast[data-kind=error]')].some(n=>n.innerText.includes('Sign-in failed'))"),'persistent sign-in error toast');
+ await sleep(6200);assert.equal(await evaluate("!!document.querySelector('.toast[data-kind=error]')"),true,'errors do not expire');
+ await cdp('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
+ for(const mode of ['light','dark','system']){
+   await evaluate(`document.documentElement.dataset.appearance=${JSON.stringify(mode)}`);
+   assert.equal(await evaluate("(()=>{const toast=document.querySelector('.toast').getBoundingClientRect();return toast.left>=0 && toast.right<=innerWidth && getComputedStyle(document.querySelector('.toast')).backgroundColor!=='rgba(0, 0, 0, 0)'})()"),true,'toast fits narrow '+mode+' layout');
+ }
+ await evaluate("document.documentElement.dataset.appearance='system'");await cdp('Emulation.clearDeviceMetricsOverride');
+ await evaluate("document.querySelectorAll('.toast[data-kind=error] button').forEach(b=>b.click())");
+ assert.equal(await evaluate("!!document.querySelector('.toast[data-kind=error]')"),false);
+ assert.equal(await evaluate("document.body.innerText.includes('Sign-in failed')"),true,'sign-in retry state remains inline after dismissal');
+ assert.equal(await evaluate("!!document.querySelector('.banner')"),false,'no page-wide notice banner');
+ console.log('PASS persistent errors, dismissal and inline sign-in recovery');
+
  await act("testClick('Create an agent')","document.body.innerText.includes('Create your agent')",'create agent without connecting');
  await evaluate("testInput('.setup input','Mira');testInput('.setup textarea','Help me plan');document.querySelector('.setup select').value='codex';document.querySelector('.setup select').dispatchEvent(new Event('change',{bubbles:true}));testInput('.setup input[placeholder]','fixture-model');testClick('Create agent')");
  await until(()=>evaluate("document.body.innerText.includes('Agent created.') && !!document.querySelector('[aria-label=Message]')"),'create agent');
@@ -152,6 +183,8 @@ try{
  await act("testClick('Connect Codex')","!![...document.querySelectorAll('a')].find(a=>a.textContent==='Continue sign-in')",'retry Codex after failure');
  await evaluate("(async()=>{const state=new URL([...document.querySelectorAll('a')].find(a=>a.textContent==='Continue sign-in').href).searchParams.get('state');await fetch('/auth/callback?code=success&state='+encodeURIComponent(state))})()");
  await until(()=>evaluate("document.body.innerText.includes('Saved sign-in found for this instance.')"),'complete synthetic Codex sign-in');
+ assert.doesNotMatch(await evaluate("document.querySelector('.toasts').innerText"),/Complete it, then return|tab was blocked/,'completion clears stale sign-in instructions');
+
  assert.equal(await evaluate("!![...document.querySelectorAll('a')].find(a=>a.textContent==='Continue sign-in')"),false);
  assert.equal(await evaluate("document.body.innerText.includes('has not been checked against the provider')"),true);
  assert.doesNotMatch(await evaluate("document.body.innerText"),/synthetic-(access|refresh|id)-secret/);
