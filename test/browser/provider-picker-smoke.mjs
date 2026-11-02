@@ -51,8 +51,8 @@ try{
  await until(()=>evaluate("!document.querySelector('[aria-label=\"Provider picker\"] fieldset').disabled"),'selection settled');
  await evaluate("testClick('List models')");
  await until(()=>evaluate("document.querySelectorAll('[aria-label=\"Provider picker\"] datalist option').length===2"),'synthetic catalog listed');
- await evaluate("testInput('[aria-label=\"Provider picker\"] input','fixture/model');document.querySelector('[aria-label=\"Provider picker\"] input').focus();document.querySelector('[aria-label=\"Provider picker\"] input').blur()");
- await until(async()=>(await api('bots/'+bot.id)).model==='fixture/model','manual model entry saves');
+ await evaluate("testInput('[aria-label=\"Provider picker\"] input','fixture/model')");
+ await until(async()=>(await api('bots/'+bot.id)).model==='fixture/model','catalog model selection saves without blur');
  await until(()=>evaluate("!document.querySelector('[aria-label=\"Provider picker\"] fieldset').disabled"),'model settled');
  await evaluate("(()=>{const e=document.querySelectorAll('[aria-label=\"Provider picker\"] select')[1];e.value='high';e.dispatchEvent(new Event('change',{bubbles:true}))})()");
  await until(async()=>(await api('bots/'+bot.id)).reasoning==='high','reasoning saves immediately');

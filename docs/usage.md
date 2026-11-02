@@ -483,7 +483,7 @@ An uncertain start, stop or cleanup blocks further scratch commands and daemon c
 ## Provider choices
 
 Open the composer model control to choose provider, model and reasoning. Provider
-and reasoning selections save immediately; manual model text saves when leaving
+and reasoning selections and listed model choices save immediately; manual model text saves when leaving
 the field. List models reads metadata only; model IDs absent from the list remain
 valid manual entries. Provider default reasoning leaves the effort unset. A model
 with explicitly incompatible advertised reasoning resets the effort visibly.
