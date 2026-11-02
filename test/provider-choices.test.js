@@ -53,3 +53,22 @@ test('metadata handles explicit advertised defaults, unknown reasoning, empty ca
  assert.equal(inference,0);assert.equal(requests,2);
  }finally{await app.close();rmSync(dir,{recursive:true,force:true})}
 });
+
+test('paired CLI and accepted responses observe one authoritative selection with captured in-flight settings',async()=>{
+ const {execFile}=await import('node:child_process');const {promisify}=await import('node:util');const run=promisify(execFile);
+ const dir=mkdtempSync(join(tmpdir(),'staf-selection-clients-'));let captured,release;
+ const gate=new Promise(resolve=>{release=resolve});
+ const app=startInstance(join(dir,'db'),0,{env:{},providerFactory:async profile=>{captured=profile;return {name:'synthetic',capabilities:{toolCalls:false,incrementalText:false},complete:async()=>{await gate;return {role:'assistant',content:'Synthetic completed'}}}}});const port=await app.listen();const url=`http://127.0.0.1:${port}`;let token='';
+ const call=async(path,body)=>{const r=await fetch(url+'/api/'+path,{method:body?'POST':'GET',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});return r.json()};
+ const cli=async(...args)=>{const output=(await run(process.execPath,['dist/cli.js','instance',args[0],url,join(dir,'client.json'),...args.slice(1)])).stdout;return args[0]==='pair'?output:JSON.parse(output)};
+ const wait=async fn=>{for(let n=0;n<100;n++){if(await fn())return;await new Promise(r=>setTimeout(r,10))}throw Error('Timed out')};
+ try{await cli('pair',app.code);token=(await call('pair',{code:app.issueCode()})).token;
+ let a=await call('bots',{name:'Captured',provider:'openrouter',model:'before',reasoning:'high'});
+ assert.equal((await call('commands',{id:'captured-command',botId:a.id,content:'Synthetic prompt'})).kind,'accepted');
+ await wait(()=>captured);a=await cli('select',a.id,a.revision,'codex','after','low');
+ assert.equal(a.provider,'codex');assert.equal((await call('bots/'+a.id)).model,'after');
+ assert.equal(captured.provider,'openrouter');assert.equal(captured.model,'before');assert.equal(captured.reasoning,'high');
+ a=await cli('select',a.id,a.revision,'openrouter');assert.equal(a.model,'before');assert.equal(a.reasoning,'high');
+ release();await wait(async()=>(await call('commands/captured-command')).state==='completed');
+ }finally{release();await app.close();rmSync(dir,{recursive:true,force:true})}
+});

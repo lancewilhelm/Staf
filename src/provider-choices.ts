@@ -1,7 +1,6 @@
 import {existsSync,readFileSync,mkdirSync,writeFileSync,renameSync} from 'node:fs';
 import {join} from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
-import {validateSetting} from './settings.js';
 import {isRecord} from './validation.js';
 import {AgentConfigConflict} from './agent-config.js';
 export type ProviderChoice={model:string|null;reasoning:string|null};
@@ -13,7 +12,7 @@ export function parseChoices(value:unknown):ProviderChoices {
   if(!['demo','codex','openrouter','lmstudio','live'].includes(provider)||!isRecord(pair)||Object.keys(pair).some(k=>!['model','reasoning'].includes(k)))throw Error('Invalid provider choice');
   const model=pair.model??null,reasoning=pair.reasoning??null;
   if(!(model===null||typeof model==='string')||!(reasoning===null||typeof reasoning==='string'))throw Error('Invalid provider choice');
-  if(model!==null)validateSetting('model.codex',model);
+  if(model!==null&&(!model.trim()||model.length>200||/[\x00-\x1f\x7f]/.test(model)||/sk-[A-Za-z0-9_-]+/i.test(model)))throw Error('Invalid model identifier');
   if(reasoning!==null&&!['default','none','minimal','low','medium','high','xhigh','max'].includes(reasoning))throw Error('Invalid reasoning choice');
   result[provider]={model,reasoning};
  }
