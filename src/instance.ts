@@ -459,17 +459,17 @@ export class Instance {
     const result=this.db.prepare('UPDATE creation_defaults SET revision=revision+1,provider=?,model=?,reasoning=? WHERE id=1 AND revision=?').run(input.provider,input.model,input.reasoning,input.revision);
     if(!result.changes)throw new BotConflict('Creation defaults changed. Refresh before editing.');return this.creationDefaults();
   }
-  createBot(input: {name: string; instructions: string; provider?: string; model?: string; reasoning?: string; operationId?: string}) {
+  createBot(input: {name: string; instructions: string; provider?: string; model?: string; reasoning?: string; operationId?: string}, advertisedModel?:string) {
     if (!input.name.trim() || (input.provider !== undefined && !input.provider.trim())) throw new Error('Name and provider are required');
     const id = randomUUID(), chatId = randomUUID();
     this.db.exec('BEGIN IMMEDIATE');
     try {
       const digest=input.operationId ? createHmac('sha256',this.fingerprintKey).update(JSON.stringify([input.name,input.instructions,input.provider ?? null,input.model ?? null,input.reasoning ?? null])).digest('hex') : null;
       if(input.operationId) { const existing=this.db.prepare('SELECT digest,bot_id FROM bot_creation_operations WHERE id=?').get(input.operationId); if(existing) { if(existing.digest!==digest || typeof existing.bot_id!=='string') throw new BotConflict('Creation operation ID conflict'); const bot=this.bot(existing.bot_id); this.db.exec('COMMIT'); return bot; } }
-      const defaults=this.creationDefaults();const provider=input.provider ?? defaults.provider, reasoning=input.reasoning ?? defaults.reasoning;
+      const defaults=this.creationDefaults();const provider=input.provider ?? defaults.provider;
       const first=this.providerDefaults().read().providers[provider];
-      const chosenModel=input.model ?? (input.provider===undefined?defaults.model:first?.model??null);
-      const chosenReasoning=input.reasoning ?? (input.provider===undefined?defaults.reasoning:first?first.reasoning:reasoning);
+      const chosenModel=input.model ?? (input.provider===undefined?defaults.model:first?.model??advertisedModel??null);
+      const chosenReasoning=input.reasoning ?? (input.provider===undefined?defaults.reasoning:first?.reasoning??null);
       this.configs.publish(id,{name:input.name,description:'',provider,model:chosenModel,reasoning:chosenReasoning,instructions:input.instructions,providerChoices:{[provider]:{model:chosenModel,reasoning:chosenReasoning}}},false);
       this.db.prepare('INSERT INTO bots VALUES (?, ?, ?, ?, ?, ?, ?)').run(id, chatId, '', '', 'demo', null, null);
       this.db.prepare('INSERT INTO bot_profiles (bot_id,revision,soul,archived) VALUES (?, 1, ?, 0)').run(id, '');

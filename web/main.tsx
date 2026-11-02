@@ -153,7 +153,7 @@ function App(){
     :s.setup.kind==='create'?<div className="setup"><span className="eyebrow">YOUR AGENT</span><h2>Create your agent</h2><p>Give your agent a name. Instructions and provider settings are optional.</p>
       <label>Name<input value={s.setup.name} disabled={!!s.setup.operationId} onChange={e=>app.setupField('name',e.target.value)}/></label>
       <label>Instructions<textarea value={s.setup.instructions} disabled={!!s.setup.operationId} onChange={e=>app.setupField('instructions',e.target.value)}/></label><InstructionsHelp/>
-      <ChoiceFields app={app} provider={s.setup.provider} model={s.setup.model} reasoning={s.setup.reasoning??'default'} disabled={!!s.setup.operationId} onChange={(field,value)=>field==='provider'?void app.setupProvider(value):app.setupField(field,value)}/>
+      <ChoiceFields resetUnsupported app={app} provider={s.setup.provider} model={s.setup.model} reasoning={s.setup.reasoning??'default'} disabled={!!s.setup.operationId} onChange={(field,value)=>field==='provider'?void app.setupProvider(value):app.setupField(field,value)}/>
       <p>Provider connections are shared. Defaults are copied when the agent is created.</p>
       <div className="row">{s.setup.operationId?<><button onClick={()=>void app.checkCreate()}>Check creation</button><button onClick={()=>void app.create(true)}>Retry same creation</button></>:<button onClick={()=>void app.create()}>Create agent</button>}<button className="quiet" onClick={()=>app.closeSetup()}>Close</button></div><p role="status">{s.setup.status}</p>
     </div>:view==='settings'?<div className="setup"><span className="eyebrow">SETTINGS</span><h2>Appearance</h2><p>Choose how Staf looks in this browser.</p>

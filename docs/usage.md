@@ -284,7 +284,8 @@ cannot recover a version that was overwritten before it read that version.
 If changing both files, finish the edits before sending new work: independent
 file writes are not an atomic pair and Staf may see one before the other.
 GUI changes preserve TOML comments and surrounding formatting; if a layout
-cannot be safely updated, Staf reports an error and retains the file.
+cannot be safely updated, Staf reports an error and retains the file. Authored
+provider-choice tables, dotted keys, or inline tables may require a direct edit.
 
 Client saves include a revision and reject stale versions. If a client reports
 that a save result is uncertain, inspect the current files before retrying.
@@ -500,7 +501,10 @@ Save settings action and conflict recovery.
 Global Settings → Provider defaults configures each provider's first-use pair.
 Returning to a provider restores that agent's remembered pair. Changing defaults
 does not update existing selections. Creation without an explicit provider keeps
-the copied creation defaults. Configuration does not verify model/account access.
+the copied creation defaults. An explicit provider instead uses its own defaults or an explicit choice; after
+discovery, an advertised default model can fill an unset model. It does not
+inherit another provider’s reasoning.
+Configuration does not verify model/account access.
 
 Paired CLI clients can inspect and select the same state:
 
@@ -508,10 +512,13 @@ Paired CLI clients can inspect and select the same state:
 staf instance provider-defaults URL CREDENTIAL_FILE
 staf instance provider-defaults-set URL CREDENTIAL_FILE openrouter owner/model high
 staf instance inspect URL CREDENTIAL_FILE AGENT_ID
-staf instance select URL CREDENTIAL_FILE AGENT_ID REVISION openrouter
+staf instance select URL CREDENTIAL_FILE AGENT_ID REVISION openrouter --confirm-provider-change
 ```
 
 `select` optionally accepts model and reasoning after provider; `-` explicitly
 clears a value. Omitted values restore the remembered pair or first-use defaults.
-Use the revision from inspect; conflicts preserve the current configuration. The
+A provider change can send conversation history to the new provider; inspect the
+agent and review the warning before adding `--confirm-provider-change`. Without
+the flag the provider stays unchanged. Use the revision from inspect; conflicts
+preserve the current configuration. The
 interactive terminal keeps its existing provider-change confirmation.

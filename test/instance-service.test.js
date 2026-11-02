@@ -17,7 +17,7 @@ test('creation operation retries across restart with copied defaults and optiona
   await app.close();app=startInstance(path,0,{env:{}});port=await app.listen();
   const retry=await call('/api/bots',token,{operationId:'retry-name',name:'Ada'});assert.equal(retry[1].id,bot.id);assert.equal(retry[1].provider,bot.provider);
   assert.equal((await call('/api/bots',token,{operationId:'retry-name',name:'Changed'}))[0],409);
-  const custom=await call('/api/bots',token,{operationId:'custom',name:'Ada',provider:'lmstudio',model:'local',instructions:'Help'});assert.equal(custom[0],201);assert.equal(custom[1].provider,'lmstudio');assert.equal(custom[1].model,'local');assert.equal(custom[1].reasoning,'high');assert.notEqual(custom[1].id,bot.id);
+  const custom=await call('/api/bots',token,{operationId:'custom',name:'Ada',provider:'lmstudio',model:'local',instructions:'Help'});assert.equal(custom[0],201);assert.equal(custom[1].provider,'lmstudio');assert.equal(custom[1].model,'local');assert.equal(custom[1].reasoning,null);assert.notEqual(custom[1].id,bot.id);
   const unkeyed=await call('/api/bots',token,{name:'Ada',provider:'lmstudio',model:'local',instructions:'Help'});assert.equal(unkeyed[1].reasoning,custom[1].reasoning);
   assert.equal((await call('/api/bots',token))[1].length,3);
  } finally {await app.close();rmSync(dir,{recursive:true,force:true});}
