@@ -193,6 +193,7 @@ test('failed tool turn retains observed accounting privately and does not replay
  const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return r.json()};
  const wait=async(id,token)=>{for(let i=0;i<100;i++){let c=await call('/api/commands/'+id,token);if(c.state!=='pending')return c;await new Promise(r=>setTimeout(r,5));}throw Error('timeout')};
  try{const token=(await call('/api/pair','',{code:app.code})).token;const bot=await call('/api/bots',token,{name:'A'});await call('/api/commands',token,{id:'failure',botId:bot.id,content:'synthetic-secret'});const failure=await wait('failure',token);assert.equal(failure.state,'failed');assert.ok(!JSON.stringify(failure).includes('secret'));assert.equal((await call(`/api/bots/${bot.id}/messages`,token))[0].content,'[REDACTED]');
+  const chat=await call(`/api/bots/${bot.id}/chat-work`,token);assert.equal(chat.requests[0].progress.state,'failed');assert.equal(chat.requests[0].events.at(-1).success,1);assert.match(chat.requests[0].events.at(-1).detail,/UTC|T/);assert.ok(!JSON.stringify(chat).includes('synthetic-secret'));
   await call('/api/commands',token,{id:'next',botId:bot.id,content:'next'});assert.equal((await wait('next',token)).state,'completed');assert.deepEqual(later.map(m=>m.role),['user']);
   await app.close();closed=true;const db=new DatabaseSync(path);const raw=db.prepare('SELECT session FROM sessions').get().session;const session=JSON.parse(raw);db.close();assert.ok(session.events.some(e=>e.type==='tool_result'));assert.ok(session.usage.some(u=>u.metrics.input===7));assert.ok(!raw.includes('synthetic-secret'));
  }finally{if(!closed)await app.close();rmSync(dir,{recursive:true,force:true});}
@@ -257,6 +258,9 @@ test('paired clients see safe live tool progress and reported usage without prov
   const approval=await until(async()=>(await call('/api/approvals',token))[1].find(x=>x.state==='pending'));
   const pending=(await call('/api/commands/clock-indicator',token))[1];
   assert.deepEqual(pending.runtimeEvents,[{type:'tool_start',name:'clock'}]);
+  const chatPending=(await call(`/api/bots/${bot.id}/chat-work`,token))[1];assert.equal(chatPending.requests[0].id,'clock-indicator');assert.equal(chatPending.requests[0].events[0].name,'clock');
+  const other=(await call('/api/bots',token,{name:'Other'}))[1];assert.deepEqual((await call(`/api/bots/${other.id}/chat-work`,token))[1].requests,[]);
+
   assert.equal((await call('/api/codex-auth/logout',token,{}))[0],409);
   await call(`/api/approvals/${approval.id}/approve`,token,{});
   const completed=await until(async()=>{const result=(await call('/api/commands/clock-indicator',token))[1];return result.state==='completed'&&result;});
@@ -266,6 +270,7 @@ test('paired clients see safe live tool progress and reported usage without prov
   assert.doesNotMatch(JSON.stringify({usage,context}),/what time is it|Demo tool result/);
   await app.close();app=startInstance(path,0,{env:{}});port=await app.listen();
   assert.deepEqual((await call('/api/commands/clock-indicator',token))[1].runtimeEvents,completed.runtimeEvents);
+  const recovered=(await call(`/api/bots/${bot.id}/chat-work`,token))[1];assert.equal(recovered.requests[0].events.length,2);assert.equal(recovered.requests[0].events.at(-1).success,1);assert.deepEqual((await call(`/api/bots/${bot.id}/chat-work`,token))[1],recovered);
  } finally {await app.close();rmSync(dir,{recursive:true,force:true});}
 });
 

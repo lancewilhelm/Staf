@@ -67,7 +67,7 @@ and stores review data separately under `.staf/chat-review`.
   show stopping until the fixture is released, while keeping independent drafts.
 - In Settings, try Light, Dark and System; narrow the window to phone width.
   Expect readable messages and a visible circular action without page overflow.
-  Activity and approval controls should remain available.
+  Inline chat approval controls should remain available; Activity and Updates navigation are absent.
 
 To finish a held response normally, enter `stream-next` twice in the fixture
 terminal. Stop the fixture with Ctrl+C when finished.
@@ -82,3 +82,5 @@ terminal. Stop the fixture with Ctrl+C when finished.
    acceptance criteria. Report the checks performed and any gaps.
 4. Commit only the work authorized for that delivery. Do not include unrelated
    working-tree changes.
+
+For inline tool review in the same fixture, send `What time is it in UTC?`. To require a decision first, use the paired approval-settings API or CLI to select `ask-every-time`. Expect a clock request below that message, exact-action Approve once/Deny controls, and a retained tool outcome. Refresh or use another paired client to decide; the original conversation updates on its next poll.

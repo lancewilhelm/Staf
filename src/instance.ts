@@ -51,8 +51,8 @@ export class Instance {
     const hasProfiles = this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='bot_profiles'").get();
     const versionRow = this.db.prepare('PRAGMA user_version').get();
     const version = Number(versionRow?.user_version ?? 0);
-    if (version > 29) throw new Error('Database version is newer than this Staf');
-    if (hasBots && version < 29 && path !== ':memory:') {
+    if (version > 30) throw new Error('Database version is newer than this Staf');
+    if (hasBots && version < 30 && path !== ':memory:') {
       this.migrationBackup = `${path}.before-${version < 2 ? 'profiles' : version < 3 ? 'tasks' : version < 4 ? 'approvals' : version < 5 ? 'task-inbox' : version < 6 ? 'memory' : version < 7 ? 'memory-confirmation' : version < 8 ? 'skills' : version < 9 ? 'schedules' : version < 10 ? 'schedule-retries' : version < 11 ? 'schedule-lineage' : version < 12 ? 'bot-description' : version < 13 ? 'delegation-scope' : version < 14 ? 'collaboration' : version < 15 ? 'disclosure' : version < 16 ? 'chat-tasks' : version < 17 ? 'creation-defaults' : version < 18 ? 'web-actions' : version < 19 ? 'search-actions' : version < 20 ? 'scratch-shell' : version < 21 ? 'approval-grants' : version < 22 ? 'schedule-web-scope' : version < 23 ? 'schedule-search-scope' : version < 24 ? 'schedule-shell-scope' : version < 25 ? 'main-bot' : version < 26 ? 'command-events' : version < 27 ? 'bot-creation' : version < 28 ? 'response-progress' : 'response-stop'}-${randomUUID()}.sqlite`;
       const previousUmask = process.umask(0o077);
       try { this.db.prepare('VACUUM INTO ?').run(this.migrationBackup); }
@@ -124,7 +124,8 @@ export class Instance {
     if(version < 27)this.db.exec('CREATE TABLE IF NOT EXISTS bot_creation_operations (id TEXT PRIMARY KEY, digest TEXT NOT NULL, bot_id TEXT NOT NULL REFERENCES bots(id))');
     if(version < 28)this.db.exec("CREATE TABLE IF NOT EXISTS response_progress (command_id TEXT PRIMARY KEY REFERENCES commands(id), text TEXT NOT NULL DEFAULT '')");
     if(version < 29)this.db.exec("CREATE TABLE IF NOT EXISTS response_stops (command_id TEXT PRIMARY KEY REFERENCES commands(id))");
-    this.db.exec('PRAGMA user_version=29');
+    if(version < 30 && !this.db.prepare("SELECT 1 FROM pragma_table_info('command_runtime_events') WHERE name='detail'").get())this.db.exec('ALTER TABLE command_runtime_events ADD COLUMN detail TEXT');
+    this.db.exec('PRAGMA user_version=30');
     for (const row of this.db.prepare("SELECT id,bot_id FROM task_attempts WHERE state IN ('queued','running','stopping','waiting') ORDER BY rowid").all()) {
       if (typeof row.id !== 'string' || typeof row.bot_id !== 'string') throw Error('Invalid interrupted task');
       this.cancelTaskInputs(row.id);
@@ -868,11 +869,18 @@ export class Instance {
       this.db.exec('COMMIT');
     } catch(error) {this.db.exec('ROLLBACK');throw error;}
   }
-  commandRuntimeEvent(id:string, event:{type:'tool_start'|'tool_result';name:string;success?:boolean}) {
-    this.db.prepare('INSERT INTO command_runtime_events (command_id,type,name,success) VALUES (?,?,?,?)').run(id,event.type,event.name,event.success === undefined ? null : Number(event.success));
+  commandRuntimeEvent(id:string, event:{type:'tool_start'|'tool_result';name:string;success?:boolean}, detail:string|null=null) {
+    this.db.prepare('INSERT INTO command_runtime_events (command_id,type,name,success,detail) VALUES (?,?,?,?,?)').run(id,event.type,event.name,event.success === undefined ? null : Number(event.success),detail);
   }
   commandRuntimeEvents(id:string) {
     return this.db.prepare('SELECT type,name,success FROM command_runtime_events WHERE command_id=? ORDER BY seq').all(id).map(row=>row.type === 'tool_result' ? {type:'tool_result' as const,name:String(row.name),success:row.success === 1} : {type:'tool_start' as const,name:String(row.name)});
+  }
+  chatWork(botId:string) {
+    const requests=this.db.prepare('SELECT id FROM commands WHERE bot_id=? ORDER BY rowid').all(botId).map(row=>{
+      const id=String(row.id);
+      return {id,progress:this.responseProgress(id),events:this.db.prepare('SELECT seq AS id,type,name,success,detail FROM command_runtime_events WHERE command_id=? ORDER BY seq').all(id)};
+    });
+    return {requests,messages:this.db.prepare('SELECT id,role,content FROM messages WHERE bot_id=? AND id NOT IN (SELECT message_id FROM task_notices) ORDER BY seq').all(botId)};
   }
   chatSession(botId:string):Session {
     const bot=this.botIdentity(botId);if(!bot || typeof bot.chatId !== 'string')throw Error('Agent not found');

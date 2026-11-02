@@ -52,3 +52,5 @@ summary{cursor:pointer}
 .model-discovery-status:empty{display:none}
 .provider-default-actions{margin-top:16px}
 .provider-picker{min-width:0;margin:16px 0;padding:0;border:0}
+
+.chat-work{margin-top:12px;text-align:left;font-size:14px}.chat-work details{margin:6px 0}.chat-work pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:300px;overflow:auto}.chat-work .item{max-width:100%}

@@ -35,18 +35,16 @@ System follows the device setting. The persistent agent list switches between ma
 Instructions live in its `soul.md` file; settings live in `agent.toml`. You can
 [edit these files directly](docs/usage.md#agent-configuration-files) on the instance host.
 Connect an instance-wide OpenRouter key in global Settings or through the paired CLI; saved presence does not verify account or model access. You can create an agent with just a name before connecting a provider. Agent settings
-offer Demo and configured shared connections, retain disconnected selections, and ask for confirmation before switching providers. Review the agent's model after a switch. Open full agent settings from the chat header avatar. Agent settings include archive; reveal Archived agents in the Agents sidebar to restore them. The inbox shows task updates and
-requests for input or approval. The previous Advanced page has been retired;
+offer Demo and configured shared connections, retain disconnected selections, and ask for confirmation before switching providers. Review the agent's model after a switch. Open full agent settings from the chat header avatar. Agent settings include archive; reveal Archived agents in the Agents sidebar to restore them. Tool requests, observed outcomes, and exact-action approvals appear in the chat conversation. The previous Advanced page has been retired;
 other management features remain available through the service and CLI while
 their GUI is developed. Shared-instance Codex sign-in has synthetic coverage
-but is not live verified. Agents can start background work from main chat and
-request help during tasks; each agent-to-agent message requires owner approval.
+but is not live verified. Background-task creation from main chat is deferred. Explicit task API and CLI operations remain available.
 Public web reading, owner-configured local search and scratch-only shell are off
 by default and require owner approval. Press Enter in the host
 terminal to issue a fresh one-time code for another client. This preview binds
 only to loopback; it does not support LAN access. See [usage](docs/usage.md#local-shared-instance-offline-preview) for CLI commands and limitations.
 
-The loopback instance has an initial background-task and Activity interface. It is an offline-tested preview with important permission and recovery limitations; see [usage](docs/usage.md#background-task-preview).
+The loopback instance retains the background-task engine; its separate Activity and task-update workspace is deferred. It is an offline-tested preview with important permission and recovery limitations; see [usage](docs/usage.md#background-task-preview).
 
 
 The shared instance supports owner-imported [skills](docs/usage.md#skills-in-the-shared-instance) as an offline-tested preview.
