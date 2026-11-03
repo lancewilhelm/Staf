@@ -22,6 +22,7 @@ The browser interface uses Vue single-file components with Composition API and
 `web/components/` for chat, agent settings, provider choices, and notifications.
 `web/workspace.ts` exposes the existing client controller as a shallow Vue ref;
 the controller owns API calls, draft recovery, polling, and response streams.
+One controller survives `App.vue` hot reloads so it retains browser draft locks.
 The existing CSS in `web/style.css` and `web/toasts.css` owns appearance.
 
 Vite builds the browser assets; `vue-tsc` checks component scripts and templates

@@ -43,6 +43,7 @@ function change(field: 'provider' | 'model' | 'reasoning', event: Event) {
   if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement)) return;
   emit('change', field, target.value);
   if (field === 'model' && catalog.value?.models.some(model => model.id === target.value)) emit('modelSelect', target.value);
+  if (target instanceof HTMLSelectElement) target.value = field === 'provider' ? props.provider : props.reasoning || 'default';
 }
 function chooseListed(event: Event) {
   if (event.target instanceof HTMLSelectElement && event.target.value) {

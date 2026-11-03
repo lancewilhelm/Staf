@@ -1,44 +1,41 @@
 <script setup lang="ts">
-import { ref } from 'vue';
 import { useWorkspace } from '../workspace';
 import { type Appearance, saveAppearance } from '../appearance';
 import ProviderDefaults from './ProviderDefaults.vue';
-defineProps<{appearance: Appearance; hasAgentSettings: boolean}>();
+const props = defineProps<{appearance: Appearance; hasAgentSettings: boolean; routerForm: {key: string; status: string; busy: boolean}}>();
+const form = props.routerForm;
 const emit = defineEmits<{'update:appearance': [value: Appearance]; agentSettings: []; chat: []}>();
 const {app, state: s} = useWorkspace();
 const appearances: Appearance[] = ['light', 'dark', 'system'];
-const routerKey = ref('');
-const routerStatus = ref('');
-const routerBusy = ref(false);
 function chooseAppearance(value: Appearance) { emit('update:appearance', value); saveAppearance(value); }
 function signOut() {
   if (window.confirm('Sign out of Codex for this Staf instance? All agents using it will need a new sign-in.')) void app.signOutAuth();
 }
 async function saveRouter() {
-  routerBusy.value = true;
-  routerStatus.value = '';
+  form.busy = true;
+  form.status = '';
   try {
-    await app.saveOpenRouter(routerKey.value);
-    routerKey.value = '';
-    routerStatus.value = 'Key saved. Account and model access have not been verified.';
-    app.notify(routerStatus.value, 'success');
+    await app.saveOpenRouter(form.key);
+    form.key = '';
+    form.status = 'Key saved. Account and model access have not been verified.';
+    app.notify(form.status, 'success');
   } catch {
-    routerStatus.value = 'Could not save the key, or the result is uncertain. Check status and retry.';
-    app.notify(routerStatus.value, 'error');
-  } finally { routerBusy.value = false; }
+    form.status = 'Could not save the key, or the result is uncertain. Check status and retry.';
+    app.notify(form.status, 'error');
+  } finally { form.busy = false; }
 }
 async function disconnectRouter() {
-  routerBusy.value = true;
-  routerStatus.value = '';
+  form.busy = true;
+  form.status = '';
   try {
     await app.disconnectOpenRouter();
-    routerKey.value = '';
-    routerStatus.value = 'OpenRouter disconnected.';
-    app.notify(routerStatus.value, 'success');
+    form.key = '';
+    form.status = 'OpenRouter disconnected.';
+    app.notify(form.status, 'success');
   } catch {
-    routerStatus.value = 'Disconnect failed or is uncertain. Check status and retry.';
-    app.notify(routerStatus.value, 'error');
-  } finally { routerBusy.value = false; }
+    form.status = 'Disconnect failed or is uncertain. Check status and retry.';
+    app.notify(form.status, 'error');
+  } finally { form.busy = false; }
 }
 </script>
 
@@ -67,12 +64,12 @@ async function disconnectRouter() {
       <strong>OpenRouter</strong>
       <p>{{ s.openrouter === 'saved' ? 'API key saved for this instance.' : s.openrouter === 'missing' ? 'No OpenRouter API key saved.' : s.openrouter === 'error' ? 'OpenRouter credential storage is unavailable. Replace or disconnect the key.' : 'Checking the OpenRouter connection.' }}</p>
       <p class="meta">A saved key does not verify account or model access.</p>
-      <label>OpenRouter API key<input v-model="routerKey" type="password" autocomplete="off" :disabled="routerBusy" /></label>
+      <label>OpenRouter API key<input v-model="form.key" type="password" autocomplete="off" :disabled="form.busy" /></label>
       <div class="row">
-        <button :disabled="routerBusy || !routerKey" @click="saveRouter">{{ s.openrouter === 'saved' ? 'Replace OpenRouter key' : 'Save OpenRouter key' }}</button>
-        <button v-if="s.openrouter === 'saved' || s.openrouter === 'error'" class="quiet" :disabled="routerBusy" @click="disconnectRouter">Disconnect OpenRouter</button>
+        <button :disabled="form.busy || !form.key" @click="saveRouter">{{ s.openrouter === 'saved' ? 'Replace OpenRouter key' : 'Save OpenRouter key' }}</button>
+        <button v-if="s.openrouter === 'saved' || s.openrouter === 'error'" class="quiet" :disabled="form.busy" @click="disconnectRouter">Disconnect OpenRouter</button>
       </div>
-      <p role="status">{{ routerStatus }}</p>
+      <p role="status">{{ form.status }}</p>
     </div>
     <div class="row"><button v-if="hasAgentSettings" class="quiet" @click="emit('agentSettings')">Back to agent settings</button><button class="quiet" @click="emit('chat')">Back to chat</button></div>
   </div></div>

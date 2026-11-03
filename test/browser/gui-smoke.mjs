@@ -77,6 +77,17 @@ try{
  await until(()=>evaluate("document.body.innerText.includes('OpenRouter credential storage is unavailable') && document.body.innerText.includes('Connect Codex')"),'credential status error leaves Settings available');
  await evaluate("window.fetch=window.routerFetch");
  await until(()=>evaluate("document.body.innerText.includes('No OpenRouter API key saved.')"),'credential status recovers');
+ await evaluate("testInput('input[type=password]','synthetic-unsaved-key');testClick('Back to chat')");
+ await act("[...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('Settings')).click()","!!document.querySelector('input[type=password]')",'return to unsaved provider connection');
+ assert.equal(await evaluate("document.querySelector('input[type=password]').value"),'synthetic-unsaved-key','navigation retains unsaved connection form');
+ await evaluate("window.pendingRouterFetch=window.fetch;window.routerWriteGate=new Promise(resolve=>window.releaseRouterWrite=resolve);window.routerWriteStarted=false;window.fetch=async(...args)=>{if(String(args[0]).endsWith('/api/openrouter-connection')&&args[1]?.method==='POST'){window.routerWriteStarted=true;await window.routerWriteGate}return window.pendingRouterFetch(...args)};testClick('Save OpenRouter key')");
+ await until(()=>evaluate("window.routerWriteStarted"),'provider connection write is held');
+ await act("testClick('Back to chat')","!document.querySelector('input[type=password]')",'leave pending provider connection');
+ await act("[...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('Settings')).click()","!!document.querySelector('input[type=password]')",'return to pending provider connection');
+ assert.equal(await evaluate("document.querySelector('input[type=password]').disabled && [...document.querySelectorAll('button')].find(button=>button.textContent==='Save OpenRouter key').disabled"),true,'navigation retains pending connection busy state');
+ await evaluate("window.fetch=window.pendingRouterFetch;window.releaseRouterWrite()");
+ await until(()=>evaluate("document.body.innerText.includes('API key saved for this instance.') && !document.querySelector('input[type=password]').value"),'pending provider save completes after navigation');
+ await act("testClick('Disconnect OpenRouter')","document.body.innerText.includes('No OpenRouter API key saved.')",'reset provider connection fixture');
  await evaluate("(async()=>{window.routerFetch=window.fetch;window.fetch=async(...args)=>String(args[0]).endsWith('/api/openrouter-connection')&&args[1]?.method==='POST'?new Response(JSON.stringify({error:'synthetic failure'}),{status:503,headers:{'Content-Type':'application/json'}}):window.routerFetch(...args);testInput('input[type=password]','synthetic-browser-one');await new Promise(requestAnimationFrame);testClick('Save OpenRouter key')})()");
  await until(()=>evaluate("document.body.innerText.includes('Could not save the key')"),'OpenRouter save failure');
  assert.equal(await evaluate("document.querySelector('input[type=password]').value"),'synthetic-browser-one');
@@ -436,6 +447,7 @@ try{
  await act("document.querySelector('.model-button').click();setTimeout(()=>testClick('Agent settings'),0)","!!document.querySelector('.setup select')",'open second agent settings');
  await evaluate("window.confirmMessages=[];window.confirm=message=>{window.confirmMessages.push(message);return false};document.querySelector('.setup select').value='codex';document.querySelector('.setup select').dispatchEvent(new Event('change',{bubbles:true}))");
  assert.match(await evaluate("window.confirmMessages[0]"),/conversation history.*new provider/i);
+ assert.equal(await evaluate("document.querySelector('.setup select').value"),'demo','canceled provider switch restores the displayed choice');
  assert.equal((await evaluate(`(async()=>{const t=localStorage.getItem('staf-token');return await (await fetch('/api/bots/${duplicate.id}',{headers:{Authorization:'Bearer '+t}})).json()})()`)).provider,'demo');
  await evaluate("window.confirm=message=>{window.confirmMessages.push(message);return true};document.querySelector('.setup select').value='codex';document.querySelector('.setup select').dispatchEvent(new Event('change',{bubbles:true}));setTimeout(()=>testClick('Save settings'),300)");
  await until(()=>evaluate("!!document.querySelector('[aria-label=Message]')"),'confirmed provider switch');

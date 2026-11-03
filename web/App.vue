@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, reactive, ref, watch } from 'vue';
 import { provideWorkspace } from './workspace';
 import { readAppearance, applyAppearance } from './appearance';
 import AgentSidebar from './components/AgentSidebar.vue';
@@ -14,6 +14,7 @@ const {app, state: s} = provideWorkspace();
 type View = 'chat' | 'settings' | 'agent';
 const view = ref<View>('chat');
 const code = ref('');
+const routerForm = reactive({key: '', status: '', busy: false});
 const appearance = ref(readAppearance());
 applyAppearance(appearance.value);
 const settingsAgentId = ref<string | null>(null);
@@ -66,7 +67,7 @@ function openChat(id: string) { settingsAgentId.value = null; app.closeSetup(); 
           <label>Pairing code<input v-model="code" /></label><button @click="app.pair(code)">Pair</button><p role="alert">{{ s.connection.message }}</p>
         </div>
         <NewAgent v-else-if="s.setup.kind === 'create'" />
-        <SettingsView v-else-if="view === 'settings'" v-model:appearance="appearance" :has-agent-settings="!!settingsAgentId" @agent-settings="view = 'agent'" @chat="closeAgentSettings" />
+        <SettingsView v-else-if="view === 'settings'" v-model:appearance="appearance" :router-form="routerForm" :has-agent-settings="!!settingsAgentId" @agent-settings="view = 'agent'" @chat="closeAgentSettings" />
         <ChatView v-else @create="createAgent" @providers="openSettings" @settings="openAgentSettings" />
       </template>
     </main>

@@ -2,9 +2,10 @@ import { inject, onScopeDispose, provide, shallowRef, type InjectionKey, type Sh
 import { Controller, type Workspace } from './controller';
 
 const workspaceKey: InjectionKey<{app: Controller; state: ShallowRef<Workspace>}> = Symbol('workspace');
+let controller: Controller | undefined;
 
 export function provideWorkspace() {
-  const app = new Controller();
+  const app = controller ??= new Controller();
   const state = shallowRef(app.snapshot());
   const unsubscribe = app.subscribe(() => { state.value = app.snapshot(); });
   onScopeDispose(unsubscribe);
