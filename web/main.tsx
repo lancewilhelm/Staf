@@ -1,7 +1,7 @@
 import {useEffect,useLayoutEffect,useRef,useState,useSyncExternalStore,type ReactNode} from 'react';
 import {createRoot} from 'react-dom/client';
 import Markdown from 'react-markdown';
-import {Controller,type BotProfile,type InboxItem,type Workspace} from './controller';
+import {Controller,type BotProfile,type InboxItem,type Workspace,type ChatWork} from './controller';
 import './style.css';
 import {ProviderPicker,ProviderDefaults,ChoiceFields} from './provider-picker';
 import {Toasts} from './toasts';
@@ -23,7 +23,7 @@ function CodeBlock({children}:{children:ReactNode}){
 }
 function ResponseText({text}:{text:string}){return <div className="bottext markdown"><Markdown skipHtml components={{pre:({children})=><CodeBlock>{children}</CodeBlock>,a:({href,children})=><a href={href} target="_blank" rel="noopener noreferrer">{children}</a>}}>{text}</Markdown></div>}
 
-type View='chat'|'inbox'|'settings'|'bot';
+type View='chat'|'settings'|'bot';
 type Appearance='light'|'dark'|'system';
 const appearanceKey='staf-appearance';
 function readAppearance():Appearance{
@@ -42,11 +42,21 @@ function Item({item}:{item:InboxItem}){
       <p className="meta">Replying to task questions in the workspace is not available yet.</p>
     </>:<>
       <p className="meta">{item.work.kind} {item.work.id}</p>
-      <p>{item.approvalKind==='shell'?'Commands, output, and unknown secrets may be retained in chat, Activity, and backups. The Docker daemon and image must be trusted.':item.approvalKind==='search'?'The configured search backend may retain and forward this exact query. Queries and results may be retained in chat, Activity, and backups.':item.approvalKind==='web'?'This allows the exact public URL shown. Each redirect requires a separate approval. URLs and source text may be retained in chat, Activity, and backups.':item.approvalKind==='disclosure'?'Review the exact sender, recipient, and message before allowing disclosure.':'This allows one UTC clock read.'}</p>
+      <p>{item.approvalKind==='shell'?'Commands, output, and unknown secrets may be retained in chat and backups. The Docker daemon and image must be trusted.':item.approvalKind==='search'?'The configured search backend may retain and forward this exact query. Queries and results may be retained in chat and backups.':item.approvalKind==='web'?'This allows the exact public URL shown. Each redirect requires a separate approval. URLs and source text may be retained in chat and backups.':item.approvalKind==='disclosure'?'Review the exact sender, recipient, and message before allowing disclosure.':'This allows one UTC clock read.'}</p>
       <pre>{typeof item.detail==='string'?item.detail:JSON.stringify(item.detail,null,2)}</pre>
       <div className="row"><button onClick={()=>void app.decide(item,'approve')}>Approve once</button><button className="quiet" onClick={()=>void app.decide(item,'deny')}>Deny</button></div>
     </>}
   </article>;
+}
+
+function ChatWorkItems({work,inbox}:{work:ChatWork|undefined;inbox:InboxItem[]}){
+  if(!work)return null;
+  const approvals=inbox.filter(item=>item.kind==='approval'&&item.work.kind==='command'&&item.work.id===work.id);
+  return <div className="chat-work" aria-label="Agent work">
+    {work.events.map(event=><details key={event.id}><summary>{event.name} · {event.type==='tool_start'?'Requested':event.success?'Succeeded':'Failed'}</summary>{event.detail&&<pre>{event.detail}</pre>}</details>)}
+    {approvals.map(item=><Item key={item.id} item={item}/>)}
+    {!!work.events.length&&<div className="meta">{approvals.length?'Waiting for approval':work.progress.state==='running'?'Working':work.progress.state}</div>}
+  </div>;
 }
 
 function InstructionsHelp(){
@@ -108,22 +118,18 @@ function App(){
   const [settingsBotId,setSettingsBotId]=useState<string|null>(null);
   const [botSaving,setBotSaving]=useState(false);
   const firstRun=useRef(false);
-  const activityButton=useRef<HTMLButtonElement>(null);
-  const closeButton=useRef<HTMLButtonElement>(null);
   const messagesRef=useRef<HTMLDivElement>(null);
   const composerRef=useRef<HTMLTextAreaElement>(null);
   useLayoutEffect(()=>{const node=composerRef.current;if(node){node.style.height='auto';node.style.height=Math.min(node.scrollHeight,180)+'px'}},[s.draft.text,s.selected,view]);
   const followBottom=useRef(true);
   useLayoutEffect(()=>{followBottom.current=true},[s.selected,view]);
-  useLayoutEffect(()=>{const node=messagesRef.current;if(node&&followBottom.current)node.scrollTop=node.scrollHeight},[s.selected,view,s.messages,s.response?.text,s.response?.state,s.draft.submission?.id,s.draft.submission?.kind]);
-  useEffect(()=>{if(s.activityOpen&&document.activeElement===activityButton.current)closeButton.current?.focus()},[s.activityOpen]);
+  useLayoutEffect(()=>{const node=messagesRef.current;if(node&&followBottom.current)node.scrollTop=node.scrollHeight},[s.selected,view,s.messages,s.work,s.inbox,s.response?.text,s.response?.state,s.draft.submission?.id,s.draft.submission?.kind]);
   useEffect(()=>{if(!firstRun.current&&s.connection.kind==='ready'){firstRun.current=true;if(!s.bots.length&&s.credential==='signed-out')setView('settings')}},[s.connection.kind,s.bots.length,s.credential]);
   const submissionError=s.draft.submission&&'error' in s.draft.submission?s.draft.submission.error:null;
   useEffect(()=>{if(submissionError)app.notify(submissionError,'error','submission')},[submissionError]);
   useEffect(()=>{if(s.connection.kind==='offline')app.notify(s.connection.message,'error','connection');else if(s.connection.kind==='ready'){for(const notice of app.state.notices)if(notice.topic==='connection')app.dismissNotice(notice.id)}},[s.connection.kind]);
   const selected=s.bots.find(b=>b.id===s.selected);
   const botLabel=(bot:{id:string;name:string})=><>{bot.name}{s.bots.filter(other=>other.name===bot.name).length>1&&<span className="agent-id"> · {bot.id.slice(-4)}</span>}</>;
-  const labelFor=(id:string)=>{const bot=s.bots.find(item=>item.id===id);return bot?botLabel(bot):'Agent'};
   const relevant=s.inbox.filter(i=>i.botId===s.selected);
   const submission=s.draft.submission;
   const responding=!!s.response&&['accepted','running','stopping'].includes(s.response.state);
@@ -139,12 +145,9 @@ function App(){
     <button disabled={botSaving} onClick={openBotCreation}>＋ &nbsp; New agent</button>
     <nav aria-labelledby="agents-label">{s.bots.filter(b=>!b.archived).map(b=>{const active=b.id===s.selected&&view==='chat'&&s.setup.kind==='closed';return <button disabled={botSaving} key={b.id} aria-current={active?'page':undefined} className={active?'active':''} onClick={()=>openChat(b.id)}>◉ &nbsp; {botLabel(b)} <span className="dots">{s.inbox.filter(i=>i.botId===b.id).length||''}</span></button>})}</nav>
     {s.bots.some(bot=>bot.archived)&&<details className="archived-agents"><summary>Archived agents</summary>{s.bots.filter(bot=>bot.archived).map(bot=><ArchivedBot key={bot.id} bot={bot} label={botLabel(bot)}/>)}</details>}
-    <div className="caption">Inbox</div>
-    <button disabled={botSaving} className={view==='inbox'?'active':''} onClick={()=>{setSettingsBotId(null);app.closeSetup();setView(view==='inbox'?'chat':'inbox')}}>◉ &nbsp; Updates <span className="dots">{s.inbox.length||''}</span></button>
     <div className="minor"><button disabled={botSaving} className={view==='settings'?'active':''} onClick={openSettings}>⚙ &nbsp; Settings</button></div>
   </aside><main className="main">
     <header className="top">{selected&&view==='chat'&&s.setup.kind==='closed'?<button className="avatar" aria-label="Open agent settings" title="Open agent settings" disabled={botSaving} onClick={()=>{setSettingsBotId(selected.id);setView('bot')}}>{selected.name[0]?.toUpperCase()||'✳'}</button>:<div className="avatar">{selected?.name[0]?.toUpperCase()||'✳'}</div>}<div><div className="title">{view==='settings'?'Settings':selected?botLabel(selected):'Welcome to Staf'}</div><div className="sub">{s.connection.kind==='ready'?(view==='settings'?'Provider connections':view==='bot'?'Agent settings':'Your ongoing conversation'):s.connection.kind}</div></div><div className="spacer"/>
-      <button ref={activityButton} className="iconbutton activity-button" aria-label="Activity" title="Activity" onClick={()=>app.activity(!s.activityOpen)}><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12h4l3-7 4 14 3-7h4"/></svg>{relevant.length>0&&<span className="activity-dot"/>}</button>
     </header>
     <Toasts notices={s.notices} onDismiss={app.dismissNotice}/>
     {s.connection.kind==='offline'&&<div className="connection-recovery" role="alert">{s.connection.message} {s.freshness}</div>}
@@ -165,17 +168,15 @@ function App(){
         {s.authAttempt?.phase==='waiting'&&(!s.authUrl||s.authUrlAttemptId!==s.authAttempt.id)&&<p>The sign-in link is no longer available here. Cancel this attempt and start again.</p>}
         <div className="row"><button disabled={s.authStarting||!!s.authAttempt&&['waiting','exchanging','committing'].includes(s.authAttempt.phase)} onClick={()=>void app.startAuth()}>{s.credential==='signed-in'?'Sign in again':'Connect Codex'}</button>{s.authUrl&&s.authAttempt?.phase==='waiting'&&s.authUrlAttemptId===s.authAttempt.id&&<a href={s.authUrl} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer">Continue sign-in</a>}{s.authAttempt&&['waiting','exchanging'].includes(s.authAttempt.phase)&&<button className="quiet" onClick={()=>void app.cancelAuth()}>Cancel sign-in</button>}{s.credential==='signed-in'&&<button className="quiet" onClick={()=>{if(window.confirm('Sign out of Codex for this Staf instance? All agents using it will need a new sign-in.'))void app.signOutAuth()}}>Sign out</button>}</div>
       </div><div className="provider provider-settings"><strong>OpenRouter</strong><p>{s.openrouter==='saved'?'API key saved for this instance.':s.openrouter==='missing'?'No OpenRouter API key saved.':s.openrouter==='error'?'OpenRouter credential storage is unavailable. Replace or disconnect the key.':'Checking the OpenRouter connection.'}</p><p className="meta">A saved key does not verify account or model access.</p><label>OpenRouter API key<input type="password" autoComplete="off" value={routerKey} disabled={routerBusy} onChange={e=>setRouterKey(e.target.value)}/></label><div className="row"><button disabled={routerBusy||!routerKey} onClick={()=>void saveRouter()}>{s.openrouter==='saved'?'Replace OpenRouter key':'Save OpenRouter key'}</button>{(s.openrouter==='saved'||s.openrouter==='error')&&<button className="quiet" disabled={routerBusy} onClick={()=>void disconnectRouter()}>Disconnect OpenRouter</button>}</div><p role="status">{routerStatus}</p></div><div className="row">{settingsBotId&&<button className="quiet" onClick={()=>setView('bot')}>Back to agent settings</button>}<button className="quiet" onClick={()=>{setSettingsBotId(null);setView('chat')}}>Back to chat</button></div>
-    </div></div>:<div className="workspace"><div className="chat">{view==='inbox'?<div className="messages"><h2>Inbox</h2><p>Questions and approvals that need your attention.</p>
-      {s.inbox.length?s.inbox.map(item=><div key={item.kind+item.id}><button className="inbox-link" onClick={()=>{if(item.botId)app.select(item.botId);app.activity(true);setView('chat')}}>{item.botId?labelFor(item.botId):'Instance-wide'} · {item.kind==='question'?'Question':item.approvalKind+' approval'}</button>{!item.botId&&<Item item={item}/>}</div>):<p>Nothing needs attention right now.</p>}
-      <h3>Task updates</h3>{s.taskUpdates.length?s.taskUpdates.map(task=><article className="item" key={task.id}><button className="inbox-link" onClick={()=>{app.select(task.botId);app.activity(true);setView('chat')}}>{labelFor(task.botId)} · {task.objective}</button><div className="meta">{task.state} · {task.id}</div>{task.outcome&&<p>{task.outcome}</p>}</article>):<p>No task updates yet.</p>}
-    </div>:<div className="messages" ref={messagesRef} onScroll={e=>{const node=e.currentTarget;followBottom.current=node.scrollHeight-node.scrollTop-node.clientHeight<40}}>{selected?s.messages.length?s.messages.map(m=><div className={m.role==='user'?'message user-message':'message'} key={m.id}><div className="who">{m.role==='user'?'YOU':selected.name.toUpperCase()}{m.role==='assistant_stopped'?' · stopped':''}</div>{m.role==='user'?<div className="bubble">{m.content}</div>:<ResponseText text={m.content}/>} {submission&&m.id==='command-user-'+submission.id&&submissionStatus}</div>):<div className="empty"><strong>Say hello to {selected.name}</strong><p>This is your ongoing conversation.</p></div>:<div className="empty"><strong>Let's set up your first agent.</strong><p>Create an agent now, even if your provider is not connected.</p><button onClick={openBotCreation}>Create an agent</button></div>}
+    </div></div>:<div className="workspace"><div className="chat"><div className="messages" ref={messagesRef} onScroll={e=>{const node=e.currentTarget;followBottom.current=node.scrollHeight-node.scrollTop-node.clientHeight<40}}>{selected?s.messages.length?s.messages.map(m=><div className={m.role==='user'?'message user-message':'message'} key={m.id}><div className="who">{m.role==='user'?'YOU':selected.name.toUpperCase()}{m.role==='assistant_stopped'?' · stopped':''}</div>{m.role==='user'?<div className="bubble">{m.content}</div>:<ResponseText text={m.content}/>} {submission&&m.id==='command-user-'+submission.id&&submissionStatus}{m.role==='user'&&<ChatWorkItems work={s.work.find(w=>m.id==='command-user-'+w.id)} inbox={relevant}/>}</div>):<div className="empty"><strong>Say hello to {selected.name}</strong><p>This is your ongoing conversation.</p></div>:<div className="empty"><strong>Let's set up your first agent.</strong><p>Create an agent now, even if your provider is not connected.</p><button onClick={openBotCreation}>Create an agent</button></div>}
+      {selected&&s.work.filter(work=>!s.messages.some(message=>message.id==='command-user-'+work.id)&&(work.events.length||relevant.some(item=>item.kind==='approval'&&item.work.id===work.id))).map(work=><div className="message" key={'unmatched-'+work.id}><div className="who">{selected.name.toUpperCase()} · request {work.id}</div><ChatWorkItems work={work} inbox={relevant}/></div>)}
       {selected&&submission&&!s.messages.some(m=>m.id==='command-user-'+submission.id)&&<div className="message user-message"><div className="who">YOU</div><div className="bubble">{submission.text}</div>{submissionStatus}</div>}
       {selected&&s.responseConnection==='reconnecting'&&<div className="message meta">Live response updates disconnected. Reconnecting…</div>}
       {selected&&s.response&&!['completed','stopped'].includes(s.response.state)&&<div className="message provisional"><div className="who">{selected.name.toUpperCase()} · {s.response.state}</div>{s.response.text&&<ResponseText text={s.response.text}/>}<div className="meta">{s.response.state==='failed'||s.response.state==='interrupted'?'Response did not complete. ':'Response in progress. '}{s.response.error}</div></div>}
       {selected?.provider==='codex'&&s.credential==='signed-out'&&<div className="provider"><strong>Connect Codex to chat</strong><p>Provider connections are shared by this Staf instance.</p><button className="quiet" onClick={openSettings}>Open provider settings</button></div>}
       {selected?.provider==='openrouter'&&s.openrouter==='missing'&&<div className="provider"><strong>Connect OpenRouter to chat</strong><p>Provider connections are shared by this Staf instance.</p><button className="quiet" onClick={openSettings}>Open provider settings</button></div>}
 
-    </div>}
+    </div>
     {selected&&view==='chat'&&<div className="composer"><textarea ref={composerRef} rows={2} disabled={!s.draftReady} aria-label="Message" placeholder={'Message '+selected.name+'…'} value={s.draft.text} onChange={e=>app.edit(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();void app.send()}}}/>
       {picker&&<div className="composer-picker"><ProviderPicker key={selected.id} app={app} id={selected.id}/><button className="quiet" onClick={()=>{setPicker(false);setSettingsBotId(selected.id);setView('bot')}}>Agent settings</button><button className="quiet" onClick={()=>setPicker(false)}>Close picker</button></div>}
       <div className="actions"><button className="model-button" onClick={()=>setPicker(!picker)} aria-expanded={picker} aria-label="Choose provider, model and reasoning">{selected.provider} · {selected.model||'Choose model'}</button><button className="composer-control" aria-label={responding?stopping?'Stopping response':'Stop':'Send'} title={responding?stopping?'Stopping response':'Stop response':'Send (Enter)'} disabled={responding?stopping:!s.draftReady||!!submission} onClick={()=>{if(responding)void app.stopResponse();else void app.send()}}><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24">{responding?<rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor"/>:<path d="M12 19V5m-6 6 6-6 6 6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>}</svg><span className="sr-only">{responding?stopping?'Stopping…':'Stop':'Send'}</span></button></div>
@@ -183,7 +184,7 @@ function App(){
       {!s.draftReady&&<p role="status">{s.actionError.includes('Browser storage or locking is unavailable')?'Draft unavailable. Check browser storage and locking.':'Loading saved draft…'}</p>}
       {s.actionError&&<p role="alert">{s.actionError}</p>}
     </div>}</div>
-    {s.activityOpen&&<aside className="activity" aria-label="Activity"><h3>Activity <button ref={closeButton} className="quiet close" onClick={()=>{app.activity(false);activityButton.current?.focus()}} aria-label="Close Activity">×</button></h3>{relevant.map(item=><Item key={item.kind+item.id} item={item}/>)}{s.tasks.length?s.tasks.map(task=><article className="item" key={task.id}><strong>{task.objective}</strong><div className="meta">{task.state} · {task.id}</div>{task.outcome&&<p>{task.outcome}</p>}{task.activity?.map((event,index)=><pre key={index}>{JSON.stringify(event,null,2)}</pre>)}</article>):<p className="meta">No tasks recorded for this agent.</p>}</aside>}
+
     </div>}
   </main></div>;
 }

@@ -30,8 +30,8 @@ Main-chat progress is owned by the shared service. The version 28 migration stor
 
 The React workspace is built with Vite into static assets served by the same
 loopback instance. Its persistent agent list selects main chats using stable
-IDs, including when names coincide. It reads agents, chat, task updates, and
-pending requests from the service and polls while visible. Existing `bots` API
+IDs, including when names coincide. It reads agents, chat work, and
+pending chat approvals from the service and polls while visible. Existing `bots` API
 paths and fields continue to identify these agents. Provider sign-in belongs to
 the instance; each agent owns its model selection. The former Advanced page is not served.
 Appearance is a browser-local preference; CSS follows the device color scheme
@@ -115,7 +115,7 @@ remain service-controlled. Live provider execution remains unverified.
 The shared chat-completions adapter passes caller cancellation and its timeout
 to the HTTP transport.
 
-The background-task preview stores tasks, linked attempts, captured profiles and context, ordered Activity, and private sessions in SQLite. A partial unique index enforces one queued, running, or stopping attempt per bot. Startup marks unfinished attempts interrupted. Stop intent is saved before requesting transport cancellation; observed terminal output and usage can still arrive. Clock permissions and approval modes are implemented. Explicit task inputs are stored in an ordered inbox and incorporated at provider boundaries; completion and input acceptance are serialized. Structured `ask_owner` calls wait for an answer to the recorded question ID, without consuming the execution timer. Main chat does not implicitly direct a task. Explicit replacement is captured while waiting and becomes queued in the same transaction that records the original attempt settling. The workspace polls Activity while visible. Task-question replies are not yet available in the workspace. Offline tests do not establish live provider behavior.
+The background-task preview stores tasks, linked attempts, captured profiles and context, ordered Activity, and private sessions in SQLite. A partial unique index enforces one queued, running, or stopping attempt per bot. Startup marks unfinished attempts interrupted. Stop intent is saved before requesting transport cancellation; observed terminal output and usage can still arrive. Clock permissions and approval modes are implemented. Explicit task inputs are stored in an ordered inbox and incorporated at provider boundaries; completion and input acceptance are serialized. Structured `ask_owner` calls wait for an answer to the recorded question ID, without consuming the execution timer. Main chat does not implicitly direct a task. Explicit replacement is captured while waiting and becomes queued in the same transaction that records the original attempt settling. The MVP workspace hides Activity and task questions; explicit task API/CLI operations remain available. Offline tests do not establish live provider behavior.
 
 
 ### Shared-instance skills
@@ -194,3 +194,7 @@ pointer hover and focus within the toast pause the countdown and progress bar.
 Errors persist until dismissed, while correction and retry context stays inline.
 Sign-in transitions replace the previous attempt notice and clear terminal URLs;
 local saved credentials still do not establish provider or model access.
+
+### Inline main-chat execution
+
+The workspace reads service-owned command progress and persisted tool records through `/api/bots/{id}/chat-work`; it associates records and exact pending approvals with the command user message. Snapshot replacement avoids duplicate delivery. Tool outcomes remain stored independently of later provider success or failure. Database version 30 adds bounded result detail to command runtime events after a protected migration backup. The CLI summary contract remains unchanged. Ordinary chat no longer receives the background-task creation adapter; unsolicited calls fail without starting work. The task engine and explicit API/CLI remain intact. Synthetic checks do not prove live provider behavior.

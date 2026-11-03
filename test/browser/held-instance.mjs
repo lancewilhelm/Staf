@@ -10,7 +10,7 @@ const [path, port] = process.argv.slice(2);
 let releaseInputTask, releaseStream, releaseRouter;
 let routerFailed=false;
 function makeProvider() {
-let inputCalls=0, inputTask=false, skillCalls=0, skillTask=false, collabCalls=0, collabTask=false, webCalls=0, searchCalls=0, shellCalls=0;
+let backgroundCalls=0, inputCalls=0, inputTask=false, skillCalls=0, skillTask=false, collabCalls=0, collabTask=false, webCalls=0, searchCalls=0, shellCalls=0;
 return {
   name: 'controlled-offline',
   capabilities: { toolCalls: true, incrementalText: false, transport: 'demo' },
@@ -39,7 +39,8 @@ return {
       }
       return {role:'assistant',content:'Synthetic web action settled'};
     }
-    if (options?.currentUserInput==='Start synthetic background work' && tools.some(tool=>tool.function.name==='start_background_task')) return {role:'assistant',content:null,tool_calls:[{id:'background-request',type:'function',function:{name:'start_background_task',arguments:JSON.stringify({objective:'Hold chat background'})}}]};
+    if (options?.currentUserInput==='Start synthetic background work' && backgroundCalls++===0) {if(tools.some(tool=>tool.function.name==='start_background_task'))throw Error('Deferred task tool was offered');return {role:'assistant',content:null,tool_calls:[{id:'background-request',type:'function',function:{name:'start_background_task',arguments:JSON.stringify({objective:'Hold chat background'})}}]};}
+    if(options?.currentUserInput==='Start synthetic background work')return {role:'assistant',content:messages.at(-1)?.content};
     if (options?.currentUserInput==='Hold chat background') {const signal=options.signal;await new Promise(resolve=>signal.aborted ? resolve() : signal.addEventListener('abort',resolve,{once:true}));signal.throwIfAborted();}
     const initial=messages.at(-1)?.content ?? '';
     if (!collabCalls && /Collaborate with [\w-]+/.test(initial)) collabTask=true;
@@ -124,4 +125,4 @@ const responseStreams=new Set();
 app.server.on('request',(req,res)=>{if(req.url?.endsWith('/response/stream')){responseStreams.add(res);res.on('close',()=>responseStreams.delete(res));}});
 await app.listen();
 console.log(`Listening on http://127.0.0.1:${port}\nPairing code: ${app.code}`);
-createInterface({input:process.stdin}).on('line', line => { if(line==='release') releaseInputTask?.(); else if(line==='stream-next')releaseStream?.();else if(line==='router-next')releaseRouter?.();else if(line==='drop-response-streams')for(const response of responseStreams)response.destroy();else console.log(`Pairing code: ${app.issueCode()}`); });
+createInterface({input:process.stdin}).on('line', async line => { if(line==='ask-clock'){const origin='http://127.0.0.1:'+port;const paired=await (await fetch(origin+'/api/pair',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:app.issueCode()})})).json();await fetch(origin+'/api/approval-settings/instance',{method:'POST',headers:{Authorization:'Bearer '+paired.token,'Content-Type':'application/json'},body:JSON.stringify({mode:'ask-every-time',clockEnabled:true})});console.log('Clock approvals enabled');return;} if(line==='release') releaseInputTask?.(); else if(line==='stream-next')releaseStream?.();else if(line==='router-next')releaseRouter?.();else if(line==='drop-response-streams')for(const response of responseStreams)response.destroy();else console.log(`Pairing code: ${app.issueCode()}`); });

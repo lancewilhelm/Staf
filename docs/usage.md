@@ -220,6 +220,8 @@ work cannot be archived until that work settles.
 
 In the shared terminal, `/stop` requests cancellation of the current main-chat response, including one started by another paired client, and reports its settled state and any stopped partial output. Incremental provider text is labeled provisional until the response settles. A line entered while your terminal command is unresolved is kept as an unsent draft. Use `/edit ID TEXT` to revise it and `/retry ID` after the response settles; drafts are never queued automatically.
 
+Actual tool requests and success/failure outcomes appear below the corresponding user message. Expand an outcome to read bounded, redacted output. Pending chat approvals show the exact action and scope with **Approve once** and **Deny**. Decisions from other clients disappear on the next refresh. Observed outcomes remain visible after response failure or Stop. These are tool records, not hidden reasoning.
+
 While a response runs, the workspace receives provisional text and progress over a shared-instance event stream. If the connection drops, the workspace reconnects and shows the latest saved progress.
 The composer has one circular action: an up arrow labeled **Send** when ready, and a square labeled **Stop** during an active response. You can type a next draft while the response runs. Select **Stop** to request cancellation; the response shows **stopping** until the provider and pending operations settle. The circular action stays disabled and labeled **Stopping response** until settlement, then returns to Send. The draft remains editable throughout; Enter cannot submit it during generation or stopping, and nothing is queued. Send it explicitly after the response settles. Stopped partial output stays in the conversation labeled **stopped** and is not treated as a completed provider reply. A provider that does not promptly honor cancellation can keep the agent in stopping until it returns.
 Markdown headings, lists, links and code blocks render in assistant responses;
@@ -229,12 +231,7 @@ Incremental output is available when the adapter supplies it; buffered adapters
 show progress and then the completed message. A failed or interrupted response
 remains labeled as incomplete.
 
-**Updates** shows task updates, questions, and approval requests. Activity opens
-automatically for a new question or approval for the selected agent. Other
-updates do not open it. Select a request for another agent to view its Activity.
-Clock approvals can be approved or denied there. Task questions are visible, but
-answering them in the workspace is not yet implemented. The workspace checks
-for updates while the page is visible; it does not provide background notifications.
+Pending main-chat approvals appear in the conversation. The workspace checks for updates while visible; it does not provide background notifications. Activity, task updates, and task questions are deferred from the MVP workspace.
 
 Drafts and pending message IDs are stored in the browser's local journal.
 An agent's draft and pending submission recover automatically after reload or
@@ -362,9 +359,7 @@ not a LAN deployment.
 
 ## Background task preview
 
-The workspace shows task records in Activity and task updates in the inbox.
-Task creation, direction, stopping, and retry controls are not yet available in
-the workspace. The CLI operations below can start and inspect tasks with a run
+The background engine and task history remain available through explicit API/CLI operations. The MVP workspace hides Activity and task updates without stopping existing work. Main chat does not advertise or execute background-task creation. The CLI operations below can start and inspect tasks with a run
 limit of five minutes by default. Stop requests cancellation; the task remains
 stopping until its provider settles. A provider result already returned after
 the request can still complete the task. Retry a failed, stopped, or interrupted
@@ -390,7 +385,7 @@ submission; do not silently submit again. The workspace polls while visible. On 
 unfinished work is marked interrupted and never restarts automatically. Existing
 databases get a private SQLite backup before the task schema migration.
 
-The selected task accepts explicit directions through `task-direct` or main chat with `direct task ATTEMPT_ID: your direction`. Use `stop task ATTEMPT_ID` in main chat to stop it. A request without a full attempt ID asks for clarification. A tool-capable provider may start a background task from main chat when the work calls for it; the service reports the actual accepted ID or busy rejection. Main-chat task requests do not grant helper clock scope or expand existing permissions. An accepted task can continue if the chat command later fails; inspect Activity before retrying an uncertain submission. These paths have synthetic-provider coverage, not live-provider verification. Input is accepted first and applied at a subsequent safe boundary, with both statuses shown in Activity. A task may use the structured `ask_owner` tool to request clarification; answer the specific question ID with `task-answer`. Waiting for an answer does not consume the execution limit. Input is not approval for a tool action. Accepted but unapplied inputs remain visible after stop or restart. Adapters without tool-call support cannot request clarification.
+The selected task accepts explicit directions through `task-direct` or main chat with `direct task ATTEMPT_ID: your direction`. Use `stop task ATTEMPT_ID` in main chat to stop it. A request without a full attempt ID asks for clarification. Provider calls to `start_background_task` fail with no task started. Input is accepted first and applied at a subsequent safe boundary, with both statuses shown in Activity. A task may use the structured `ask_owner` tool to request clarification; answer the specific question ID with `task-answer`. Waiting for an answer does not consume the execution limit. Input is not approval for a tool action. Accepted but unapplied inputs remain visible after stop or restart. Adapters without tool-call support cannot request clarification.
 
 The shared instance also supports separately permitted web reading, local search and scratch-only shell, as described below. A complete recovery workflow is not implemented. Browser task submission does not yet recover an uncertain request automatically. Provider cancellation and live execution require separate live verification.
 
