@@ -152,16 +152,16 @@ try{
  await act("document.querySelector('.panel-toggle').click()","!!document.querySelector('.sidebar-head .panel-toggle')",'expanded toggle returns to sidebar');
  await evaluate("testInput('[aria-label=Message]','Design retained draft');document.querySelector('.model-button').click()");
  await until(()=>evaluate("!!document.querySelector('.composer-picker select')"),'real provider picker loaded');
- assert.equal(await evaluate("(()=>{const p=document.querySelector('.composer-picker').getBoundingClientRect(),c=document.querySelector('.composer').getBoundingClientRect();return p.bottom<c.top && p.top>=0 && p.left>=0 && p.right<=innerWidth})()"),true,'picker anchored above composer within viewport');
+ assert.equal(await evaluate("(()=>{const p=document.querySelector('.composer-picker:not([hidden])').getBoundingClientRect(),c=document.querySelector('.composer').getBoundingClientRect();return p.bottom<c.top && p.top>=0 && p.left>=0 && p.right<=innerWidth})()"),true,'picker anchored above composer within viewport');
  await cdp('Input.dispatchKeyEvent',{type:'keyDown',key:'Tab',code:'Tab'});
  assert.equal(await evaluate("document.activeElement.tagName"),'SELECT','Tab enters provider form');
  await cdp('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape'});
- await until(()=>evaluate("!document.querySelector('.composer-picker') && document.activeElement===document.querySelector('.model-button')"),'Escape closes picker and returns focus');
+ await until(()=>evaluate("!document.querySelector('.composer-picker:not([hidden])') && document.activeElement===document.querySelector('.model-button')"),'Escape closes picker and returns focus');
  await evaluate("document.querySelector('.model-button').click()");
- await until(()=>evaluate("!!document.querySelector('.composer-picker')"),'reopen popup');
+ await until(()=>evaluate("!!document.querySelector('.composer-picker:not([hidden])')"),'reopen popup');
  await cdp('Input.dispatchMouseEvent',{type:'mousePressed',x:220,y:20,button:'left',clickCount:1});
  await cdp('Input.dispatchMouseEvent',{type:'mouseReleased',x:220,y:20,button:'left',clickCount:1});
- await until(()=>evaluate("!document.querySelector('.composer-picker')"),'outside click dismisses popup');
+ await until(()=>evaluate("!document.querySelector('.composer-picker:not([hidden])')"),'outside click dismisses popup');
  assert.equal(await evaluate("document.querySelector('[aria-label=Message]').value"),'Design retained draft');
  const hoverPoint=await evaluate("(()=>{const r=document.querySelector('.model-button').getBoundingClientRect();return {x:r.x+5,y:r.y+5}})()");
  const buttonStyle=()=>evaluate("(()=>{const s=getComputedStyle(document.querySelector('.model-button'));return [s.color,s.backgroundColor,s.borderColor,s.filter,s.boxShadow]})()");
@@ -174,6 +174,7 @@ try{
  await until(()=>evaluate("document.documentElement.dataset.palette==='ink' && getComputedStyle(document.documentElement).getPropertyValue('--body')==='16px'"),'palette and text preferences apply');
  await cdp('Page.reload');
  await until(()=>evaluate("document.documentElement.dataset.palette==='ink' && document.querySelector('.brand svg circle').getAttribute('cx')==='20'"),'design preferences persist');
+ await evaluate(`window.testInput=(selector,value)=>{const el=document.querySelector(selector);Object.getOwnPropertyDescriptor(el.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,'value').set.call(el,value);el.dispatchEvent(new Event('input',{bubbles:true}))}; window.testClick=text=>{const b=[...document.querySelectorAll('button')].find(x=>x.textContent.trim()===text);if(!b)throw Error('Missing button '+text);b.click()}`);
  await evaluate("[...document.querySelectorAll('.side button')].find(b=>b.getAttribute('aria-label')==='Settings').click()");
  await until(()=>evaluate("!!document.querySelector('.appearance-details')"),'return to appearance');
  await evaluate("document.querySelector('.appearance-details').open=true;testClick('Reset layout and typography');testClick('Back to chat')");
@@ -181,9 +182,9 @@ try{
  for(const width of [390,1280]){
    await cdp('Emulation.setDeviceMetricsOverride',{width,height:844,deviceScaleFactor:1,mobile:width<600});
    await evaluate("document.querySelector('.model-button').click()");
-   await until(()=>evaluate("!!document.querySelector('.composer-picker')"),'popup at '+width);
+   await until(()=>evaluate("!!document.querySelector('.composer-picker:not([hidden])')"),'popup at '+width);
    if(process.env.STAF_GUI_SCREENSHOTS) await writeFile(join(process.env.STAF_GUI_SCREENSHOTS,'staf-'+width+'.png'),Buffer.from((await cdp('Page.captureScreenshot',{format:'png'})).data,'base64'));
-   assert.equal(await evaluate("(()=>{const r=document.querySelector('.composer-picker').getBoundingClientRect();return r.left>=0 && r.right<=innerWidth && r.top>=0 && document.documentElement.scrollWidth<=innerWidth})()"),true,'picker and page fit '+width);
+   assert.equal(await evaluate("(()=>{const r=document.querySelector('.composer-picker:not([hidden])').getBoundingClientRect();return r.left>=0 && r.right<=innerWidth && r.top>=0 && document.documentElement.scrollWidth<=innerWidth})()"),true,'picker and page fit '+width);
    await evaluate("document.querySelector('.composer-picker button:last-child').click()");
  }
  await cdp('Emulation.clearDeviceMetricsOverride');
@@ -404,7 +405,7 @@ try{
  await evaluate("testInput('.setup [aria-label=\"Provider picker\"] input','fixture-model-v2');document.querySelector('.setup [aria-label=\"Provider picker\"] input').focus();document.querySelector('.setup [aria-label=\"Provider picker\"] input').blur()");
  await until(()=>evaluate("document.querySelector('[aria-label=\"Provider picker\"]').innerText.includes('Saved. Applies')"),'immediate model edit');
  await evaluate("testInput('.setup textarea','Help me plan with care');testClick('Save settings')");
- await until(()=>evaluate("document.querySelector('.setup textarea')?.disabled"),'settings save pending');assert.equal(await evaluate("[...document.querySelectorAll('.setup input,.setup select,.setup textarea,.setup button,.side button')].every(element=>element.matches(':disabled'))"),true);await evaluate("document.querySelector('.side button').click()");assert.equal(await evaluate("document.body.innerText.includes('AGENT SETTINGS')"),true);console.log('PASS settings and navigation cannot change while saving');
+ await until(()=>evaluate("document.querySelector('.setup textarea')?.disabled"),'settings save pending');assert.equal(await evaluate("[...document.querySelectorAll('.setup input,.setup select,.setup textarea,.setup button,.side button,.top button')].every(element=>element.matches(':disabled'))"),true);await evaluate("document.querySelector('.side button').click()");assert.equal(await evaluate("document.body.innerText.includes('AGENT SETTINGS')"),true);console.log('PASS settings and navigation cannot change while saving');
  await evaluate("window.releaseTestSave()");await until(()=>evaluate("document.body.innerText.includes('synthetic save failure')"),'settings failure');assert.equal(await evaluate("document.querySelector('.setup textarea').value"),'Help me plan with care');console.log('PASS failed save retains settings and error');
  await evaluate("window.testFailSave=false;window.testSaveGate=new Promise(resolve=>window.releaseTestSave=resolve);testClick('Save settings')");await until(()=>evaluate("document.querySelector('.setup textarea')?.disabled && [...document.querySelectorAll('.side button')].every(element=>element.matches(':disabled'))"),'settings retry pending');
  await act("window.releaseTestSave();window.fetch=window.testFetch","!!document.querySelector('[aria-label=Message]')",'save agent settings');

@@ -102,5 +102,22 @@ try{
  assert.equal((await api('bots/'+bot.id+'/messages')).length,0);
  await cdp('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
  assert.equal(await evaluate('document.documentElement.scrollWidth<=innerWidth'),true,'narrow viewport has no horizontal overflow');
+
+ await cdp('Emulation.clearDeviceMetricsOverride');
+ await until(()=>evaluate("!document.querySelector('[aria-label=\"Provider picker\"] fieldset').disabled"),'picker ready for conflict');
+ await evaluate("window.fetch=async(...args)=>String(args[0]).endsWith('/selection')?new Response(JSON.stringify({error:'fixture conflict'}),{status:409,headers:{'Content-Type':'application/json'}}):window.realPickerFetch(...args);testInput('[aria-label=\"Provider picker\"] input','retained/conflict');document.querySelector('[aria-label=\"Provider picker\"] input').focus()");
+ await cdp('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape'});
+ await until(()=>evaluate("document.querySelector('.composer-picker').hidden && document.activeElement===document.querySelector('.model-button')"),'dismiss conflicting edit with focus return');
+ await until(()=>evaluate("document.querySelector('.composer-picker').textContent.includes('Save failed or is uncertain')"),'failed save feedback retained while hidden');
+ await evaluate("document.querySelector('.model-button').click()");
+ await until(()=>evaluate("!document.querySelector('.composer-picker').hidden"),'reopen retained picker');
+ assert.equal(await evaluate("document.querySelector('[aria-label=\"Provider picker\"] input').value"),'retained/conflict','failed model edit remains available');
+ assert.equal(await evaluate("document.querySelector('.composer-picker').textContent.includes('fixture conflict')"),true);
+ await evaluate("window.fetch=window.realPickerFetch");
+ const triggerPoint=await evaluate("(()=>{const r=document.querySelector('.model-button').getBoundingClientRect();return {x:r.x+5,y:r.y+5}})()");
+ await cdp('Input.dispatchMouseEvent',{type:'mousePressed',...triggerPoint,button:'left',clickCount:1});
+ await cdp('Input.dispatchMouseEvent',{type:'mouseReleased',...triggerPoint,button:'left',clickCount:1});
+ await until(()=>evaluate("document.querySelector('.composer-picker').hidden"),'pointer click on open trigger closes popup');
+ console.log('PASS popup dismissal preserves failed model edit and feedback; trigger closes with pointer');
  console.log('PASS provider defaults, immediate picker, confirmation, catalog, manual entry, reasoning fallback, remembered pair, draft retention and no inference');
 } finally {socket?.close();browserSocket?.close();browser?.kill();server?.kill();proxy?.close();await sleep(200);await rm(temp,{recursive:true,force:true})}
