@@ -74,7 +74,7 @@ connection presence.
 
 | Command | Effect |
 | --- | --- |
-| `pnpm run build` | Build the Vite browser workspace and compile server source to `dist/`. |
+| `pnpm run build` | Build the Vue/Vite browser workspace and compile server source to `dist/`. |
 | `pnpm run check` | Check server and browser TypeScript without emitting output. |
 | `pnpm test` | Build and run JavaScript tests against compiled output. |
 | `pnpm start` | Build and start the shared terminal. |

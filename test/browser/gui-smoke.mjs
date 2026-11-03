@@ -77,12 +77,12 @@ try{
  await until(()=>evaluate("document.body.innerText.includes('OpenRouter credential storage is unavailable') && document.body.innerText.includes('Connect Codex')"),'credential status error leaves Settings available');
  await evaluate("window.fetch=window.routerFetch");
  await until(()=>evaluate("document.body.innerText.includes('No OpenRouter API key saved.')"),'credential status recovers');
- await evaluate("window.routerFetch=window.fetch;window.fetch=async(...args)=>String(args[0]).endsWith('/api/openrouter-connection')&&args[1]?.method==='POST'?new Response(JSON.stringify({error:'synthetic failure'}),{status:503,headers:{'Content-Type':'application/json'}}):window.routerFetch(...args);testInput('input[type=password]','synthetic-browser-one');testClick('Save OpenRouter key')");
+ await evaluate("(async()=>{window.routerFetch=window.fetch;window.fetch=async(...args)=>String(args[0]).endsWith('/api/openrouter-connection')&&args[1]?.method==='POST'?new Response(JSON.stringify({error:'synthetic failure'}),{status:503,headers:{'Content-Type':'application/json'}}):window.routerFetch(...args);testInput('input[type=password]','synthetic-browser-one');await new Promise(requestAnimationFrame);testClick('Save OpenRouter key')})()");
  await until(()=>evaluate("document.body.innerText.includes('Could not save the key')"),'OpenRouter save failure');
  assert.equal(await evaluate("document.querySelector('input[type=password]').value"),'synthetic-browser-one');
  await act("window.fetch=window.routerFetch;testClick('Save OpenRouter key')","document.body.innerText.includes('API key saved for this instance.') && !document.querySelector('input[type=password]').value",'save OpenRouter key');
  assert.equal(await evaluate("document.body.innerText.includes('does not verify account or model access')"),true);
- await act("testInput('input[type=password]','synthetic-browser-two');testClick('Replace OpenRouter key')","document.body.innerText.includes('Key saved.') && !document.querySelector('input[type=password]').value",'replace OpenRouter key');
+ await act("(async()=>{testInput('input[type=password]','synthetic-browser-two');await new Promise(requestAnimationFrame);testClick('Replace OpenRouter key')})()","document.body.innerText.includes('Key saved.') && !document.querySelector('input[type=password]').value",'replace OpenRouter key');
  assert.doesNotMatch(await evaluate("document.body.innerText"),/synthetic-browser/);
  await act("testClick('Disconnect OpenRouter')","document.body.innerText.includes('No OpenRouter API key saved.')",'disconnect OpenRouter');
 
@@ -91,10 +91,10 @@ try{
  assert.equal(await evaluate("window.popupCalls.length"),1,'Connect reserves a tab during the user action');
  assert.equal(await evaluate("!!document.querySelector('.toast [role=progressbar]')"),true,'sign-in instruction is a timed toast');
  assert.match(await evaluate("document.body.innerText"),/blocked.*Continue sign-in/i);
- await evaluate("document.querySelector('.toast:last-child').dispatchEvent(new MouseEvent('mouseover',{bubbles:true}))");
+ await evaluate("document.querySelector('.toast:last-child').dispatchEvent(new MouseEvent('mouseenter',{bubbles:true}))");
  await sleep(150);const paused=await evaluate("document.querySelector('.toast:last-child [role=progressbar]').getAttribute('aria-valuenow')");
  await sleep(350);assert.equal(await evaluate("document.querySelector('.toast:last-child [role=progressbar]').getAttribute('aria-valuenow')"),paused,'hover pauses toast');
- await evaluate("document.querySelector('.toast:last-child button').focus();document.querySelector('.toast:last-child').dispatchEvent(new MouseEvent('mouseout',{bubbles:true,relatedTarget:document.body}))");
+ await evaluate("document.querySelector('.toast:last-child button').focus();document.querySelector('.toast:last-child').dispatchEvent(new MouseEvent('mouseleave',{bubbles:true,relatedTarget:document.body}))");
  await sleep(350);assert.equal(await evaluate("document.querySelector('.toast:last-child [role=progressbar]').getAttribute('aria-valuenow')"),paused,'keyboard focus pauses toast after pointer leaves');
  await evaluate("document.activeElement.blur()");
  await until(()=>evaluate("!document.querySelector('.toast [role=progressbar]')"),'informational toasts expire after resuming');
@@ -177,7 +177,7 @@ try{
  assert.equal(await evaluate("document.querySelector('.setup select option[value=openrouter]').disabled"),false);
  await evaluate("testInput('.setup textarea','Unsaved recovery instructions')");
  await act("testClick('Open provider settings')","!!document.querySelector('input[type=password]')",'open provider setup from agent settings');
- await act("testInput('input[type=password]','synthetic-recovery-key');testClick('Save OpenRouter key')","document.body.innerText.includes('API key saved for this instance.')",'connect provider while editing agent');
+ await act("(async()=>{testInput('input[type=password]','synthetic-recovery-key');await new Promise(requestAnimationFrame);testClick('Save OpenRouter key')})()","document.body.innerText.includes('API key saved for this instance.')",'connect provider while editing agent');
  await act("testClick('Back to agent settings')","document.body.innerText.includes('AGENT SETTINGS')",'return to unsaved agent settings');
  assert.equal(await evaluate("document.querySelector('.setup textarea').value"),'Unsaved recovery instructions');
  assert.equal(await evaluate("document.querySelector('.setup select option[value=openrouter]').disabled"),false);
@@ -477,7 +477,7 @@ try{
  await evaluate("testInput('[aria-label=Message]','Keep OpenRouter draft');testClick('Send')");
  assert.equal(await evaluate("document.querySelector('[aria-label=Message]').value"),'');assert.equal(await evaluate("document.querySelector('.messages').innerText.includes('Keep OpenRouter draft') && document.body.innerText.includes('Connect OpenRouter in Settings to send.')"),true);await evaluate("testInput('[aria-label=Message]','Next OpenRouter draft')");
  await act("testClick('Open provider settings')","!!document.querySelector('input[type=password]')",'open OpenRouter settings');
- await act("testInput('input[type=password]','synthetic-browser-recovery');testClick('Save OpenRouter key')","document.body.innerText.includes('API key saved for this instance.')",'recover OpenRouter connection');
+ await act("(async()=>{testInput('input[type=password]','synthetic-browser-recovery');await new Promise(requestAnimationFrame);testClick('Save OpenRouter key')})()","document.body.innerText.includes('API key saved for this instance.')",'recover OpenRouter connection');
  await act("testClick('Back to chat')","document.querySelector('[aria-label=Message]')?.value==='Next OpenRouter draft' && document.querySelector('.messages').innerText.includes('Keep OpenRouter draft')",'OpenRouter draft preserved through setup');
  await evaluate("testClick('Retry')");
  await until(()=>evaluate("document.querySelector('.provisional')?.textContent.includes('Router first chunk')"),'OpenRouter retry streams incrementally');

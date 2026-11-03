@@ -1,4 +1,4 @@
-import type {ToastNotice} from './toasts';
+import type {ToastNotice} from './toast-notice';
 import {responseEvents} from './response-stream';
 
 export type ModelCatalog={models:Array<{id:string;label:string;reasoning:string[]|null;reasoningStatus:string}>;defaultModel?:string};

@@ -28,7 +28,7 @@ Main-chat progress is owned by the shared service. The version 28 migration stor
 
 ## Local shared instance preview
 
-The React workspace is built with Vite into static assets served by the same
+The Vue workspace is built with Vite into static assets served by the same
 loopback instance. Its persistent agent list selects main chats using stable
 IDs, including when names coincide. It reads agents, chat work, and
 pending chat approvals from the service and polls while visible. Existing `bots` API
@@ -67,6 +67,13 @@ the bot identity, configuration, and history for restoration.
 Inbox approvals are projections of existing records and in-memory requests, not
 a second authorization store. This UI does not add LAN transport or establish
 live Codex behavior.
+
+`web/App.vue` composes the workspace from focused Vue single-file components.
+`web/workspace.ts` provides one controller and a shallow reactive snapshot to
+those components. API operations, draft persistence, polling, and streaming stay
+in `web/controller.ts`. Markdown passes through remark and rehype with raw HTML
+omitted and sanitization before trusted code-copy controls are added. See the
+[frontend decision](adr/0004-vue-frontend.md).
 
 The default terminal connects to the same instance over authenticated loopback
 HTTP. A detached local daemon owns SQLite and remains alive after the terminal

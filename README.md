@@ -80,6 +80,9 @@ The shared instance includes a provisional daily and weekly schedule preview for
 See the [development guide](docs/development.md) for the pinned package manager,
 focused tests, browser smoke check, and delivery workflow.
 
+The frontend uses Vue with Vite, Composition API, and focused `.vue` components
+with `<script setup lang="ts">`.
+
 ```sh
 pnpm run build
 pnpm run check

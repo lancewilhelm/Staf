@@ -17,6 +17,18 @@ recreate `node_modules`; this does not remove instance data or credentials.
 
 ## Verify a change
 
+The browser interface uses Vue single-file components with Composition API and
+`<script setup lang="ts">`. Start at `web/App.vue` for navigation and
+`web/components/` for chat, agent settings, provider choices, and notifications.
+`web/workspace.ts` exposes the existing client controller as a shallow Vue ref;
+the controller owns API calls, draft recovery, polling, and response streams.
+The existing CSS in `web/style.css` and `web/toasts.css` owns appearance.
+
+Vite builds the browser assets; `vue-tsc` checks component scripts and templates
+as part of `pnpm run check`. TypeScript is pinned to the 6.0 release line because
+the installed Vue language tools require TypeScript below 7. The server uses
+the same compiler. Upgrade these together when the Vue tools support it.
+
 Build before running an individual test file; tests import the compiled `dist`
 output. Replace the example with the relevant test file.
 
