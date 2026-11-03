@@ -177,8 +177,18 @@ name, including archived namesakes, show the last four characters of their stabl
 IDs in the list and Updates. Suffixes can coincide; full IDs remain available
 through the API or CLI. **New agent**, under the **Agents** sidebar heading, opens creation, and **Settings** controls appearance and
 instance-wide provider connections. Choose Light, Dark, or System appearance;
-System is the default and follows device appearance changes. The choice is saved
+Light is the default; System follows device appearance changes. The choice is saved
 in this browser, independently of other browsers; clearing browser storage resets it.
+
+The sidebar starts expanded. Use its panel icon to collapse it to the Focus rail;
+the expand button then appears in the workspace header. Agent selection, New
+agent, and Settings remain available in the rail. Settings offers Evergreen and
+Ink palettes and **Layout and typography** controls for DM Sans or system sans,
+text size, spacing, corners, and the five-dot logo. Defaults are Evergreen, DM
+Sans, 14px text, 20px spacing, 10px corners, and Orbit. These choices apply only
+to this browser. The composer model button opens provider, model, and reasoning
+choices immediately above it. Use Tab through the form, Escape to close and
+return focus, or click outside to dismiss. Provider changes retain confirmation.
 
 Workspace notifications appear as dismissible toasts at the top of the page.
 Informational and success notices expire after six seconds, with a progress bar.

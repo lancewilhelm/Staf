@@ -34,8 +34,13 @@ IDs, including when names coincide. It reads agents, chat work, and
 pending chat approvals from the service and polls while visible. Existing `bots` API
 paths and fields continue to identify these agents. Provider sign-in belongs to
 the instance; each agent owns its model selection. The former Advanced page is not served.
-Appearance is a browser-local preference; CSS follows the device color scheme
-when System is selected. It is not stored by the shared instance.
+Appearance and layout are browser-local preferences (`web/appearance.ts` and
+`web/design.ts`); the default is Light/Evergreen with an expanded sidebar.
+The bundled DM Sans font needs no external request. The composer popup wraps the
+existing provider choice form and keeps its service-backed discovery/save behavior.
+CSS follows the device color scheme when System is selected. These preferences
+are not stored by the shared instance.
+
 A browser journal retains each agent's next draft and submitted command. Each
 open tab claims its records with browser Web Locks; closed-tab records can be
 claimed automatically when that agent is opened again. Concurrent tabs keep

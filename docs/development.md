@@ -110,7 +110,12 @@ registration remains unverified by the offline checks. See
   stays unsent until you send it.
 - Open another tab on the same address. Stop a response there; both tabs should
   show stopping until the fixture is released, while keeping independent drafts.
-- In Settings, try Light, Dark and System; narrow the window to phone width.
+- In Settings, try Light, Dark and System, Evergreen/Ink, and Layout and typography.
+  Reload to check persistence. Collapse the sidebar: the agent rail stays visible
+  and the expand icon moves to the header. Open the composer model popup; check
+  Tab navigation, Escape with focus return, and outside-click dismissal. Buttons
+  keep their appearance on pointer hover and show keyboard focus.
+- Narrow the window to phone width.
   Expect readable messages and a visible circular action without page overflow.
   Inline chat approval controls should remain available; Activity and Updates navigation are absent.
 

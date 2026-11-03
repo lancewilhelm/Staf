@@ -31,12 +31,12 @@ try{
  await until(()=>evaluate("document.body?.innerText.includes('Pair this browser')"),'pair page');
  await evaluate(`window.testInput=(selector,value)=>{const el=document.querySelector(selector);Object.getOwnPropertyDescriptor(el.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,'value').set.call(el,value);el.dispatchEvent(new Event('input',{bubbles:true}))}; window.testClick=text=>{const b=[...document.querySelectorAll('button')].find(x=>x.textContent.trim()===text);if(!b)throw Error('Missing button '+text);b.click()}`);
  await act(`testInput('input',${JSON.stringify(code)});testClick('Pair')`,"document.body.innerText.includes('Providers') && document.body.innerText.includes('Connect ChatGPT')",'pair browser and open global provider setup');
- assert.equal(await evaluate("document.querySelector('.brand span').textContent"),'STAF','product wordmark');
+ assert.equal(await evaluate("document.querySelector('.brand span').textContent"),'staf','product wordmark');
  assert.equal(await evaluate("[...document.querySelectorAll('.setup button')].some(b=>b.textContent==='Create an agent')"),false,'creation belongs in sidebar');
  assert.equal(await evaluate("!![...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('New agent'))"),true,'agent creation is discoverable in navigation');
  assert.equal(await evaluate("document.querySelector('nav[aria-labelledby=agents-label]')?.getAttribute('aria-labelledby')==='agents-label' && document.querySelector('#agents-label')?.textContent==='Agents'"),true,'navigation has an agent accessible name');
  await cdp('Emulation.setEmulatedMedia',{features:[{name:'prefers-color-scheme',value:'light'}]});
- assert.equal(await evaluate("document.querySelector('input[name=appearance][value=system]')?.checked"),true,'fresh browser defaults to System');
+ assert.equal(await evaluate("document.querySelector('input[name=appearance][value=light]')?.checked"),true,'fresh browser defaults to Light');
  assert.equal(await evaluate("getComputedStyle(document.documentElement).colorScheme"),'light');
  await act("document.querySelector('input[name=appearance][value=dark]').click()","getComputedStyle(document.documentElement).colorScheme==='dark'",'choose dark appearance');
  await evaluate("localStorage.setItem('staf-draft','Obsolete draft');localStorage.setItem('staf-pending',JSON.stringify({id:'obsolete-command',text:'Obsolete command'}))");
@@ -141,6 +141,54 @@ try{
  await until(()=>evaluate("document.body.innerText.includes('Agent created.') && !!document.querySelector('[aria-label=Message]')"),'create agent');
  const bot=await evaluate("(async()=>{let t=localStorage.getItem('staf-token');return (await (await fetch('/api/bots',{headers:{Authorization:'Bearer '+t}})).json())[0]})()");assert.equal(bot.name,'Mira');assert.equal(bot.provider,'codex');assert.equal(bot.model,'fixture-model');console.log('PASS create ChatGPT agent without connecting');
  assert.equal(await evaluate("document.querySelectorAll('.composer .composer-control').length"),1,'one accessible Send/Stop composer control');
+
+ // Approved design: real components, local preferences, accessible anchored picker.
+ assert.equal(await evaluate("document.querySelector('.shell').dataset.sidebar"),'expanded');
+ assert.equal(await evaluate("document.querySelector('.sidebar-head .panel-toggle') !== null"),true);
+ assert.equal(await evaluate("document.querySelector('.brand svg').querySelectorAll('circle').length"),5);
+ assert.equal(await evaluate("getComputedStyle(document.documentElement).fontFamily.includes('DM Sans')"),true);
+ await act("document.querySelector('.panel-toggle').click()","!!document.querySelector('.top .panel-toggle') && document.querySelector('.shell').dataset.sidebar==='focus'",'Focus rail moves toggle into header');
+ assert.equal(await evaluate("document.activeElement===document.querySelector('.panel-toggle')"),true,'toggle keeps focus after moving');
+ await act("document.querySelector('.panel-toggle').click()","!!document.querySelector('.sidebar-head .panel-toggle')",'expanded toggle returns to sidebar');
+ await evaluate("testInput('[aria-label=Message]','Design retained draft');document.querySelector('.model-button').click()");
+ await until(()=>evaluate("!!document.querySelector('.composer-picker select')"),'real provider picker loaded');
+ assert.equal(await evaluate("(()=>{const p=document.querySelector('.composer-picker').getBoundingClientRect(),c=document.querySelector('.composer').getBoundingClientRect();return p.bottom<c.top && p.top>=0 && p.left>=0 && p.right<=innerWidth})()"),true,'picker anchored above composer within viewport');
+ await cdp('Input.dispatchKeyEvent',{type:'keyDown',key:'Tab',code:'Tab'});
+ assert.equal(await evaluate("document.activeElement.tagName"),'SELECT','Tab enters provider form');
+ await cdp('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape'});
+ await until(()=>evaluate("!document.querySelector('.composer-picker') && document.activeElement===document.querySelector('.model-button')"),'Escape closes picker and returns focus');
+ await evaluate("document.querySelector('.model-button').click()");
+ await until(()=>evaluate("!!document.querySelector('.composer-picker')"),'reopen popup');
+ await cdp('Input.dispatchMouseEvent',{type:'mousePressed',x:220,y:20,button:'left',clickCount:1});
+ await cdp('Input.dispatchMouseEvent',{type:'mouseReleased',x:220,y:20,button:'left',clickCount:1});
+ await until(()=>evaluate("!document.querySelector('.composer-picker')"),'outside click dismisses popup');
+ assert.equal(await evaluate("document.querySelector('[aria-label=Message]').value"),'Design retained draft');
+ const hoverPoint=await evaluate("(()=>{const r=document.querySelector('.model-button').getBoundingClientRect();return {x:r.x+5,y:r.y+5}})()");
+ const buttonStyle=()=>evaluate("(()=>{const s=getComputedStyle(document.querySelector('.model-button'));return [s.color,s.backgroundColor,s.borderColor,s.filter,s.boxShadow]})()");
+ await cdp('Input.dispatchMouseEvent',{type:'mouseMoved',x:220,y:20});const beforeHover=await buttonStyle();
+ await cdp('Input.dispatchMouseEvent',{type:'mouseMoved',...hoverPoint});assert.deepEqual(await buttonStyle(),beforeHover,'pointer hover keeps button visuals');
+ await evaluate("[...document.querySelectorAll('.side button')].find(b=>b.getAttribute('aria-label')==='Settings').click()");
+ await until(()=>evaluate("!!document.querySelector('.palette-card')"),'appearance options');
+ await evaluate("document.querySelector('.appearance-details').open=true");
+ await evaluate("document.querySelectorAll('.palette-card')[1].click();const r=document.querySelector('[aria-label=\"Text size\"]');r.value='16';r.dispatchEvent(new Event('input',{bubbles:true}));document.querySelector('[aria-label=\"Use Signal logo\"]').click()");
+ await until(()=>evaluate("document.documentElement.dataset.palette==='ink' && getComputedStyle(document.documentElement).getPropertyValue('--body')==='16px'"),'palette and text preferences apply');
+ await cdp('Page.reload');
+ await until(()=>evaluate("document.documentElement.dataset.palette==='ink' && document.querySelector('.brand svg circle').getAttribute('cx')==='20'"),'design preferences persist');
+ await evaluate("[...document.querySelectorAll('.side button')].find(b=>b.getAttribute('aria-label')==='Settings').click()");
+ await until(()=>evaluate("!!document.querySelector('.appearance-details')"),'return to appearance');
+ await evaluate("document.querySelector('.appearance-details').open=true;testClick('Reset layout and typography');testClick('Back to chat')");
+ await until(()=>evaluate("!!document.querySelector('[aria-label=Message]') && document.documentElement.dataset.palette==='green'"),'reset approved design defaults');
+ for(const width of [390,1280]){
+   await cdp('Emulation.setDeviceMetricsOverride',{width,height:844,deviceScaleFactor:1,mobile:width<600});
+   await evaluate("document.querySelector('.model-button').click()");
+   await until(()=>evaluate("!!document.querySelector('.composer-picker')"),'popup at '+width);
+   if(process.env.STAF_GUI_SCREENSHOTS) await writeFile(join(process.env.STAF_GUI_SCREENSHOTS,'staf-'+width+'.png'),Buffer.from((await cdp('Page.captureScreenshot',{format:'png'})).data,'base64'));
+   assert.equal(await evaluate("(()=>{const r=document.querySelector('.composer-picker').getBoundingClientRect();return r.left>=0 && r.right<=innerWidth && r.top>=0 && document.documentElement.scrollWidth<=innerWidth})()"),true,'picker and page fit '+width);
+   await evaluate("document.querySelector('.composer-picker button:last-child').click()");
+ }
+ await cdp('Emulation.clearDeviceMetricsOverride');
+ await evaluate("testInput('[aria-label=Message]','')");
+ console.log('PASS approved design defaults, Focus, preferences, popup, pointer and mobile checks');
  // window.open clones the opener's sessionStorage, as a duplicated tab can.
  await evaluate("testInput('[aria-label=Message]','First tab submission');testClick('Send');testInput('[aria-label=Message]','First tab draft')");
  await until(()=>evaluate("document.body.innerText.includes('Connect ChatGPT in Settings to send.')"),'first tab submission retained');
@@ -240,7 +288,7 @@ try{
  await cdp('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
  for(const appearance of ['light','dark','system']){
    await evaluate(`document.documentElement.dataset.appearance=${JSON.stringify(appearance)}`);
-   assert.equal(await evaluate("(()=>{const b=document.querySelector('.composer-control'),r=b.getBoundingClientRect(),t=document.querySelector('[aria-label=Message]').getBoundingClientRect();return r.width===40 && r.height===40 && getComputedStyle(b).borderRadius==='50%' && r.right<=innerWidth && t.bottom<innerHeight && document.documentElement.scrollWidth<=innerWidth})()"),true,'streaming composer fits narrow '+appearance);
+   assert.equal(await evaluate("(()=>{const b=document.querySelector('.composer-control'),r=b.getBoundingClientRect(),t=document.querySelector('[aria-label=Message]').getBoundingClientRect();return r.width===34 && r.height===34 && getComputedStyle(b).borderRadius==='50%' && r.right<=innerWidth && t.bottom<innerHeight && document.documentElement.scrollWidth<=innerWidth})()"),true,'streaming composer fits narrow '+appearance);
  }
  await evaluate(`document.documentElement.dataset.appearance=${JSON.stringify(chatAppearance)}`);
  await cdp('Emulation.clearDeviceMetricsOverride');

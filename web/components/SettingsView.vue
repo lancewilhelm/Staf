@@ -2,6 +2,7 @@
 import { useWorkspace } from '../workspace';
 import { type Appearance, saveAppearance } from '../appearance';
 import ProviderDefaults from './ProviderDefaults.vue';
+import AppearanceOptions from './AppearanceOptions.vue';
 const props = defineProps<{appearance: Appearance; hasAgentSettings: boolean; routerForm: {key: string; status: string; busy: boolean}}>();
 const form = props.routerForm;
 const emit = defineEmits<{'update:appearance': [value: Appearance]; agentSettings: []; chat: []}>();
@@ -43,8 +44,9 @@ async function disconnectRouter() {
   <div class="settings-scroll"><div class="setup settings-content">
     <span class="eyebrow">SETTINGS</span><h2>Appearance</h2><p>Choose how Staf looks in this browser.</p>
     <fieldset class="appearance"><legend>Appearance</legend>
-      <label v-for="value in appearances" :key="value"><input type="radio" name="appearance" :value="value" :checked="appearance === value" @change="chooseAppearance(value)" />{{ value[0].toUpperCase() + value.slice(1) }}</label>
+      <label v-for="value in appearances" :key="value"><span class="theme-preview" :class="value" aria-hidden="true"><i /><span><b /><em /></span></span><span class="theme-name"><input type="radio" name="appearance" :value="value" :checked="appearance === value" @change="chooseAppearance(value)" />{{ value[0].toUpperCase() + value.slice(1) }}</span></label>
     </fieldset>
+    <AppearanceOptions />
     <ProviderDefaults /><h2>Providers</h2><p>Provider connections belong to this Staf instance and are available to all your agents. Each agent has its own model.</p>
     <div class="provider provider-settings">
       <strong>ChatGPT</strong>
