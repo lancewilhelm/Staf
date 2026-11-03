@@ -2,7 +2,8 @@
 import { ref } from 'vue';
 import { useWorkspace } from '../workspace';
 import AgentLabel from './AgentLabel.vue';
-const props = defineProps<{agent: {id: string; name: string}}>();
+const props = defineProps<{agent: {id: string; name: string}; saving: boolean}>();
+const emit = defineEmits<{memory: []}>();
 const { app } = useWorkspace();
 const busy = ref(false);
 const status = ref('');
@@ -22,7 +23,8 @@ async function restore() {
 <template>
   <div class="provider">
     <strong><AgentLabel :agent="agent" /></strong>
-    <button :disabled="busy" :aria-label="`Restore agent ${agent.name}`" @click="restore">Restore agent</button>
+    <button class="quiet" :disabled="busy || saving" :aria-label="`View memory for ${agent.name}`" @click="emit('memory')">View memory</button>
+    <button :disabled="busy || saving" :aria-label="`Restore agent ${agent.name}`" @click="restore">Restore agent</button>
     <p role="status">{{ status }}</p>
   </div>
 </template>

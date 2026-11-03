@@ -1,5 +1,6 @@
 import type {ToastNotice} from './toast-notice';
 import {responseEvents} from './response-stream';
+import type { Memory, MemoryScope } from '../src/memory-types';
 
 export type ModelCatalog={models:Array<{id:string;label:string;reasoning:string[]|null;reasoningStatus:string}>;defaultModel?:string};
 export type Bot={revision?:string;id:string;name:string;provider:string;model:string|null;archived:boolean};
@@ -33,6 +34,16 @@ function parseSelection(value:unknown):BotProfile {
  return {id:value.id,name:value.name,provider:value.provider,model:value.model,archived:value.archived,revision:value.revision,instructions:value.instructions,description:value.description,reasoning:value.reasoning,configDir:value.configDir,...(value.providerChoices===undefined?{}:{providerChoices:value.providerChoices})};
 }
 
+function parseMemories(value: unknown, scope: MemoryScope): Memory[] {
+  if (!Array.isArray(value)) throw Error('Invalid memory response.');
+  const ids = new Set<string>();
+  return value.map((entry: unknown) => {
+    if (!isRecord(entry) || typeof entry.id !== 'string' || !entry.id || ids.has(entry.id) || typeof entry.text !== 'string' || !entry.text.trim() || entry.text.length > 4000 || typeof entry.version !== 'number' || !Number.isSafeInteger(entry.version) || entry.version < 1 || typeof entry.createdAt !== 'string' || !Number.isFinite(Date.parse(entry.createdAt)) || typeof entry.updatedAt !== 'string' || !Number.isFinite(Date.parse(entry.updatedAt)) || !isRecord(entry.scope) || entry.scope.kind !== scope.kind || (scope.kind === 'bot' && entry.scope.botId !== scope.botId)) throw Error('Invalid memory response or audience.');
+    ids.add(entry.id);
+    return { id: entry.id, text: entry.text, version: entry.version, createdAt: entry.createdAt, updatedAt: entry.updatedAt, scope };
+  });
+}
+
 function isResponseProgress(value:unknown,botId:string):value is ResponseProgress {
   return isRecord(value)&&typeof value.id==='string'&&value.botId===botId&&typeof value.state==='string'&&['accepted','running','stopping','stopped','completed','failed','interrupted'].includes(value.state)&&typeof value.text==='string'&&(value.error===null||typeof value.error==='string');
 }
@@ -54,7 +65,7 @@ export class Controller {
   private update(change:Partial<Workspace>){
     if(change.notice){change.notices=[...this.state.notices,{id:crypto.randomUUID(),message:change.notice,kind:'info'}]}
     this.state={...this.state,...change};this.listeners.forEach(fn=>fn())}
-  private async api<T>(path:string,body?:unknown):Promise<T>{const response=await fetch(path,{method:body===undefined?'GET':'POST',headers:{...(body===undefined?{}:{'Content-Type':'application/json'}),...(this.token?{Authorization:'Bearer '+this.token}:{})},...(body===undefined?{}:{body:JSON.stringify(body)})});const data:unknown=await response.json();if(!response.ok){const message=typeof data==='object'&&data!==null&&'error'in data&&typeof data.error==='string'?data.error:'Request failed';throw new ApiError(message,response.status)}return data as T}
+  private async api<T>(path:string,body?:unknown,signal?:AbortSignal):Promise<T>{const response=await fetch(path,{method:body===undefined?'GET':'POST',headers:{...(body===undefined?{}:{'Content-Type':'application/json'}),...(this.token?{Authorization:'Bearer '+this.token}:{})},...(body===undefined?{}:{body:JSON.stringify(body)}),signal});const data:unknown=await response.json();if(!response.ok){const message=typeof data==='object'&&data!==null&&'error'in data&&typeof data.error==='string'?data.error:'Request failed';throw new ApiError(message,response.status)}return data as T}
   private watchResponse(botId:string|null){
     if(this.responseStream?.botId===botId && !this.responseStream.controller.signal.aborted)return;
     this.responseStream?.controller.abort();this.responseStream=null;
@@ -254,6 +265,25 @@ export class Controller {
   async models(provider:string){return parseModelCatalog(await this.api<unknown>('/api/models',{provider}))}
   async selectProvider(profile:BotProfile,provider:string,edit:{model?:string|null;reasoning?:string|null}={}){const result=parseSelection(await this.api<unknown>('/api/bots/'+profile.id+'/selection',{revision:profile.revision,provider,...edit}));await this.refresh();return result}
   async botProfile(id:string){return this.api<BotProfile>('/api/bots/'+id)}
+  async memories(scope: MemoryScope, signal: AbortSignal): Promise<Memory[]> {
+    const token = this.token;
+    try {
+      const path = scope.kind === 'user' ? 'user' : 'bot/' + encodeURIComponent(scope.botId);
+      const result = await this.api<unknown>('/api/memories/' + path, undefined, signal);
+      signal.throwIfAborted();
+      if (!token || this.token !== token) throw Error('Memory access is no longer available.');
+      return parseMemories(result, scope);
+    } catch (error) {
+      if (!signal.aborted && this.token === token && error instanceof ApiError && error.status === 401) {
+        this.token = '';
+        this.generation++;
+        this.watchResponse(null);
+        localStorage.removeItem('staf-token');
+        this.update({connection: {kind: 'pairing', message: 'Pairing expired or was revoked.'}});
+      }
+      throw error;
+    }
+  }
   async saveBotProfile(profile:BotProfile,edit:{name:string;provider:string;model:string;instructions:string}){await this.api('/api/bots/'+profile.id+'/profile',{revision:profile.revision,name:edit.name,description:profile.description,instructions:edit.instructions,provider:edit.provider,model:edit.model.trim()||null,reasoning:profile.reasoning});await this.refresh()}
   async setArchived(profile:BotProfile,archived:boolean){await this.api('/api/bots/'+profile.id+'/'+(archived?'archive':'restore'),{revision:profile.revision});await this.refresh()}
   async decide(item:Extract<InboxItem,{kind:'approval'}>,decision:'approve'|'deny'){const route={clock:'approvals',web:'web-approvals',search:'search-approvals',shell:'shell-approvals',disclosure:'disclosures'}[item.approvalKind];try{await this.api('/api/'+route+'/'+item.id+'/'+decision,{});this.update({notice:'Decision recorded.'});await this.refresh()}catch(e){this.update({actionError:'Decision failed or is uncertain. Refresh before trying again.'});this.notify('Decision failed or is uncertain. Refresh before trying again.','error');await this.refresh()}}

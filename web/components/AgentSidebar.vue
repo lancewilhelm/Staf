@@ -8,7 +8,7 @@ import BrandMark from './BrandMark.vue';
 import PanelToggle from './PanelToggle.vue';
 import { design } from '../design';
 defineProps<{view: string; saving: boolean}>();
-const emit = defineEmits<{create: []; select: [id: string]; settings: []}>();
+const emit = defineEmits<{create: []; select: [id: string]; settings: []; memory: [id: string]}>();
 const { state: s } = useWorkspace();
 function agentName(agent: {name: string; id: string}) {
   return agent.name + (s.value.bots.filter(other => other.name === agent.name).length > 1 ? ' · ' + agent.id.slice(-4) : '');
@@ -29,7 +29,7 @@ function agentName(agent: {name: string; id: string}) {
     </nav>
     <details v-if="s.bots.some(agent => agent.archived)" class="archived-agents">
       <summary>Archived agents</summary>
-      <ArchivedAgent v-for="agent in s.bots.filter(b => b.archived)" :key="agent.id" :agent="agent" />
+      <ArchivedAgent v-for="agent in s.bots.filter(b => b.archived)" :key="agent.id" :agent="agent" :saving="saving" @memory="emit('memory', agent.id)" />
     </details>
     <div class="minor"><button :disabled="saving" :class="{active: view === 'settings'}" @click="emit('settings')" aria-label="Settings" title="Settings"><UiIcon name="gear" /><span>Settings</span></button><div class="workspace-caption">Personal workspace</div></div>
   </aside>

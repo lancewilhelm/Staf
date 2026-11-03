@@ -2160,6 +2160,64 @@ summary {
   padding: 16px;
 }
 
+.memory-view .memory-audience {
+  display: inline-block;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  margin: 0 0 14px;
+}
+
+.memory-actions {
+  margin-bottom: 20px;
+}
+
+.memory-list {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0 20px;
+}
+
+.memory-entry {
+  border-top: 1px solid var(--line);
+  padding: 18px 0;
+  overflow-wrap: anywhere;
+}
+
+.memory-text {
+  white-space: pre-wrap;
+  font-size: 13px;
+  line-height: 1.7;
+  margin: 0 0 8px;
+}
+
+.memory-entry details {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.memory-entry summary {
+  cursor: pointer;
+}
+
+.memory-entry dl {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 6px 12px;
+}
+
+.memory-entry dd {
+  margin: 0;
+}
+
+.memory-entry code {
+  overflow-wrap: anywhere;
+}
+
+.memory-view :is(h1, .memory-page-status):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
+
 .modal.setup {
   position: fixed;
   margin: auto;

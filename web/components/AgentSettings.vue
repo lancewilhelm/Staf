@@ -6,7 +6,7 @@ import { useWorkspace } from '../workspace';
 import ProviderPicker from './ProviderPicker.vue';
 import InstructionsHelp from './InstructionsHelp.vue';
 const props = defineProps<{id: string; saving: boolean}>();
-const emit = defineEmits<{close: []; providers: []; 'update:saving': [value: boolean]}>();
+const emit = defineEmits<{close: []; providers: []; memory: []; 'update:saving': [value: boolean]}>();
 const { app } = useWorkspace();
 const profile = shallowRef<BotProfile | null>(null);
 const name = ref('');
@@ -60,6 +60,7 @@ async function archive() {
   <div class="settings-scroll"><div class="setup settings-content agent-settings">
     <span class="eyebrow">AGENT SETTINGS</span><h1 class="page-title">{{ profile?.name || 'Agent settings' }}</h1><p class="page-intro">Edit this agent’s name, instructions, provider, and model.</p>
     <template v-if="profile">
+      <section class="settings-section"><h2 class="section-title">Memory</h2><p class="section-help">Saved memory available only to {{ profile.name }}.</p><button :disabled="saving" class="quiet agent-memory-link" @click="emit('memory')">View agent memory</button></section>
       <p>Provider connections are shared by the instance. A saved connection does not verify account or model access.</p>
       <label>Name<input v-model="name" :disabled="saving" /></label>
       <label>Instructions<textarea v-model="instructions" :disabled="saving" /></label><InstructionsHelp />

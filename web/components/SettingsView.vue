@@ -5,7 +5,7 @@ import ProviderDefaults from './ProviderDefaults.vue';
 import AppearanceOptions from './AppearanceOptions.vue';
 const props = defineProps<{appearance: Appearance; hasAgentSettings: boolean; routerForm: {key: string; status: string; busy: boolean}}>();
 const form = props.routerForm;
-const emit = defineEmits<{'update:appearance': [value: Appearance]; agentSettings: []; chat: []}>();
+const emit = defineEmits<{'update:appearance': [value: Appearance]; agentSettings: []; chat: []; memory: []}>();
 const {app, state: s} = useWorkspace();
 const appearances: Appearance[] = ['light', 'dark', 'system'];
 function chooseAppearance(value: Appearance) { emit('update:appearance', value); saveAppearance(value); }
@@ -42,7 +42,8 @@ async function disconnectRouter() {
 
 <template>
   <div class="settings-scroll"><div class="setup settings-content">
-    <h1 class="page-title">Settings</h1><p class="page-intro">Appearance preferences and shared provider connections.</p>
+    <h1 class="page-title">Settings</h1><p class="page-intro">User memory, appearance preferences, and shared provider connections.</p>
+    <section class="settings-section"><h2 class="section-title">User</h2><p class="section-help">User memory is available to all your agents.</p><button class="quiet user-memory-link" @click="emit('memory')">View user memory</button></section>
     <section class="settings-section"><h2 class="section-title">Theme</h2><p class="section-help">Choose how Staf looks in this browser.</p>
     <fieldset class="appearance"><legend>Appearance</legend>
       <label v-for="value in appearances" :key="value"><span class="theme-preview" :class="value" aria-hidden="true"><i /><span><b /><em /></span></span><span class="theme-name"><input type="radio" name="appearance" :value="value" :checked="appearance === value" @change="chooseAppearance(value)" />{{ value[0].toUpperCase() + value.slice(1) }}</span></label>

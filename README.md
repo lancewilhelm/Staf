@@ -50,7 +50,7 @@ The loopback instance retains the background-task engine; its separate Activity 
 
 The shared instance supports owner-imported [skills](docs/usage.md#skills-in-the-shared-instance) as an offline-tested preview.
 
-The shared instance supports [scoped memory](docs/usage.md#scoped-memory-in-the-shared-instance) in an offline-tested preview.
+The shared instance supports [scoped memory](docs/usage.md#scoped-memory-in-the-shared-instance) in an offline-tested preview, with read-only agent and shared user memory pages in Settings.
 
 The shared instance supports per-action approval and permission controls for its clock tool. See [clock approvals](docs/usage.md#clock-approvals-in-the-shared-instance) for setup and current limits.
 
