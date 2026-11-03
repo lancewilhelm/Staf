@@ -138,6 +138,14 @@ Database version 8 adds the immutable skill catalog, per-bot availability, task 
 
 ### Shared-instance memory
 
+The browser exposes read-only agent and shared user memory through the existing
+authenticated scoped list APIs. It validates each response against the requested
+audience and paginates the complete snapshot locally in groups of 20. Leaving a
+memory page aborts its request; later responses cannot repopulate another page.
+Pairing loss unmounts settings and memory views. Archived agents remain
+inspectable without restoration. No memory mutation or provider call is added.
+
+
 Version 6 adds scoped memory in the instance database transaction after a protected migration backup. The store enforces bot and user scopes and optimistic versions. Provider calls receive bounded keyword-matched memories as untrusted request-only data. The session retains ordinary messages rather than the injected memory. Main-chat saves use only directly recognized owner input; provider output cannot invoke a memory mutation. Version 7 adds durable, bot-bound shared-memory proposals. A separate explicit owner confirmation atomically saves the proposed text once, and cancellation clears the pending proposal text without creating memory. The original text and proposal response remain in chat history and may be sent in future model requests or task context; cancellation does not erase backups or already-sent data. This is an offline-tested preview and not a general intent interpreter.
 
 ### Shared-instance clock dispatch

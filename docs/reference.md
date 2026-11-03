@@ -230,6 +230,11 @@ Authenticated clients use `GET` and `POST /api/skills` to list or import. Import
 
 ### Shared-instance memory API
 
+The workspace uses the authenticated `GET` routes below for read-only memory
+pages. Each route returns the complete scope; browser pagination uses 20 entries
+per page and does not change this API. A missing agent returns HTTP 404, and an
+absent or revoked client credential returns HTTP 401.
+
 Authenticated clients use `GET` and `POST /api/memories/user` or `/api/memories/bot/BOT_ID` to list or create entries. `POST` to `/MEMORY_ID/edit` takes `version` and `text`; `POST` to `/MEMORY_ID/delete` takes `version`. A stale or wrong-scope ID returns HTTP 409. Descriptive main-chat lookups return a bounded exact-scope candidate preview without mutation; edits and deletes still require an explicit ID and current version. See [usage](usage.md#scoped-memory-in-the-shared-instance) for scope, retrieval, and deletion limits.
 
 ### Shared-instance clock approval API

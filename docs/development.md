@@ -60,6 +60,17 @@ For a workspace change, run the served GUI smoke journey after building:
 node test/browser/gui-smoke.mjs
 ```
 
+For memory settings changes, also run the focused read-only browser journey:
+
+```sh
+node test/browser/memory-smoke.mjs
+```
+
+It uses a disposable SQLite instance and rejects provider calls. It covers
+complete scope lists, pagination, archived agents, keyboard and narrow layouts,
+retained settings drafts, failed loads, repeated/interrupted navigation, and
+revoked access. Screenshots are saved under `test-results/memory/`.
+
 The script uses a local Chrome or cached Chromium on macOS. Set `CHROME_PATH`
 to an executable when neither default path exists. It starts a disposable local
 instance and uses synthetic provider and sign-in fixtures. It does not verify
