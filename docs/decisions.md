@@ -187,6 +187,10 @@ complete initial bot agreement on 2026-10-27; the
 
 ## First-delivery background tasks
 
+The MVP scope was revised on 2026-11-02; see
+[Simple chat before background-task workflows](#simple-chat-before-background-task-workflows).
+The following records the earlier delivery agreement.
+
 On 2026-10-27 the owner accepted the eight task recommendations: one background
 task per bot with responsive chat, explicit task direction, separate Activity,
 observable stopping, preserved failures, client-independent work, explicit retry
@@ -198,6 +202,10 @@ This is future behavior, with storage/API and interaction design still separate
 map work.
 
 ## First-delivery chat and Activity interaction
+
+The separate Activity workflow is deferred from the MVP by the
+[2026-11-02 scope revision](#simple-chat-before-background-task-workflows).
+The following records the earlier interaction decisions.
 
 Accepted on 2026-10-30. Use the simple side-by-side layout A as the starting
 direction for desktop web chat and Activity. Chat stays available while Activity
@@ -219,6 +227,27 @@ instance, while each bot selects its own model. Provider setup belongs in global
 Settings. The owner retired the Advanced browser page and chose to bring other
 controls into the workspace incrementally. The underlying service operations
 remain available; the retired page is not the current GUI.
+
+## Simple chat before background-task workflows
+
+Accepted on 2026-11-02 during the review of
+[background work delivery](https://github.com/lancewilhelm/Staf/issues/22).
+Focus the MVP on a simple chat interface, with Hermes Agent as a product
+reference. Actual tool use and brief status updates belong in the message list.
+Defer independently running background tasks and their separate Activity,
+question, and management workflow from the MVP. This revises the earlier
+first-delivery requirement to finish that workflow now.
+
+Preserve the existing background-task implementation for later work. Deferral
+does not mean issue #22 is complete, and a separate Activity view remains a
+possible future feature. The current runtime still exposes background-task
+creation to tool-capable chat providers; changing that exposure and simplifying
+the web interface require implementation after this design discussion.
+
+Sub-agents means temporary workers created for a particular assignment, with
+results returned to the parent agent. They are a future concept, distinct from
+the existing collaboration between persistent agents. This decision does not
+add sub-agents to the MVP or change runtime behavior.
 
 ## First-delivery shared state and client contract
 

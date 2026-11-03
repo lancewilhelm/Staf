@@ -36,6 +36,11 @@ _Avoid_: Task, Activity
 A piece of work carried out for an agent, with an objective, progress, and an outcome.
 _Avoid_: Agent, main chat
 
+**Sub-agent**:
+A temporary worker an agent creates for a particular assignment and whose
+results return to that agent.
+_Avoid_: Persistent agent, background task
+
 **Task attempt**:
 One execution of a task objective with its own progress and outcome. A retry is a
 new attempt linked to the previous attempt, whose record remains intact.
