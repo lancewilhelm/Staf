@@ -4,8 +4,8 @@ const key = 'staf-appearance';
 export function readAppearance(): Appearance {
   try {
     const saved = localStorage.getItem(key);
-    return saved === 'light' || saved === 'dark' ? saved : 'system';
-  } catch { return 'system'; }
+    return saved === 'light' || saved === 'dark' || saved === 'system' ? saved : 'light';
+  } catch { return 'light'; }
 }
 
 export function applyAppearance(value: Appearance) {

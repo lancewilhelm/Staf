@@ -45,10 +45,11 @@ async function compare() {
 </script>
 
 <template>
-  <section aria-label="Provider defaults">
-    <h2>Provider defaults</h2><p>Used on first selection. Existing agents keep their choices.</p>
+  <section aria-label="Provider defaults" class="setting-card">
+    <h2 class="section-title">Creation defaults</h2><p>Copied into new agents. Existing agents keep their own settings.</p><details class="defaults-editor"><summary>Edit defaults</summary>
     <ChoiceFields :provider="provider" :model="model" :reasoning="reasoning" @change="change" />
     <div class="row provider-default-actions"><button :disabled="!state" @click="save">Save provider defaults</button><button class="quiet" @click="compare">Compare latest defaults</button></div>
     <p role="status">{{ status }}</p>
+    </details>
   </section>
 </template>

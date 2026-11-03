@@ -372,3 +372,21 @@ The owner confirmed the [consolidated GUI polish plan](chat-polish-plan.md) on
 [Polish agent chat, provider setup, and shared configuration](https://github.com/lancewilhelm/Staf/issues/26),
 labelled ready-for-agent. These are accepted design decisions, not implemented or
 verified GUI behavior.
+
+## Approved chat workspace appearance
+
+Accepted on 2026-11-02 with the iteration-4 prototype at
+`prototype/quiet-work-browser`, commit `f581a771bc4b1e096210bcf518da08b39c3e34e4`.
+The owner chose Light, Evergreen, DM Sans, Orbit, and an expanded sidebar as the
+initial appearance. This supersedes the earlier System default above to match
+the approved design. Existing saved Light/Dark/System choices remain honored;
+System is still available. Appearance and layout preferences belong to each
+browser. The Focus rail keeps agent navigation available. Provider choices use
+a popup above the composer, with the existing service contracts and inline save
+feedback. Separate Activity/background-management screens remain deferred.
+
+On 2026-11-02 the owner clarified that the accepted prototype is the visual and
+interaction authority for all menus and pages, with existing production features
+adapted into that style. Use grouped model menu rows, the New agent modal,
+provider cards and the Edit defaults disclosure. Keep manual entry, reasoning,
+connection recovery and agent lifecycle controls within those components.
