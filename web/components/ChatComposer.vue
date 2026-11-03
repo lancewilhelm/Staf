@@ -17,18 +17,24 @@ function closePicker(restore = false) {
   picker.value = false;
   if (restore) trigger.value?.focus();
 }
+const pickerEdge = ref<'selected' | 'first' | 'last'>('selected');
+async function focusPicker() {
+  await nextTick();
+  if (!picker.value) return;
+  const items = popup.value?.querySelectorAll<HTMLButtonElement>('[role=menuitemradio]:not(:disabled)');
+  const target = pickerEdge.value === 'first' ? items?.[0] : pickerEdge.value === 'last' ? items?.[items.length - 1] : popup.value?.querySelector<HTMLButtonElement>('[data-model][aria-checked=true]');
+  (target ?? popup.value)?.focus();
+}
 async function openPicker(edge: 'selected' | 'first' | 'last' = 'selected') {
+  pickerEdge.value = edge;
   pickerOpened.value = true;
   picker.value = true;
-  await nextTick();
-  const items = popup.value?.querySelectorAll<HTMLButtonElement>('[role=menuitemradio]:not(:disabled)');
-  const target = edge === 'first' ? items?.[0] : edge === 'last' ? items?.[items.length - 1] : popup.value?.querySelector<HTMLButtonElement>('[data-model][aria-checked=true]');
-  (target ?? popup.value)?.focus();
+  await focusPicker();
 }
 function togglePicker() { if (picker.value) closePicker(true); else void openPicker(); }
 function outside(event: MouseEvent) { if (event.target instanceof Node && !popup.value?.contains(event.target) && !trigger.value?.contains(event.target)) closePicker(); }
 function popupKey(event: KeyboardEvent) {
-  if (event.key === 'Escape') { event.preventDefault(); closePicker(true); return; }
+  if (event.key === 'Escape' || event.key === 'Tab') { event.preventDefault(); closePicker(true); return; }
   if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key) || event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement) return;
   const items = [...(popup.value?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled)') ?? [])];
   if (!items.length) return;
@@ -40,7 +46,7 @@ function popupKey(event: KeyboardEvent) {
 function leavePopup(event: FocusEvent) { if (event.relatedTarget instanceof Node && !popup.value?.contains(event.relatedTarget) && !trigger.value?.contains(event.relatedTarget)) closePicker(); }
 onMounted(() => document.addEventListener('click', outside));
 onUnmounted(() => document.removeEventListener('click', outside));
-watch(() => s.value.selected, () => closePicker());
+watch(() => s.value.selected, () => { closePicker(); pickerOpened.value = false; });
 const responding = computed(() => !!s.value.response && ['accepted', 'running', 'stopping'].includes(s.value.response.state));
 const stopping = computed(() => s.value.response?.state === 'stopping');
 watch([() => s.value.draft.text, () => s.value.selected, textarea], () => {
@@ -63,7 +69,7 @@ function openSettings() {
     <textarea ref="textarea" :rows="2" :disabled="!s.draftReady" aria-label="Message" :placeholder="'Message ' + selected.name + '…'" :value="s.draft.text" @input="edit" @keydown="keydown" />
     <div class="actions"><div class="model-control">
     <div v-if="pickerOpened" :hidden="!picker" id="composer-picker" ref="popup" class="composer-picker model-menu" role="menu" aria-label="Provider, model and reasoning" tabindex="-1" @keydown="popupKey" @focusout="leavePopup">
-      <ProviderPicker compact @selected="closePicker(true)" :key="selected.id" :id="selected.id" />
+      <ProviderPicker compact @ready="focusPicker" @selected="closePicker(true)" :key="selected.id" :id="selected.id" />
       <button class="text-action" @click="openSettings">Agent settings</button><button class="text-action" aria-label="Close picker" @click="closePicker(true)">Close picker</button>
     </div>
 

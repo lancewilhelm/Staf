@@ -27,7 +27,7 @@ async function discover() {
     const found = await app.models(provider);
     if (request !== discovery || provider !== props.provider) return;
     catalog.value = found;
-    if (!props.model && found.defaultModel) {
+    if (!props.menu && !props.model && found.defaultModel) {
       emit('change', 'model', found.defaultModel);
       emit('modelSelect', found.defaultModel);
     }
@@ -50,7 +50,7 @@ function change(field: 'provider' | 'model' | 'reasoning', event: Event) {
   const target = event.target;
   if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement)) return;
   emit('change', field, target.value);
-  if (field === 'model' && catalog.value?.models.some(model => model.id === target.value)) emit('modelSelect', target.value);
+  if (!props.menu && field === 'model' && catalog.value?.models.some(model => model.id === target.value)) emit('modelSelect', target.value);
   if (target instanceof HTMLSelectElement) target.value = field === 'provider' ? props.provider : props.reasoning || 'default';
 }
 function chooseListed(event: Event) {
@@ -68,17 +68,17 @@ function modelKeydown(event: KeyboardEvent) {
   <fieldset class="provider-choices" :class="{'menu-choices': menu}" :disabled="disabled">
     <template v-if="menu">
       <div class="model-menu-group" role="group" aria-label="Provider"><div class="menu-caption">Provider</div>
-        <button v-for="value in providers" :key="value" class="model-option" role="menuitemradio" :aria-checked="provider === value" :data-provider="value" @click="emit('change', 'provider', value)"><span>{{ providerLabel(value) }}</span><UiIcon v-if="provider === value" name="check" /></button>
+        <button type="button" v-for="value in providers" :key="value" class="model-option" tabindex="-1" role="menuitemradio" :aria-checked="provider === value" :data-provider="value" @click="emit('change', 'provider', value)"><span>{{ providerLabel(value) }}</span><UiIcon v-if="provider === value" name="check" /></button>
       </div>
       <div class="model-menu-group" role="group" aria-label="Model"><div class="menu-caption">Model</div>
-        <button v-for="item in menuModels" :key="item.id" class="model-option" role="menuitemradio" :aria-checked="model === item.id" :data-model="item.id" @click="pickModel(item.id)"><span>{{ item.label }}</span><UiIcon v-if="model === item.id" name="check" /></button>
+        <button type="button" v-for="item in menuModels" :key="item.id" class="model-option" tabindex="-1" role="menuitemradio" :aria-checked="model === item.id" :data-model="item.id" @click="pickModel(item.id)"><span>{{ item.label }}</span><UiIcon v-if="model === item.id" name="check" /></button>
         <p v-if="!menuModels.length" class="menu-note">No models loaded yet.</p>
       </div>
       <div class="model-menu-group" role="group" aria-label="Reasoning"><div class="menu-caption">Reasoning</div>
-        <button v-for="level in ['default', ...(['codex', 'openrouter'].includes(provider) ? levels : [])]" :key="level" class="model-option" role="menuitemradio" :aria-checked="(reasoning || 'default') === level" :data-reasoning="level" @click="emit('change', 'reasoning', level)"><span>{{ level === 'default' ? 'Provider default' : level }}</span><UiIcon v-if="(reasoning || 'default') === level" name="check" /></button>
+        <button type="button" v-for="level in ['default', ...(['codex', 'openrouter'].includes(provider) ? levels : [])]" :key="level" class="model-option" tabindex="-1" role="menuitemradio" :aria-checked="(reasoning || 'default') === level" :data-reasoning="level" @click="emit('change', 'reasoning', level)"><span>{{ level === 'default' ? 'Provider default' : level }}</span><UiIcon v-if="(reasoning || 'default') === level" name="check" /></button>
       </div>
       <div class="model-menu-group menu-manual"><label>Model ID<input :list="list" :value="model" placeholder="Choose or enter a model ID" @input="change('model', $event)" @keydown="modelKeydown" /><datalist :id="list"><option v-for="item in catalog?.models" :key="item.id" :value="item.id">{{ item.label }}</option></datalist></label>
-      <button class="text-action" @click="discover">List models</button><p class="model-discovery-status menu-note" role="status">{{ status }}</p></div>
+      <button type="button" class="text-action" @click="discover">List models</button><p class="model-discovery-status menu-note" role="status">{{ status }}</p></div>
     </template>
     <template v-else>
     <legend>Provider, model and reasoning</legend>
@@ -89,7 +89,7 @@ function modelKeydown(event: KeyboardEvent) {
     <label>Model<input :list="list" :value="model" placeholder="Choose or enter a model ID" @input="change('model', $event)" @keydown="modelKeydown" />
       <datalist :id="list"><option v-for="item in catalog?.models" :key="item.id" :value="item.id">{{ item.label }}</option></datalist>
     </label>
-    <button class="quiet" @click="discover">List models</button>
+    <button type="button" class="quiet" @click="discover">List models</button>
     <label v-if="catalog && catalog.models.length > 0">Available models
       <select aria-label="Available models" :value="catalog.models.some(item => item.id === model) ? model : ''" @change="chooseListed">
         <option value="">Choose a listed model</option>

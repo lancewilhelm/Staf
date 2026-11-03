@@ -10,6 +10,7 @@ import NewAgent from './components/NewAgent.vue';
 import ChatView from './components/ChatView.vue';
 import Toasts from './components/Toasts.vue';
 import PanelToggle from './components/PanelToggle.vue';
+import BrandMark from './components/BrandMark.vue';
 import { design } from './design';
 
 const {app, state: s} = provideWorkspace();
@@ -52,7 +53,7 @@ function openChat(id: string) { settingsAgentId.value = null; app.closeSetup(); 
       <header class="top">
         <PanelToggle :disabled="agentSaving" v-if="design.sidebar === 'focus'" />
         <button v-if="selected && view === 'chat' && s.setup.kind === 'closed'" class="avatar" aria-label="Open agent settings" title="Open agent settings" :disabled="agentSaving" @click="openAgentSettings(selected.id)">{{ selected.name[0]?.toUpperCase() || '✳' }}</button>
-        <div v-else class="avatar">{{ selected?.name[0]?.toUpperCase() || '✳' }}</div>
+        <div v-else class="avatar"><template v-if="selected">{{ selected.name[0]?.toUpperCase() }}</template><BrandMark v-else /></div>
         <div>
           <div class="title"><template v-if="view === 'settings'">Settings</template><AgentLabel v-else-if="selected" :agent="selected" /><template v-else>Welcome to Staf</template></div>
         </div>

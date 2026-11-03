@@ -191,7 +191,8 @@ Sans, 14px text, 20px spacing, 10px corners, and Orbit. These choices apply only
 to this browser. Settings groups shared connections into provider cards;
 Creation defaults opens its editor through Edit defaults. The composer model button opens provider, model, and reasoning
 choices immediately above it as grouped menu rows with selection checkmarks.
-Use Up/Down or Home/End through the menu, Tab to reach manual entry, and Escape to close and
+Use Up/Down or Home/End through the choices and manual entry controls. Tab or
+Escape closes the menu and
 return focus, or click outside to dismiss. Provider changes retain confirmation.
 
 Workspace notifications appear as dismissible toasts at the top of the page.

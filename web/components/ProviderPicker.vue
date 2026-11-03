@@ -4,7 +4,7 @@ import type { BotProfile } from '../controller';
 import { useWorkspace } from '../workspace';
 import ChoiceFields from './ChoiceFields.vue';
 const props = withDefaults(defineProps<{id: string; disabled?: boolean; compact?: boolean}>(), {disabled: false});
-const emit = defineEmits<{profile: [profile: BotProfile]; selected: []}>();
+const emit = defineEmits<{profile: [profile: BotProfile]; selected: []; ready: []}>();
 const { app, state } = useWorkspace();
 const profile = shallowRef<BotProfile | null>(null);
 const model = ref('');
@@ -17,7 +17,7 @@ watch(() => props.id, (id, _, onCleanup) => {
   onCleanup(() => { active = false; });
   profile.value = null;
   void app.botProfile(id).then(value => {
-    if (active) { profile.value = value; model.value = value.model ?? ''; }
+    if (active) { profile.value = value; model.value = value.model ?? ''; emit('ready'); }
   }).catch(reason => { if (active) error.value = String(reason); });
 }, {immediate: true});
 watch([sharedRevision, busy, profile, model], (_, __, onCleanup) => {
@@ -29,7 +29,7 @@ watch([sharedRevision, busy, profile, model], (_, __, onCleanup) => {
   let active = true;
   onCleanup(() => { active = false; });
   void app.botProfile(props.id).then(value => {
-    if (active) { profile.value = value; model.value = value.model ?? ''; }
+    if (active) { profile.value = value; model.value = value.model ?? ''; emit('ready'); }
   }).catch(reason => { if (active) error.value = String(reason); });
 });
 async function save(field: 'provider' | 'model' | 'reasoning', value: string) {

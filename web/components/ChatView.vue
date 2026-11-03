@@ -32,9 +32,8 @@ function scroll(event: Event) {
       <template v-if="selected">
         <template v-if="s.messages.length">
           <div v-for="message in s.messages" :key="message.id" class="message" :class="{'user-message': message.role === 'user'}">
-            <div class="who"><span v-if="message.role !== 'user'" class="avatar">{{ selected.name[0]?.toUpperCase() }}</span>{{ message.role === 'user' ? 'YOU' : selected.name.toUpperCase() }}{{ message.role === 'assistant_stopped' ? ' · stopped' : '' }}</div>
-            <div v-if="message.role === 'user'" class="bubble">{{ message.content }}</div>
-            <ResponseText v-else :text="message.content" />
+            <div v-if="message.role === 'user'" class="user-bubble"><div class="who">YOU</div><div class="bubble">{{ message.content }}</div></div>
+            <template v-else><div class="who"><span class="avatar">{{ selected.name[0]?.toUpperCase() }}</span>{{ selected.name }}{{ message.role === 'assistant_stopped' ? ' · stopped' : '' }}</div><ResponseText :text="message.content" /></template>
             <SubmissionStatus v-if="submission && message.id === 'command-user-' + submission.id" />
             <ChatWorkItems v-if="message.role === 'user'" :work="s.work.find(work => message.id === 'command-user-' + work.id)" :inbox="relevant" />
           </div>
@@ -44,7 +43,7 @@ function scroll(event: Event) {
           <div class="who">{{ selected.name.toUpperCase() }} · request {{ work.id }}</div><ChatWorkItems :work="work" :inbox="relevant" />
         </div>
         <div v-if="submission && !s.messages.some(message => message.id === 'command-user-' + submission?.id)" class="message user-message">
-          <div class="who">YOU</div><div class="bubble">{{ submission.text }}</div><SubmissionStatus />
+          <div class="user-bubble"><div class="who">YOU</div><div class="bubble">{{ submission.text }}</div></div><SubmissionStatus />
         </div>
         <div v-if="s.responseConnection === 'reconnecting'" class="message meta">Live response updates disconnected. Reconnecting…</div>
         <div v-if="s.response && !['completed', 'stopped'].includes(s.response.state)" class="message provisional">

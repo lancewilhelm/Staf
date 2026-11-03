@@ -113,7 +113,7 @@ registration remains unverified by the offline checks. See
 - In Settings, try Light, Dark and System, Evergreen/Ink, and Layout and typography.
   Reload to check persistence. Collapse the sidebar: the agent rail stays visible
   and the expand icon moves to the header. Open the composer model popup; check
-  arrow/Home/End navigation, Tab to manual entry, Escape with focus return,
+  arrow/Home/End navigation, Tab/Escape dismissal with focus return,
   selection checkmarks, and outside-click dismissal. New agent opens a modal:
   expect Name focus, trapped Tab navigation, and Escape returning focus.
   Settings should show theme cards, palette swatches, provider cards and an

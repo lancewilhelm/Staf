@@ -61,7 +61,7 @@ try{
  await until(()=>evaluate("document.body.innerText.includes('Invalid model catalog') && document.body.innerText.includes('Enter a model ID manually')"),'malformed catalog offers recovery');
  await evaluate("window.fetch=window.realPickerFetch");
  await evaluate("[...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('New agent')).click()");
- await until(()=>evaluate("document.body.innerText.includes('Create your agent')"),'creation choices');
+ await until(()=>evaluate("document.body.innerText.includes('Create agent')"),'creation choices');
  await evaluate("document.querySelector('.creation-choices').open=true");
  await evaluate("(()=>{const p=document.querySelector('.setup fieldset select');p.value='openrouter';p.dispatchEvent(new Event('change',{bubbles:true}))})()");
  await until(()=>evaluate("document.querySelector('.setup fieldset input').value==='owner/model' && [...document.querySelector('.setup select[aria-label=Reasoning]')?.options??[]].some(o=>o.value==='high')"),'creation defaults and reasoning options');
@@ -94,7 +94,11 @@ try{
  await evaluate("if(document.querySelector('.composer-picker').hidden) document.querySelector('.model-button').click();document.querySelector('[data-reasoning=high]').click()");
  await until(async()=>(await api('bots/'+bot.id)).reasoning==='high','reasoning saves immediately');
  await until(()=>evaluate("!document.querySelector('[aria-label=\"Provider picker\"] fieldset').disabled"),'reasoning settled');
- await evaluate("testInput('[aria-label=\"Provider picker\"] input','fixture/plain');document.querySelector('[aria-label=\"Provider picker\"] input').focus();document.querySelector('[aria-label=\"Provider picker\"] input').blur()");
+ await evaluate("document.querySelector('[aria-label=\"Provider picker\"] input').focus();testInput('[aria-label=\"Provider picker\"] input','fixture/plain')");
+ await sleep(150);
+ assert.equal(await evaluate("document.querySelector('.composer-picker').hidden"),false,'typing a catalog ID prefix does not close manual entry');
+ assert.equal((await api('bots/'+bot.id)).model,'fixture/model','typing keeps the saved model until entry is completed');
+ await evaluate("document.querySelector('[aria-label=\"Provider picker\"] input').blur()");
  await until(()=>evaluate("document.body.innerText.includes('Reasoning changed to Provider default')"),'visible unsupported reasoning reset');
  assert.equal((await api('bots/'+bot.id)).reasoning,null);
  await evaluate("if(document.querySelector('.composer-picker').hidden) document.querySelector('.model-button').click()");await change('demo');await until(async()=>(await api('bots/'+bot.id)).provider==='demo','switch away');
@@ -122,5 +126,19 @@ try{
  await cdp('Input.dispatchMouseEvent',{type:'mouseReleased',...triggerPoint,button:'left',clickCount:1});
  await until(()=>evaluate("document.querySelector('.composer-picker').hidden"),'pointer click on open trigger closes popup');
  console.log('PASS popup dismissal preserves failed model edit and feedback; trigger closes with pointer');
+
+ const unconfigured=await api('bots',{name:'Unconfigured menu check',provider:'demo'});
+ await until(()=>evaluate("[...document.querySelectorAll('.side nav button')].some(b=>b.textContent.includes('Unconfigured menu check'))"),'unconfigured agent appears');
+ await evaluate("[...document.querySelectorAll('.side nav button')].find(b=>b.textContent.includes('Unconfigured menu check')).click()");
+ await until(()=>evaluate("document.querySelector('.top').textContent.includes('Unconfigured menu check')"),'unconfigured chat selected');
+ const beforeOpen=await api('bots/'+unconfigured.id);
+ await evaluate("window.fetch=async(...args)=>args[0]==='/api/models'?new Response(JSON.stringify({models:[{id:'suggested/default',label:'Suggested default',reasoning:null,reasoningStatus:'unknown'}],defaultModel:'suggested/default'}),{status:200,headers:{'Content-Type':'application/json'}}):window.realPickerFetch(...args)");
+ await evaluate("document.querySelector('.model-button').click()");
+ await until(()=>evaluate("document.querySelector('.composer-picker .model-discovery-status')?.textContent.includes('loaded')"),'automatic model discovery');
+ const afterOpen=await api('bots/'+unconfigured.id);
+ assert.equal(afterOpen.revision,beforeOpen.revision,'opening the menu does not change agent configuration');
+ assert.equal(afterOpen.model,beforeOpen.model,'discovery does not select a default model');
+ await evaluate("window.fetch=window.realPickerFetch");
+ console.log('PASS menu discovery is read-only and manual model prefixes remain editable');
  console.log('PASS provider defaults, immediate picker, confirmation, catalog, manual entry, reasoning fallback, remembered pair, draft retention and no inference');
 } finally {socket?.close();browserSocket?.close();browser?.kill();server?.kill();proxy?.close();await sleep(200);await rm(temp,{recursive:true,force:true})}
