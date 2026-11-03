@@ -176,9 +176,24 @@ the chat scrolls. Select an agent to switch conversations; agents with the same
 name, including archived namesakes, show the last four characters of their stable
 IDs in the list and Updates. Suffixes can coincide; full IDs remain available
 through the API or CLI. **New agent**, under the **Agents** sidebar heading, opens creation, and **Settings** controls appearance and
-instance-wide provider connections. Choose Light, Dark, or System appearance;
-System is the default and follows device appearance changes. The choice is saved
+instance-wide provider connections. New agent opens a modal with keyboard focus
+contained inside; Escape or Cancel closes it and returns focus. Optional provider
+choices remain under its Provider, model and reasoning disclosure. Choose Light, Dark, or System appearance;
+Light is the default; System follows device appearance changes. The choice is saved
 in this browser, independently of other browsers; clearing browser storage resets it.
+
+The sidebar starts expanded. Use its panel icon to collapse it to the Focus rail;
+the expand button then appears in the workspace header. Agent selection, New
+agent, and Settings remain available in the rail. Settings offers Evergreen and
+Ink palettes and **Layout and typography** controls for DM Sans or system sans,
+text size, spacing, corners, and the five-dot logo. Defaults are Evergreen, DM
+Sans, 14px text, 20px spacing, 10px corners, and Orbit. These choices apply only
+to this browser. Settings groups shared connections into provider cards;
+Creation defaults opens its editor through Edit defaults. The composer model button opens provider, model, and reasoning
+choices immediately above it as grouped menu rows with selection checkmarks.
+Use Up/Down or Home/End through the choices and manual entry controls. Tab or
+Escape closes the menu and
+return focus, or click outside to dismiss. Provider changes retain confirmation.
 
 Workspace notifications appear as dismissible toasts at the top of the page.
 Informational and success notices expire after six seconds, with a progress bar.

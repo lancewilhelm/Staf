@@ -38,3 +38,10 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+## DM Sans (SIL Open Font License 1.1)
+
+The browser bundles DM Sans in `web/assets/dm-sans.woff2` from the approved
+prototype. Copyright 2014 The DM Sans Project Authors
+(https://github.com/googlefonts/dm-fonts). See [the bundled font license](web/assets/DMSans-OFL.txt) for the
+full copyright and license notice.

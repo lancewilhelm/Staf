@@ -37,7 +37,7 @@ The browser interface uses Vue single-file components with Composition API and
 `web/workspace.ts` exposes the existing client controller as a shallow Vue ref;
 the controller owns API calls, draft recovery, polling, and response streams.
 One controller survives `App.vue` hot reloads so it retains browser draft locks.
-The existing CSS in `web/style.css` and `web/toasts.css` owns appearance.
+The CSS in `web/style.css` and `web/toasts.css` owns appearance.
 
 Vite builds the browser assets; `vue-tsc` checks component scripts and templates
 as part of `pnpm run check`. TypeScript is pinned to the 6.0 release line because
@@ -110,7 +110,16 @@ registration remains unverified by the offline checks. See
   stays unsent until you send it.
 - Open another tab on the same address. Stop a response there; both tabs should
   show stopping until the fixture is released, while keeping independent drafts.
-- In Settings, try Light, Dark and System; narrow the window to phone width.
+- In Settings, try Light, Dark and System, Evergreen/Ink, and Layout and typography.
+  Reload to check persistence. Collapse the sidebar: the agent rail stays visible
+  and the expand icon moves to the header. Open the composer model popup; check
+  arrow/Home/End navigation, Tab/Escape dismissal with focus return,
+  selection checkmarks, and outside-click dismissal. New agent opens a modal:
+  expect Name focus, trapped Tab navigation, and Escape returning focus.
+  Settings should show theme cards, palette swatches, provider cards and an
+  Edit defaults disclosure. Buttons
+  keep their appearance on pointer hover and show keyboard focus.
+- Narrow the window to phone width.
   Expect readable messages and a visible circular action without page overflow.
   Inline chat approval controls should remain available; Activity and Updates navigation are absent.
 

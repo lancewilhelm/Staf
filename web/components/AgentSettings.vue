@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { providerLabel } from '../../src/provider-label';
+import { providerLabel } from '../provider-label';
 import { ref, shallowRef, watch } from 'vue';
 import type { BotProfile } from '../controller';
 import { useWorkspace } from '../workspace';
@@ -57,14 +57,14 @@ async function archive() {
 </script>
 
 <template>
-  <div class="setup">
-    <span class="eyebrow">AGENT SETTINGS</span><h2>{{ profile?.name || 'Agent settings' }}</h2>
+  <div class="settings-scroll"><div class="setup settings-content agent-settings">
+    <span class="eyebrow">AGENT SETTINGS</span><h1 class="page-title">{{ profile?.name || 'Agent settings' }}</h1><p class="page-intro">Edit this agent’s name, instructions, provider, and model.</p>
     <template v-if="profile">
       <p>Provider connections are shared by the instance. A saved connection does not verify account or model access.</p>
       <label>Name<input v-model="name" :disabled="saving" /></label>
+      <label>Instructions<textarea v-model="instructions" :disabled="saving" /></label><InstructionsHelp />
       <ProviderPicker :id="id" :disabled="saving" @profile="value => profile = value" />
       <button :disabled="saving" class="quiet" @click="emit('providers')">Open provider settings</button>
-      <label>Instructions<textarea v-model="instructions" :disabled="saving" /></label><InstructionsHelp />
       <p class="meta">Configuration: <code>{{ profile.configDir }}</code></p>
       <div class="row"><button :disabled="saving" @click="save">Save settings</button><button :disabled="saving" class="quiet" @click="emit('close')">Cancel</button></div>
       <button v-if="!profile.archived" :disabled="saving" class="quiet" @click="archive">Archive agent</button>
@@ -74,5 +74,5 @@ async function archive() {
     <section v-if="latest" class="saved-settings" aria-label="Current saved settings">
       <h3>Current saved settings</h3><p>Name: {{ latest.name }}</p><p>Provider: {{ providerLabel(latest.provider) }}</p><p>Model: {{ latest.model || '(none)' }}</p><p>Instructions:</p><pre>{{ latest.instructions }}</pre>
     </section>
-  </div>
+  </div></div>
 </template>

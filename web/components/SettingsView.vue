@@ -2,6 +2,7 @@
 import { useWorkspace } from '../workspace';
 import { type Appearance, saveAppearance } from '../appearance';
 import ProviderDefaults from './ProviderDefaults.vue';
+import AppearanceOptions from './AppearanceOptions.vue';
 const props = defineProps<{appearance: Appearance; hasAgentSettings: boolean; routerForm: {key: string; status: string; busy: boolean}}>();
 const form = props.routerForm;
 const emit = defineEmits<{'update:appearance': [value: Appearance]; agentSettings: []; chat: []}>();
@@ -41,13 +42,15 @@ async function disconnectRouter() {
 
 <template>
   <div class="settings-scroll"><div class="setup settings-content">
-    <span class="eyebrow">SETTINGS</span><h2>Appearance</h2><p>Choose how Staf looks in this browser.</p>
+    <h1 class="page-title">Settings</h1><p class="page-intro">Appearance preferences and shared provider connections.</p>
+    <section class="settings-section"><h2 class="section-title">Theme</h2><p class="section-help">Choose how Staf looks in this browser.</p>
     <fieldset class="appearance"><legend>Appearance</legend>
-      <label v-for="value in appearances" :key="value"><input type="radio" name="appearance" :value="value" :checked="appearance === value" @change="chooseAppearance(value)" />{{ value[0].toUpperCase() + value.slice(1) }}</label>
-    </fieldset>
-    <ProviderDefaults /><h2>Providers</h2><p>Provider connections belong to this Staf instance and are available to all your agents. Each agent has its own model.</p>
-    <div class="provider provider-settings">
-      <strong>ChatGPT</strong>
+      <label v-for="value in appearances" :key="value"><span class="theme-preview" :class="value" aria-hidden="true"><i /><span><b /><em /></span></span><span class="theme-name"><input type="radio" name="appearance" :value="value" :checked="appearance === value" @change="chooseAppearance(value)" />{{ value[0].toUpperCase() + value.slice(1) }}</span></label>
+    </fieldset></section>
+    <AppearanceOptions @reset="chooseAppearance('light')" />
+    <section class="settings-section"><h2 class="section-title">Provider connections</h2><p class="section-help">Connections belong to this Staf instance and are available to all your agents.</p><div class="providers">
+    <div class="provider provider-settings provider-card">
+      <div class="provider-title"><h3>ChatGPT</h3><span class="badge">{{ s.credential === 'signed-in' ? 'Sign-in saved' : 'No sign-in saved' }}</span></div>
       <p>{{ s.credential === 'signed-in' ? 'Saved sign-in found for this instance.' : s.credential === 'signed-out' ? 'No usable sign-in found for this instance.' : 'Checking the sign-in for this instance.' }}</p>
       <p v-if="s.credential === 'signed-in'" class="meta">This saved sign-in has not been checked against the provider.</p>
       <p v-if="s.authStatus" role="status">{{ s.authStatus }}</p>
@@ -60,8 +63,8 @@ async function disconnectRouter() {
         <button v-if="s.credential === 'signed-in'" class="quiet" @click="signOut">Sign out</button>
       </div>
     </div>
-    <div class="provider provider-settings">
-      <strong>OpenRouter</strong>
+    <div class="provider provider-settings provider-card">
+      <div class="provider-title"><h3>OpenRouter</h3><span class="badge">{{ s.openrouter === 'saved' ? 'Key saved' : 'No key saved' }}</span></div>
       <p>{{ s.openrouter === 'saved' ? 'API key saved for this instance.' : s.openrouter === 'missing' ? 'No OpenRouter API key saved.' : s.openrouter === 'error' ? 'OpenRouter credential storage is unavailable. Replace or disconnect the key.' : 'Checking the OpenRouter connection.' }}</p>
       <p class="meta">A saved key does not verify account or model access.</p>
       <label>OpenRouter API key<input v-model="form.key" type="password" autocomplete="off" :disabled="form.busy" /></label>
@@ -71,6 +74,8 @@ async function disconnectRouter() {
       </div>
       <p role="status">{{ form.status }}</p>
     </div>
+    </div></section>
+    <ProviderDefaults />
     <div class="row"><button v-if="hasAgentSettings" class="quiet" @click="emit('agentSettings')">Back to agent settings</button><button class="quiet" @click="emit('chat')">Back to chat</button></div>
   </div></div>
 </template>

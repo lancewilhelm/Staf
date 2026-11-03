@@ -9,6 +9,9 @@ import SettingsView from './components/SettingsView.vue';
 import NewAgent from './components/NewAgent.vue';
 import ChatView from './components/ChatView.vue';
 import Toasts from './components/Toasts.vue';
+import PanelToggle from './components/PanelToggle.vue';
+import BrandMark from './components/BrandMark.vue';
+import { design } from './design';
 
 const {app, state: s} = provideWorkspace();
 type View = 'chat' | 'settings' | 'agent';
@@ -24,7 +27,7 @@ let firstRun = false;
 watch([() => s.value.connection.kind, () => s.value.bots.length, () => s.value.credential], () => {
   if (!firstRun && s.value.connection.kind === 'ready') {
     firstRun = true;
-    if (!s.value.bots.length && s.value.credential === 'signed-out') view.value = 'settings';
+    if (!s.value.bots.length && s.value.credential === 'signed-out' && s.value.setup.kind === 'closed') view.value = 'settings';
   }
 });
 watch(() => s.value.draft.submission && 'error' in s.value.draft.submission ? s.value.draft.submission.error : null, error => {
@@ -44,17 +47,19 @@ function openChat(id: string) { settingsAgentId.value = null; app.closeSetup(); 
 </script>
 
 <template>
-  <div class="shell">
+  <div class="shell" :data-sidebar="design.sidebar">
     <AgentSidebar :view="view" :saving="agentSaving" @create="createAgent" @select="openChat" @settings="openSettings" />
     <main class="main">
       <header class="top">
+        <PanelToggle :disabled="agentSaving" v-if="design.sidebar === 'focus'" />
         <button v-if="selected && view === 'chat' && s.setup.kind === 'closed'" class="avatar" aria-label="Open agent settings" title="Open agent settings" :disabled="agentSaving" @click="openAgentSettings(selected.id)">{{ selected.name[0]?.toUpperCase() || '✳' }}</button>
-        <div v-else class="avatar">{{ selected?.name[0]?.toUpperCase() || '✳' }}</div>
+        <div v-else class="avatar"><template v-if="selected">{{ selected.name[0]?.toUpperCase() }}</template><BrandMark v-else /></div>
         <div>
           <div class="title"><template v-if="view === 'settings'">Settings</template><AgentLabel v-else-if="selected" :agent="selected" /><template v-else>Welcome to Staf</template></div>
-          <div class="sub">{{ s.connection.kind === 'ready' ? view === 'settings' ? 'Provider connections' : view === 'agent' ? 'Agent settings' : 'Your ongoing conversation' : s.connection.kind }}</div>
         </div>
         <div class="spacer" />
+        <button v-if="selected && view === 'chat'" class="header-action" aria-label="Agent settings" :disabled="agentSaving" @click="openAgentSettings(selected.id)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M9 3h6l1 3 3 1 2 5-2 5-3 1-1 3H9l-1-3-3-1-2-5 2-5 3-1 1-3Z"/><circle cx="12" cy="12" r="3"/></svg></button>
+        <button v-else-if="view !== 'chat'" class="header-action" :disabled="agentSaving" aria-label="Back to chat" @click="closeAgentSettings"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="m6 6 12 12M6 18 18 6"/></svg></button>
       </header>
       <Toasts />
       <div v-if="s.connection.kind === 'offline'" class="connection-recovery" role="alert">{{ s.connection.message }} {{ s.freshness }}</div>
@@ -66,10 +71,10 @@ function openChat(id: string) { settingsAgentId.value = null; app.closeSetup(); 
           <span class="eyebrow">WELCOME TO STAF</span><h2>Pair this browser</h2><p>Enter the one-time code shown on the host.</p>
           <label>Pairing code<input v-model="code" /></label><button @click="app.pair(code)">Pair</button><p role="alert">{{ s.connection.message }}</p>
         </div>
-        <NewAgent v-else-if="s.setup.kind === 'create'" />
         <SettingsView v-else-if="view === 'settings'" v-model:appearance="appearance" :router-form="routerForm" :has-agent-settings="!!settingsAgentId" @agent-settings="view = 'agent'" @chat="closeAgentSettings" />
         <ChatView v-else @create="createAgent" @providers="openSettings" @settings="openAgentSettings" />
       </template>
     </main>
+    <NewAgent v-if="s.setup.kind === 'create'" />
   </div>
 </template>
