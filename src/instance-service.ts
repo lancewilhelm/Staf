@@ -1,3 +1,4 @@
+import {providerLabel} from './provider-label.js';
 import { parseMemoryLanguage } from './memory-language.js';
 import { previewMemoryCandidates } from './memory-candidates.js';
 import { executeShellSandbox, scratchLimits, type ShellSandboxResult } from './shell-sandbox.js';
@@ -483,7 +484,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
         if(req.method === 'GET' && kind === 'usage') {const session=instance.chatSession(terminalInfoMatch[1]);return json(200,{text:usageText(session),details:usageText(session,true)});}
         if(req.method === 'GET' && kind === 'context') {
           const session=instance.chatSession(terminalInfoMatch[1]);const last=session.usage?.at(-1);
-          const measurement=last?.scope === 'request' && last.metrics.input !== undefined ? `Last reported request input: ${last.metrics.input} tokens (${last.provider}; ${last.observedAt ?? 'time unavailable'}).` : 'Last request input is unavailable or its scope is unknown.';
+          const measurement=last?.scope === 'request' && last.metrics.input !== undefined ? `Last reported request input: ${last.metrics.input} tokens (${providerLabel(last.provider)}; ${last.observedAt ?? 'time unavailable'}).` : 'Last request input is unavailable or its scope is unknown.';
           return json(200,{text:`${measurement} This is a historical measurement, not current context occupancy. Saved conversation has ${session.messages.length} provider messages. The next request includes dynamic instructions, memory, tools and possibly notices. Its token count and context occupancy are unavailable. Staf does not compact history.`});
         }
         if(req.method === 'POST' && kind === 'models') {

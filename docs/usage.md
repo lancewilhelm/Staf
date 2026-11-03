@@ -77,8 +77,8 @@ existing conversation to the newly selected provider on the next request.
    `/settings`.
 2. Open the printed URL and complete sign-in in the browser. Use `/auth chatgpt
    status` to inspect the attempt and local credential status.
-3. Select `codex` and an account-available model in `/settings`, or enter
-   `/set provider codex`, confirm with `/confirm-provider`, and enter `/set model MODEL_ID`.
+3. Select **ChatGPT** and an account-available model in `/settings`, or enter
+   `/set provider chatgpt`, confirm with `/confirm-provider`, and enter `/set model MODEL_ID`.
 4. Send a message in chat and inspect the response. A real request uses the
    account's plan permissions. Do not paste credentials into chat.
 

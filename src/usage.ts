@@ -1,3 +1,4 @@
+import {providerLabel} from './provider-label.js';
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === 'object' && value !== null && !Array.isArray(value); }
 import type { Session } from './types.js';
 
@@ -75,13 +76,13 @@ export function usageText(session:Session, detail=false):string {
   const covered=new Set(rows.filter(r=>r.outcome==='response').map(r=>r.turnStart));
   const turns=session.messages.filter(m=>m.role==='user').length;
   lines.push(`History coverage: ${covered.size} observed turn starts; ${turns} saved user turns. Failed/rolled-back attempts may be included. Older history can have incomplete coverage.`);
-  if(rows.length){const last=rows.at(-1)!;lines.push(...summary(`Last request: ${last.provider} [${last.status}]`,[last]));lines.push(...summary('Last attempt (one user turn, including tool continuations)',rows.filter(r=>r.attempt===last.attempt)));const completed = session.turns?.at(-1);
+  if(rows.length){const last=rows.at(-1)!;lines.push(...summary(`Last request: ${providerLabel(last.provider)} [${last.status}]`,[last]));lines.push(...summary('Last attempt (one user turn, including tool continuations)',rows.filter(r=>r.attempt===last.attempt)));const completed = session.turns?.at(-1);
     const completedRow = completed ? [...rows].reverse().find(r => r.turnStart === completed.start && r.outcome === 'response') : undefined;
     if (completedRow) lines.push(...summary('Last completed turn', rows.filter(r => r.attempt === completedRow.attempt)));
     lines.push(...summary('Session totals',rows));
     const groups=new Map<string,UsageObservation[]>();for(const r of rows){const key=r.model?`${r.provider} | reported model ${r.model}`:r.provider;groups.set(key,[...(groups.get(key)||[]),r]);}
-    for(const [name,group] of groups)lines.push(...summary(`Provider/model: ${name}`,group));
-    if(detail)for(const row of rows)lines.push(`Call ${row.id}: ${row.provider}; ${row.outcome}; ${row.status}; scope ${row.scope || 'unknown (older record)'}; observed ${row.observedAt || 'time unavailable'}; ${row.source}; ${JSON.stringify(row.metrics)}`);
+    for(const [name,group] of groups)lines.push(...summary(`Provider/model: ${providerLabel(name)}`,group));
+    if(detail)for(const row of rows)lines.push(`Call ${row.id}: ${providerLabel(row.provider)}; ${row.outcome}; ${row.status}; scope ${row.scope || 'unknown (older record)'}; observed ${row.observedAt || 'time unavailable'}; ${row.source}; ${JSON.stringify(row.metrics)}`);
   }else lines.push('No calls observed yet. Demo is not a model; token/cost usage is not applicable.');
   lines.push('Account quota/remaining subscription allowance: unavailable. Context-window occupancy: unavailable. Dollar estimates: not calculated. Local inference is not a claim of zero operating cost.',`Caching: ${caching}`,'Commands: /usage details (per-call sources) | /usage help');
   return lines.join('\n');

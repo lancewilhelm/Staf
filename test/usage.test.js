@@ -12,6 +12,16 @@ import {validSession} from '../dist/validation.js';
 const raw={prompt_tokens:100,completion_tokens:20,total_tokens:120,prompt_tokens_details:{cached_tokens:60,cache_write_tokens:10},completion_tokens_details:{reasoning_tokens:8},cost:0.002,cost_details:{upstream_inference_cost:9}};
 async function fixture(t){const root=await mkdtemp(join(tmpdir(),'staf-usage-'));t.after(()=>rm(root,{recursive:true,force:true}));const store=new Store(root);return{root,store,session:await store.create()};}
 
+test('usage displays ChatGPT while preserving stored direct-provider identifiers',async t=>{
+ const {store,session}=await fixture(t);
+ await runTurn({store,session,provider:{...demoProvider,name:'codex-direct:fixture-model:reasoning=high'},text:'hello'});
+ const saved=await store.load(session.id);
+ assert.equal(saved.usage[0].provider,'codex-direct:fixture-model:reasoning=high');
+ const text=usageText(saved,true);
+ assert.match(text,/ChatGPT:fixture-model:reasoning=high/);
+ assert.doesNotMatch(text,/codex-direct:/);
+});
+
 test('usage mappings preserve reported zero/missing, subsets, credit units and reject invalid numbers',()=>{
  const report=httpUsage({usage:raw,model:'route/model'},'openrouter');assert.equal(report.metrics.total,120);assert.equal(report.metrics.cachedInput,60);assert.equal(report.metrics.reasoningOutput,8);assert.equal(report.metrics.costCredits,.002);assert.ok(!JSON.stringify(report).includes('upstream'));
  assert.deepEqual(httpUsage({usage:{prompt_tokens:0,completion_tokens:0}},'lmstudio').metrics,{input:0,output:0});
