@@ -3,16 +3,16 @@
   "version": "0.1.0",
   "private": true,
   "license": "Apache-2.0",
-  "packageManager": "pnpm@10.27.0",
+  "packageManager": "pnpm@12.16.1",
   "type": "module",
   "engines": {
     "node": ">=22.16.0",
-    "pnpm": ">=10.27.0"
+    "pnpm": ">=12.16.1"
   },
   "scripts": {
     "build": "vite build && tsc -p tsconfig.json",
-    "start": "pnpm run build && node dist/cli.js",
-    "test": "pnpm run build && node --test test/*.test.js",
+    "start": "corepack pnpm run build && node dist/cli.js",
+    "test": "corepack pnpm run build && node --test test/*.test.js",
     "check": "tsc -p tsconfig.json --noEmit && vue-tsc -p web/tsconfig.json --noEmit"
   },
   "devDependencies": {

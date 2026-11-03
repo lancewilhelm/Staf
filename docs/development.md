@@ -1,7 +1,7 @@
 # Develop Staf
 
 Use Node.js 22.16 or later and Corepack. The `packageManager` field in
-`package.json` selects pnpm 10.27.0, which also matches the Docker build.
+`package.json` selects pnpm 12.16.1, which also matches the Docker build.
 Use Corepack explicitly so a different `pnpm` earlier in your PATH does not
 select a different version:
 
@@ -14,6 +14,20 @@ corepack pnpm install --frozen-lockfile
 If an existing `node_modules` was installed with another pnpm major version,
 reinstall the locked dependencies with the pinned version. pnpm may ask to
 recreate `node_modules`; this does not remove instance data or credentials.
+
+Keep the exact pnpm version aligned in `package.json` and `Dockerfile`. Upgrade
+it deliberately after checking the registry's stable `latest` tag, regenerating
+the lockfile, and running the checks below. The lockfile also records pnpm 12's
+package-manager dependencies; application dependency versions remain locked.
+The `start` and `test` scripts invoke their nested build through Corepack so a
+different global pnpm does not override the project pin.
+
+The distribution test uses the version from `package.json` for packing and
+production installation. pnpm 12 excludes the root lockfile from `pnpm pack`, so
+an extracted package installs production dependencies from its manifest with
+`--no-frozen-lockfile`; this is separate from a repository or Docker build,
+which must use `--frozen-lockfile`. Package installs follow manifest ranges and
+do not provide the repository lockfile's exact dependency selection.
 
 ## Verify a change
 

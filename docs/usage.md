@@ -146,7 +146,7 @@ and notices can change the next request. Staf does not compact history. See
 ## Resolve common errors
 
 - For `ERR_PNPM_UNSUPPORTED_ENGINE`, check the Node and pnpm versions. Staf
-  requires Node 22.16 or later and pnpm 10.27.0 or later.
+  requires Node 22.16 or later and pnpm 12.16.1 or later.
 - If a provider reports a missing credential or model, check the instance connection or host environment
   and the bot profile. Restart the instance after changing host variables.
 - For HTTP 401, check the selected provider's credential. For 402, check credits.
