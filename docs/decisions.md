@@ -355,3 +355,9 @@ System is still available. Appearance and layout preferences belong to each
 browser. The Focus rail keeps agent navigation available. Provider choices use
 a popup above the composer, with the existing service contracts and inline save
 feedback. Separate Activity/background-management screens remain deferred.
+
+On 2026-11-02 the owner clarified that the accepted prototype is the visual and
+interaction authority for all menus and pages, with existing production features
+adapted into that style. Use grouped model menu rows, the New agent modal,
+provider cards and the Edit defaults disclosure. Keep manual entry, reasoning,
+connection recovery and agent lifecycle controls within those components.

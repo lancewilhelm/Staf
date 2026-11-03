@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { providerLabel } from '../../src/provider-label';
+import { providerLabel } from '../provider-label';
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useWorkspace } from '../workspace';
 import ProviderPicker from './ProviderPicker.vue';
+import UiIcon from './UiIcon.vue';
 const emit = defineEmits<{settings: [id: string]}>();
 const {app, state: s} = useWorkspace();
 const selected = computed(() => s.value.bots.find(agent => agent.id === s.value.selected));
@@ -16,13 +17,15 @@ function closePicker(restore = false) {
   picker.value = false;
   if (restore) trigger.value?.focus();
 }
-async function togglePicker() {
-  if (picker.value) { closePicker(true); return; }
+async function openPicker(edge: 'selected' | 'first' | 'last' = 'selected') {
   pickerOpened.value = true;
   picker.value = true;
   await nextTick();
-  popup.value?.focus();
+  const items = popup.value?.querySelectorAll<HTMLButtonElement>('[role=menuitemradio]:not(:disabled)');
+  const target = edge === 'first' ? items?.[0] : edge === 'last' ? items?.[items.length - 1] : popup.value?.querySelector<HTMLButtonElement>('[data-model][aria-checked=true]');
+  (target ?? popup.value)?.focus();
 }
+function togglePicker() { if (picker.value) closePicker(true); else void openPicker(); }
 function outside(event: MouseEvent) { if (event.target instanceof Node && !popup.value?.contains(event.target) && !trigger.value?.contains(event.target)) closePicker(); }
 function popupKey(event: KeyboardEvent) {
   if (event.key === 'Escape') { event.preventDefault(); closePicker(true); return; }
@@ -56,15 +59,16 @@ function openSettings() {
 </script>
 
 <template>
-  <div v-if="selected" class="composer">
+  <div v-if="selected" class="composer-area"><div class="composer">
     <textarea ref="textarea" :rows="2" :disabled="!s.draftReady" aria-label="Message" :placeholder="'Message ' + selected.name + '…'" :value="s.draft.text" @input="edit" @keydown="keydown" />
-    <div v-if="pickerOpened" :hidden="!picker" id="composer-picker" ref="popup" class="composer-picker setup" role="dialog" aria-label="Provider, model and reasoning" tabindex="-1" @keydown="popupKey" @focusout="leavePopup">
-      <ProviderPicker :key="selected.id" :id="selected.id" />
-      <button class="quiet" @click="openSettings">Agent settings</button><button class="quiet" @click="closePicker(true)">Close picker</button>
+    <div class="actions"><div class="model-control">
+    <div v-if="pickerOpened" :hidden="!picker" id="composer-picker" ref="popup" class="composer-picker model-menu" role="menu" aria-label="Provider, model and reasoning" tabindex="-1" @keydown="popupKey" @focusout="leavePopup">
+      <ProviderPicker compact @selected="closePicker(true)" :key="selected.id" :id="selected.id" />
+      <button class="text-action" @click="openSettings">Agent settings</button><button class="text-action" aria-label="Close picker" @click="closePicker(true)">Close picker</button>
     </div>
-    <div class="actions">
-      <button ref="trigger" class="model-button" aria-haspopup="dialog" aria-controls="composer-picker" @keydown.down.prevent="togglePicker" @keydown.up.prevent="togglePicker" :aria-expanded="picker" aria-label="Choose provider, model and reasoning" @click="togglePicker">{{ providerLabel(selected.provider) }} · {{ selected.model || 'Choose model' }}</button>
-      <button class="composer-control" :aria-label="responding ? stopping ? 'Stopping response' : 'Stop' : 'Send'"
+
+      <button ref="trigger" class="model-button" aria-haspopup="menu" aria-controls="composer-picker" @keydown.down.prevent="openPicker('first')" @keydown.up.prevent="openPicker('last')" :aria-expanded="picker" aria-label="Choose provider, model and reasoning" @click="togglePicker"><span class="provider-name">{{ providerLabel(selected.provider) }}</span><span> / </span><span class="model-name">{{ selected.model || 'Choose model' }}</span><UiIcon name="down" /></button>
+      </div><button class="composer-control" :aria-label="responding ? stopping ? 'Stopping response' : 'Stop' : 'Send'"
         :title="responding ? stopping ? 'Stopping response' : 'Stop response' : 'Send (Enter)'"
         :disabled="responding ? stopping : !s.draftReady || !!s.draft.submission" @click="responding ? app.stopResponse() : app.send()">
         <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24">
@@ -77,5 +81,5 @@ function openSettings() {
     <p v-if="stopping" class="composer-status" role="status">Stopping…</p>
     <p v-if="!s.draftReady" role="status">{{ s.actionError.includes('Browser storage or locking is unavailable') ? 'Draft unavailable. Check browser storage and locking.' : 'Loading saved draft…' }}</p>
     <p v-if="s.actionError" role="alert">{{ s.actionError }}</p>
-  </div>
+  </div><p class="composer-hint">Enter to send · Shift + Enter for a new line</p></div>
 </template>

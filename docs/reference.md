@@ -153,8 +153,7 @@ not an instance configuration or a shared API setting.
 corner (0–22px), and logo (0–4) choices. Defaults are expanded, green, sans,
 14, 20, 10, and 1 (Orbit). Invalid fields use their defaults; existing saved
 appearance choices remain honored. Storage failure still allows changes for the
-current page. Reset layout and typography restores these seven defaults;
-the Light/Dark/System choice is separate.
+current page. Reset appearance restores these seven defaults and Light.
 Authenticated `GET /api/inbox` projects pending questions and approvals.
 `GET /api/task-updates` returns task summaries for the inbox. `POST /api/bots`
 requires a nonblank `name` and accepts optional `instructions`, `provider`,

@@ -30,7 +30,7 @@ try{
  const browserPath=(await readFile(join(temp,'chrome','DevToolsActivePort'),'utf8')).split('\n')[1];browserSocket=new WebSocket(`ws://127.0.0.1:${debug}${browserPath}`);await new Promise((resolve,reject)=>{browserSocket.onopen=resolve;browserSocket.onerror=reject});browserSocket.onmessage=receive;
  await until(()=>evaluate("document.body?.innerText.includes('Pair this browser')"),'pair page');
  await evaluate(`window.testInput=(selector,value)=>{const el=document.querySelector(selector);Object.getOwnPropertyDescriptor(el.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,'value').set.call(el,value);el.dispatchEvent(new Event('input',{bubbles:true}))}; window.testClick=text=>{const b=[...document.querySelectorAll('button')].find(x=>x.textContent.trim()===text);if(!b)throw Error('Missing button '+text);b.click()}`);
- await act(`testInput('input',${JSON.stringify(code)});testClick('Pair')`,"document.body.innerText.includes('Providers') && document.body.innerText.includes('Connect ChatGPT')",'pair browser and open global provider setup');
+ await act(`testInput('input',${JSON.stringify(code)});testClick('Pair')`,"document.body.innerText.includes('Provider connections') && document.body.innerText.includes('Connect ChatGPT')",'pair browser and open global provider setup');
  assert.equal(await evaluate("document.querySelector('.brand span').textContent"),'staf','product wordmark');
  assert.equal(await evaluate("[...document.querySelectorAll('.setup button')].some(b=>b.textContent==='Create an agent')"),false,'creation belongs in sidebar');
  assert.equal(await evaluate("!![...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('New agent'))"),true,'agent creation is discoverable in navigation');
@@ -136,7 +136,16 @@ try{
  assert.equal(await evaluate("!!document.querySelector('.banner')"),false,'no page-wide notice banner');
  console.log('PASS persistent errors, dismissal and inline sign-in recovery');
 
- await act("[...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('New agent')).click()","document.body.innerText.includes('Create your agent')",'create agent without connecting');
+ await act("[...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('New agent')).focus();[...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('New agent')).click()","document.body.innerText.includes('Create your agent')",'create agent without connecting');
+ assert.equal(await evaluate("document.querySelector('dialog')?.matches(':modal')"),true,'New agent is a modal with inert background');
+ assert.equal(await evaluate("document.activeElement===document.querySelector('dialog input')"),true,'creation focuses Name');
+ if(process.env.STAF_GUI_SCREENSHOTS) await writeFile(join(process.env.STAF_GUI_SCREENSHOTS,'staf-create.png'),Buffer.from((await cdp('Page.captureScreenshot',{format:'png'})).data,'base64'));
+ await cdp('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
+ await cdp('Input.dispatchKeyEvent',{type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
+ await until(()=>evaluate("!document.querySelector('dialog') && document.activeElement===document.querySelector('.new-agent')"),'Escape closes creation and returns focus');
+ await evaluate("document.querySelector('.new-agent').click()");
+ await until(()=>evaluate("document.querySelector('dialog')?.matches(':modal')"),'reopen agent dialog');
+ await evaluate("document.querySelector('.creation-choices').open=true");
  await evaluate("testInput('.setup input','Mira');testInput('.setup textarea','Help me plan');document.querySelector('.setup select').value='codex';document.querySelector('.setup select').dispatchEvent(new Event('change',{bubbles:true}));testInput('.setup input[placeholder]','fixture-model');testClick('Create agent')");
  await until(()=>evaluate("document.body.innerText.includes('Agent created.') && !!document.querySelector('[aria-label=Message]')"),'create agent');
  const bot=await evaluate("(async()=>{let t=localStorage.getItem('staf-token');return (await (await fetch('/api/bots',{headers:{Authorization:'Bearer '+t}})).json())[0]})()");assert.equal(bot.name,'Mira');assert.equal(bot.provider,'codex');assert.equal(bot.model,'fixture-model');console.log('PASS create ChatGPT agent without connecting');
@@ -151,11 +160,12 @@ try{
  assert.equal(await evaluate("document.activeElement===document.querySelector('.panel-toggle')"),true,'toggle keeps focus after moving');
  await act("document.querySelector('.panel-toggle').click()","!!document.querySelector('.sidebar-head .panel-toggle')",'expanded toggle returns to sidebar');
  await evaluate("testInput('[aria-label=Message]','Design retained draft');document.querySelector('.model-button').click()");
- await until(()=>evaluate("!!document.querySelector('.composer-picker select')"),'real provider picker loaded');
- assert.equal(await evaluate("(()=>{const p=document.querySelector('.composer-picker:not([hidden])').getBoundingClientRect(),c=document.querySelector('.composer').getBoundingClientRect();return p.bottom<c.top && p.top>=0 && p.left>=0 && p.right<=innerWidth})()"),true,'picker anchored above composer within viewport');
+ await until(()=>evaluate("!!document.querySelector('.composer-picker [data-provider]')"),'real provider picker loaded');
+ assert.equal(await evaluate("(()=>{const p=document.querySelector('.composer-picker:not([hidden])').getBoundingClientRect(),c=document.querySelector('.model-button').getBoundingClientRect();return p.bottom<c.top && p.top>=0 && p.left>=0 && p.right<=innerWidth})()"),true,'picker anchored above composer within viewport');
  await cdp('Input.dispatchKeyEvent',{type:'keyDown',key:'Tab',code:'Tab'});
- assert.equal(await evaluate("document.activeElement.tagName"),'SELECT','Tab enters provider form');
- await cdp('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape'});
+ assert.equal(await evaluate("document.activeElement.tagName"),'BUTTON','Tab enters provider menu');
+ await cdp('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
+ await cdp('Input.dispatchKeyEvent',{type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
  await until(()=>evaluate("!document.querySelector('.composer-picker:not([hidden])') && document.activeElement===document.querySelector('.model-button')"),'Escape closes picker and returns focus');
  await evaluate("document.querySelector('.model-button').click()");
  await until(()=>evaluate("!!document.querySelector('.composer-picker:not([hidden])')"),'reopen popup');
@@ -177,7 +187,7 @@ try{
  await evaluate(`window.testInput=(selector,value)=>{const el=document.querySelector(selector);Object.getOwnPropertyDescriptor(el.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,'value').set.call(el,value);el.dispatchEvent(new Event('input',{bubbles:true}))}; window.testClick=text=>{const b=[...document.querySelectorAll('button')].find(x=>x.textContent.trim()===text);if(!b)throw Error('Missing button '+text);b.click()}`);
  await evaluate("[...document.querySelectorAll('.side button')].find(b=>b.getAttribute('aria-label')==='Settings').click()");
  await until(()=>evaluate("!!document.querySelector('.appearance-details')"),'return to appearance');
- await evaluate("document.querySelector('.appearance-details').open=true;testClick('Reset layout and typography');testClick('Back to chat')");
+ await evaluate("document.querySelector('.appearance-details').open=true;testClick('Reset appearance');testClick('Back to chat')");
  await until(()=>evaluate("!!document.querySelector('[aria-label=Message]') && document.documentElement.dataset.palette==='green'"),'reset approved design defaults');
  for(const width of [390,1280]){
    await cdp('Emulation.setDeviceMetricsOverride',{width,height:844,deviceScaleFactor:1,mobile:width<600});
@@ -185,7 +195,7 @@ try{
    await until(()=>evaluate("!!document.querySelector('.composer-picker:not([hidden])')"),'popup at '+width);
    if(process.env.STAF_GUI_SCREENSHOTS) await writeFile(join(process.env.STAF_GUI_SCREENSHOTS,'staf-'+width+'.png'),Buffer.from((await cdp('Page.captureScreenshot',{format:'png'})).data,'base64'));
    assert.equal(await evaluate("(()=>{const r=document.querySelector('.composer-picker:not([hidden])').getBoundingClientRect();return r.left>=0 && r.right<=innerWidth && r.top>=0 && document.documentElement.scrollWidth<=innerWidth})()"),true,'picker and page fit '+width);
-   await evaluate("document.querySelector('.composer-picker button:last-child').click()");
+   await evaluate("document.querySelector('[aria-label=\"Close picker\"]').click()");
  }
  await cdp('Emulation.clearDeviceMetricsOverride');
  await evaluate("testInput('[aria-label=Message]','')");
@@ -399,7 +409,7 @@ try{
  await act("document.querySelector('.model-button').click();setTimeout(()=>testClick('Agent settings'),0)","document.body.innerText.includes('AGENT SETTINGS')",'open agent-specific model settings');
  await until(()=>evaluate("document.querySelectorAll('.setup textarea').length===1 && document.body.innerText.includes('Configuration:')"),'settings loaded');console.log('PASS one Instructions editor and configuration location');
  await cdp('Emulation.setDeviceMetricsOverride',{width:600,height:300,deviceScaleFactor:1,mobile:false});
- assert.equal(await evaluate("(()=>{const n=document.querySelector('.setup');n.scrollTop=n.scrollHeight;return n.scrollHeight>n.clientHeight && n.scrollTop>0})()"),true,'settings remain scrollable in a short viewport');
+ assert.equal(await evaluate("(()=>{const n=document.querySelector('.settings-scroll');n.scrollTop=n.scrollHeight;return n.scrollHeight>n.clientHeight && n.scrollTop>0})()"),true,'settings remain scrollable in a short viewport');
  await cdp('Emulation.clearDeviceMetricsOverride');console.log('PASS settings scroll in a short viewport');
  await evaluate("window.testFetch=window.fetch;window.testFailSave=true;window.testSaveGate=new Promise(resolve=>window.releaseTestSave=resolve);window.fetch=async(...args)=>{if(String(args[0]).endsWith('/profile')){await window.testSaveGate;if(window.testFailSave)return new Response(JSON.stringify({error:'synthetic save failure'}),{status:503,headers:{'Content-Type':'application/json'}})}return window.testFetch(...args)}");
  await evaluate("testInput('.setup [aria-label=\"Provider picker\"] input','fixture-model-v2');document.querySelector('.setup [aria-label=\"Provider picker\"] input').focus();document.querySelector('.setup [aria-label=\"Provider picker\"] input').blur()");
@@ -428,7 +438,7 @@ try{
  await until(()=>evaluate("document.querySelector('.title')?.textContent==='Mira'"),'restore agent name after direct edit');
  await evaluate("window.testInput=(selector,value)=>{const el=document.querySelector(selector);Object.getOwnPropertyDescriptor(el.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,'value').set.call(el,value);el.dispatchEvent(new Event('input',{bubbles:true}))};window.testClick=text=>{const b=[...document.querySelectorAll('button')].find(x=>x.textContent.trim()===text);if(!b)throw Error('Missing button '+text);b.click()}");
  console.log('PASS direct agent name edit appears after browser refresh');
- await act("[...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('Settings')).click()","document.body.innerText.includes('Providers')",'provider settings remain global');
+ await act("[...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('Settings')).click()","document.body.innerText.includes('Provider connections')",'provider settings remain global');
  await act("testClick('Back to chat')","!!document.querySelector('[aria-label=Message]')",'return to chat');
 
  const originalToml=await readFile(join(updated.configDir,'agent.toml'),'utf8');await writeFile(join(updated.configDir,'agent.toml'),'name = [invalid');
@@ -527,7 +537,7 @@ try{
  await writeFile(join(temp,'auth','codex-direct.json'),JSON.stringify({version:1,issuer:'https://auth.openai.com',subject:'synthetic',clientId:'synthetic-client',hostId:'synthetic-host',accessToken:'synthetic',refreshToken:'synthetic',idToken:'synthetic',scopes:['resource.invoke','chatgpt.tokens.use.direct'],expiresAt:Date.now()+3600000}),{mode:0o600});
  await act("[...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('Settings')).click()","document.body.innerText.includes('Saved sign-in found for this instance.')",'existing instance sign-in is recognized');
  assert.equal(await evaluate(`document.querySelector('.archived-agents .agent-id')?.textContent.trim()==='· '+${JSON.stringify(duplicate.id.slice(-4))}`),true,'archived duplicate uses the shortened ID');
- await act("[...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('New agent')).click()","document.body.innerText.includes('Create your agent') && !document.body.innerText.includes('Connect ChatGPT')",'new agent does not require another provider sign-in');
+ await act("[...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('New agent')).focus();[...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('New agent')).click()","document.body.innerText.includes('Create your agent') && !document.body.innerText.includes('Connect ChatGPT')",'new agent does not require another provider sign-in');
  await evaluate("testInput('.setup input','No model');testInput('.setup textarea','Help with research');document.querySelector('.setup select').value='codex';document.querySelector('.setup select').dispatchEvent(new Event('change',{bubbles:true}));testClick('Create agent')");
  await until(()=>evaluate("document.querySelector('.title')?.textContent==='No model' && !!document.querySelector('[aria-label=Message]')"),'create agent without model');
  await evaluate("testInput('[aria-label=Message]','Keep this until model selection');document.querySelector('[aria-label=Message]').focus()");
@@ -557,14 +567,14 @@ try{
  assert.equal(await evaluate("document.body.innerText.includes('synthetic-browser-recovery') || JSON.stringify(localStorage).includes('synthetic-browser-recovery')"),false);
  console.log('PASS OpenRouter recovery, streaming, retry and secret non-disclosure');
  // Lose a real synthetic creation acknowledgment while a competing tab opens.
- await act("[...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('New agent')).click()","document.body.innerText.includes('Create your agent')",'creation recovery fixture');
+ await act("[...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('New agent')).focus();[...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('New agent')).click()","document.body.innerText.includes('Create your agent')",'creation recovery fixture');
  await evaluate("window.creationFetch=window.fetch;window.fetch=async(...args)=>{const response=await window.creationFetch(...args);if(args[0]==='/api/provider-defaults')window.creationDefaultsLoaded=true;if(args[0]==='/api/bots'&&args[1]?.method==='POST')throw Error('synthetic lost creation acknowledgment');return response};testInput('.setup input','Recovered creation');(()=>{const p=document.querySelector('.setup fieldset select');p.value='openrouter';p.dispatchEvent(new Event('change',{bubbles:true}))})();");
  await until(()=>evaluate("window.creationDefaultsLoaded && [...document.querySelector('.setup select[aria-label=Reasoning]')?.options??[]].some(o=>o.value==='high')"),'creation reasoning choices and defaults');await evaluate("(()=>{const r=document.querySelector('.setup select[aria-label=Reasoning]');r.value='high';r.dispatchEvent(new Event('change',{bubbles:true}));testClick('Create agent')})()");await until(()=>evaluate("document.body.innerText.includes('Result may be uncertain')"),'creation acknowledgment lost');
  const creationRecord=await evaluate("Object.entries(localStorage).find(([k])=>k.startsWith('staf-workspace-v1:creation:'))");assert.ok(creationRecord);
  await evaluate("localStorage.setItem('staf-draft','Obsolete beside creation');localStorage.setItem('staf-pending','obsolete')");
  const creationCopy=await openCopy();await until(()=>creationCopy.eval("!!document.querySelector('[aria-label=Message]')"),'competing tab leaves active creation alone');
  assert.equal(await creationCopy.eval(`localStorage.getItem(${JSON.stringify(creationRecord[0])})`),creationRecord[1],'live creation record retained');
- await creationCopy.eval("[...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('New agent')).click()");
+ await creationCopy.eval("[...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('New agent')).focus();[...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('New agent')).click()");
  await until(()=>creationCopy.eval("document.body.innerText.includes('Create your agent')"),'competing creation form');
  assert.equal(await creationCopy.eval("document.querySelector('.setup input').value"),'','active creation is not adopted by another tab');
  assert.equal(await creationCopy.eval("document.body.innerText.includes('Recover an agent creation')||document.body.innerText.includes('Earlier browser records')"),false,'no creation recovery picker');
@@ -578,7 +588,7 @@ try{
  assert.equal(await evaluate(`localStorage.getItem(${JSON.stringify(creationRecord[0])})`),null,'settled creation record removed');
  await evaluate("window.testInput=(selector,value)=>{const el=document.querySelector(selector);Object.getOwnPropertyDescriptor(el.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,'value').set.call(el,value);el.dispatchEvent(new Event('input',{bubbles:true}))};window.testClick=text=>{const b=[...document.querySelectorAll('button')].find(x=>x.textContent.trim()===text);if(!b)throw Error('Missing button '+text);b.click()}");
  console.log('PASS obsolete cleanup preserves active creation and retry-safe refresh recovery');
- await act("[...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('New agent')).click()","document.body.innerText.includes('Create your agent')",'name-only creation form');
+ await act("[...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('New agent')).focus();[...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('New agent')).click()","document.body.innerText.includes('Create your agent')",'name-only creation form');
  await cdp('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
  assert.equal(await evaluate("document.querySelector('.setup label:has(textarea)').firstChild.textContent"),'Instructions');
  await evaluate("document.querySelector('.instructions-help summary').focus()");

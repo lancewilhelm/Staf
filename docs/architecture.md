@@ -36,8 +36,10 @@ paths and fields continue to identify these agents. Provider sign-in belongs to
 the instance; each agent owns its model selection. The former Advanced page is not served.
 Appearance and layout are browser-local preferences (`web/appearance.ts` and
 `web/design.ts`); the default is Light/Evergreen with an expanded sidebar.
-The bundled DM Sans font needs no external request. The composer popup wraps the
-existing provider choice form and keeps its service-backed discovery/save behavior.
+The bundled DM Sans font needs no external request. The composer popup renders grouped menu choices through the existing choice and
+save boundary, while agent settings use the full form. Both keep service-backed
+discovery, manual model entry, reasoning and conflict recovery. Creation uses a
+native modal dialog over the chat; its durable state remains in the controller.
 CSS follows the device color scheme when System is selected. These preferences
 are not stored by the shared instance.
 

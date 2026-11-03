@@ -26,7 +26,7 @@ let firstRun = false;
 watch([() => s.value.connection.kind, () => s.value.bots.length, () => s.value.credential], () => {
   if (!firstRun && s.value.connection.kind === 'ready') {
     firstRun = true;
-    if (!s.value.bots.length && s.value.credential === 'signed-out') view.value = 'settings';
+    if (!s.value.bots.length && s.value.credential === 'signed-out' && s.value.setup.kind === 'closed') view.value = 'settings';
   }
 });
 watch(() => s.value.draft.submission && 'error' in s.value.draft.submission ? s.value.draft.submission.error : null, error => {
@@ -70,10 +70,10 @@ function openChat(id: string) { settingsAgentId.value = null; app.closeSetup(); 
           <span class="eyebrow">WELCOME TO STAF</span><h2>Pair this browser</h2><p>Enter the one-time code shown on the host.</p>
           <label>Pairing code<input v-model="code" /></label><button @click="app.pair(code)">Pair</button><p role="alert">{{ s.connection.message }}</p>
         </div>
-        <NewAgent v-else-if="s.setup.kind === 'create'" />
         <SettingsView v-else-if="view === 'settings'" v-model:appearance="appearance" :router-form="routerForm" :has-agent-settings="!!settingsAgentId" @agent-settings="view = 'agent'" @chat="closeAgentSettings" />
         <ChatView v-else @create="createAgent" @providers="openSettings" @settings="openAgentSettings" />
       </template>
     </main>
+    <NewAgent v-if="s.setup.kind === 'create'" />
   </div>
 </template>

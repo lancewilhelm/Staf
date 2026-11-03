@@ -3,8 +3,8 @@ import { computed, ref, shallowRef, watch } from 'vue';
 import type { BotProfile } from '../controller';
 import { useWorkspace } from '../workspace';
 import ChoiceFields from './ChoiceFields.vue';
-const props = withDefaults(defineProps<{id: string; disabled?: boolean}>(), {disabled: false});
-const emit = defineEmits<{profile: [profile: BotProfile]}>();
+const props = withDefaults(defineProps<{id: string; disabled?: boolean; compact?: boolean}>(), {disabled: false});
+const emit = defineEmits<{profile: [profile: BotProfile]; selected: []}>();
 const { app, state } = useWorkspace();
 const profile = shallowRef<BotProfile | null>(null);
 const model = ref('');
@@ -49,6 +49,7 @@ async function commit(field: 'provider' | 'model' | 'reasoning', value: string) 
     model.value = saved.model ?? '';
     emit('profile', saved);
     notice.value = field === 'model' && previous.reasoning && previous.reasoning !== saved.reasoning ? 'Reasoning changed to Provider default for this model.' : 'Saved. Applies to the next message.';
+    if (props.compact) { app.notify(notice.value, 'success'); if (field === 'model') emit('selected'); }
   } catch (reason) { error.value = 'Save failed or is uncertain. Your edits are retained. ' + String(reason); }
   finally { busy.value = false; }
 }
@@ -68,7 +69,7 @@ async function compare() {
 <template>
   <fieldset class="provider-picker" :disabled="disabled" aria-label="Provider picker">
     <div v-if="profile" @focusout="blur">
-      <ChoiceFields :provider="profile.provider" :model="model" :reasoning="profile.reasoning ?? 'default'" :disabled="busy" @model-select="value => commit('model', value)" @change="save" />
+      <ChoiceFields :menu="compact" :provider="profile.provider" :model="model" :reasoning="profile.reasoning ?? 'default'" :disabled="busy" @model-select="value => commit('model', value)" @change="save" />
     </div>
     <p role="status">{{ busy ? 'Saving…' : notice }}</p>
     <template v-if="error"><p role="alert">{{ error }}</p><button @click="compare">Compare latest choices</button></template>

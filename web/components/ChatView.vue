@@ -5,6 +5,7 @@ import ResponseText from './ResponseText.vue';
 import ChatWorkItems from './ChatWorkItems.vue';
 import SubmissionStatus from './SubmissionStatus.vue';
 import ChatComposer from './ChatComposer.vue';
+import BrandMark from './BrandMark.vue';
 const emit = defineEmits<{create: []; providers: []; settings: [id: string]}>();
 const { state: s } = useWorkspace();
 const selected = computed(() => s.value.bots.find(agent => agent.id === s.value.selected));
@@ -31,14 +32,14 @@ function scroll(event: Event) {
       <template v-if="selected">
         <template v-if="s.messages.length">
           <div v-for="message in s.messages" :key="message.id" class="message" :class="{'user-message': message.role === 'user'}">
-            <div class="who">{{ message.role === 'user' ? 'YOU' : selected.name.toUpperCase() }}{{ message.role === 'assistant_stopped' ? ' · stopped' : '' }}</div>
+            <div class="who"><span v-if="message.role !== 'user'" class="avatar">{{ selected.name[0]?.toUpperCase() }}</span>{{ message.role === 'user' ? 'YOU' : selected.name.toUpperCase() }}{{ message.role === 'assistant_stopped' ? ' · stopped' : '' }}</div>
             <div v-if="message.role === 'user'" class="bubble">{{ message.content }}</div>
             <ResponseText v-else :text="message.content" />
             <SubmissionStatus v-if="submission && message.id === 'command-user-' + submission.id" />
             <ChatWorkItems v-if="message.role === 'user'" :work="s.work.find(work => message.id === 'command-user-' + work.id)" :inbox="relevant" />
           </div>
         </template>
-        <div v-else class="empty"><strong>Say hello to {{ selected.name }}</strong><p>This is your ongoing conversation.</p></div>
+        <div v-else class="empty empty-state"><div class="logo-large"><BrandMark /></div><h2>Message {{ selected.name }}</h2><p>Send a message to start the conversation.</p></div>
         <div v-for="work in unmatched" :key="'unmatched-' + work.id" class="message">
           <div class="who">{{ selected.name.toUpperCase() }} · request {{ work.id }}</div><ChatWorkItems :work="work" :inbox="relevant" />
         </div>
