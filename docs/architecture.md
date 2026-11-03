@@ -6,6 +6,17 @@ loopback service. The automatic terminal instance stores its SQLite database and
 client credential under `~/.staf/terminal-instance` by default. The daemon
 continues after the terminal exits; it is not an operating-system service.
 
+Docker runs the same service at container loopback port 3210. A TCP forwarder on
+container port 3211 is published only at host `127.0.0.1:3210`; Host/Origin and
+client-token checks remain in the shared service. Native and Docker deployment
+instructions share `deploy/connect.sh` for protected SSH forwarding from another
+machine. Peer containers and host administrators remain trusted. Cross-machine
+acceptance is unverified; see [Docker evidence](docker-verification.md).
+The full data volume contains adjacent agent revisions and credential files as
+well as SQLite. `deploy/docker-data.sh` provides stopped-volume archives and
+empty-volume restore; a migration's SQLite backup alone does not recover those
+files. No background-task UI or new tool capability is introduced by deployment.
+
 The terminal edits a bot profile through the service. Each edit checks its
 revision, and an accepted request captures the current profile. Creation defaults
 are copied to new bots and do not change existing bots. Provider credentials and

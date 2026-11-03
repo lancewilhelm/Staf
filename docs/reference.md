@@ -185,7 +185,10 @@ SHA-256 token hashes in SQLite and limits JSON request bodies to 64 KiB, except 
 The host issues a one-time code at startup and on each terminal Enter. Browser
 requests with an Origin must match the exact server origin; JSON and bearer
 credentials are required for protected writes. No network transport beyond
-loopback is implemented here. ChatGPT and OpenRouter use instance-owned credentials; LM Studio and live use host configuration. Each requires an explicit bot model. Paired clients have derived
+loopback is implemented in the HTTP service. The prepared native and Docker
+deployment paths use [SSH forwarding](docker-installation.md#protected-access-from-another-machine)
+with `sh deploy/connect.sh USER@HOST`, preserving the accepted loopback origin.
+Cross-machine acceptance remains unverified. ChatGPT and OpenRouter use instance-owned credentials; LM Studio and live use host configuration. Each requires an explicit bot model. Paired clients have derived
 identifiers; any paired client can list and revoke them. Every paired client is trusted to act for the sole owner, including managing approvals and settings; there is no separate owner role check.
 
 Paired clients can read the latest main-chat progress with `GET /api/bots/{id}/response`, or `responseProgress` within `GET /api/commands/{id}`. The response has the command ID, bot ID, accepted/running/stopping/stopped/completed/failed/interrupted state, provisional text and a safe error. `instance response-follow URL CREDENTIAL_FILE COMMAND_ID` polls and prints changed progress as JSON lines until a terminal state. Text that could complete a known credential may be withheld at chunk boundaries. The service also holds unfinished words for safe URL handling. Provisional snapshots stop growing at one million UTF-16 code units per provider step; the completed response remains available. Version 28 adds a progress table after a database backup; incomplete output is retained separately from committed conversation messages. ChatGPT direct and OpenRouter can emit deltas; LM Studio, generic Chat Completions and demo adapters are buffered. No live provider verification was performed for this change.
@@ -215,7 +218,11 @@ revisions return HTTP 409. Profile edits preserve TOML comments and surrounding
 formatting; an unsupported layout returns 409 instead of discarding its text and
 can be changed by directly editing the file. The service stores a profile snapshot for each
 accepted chat command. Archive rejects active chat commands. The instance captures the profile for each turn, stores full provider history privately, and exposes only visible chat. New command IDs use a private keyed fingerprint to distinguish exact retries from different input that redacts to the same text. Older commands without a fingerprint remain queryable, but reuse of their IDs is rejected because the original input cannot be verified. Provider-specific settings are checked during execution. A pre-journal SQLite database is copied with `VACUUM INTO` before migration. The backup path
-is printed by `instance serve`; this is not a complete backup/restore workflow.
+is printed by `instance serve`; this database copy alone is not a full backup.
+For Docker, `sh deploy/docker-data.sh backup PROJECT BACKUP_DIRECTORY` archives
+the stopped full data volume and records checkout/image identity; `restore PROJECT ARCHIVE`
+requires an empty stopped destination. See [recovery](docker-installation.md#back-up-stopped-data)
+for private archive handling, configuration outside SQLite and verification gaps.
 
 OpenRouter streams Chat Completions with usage requested, reconstructs fragmented function calls, and commits only after a supported finish reason and the stream terminator. An incomplete provider response cannot dispatch its proposed tools or become a completed message; tools completed in earlier response steps remain recorded. Models vary in tool support; missing usage remains unavailable. LM Studio and generic Chat Completions remain buffered. OpenRouter and other chat-completions adapters combine caller cancellation with
 their 60-second timeout. Offline tests verify that cancellation closes a local

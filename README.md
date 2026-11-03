@@ -60,7 +60,7 @@ The shared instance includes a provisional daily and weekly schedule preview for
 
 - [Usage guide](docs/usage.md)
 - [Native Linux installation and backup](docs/native-linux-installation.md)
-- [Docker Compose installation and backup](docs/docker-installation.md)
+- [Docker Compose installation, protected SSH access and recovery](docs/docker-installation.md) ([verification gaps](docs/docker-verification.md))
 - [Browser and CLI test plan](docs/mvp-test-plan.md)
 - [Fresh direct ChatGPT sign-in](docs/codex-direct.md)
 - [Settings and recovery](docs/settings.md)

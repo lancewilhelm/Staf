@@ -88,8 +88,15 @@ The file can contain a code that was already used. Rotate before pairing.
    Keep this terminal open.
 
    ```sh
-   ssh -N -L 3210:127.0.0.1:3210 USERNAME@HOST
+   sh deploy/connect.sh USERNAME@HOST
    ```
+
+   Run this from a client checkout. The same helper is used by the
+   [Docker path](docker-installation.md#protected-access-from-another-machine).
+   It binds only client loopback, exits on forwarding failure and uses SSH
+   keepalives. Verify the SSH host key through a trusted procedure first. Both
+   machines and their administrators must be trusted. Actual cross-machine
+   operation remains unverified.
 
 5. Open `http://127.0.0.1:3210/` on that client and enter the code. The code is
    single-use. Rotate it again for another client. The browser stores its token

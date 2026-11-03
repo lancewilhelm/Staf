@@ -15,7 +15,7 @@ WORKDIR /app
 COPY --from=build --chown=node:node /app/dist ./dist
 COPY --from=build --chown=node:node /app/node_modules ./node_modules
 COPY --chown=node:node package.json ./package.json
-RUN mkdir /data && chown node:node /data
+RUN mkdir -m 0700 /data && chown node:node /data
 USER node
 EXPOSE 3211
 CMD ["node", "dist/container-forward.js"]

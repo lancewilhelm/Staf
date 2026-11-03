@@ -1,48 +1,195 @@
-# Run Staf with Docker Compose
+# Install and recover Staf with Docker Compose
 
-Run these commands from the repository root on the Docker host. Docker Compose builds the image using the repository lockfile. The build downloads the pinned pnpm version and dependencies. The Node base image uses a mutable tag, so rebuilding later can select a newer Node 22 image.
-
-For OpenRouter, use global Settings or the paired CLI to save a key in the instance credential store after startup. The shared instance ignores `OPENROUTER_API_KEY` from the host environment. Keep the instance data volume private; the stored key is plaintext and Docker administrators can access it. Demo mode does not require a key.
-
-```sh
-docker compose up -d --build
-docker compose logs staf
-```
-
-Open `http://127.0.0.1:3210` on the Docker host and enter the pairing code printed in the logs. A code works once. For another code, attach to the running service and press Enter.
+Run these commands from a reviewed checkout on the Docker host with Docker Engine
+and Compose v2. Use the explicit project name `staf` consistently: another name
+selects another volume. The build downloads pinned pnpm and locked dependencies.
+The Node 22 base-image tag is mutable; a later build can select a newer image.
 
 ```sh
-docker attach "$(docker compose ps -q staf)"
+docker compose -p staf up -d --build
+docker compose -p staf ps
+docker compose -p staf logs staf
 ```
 
-Detach with Ctrl-P followed by Ctrl-Q. Pairing codes appear in the container logs, so anyone who can read those logs can use an unspent code. Restrict Docker access to trusted administrators.
+Open `http://127.0.0.1:3210/` on the host and enter the single-use pairing code
+from the logs. To issue another code, attach on the host and press Enter:
 
-The published port binds to host loopback. The app checks the exact host and origin `http://127.0.0.1:3210`. The internal forwarder listens on container port 3211, and other containers on its Docker network can reach it and supply those headers. Trust those peers and Docker administrators. Do not publish the port to a LAN or the internet. Remote access needs a protected tunnel that preserves the accepted host and origin. A tunnel has not been verified here.
+```sh
+docker attach "$(docker compose -p staf ps -q staf)"
+```
 
-The named `staf-data` volume stores the database and instance data at `/data`. The service runs as the `node` user. Docker initializes a new named volume with the image directory's ownership. A bind mount or restored volume must be writable by that user.
+Detach with Ctrl-P followed by Ctrl-Q. Protect the terminal and Docker logs:
+an unused code grants access to the whole instance. Every paired client acts
+for the same owner and can manage settings, other clients and approvals.
 
-## Back up and restore
+Create a Demo agent for offline checks. OpenRouter keys are saved through global
+Settings or the paired CLI; ChatGPT uses an instance-owned grant. Do not copy
+another application's credentials. Compose does not forward host provider
+environment variables. LM Studio or generic live-provider configuration needs
+an explicit, reviewed Compose override. Live sign-in and inference require
+separate authorization during acceptance testing.
 
-Stop the service before copying the volume. The archive can contain chats, client credentials, provider credentials, and other private data. Store it securely and protect it as you would the original data.
+## Protected access from another machine
+
+Use the same authenticated SSH forwarding path as the
+[native installation](native-linux-installation.md#connect-and-pair-a-client).
+The host needs an SSH server and the client needs OpenSSH. Establish access and
+verify the host key through your normal trusted procedure first. From a trusted
+client with this checkout, keep this command running:
+
+```sh
+sh deploy/connect.sh USERNAME@HOST
+```
+
+The helper forwards only client loopback port 3210 to host loopback port 3210,
+exits if the local forward cannot bind, and uses SSH keepalives. Stop a conflicting
+local instance yourself before opening the tunnel. Keep Docker's published port
+on host loopback. On the client open **exactly** `http://127.0.0.1:3210/` and pair
+with a fresh code obtained through the protected host terminal.
+
+A built client checkout can also pair its CLI. Read the code interactively to
+keep its literal value out of shell history:
 
 ```sh
 umask 077
-docker compose stop staf
-docker compose run --rm -T --no-deps --user 0 --entrypoint tar staf -C /data -cf - . > staf-backup.tar
-docker compose start staf
+mkdir -p "$HOME/.staf/clients"
+read -r pairing_code
+node dist/cli.js instance pair http://127.0.0.1:3210 "$HOME/.staf/clients/docker.json" "$pairing_code"
+unset pairing_code
+node dist/cli.js instance clients http://127.0.0.1:3210 "$HOME/.staf/clients/docker.json"
 ```
 
-To restore the archive into a separate Compose project, use the same source checkout and build its image first. The separate project has its own named volume. Do not start both projects on port 3210 at the same time. This command restores into the destination volume and overwrites matching files there; choose a new project with an empty volume.
+Use a new credential filename for each pairing; `pair` refuses existing files.
+The code is briefly visible to local process inspectors. The browser token is
+in localStorage; the CLI token is in its private file. Other local processes can
+reach the forwarded port. From another paired client, revoke a selected ID with
+`node dist/cli.js instance revoke URL CREDENTIAL_FILE CLIENT_ID`. Its next request
+must fail; a revoked browser must return to pairing after reload.
+
+SSH protects pairing codes, tokens and chat on the cross-machine segment. Both
+endpoints, administrators, the SSH account, browser profile, Docker administrators
+and peer containers on the Compose network must be trusted. Docker networking
+alone provides no authenticated transport protection. The forwarder listens on
+container port 3211 and passes bytes to the loopback service; peers can supply
+its accepted Host and Origin headers. Protected APIs still require paired tokens.
+The accepted origin is `http://127.0.0.1:3210`. Direct LAN HTTP, arbitrary reverse
+proxies, public publishing and mobile access without a loopback tunnel are
+outside this path. Separate-machine SSH acceptance remains unverified.
+
+## Durable state
+
+The project-scoped `staf-data` volume contains **all of `/data`**: SQLite, agent
+configuration and soul revisions, credentials, provider defaults and database
+migration backups. Agent configuration is not all in SQLite. The service runs
+as `node`; new volumes initialize an owner-only data directory. Existing volumes
+keep their permissions. Bind mounts must be writable by the image's `node` user.
+Do not mount the host Docker socket into Staf.
+
+`docker compose -p staf up -d --force-recreate` retains the named volume. `down`
+retains it too; **`down --volumes` deletes it**. Browser appearance, unsent drafts
+and client-side credentials are outside this volume. Retain the reviewed source,
+Compose overrides and any separate environment files alongside the data backup.
+
+## Back up stopped data
+
+Stop every writer. The helper refuses a volume mounted by a running container,
+checks that an existing instance database is present, creates a unique private
+backup directory, and checks the archive before publishing `data.tar`. Failed
+archives remain named `data.tar.partial`. It does not start or stop Staf for you.
+
+```sh
+docker compose -p staf stop staf
+sh deploy/docker-data.sh backup staf "$HOME/staf-backups"
+```
+
+Inspect the printed archive with `tar -tf BACKUP_FILE`. Do not update if creation
+or inspection fails. The directory also records the checkout commit and the
+stopped service's image ID. A dirty checkout or unrecorded override needs its own
+retained copy. Archives contain private chat and possibly client/provider secrets;
+keep them private and retain a copy away from the host. Do not start another
+writer while copying. After a backup without an update, resume with
+`docker compose -p staf start staf`.
+
+## Owner-initiated update
+
+1. Stop Staf and make the full backup above. Retain the current source and
+   Compose configuration. Tag the old image before rebuilding, for example
+   `docker image tag "$(docker compose -p staf images --quiet staf)" staf-before-update:retained`.
+   Use a unique tag for each retained version.
+2. Select the reviewed commit with `git checkout YOUR_REVIEWED_COMMIT`, then run
+   `docker compose -p staf up -d --build`. Keep the same project and volume.
+3. Check logs, profiles, settings and retained chats, and use Demo to verify a
+   new response. Inspect existing task history through the API or CLI; the
+   deferred Activity UI is not required.
+
+Before supported database migrations, startup creates a private
+`/data/instance.sqlite.before-*.sqlite` and prints its path. That file contains
+the previous database, not a full snapshot of adjacent configuration or credentials.
+Keep the full backup until acceptance. An older image may reject a newer database.
+To roll back, stop the updated instance and restore the full backup into a new
+empty project using the retained old application/image. Preserve the updated
+volume; changing the image does not reverse a migration. Updates are manual.
+
+## Restore into a replacement instance
+
+Use only a trusted archive. On the destination host, install the same reviewed
+checkout and prerequisites, then build for a new project. Keep the original
+instance stopped while accepting the copy so clients cannot write to two
+instances that will diverge.
 
 ```sh
 docker compose -p staf-restored build
-docker compose -p staf-restored run --rm -T --no-deps --user 0 --entrypoint tar staf -C /data -xf - < staf-backup.tar
+sh deploy/docker-data.sh restore staf-restored /absolute/path/to/data.tar
+docker compose -p staf-restored up -d --no-build
+docker compose -p staf-restored logs staf
 ```
 
-Stop the original service before starting the restored project with `docker compose -p staf-restored up -d`. Verify the restored bots and chats before relying on the copy. A stopped-volume copy and restore were tested locally with offline demo data. Restore to another host and a full upgrade with a schema change have not been verified.
+The helper refuses running or nonempty destinations and restores ownership for
+`node`. Failed extraction can leave partial data; preserve it for diagnosis and
+choose another empty project for a retry. It does not delete existing records
+or sanitize untrusted archives.
 
-Before an owner-initiated update, make a backup, then update the checkout and run `docker compose up -d --build`. The service creates a database backup before supported schema migrations when applicable. Keep the separate backup until you have verified the updated instance. Reverting code after a migration may require restoring the previous backup.
+Inspect profiles (including archived agents), configuration revisions, chat,
+defaults, approval settings and existing task/Activity records. Valid clients
+should still work; revoked clients must remain rejected. An older backup can
+resurrect client authorizations or provider grants revoked since that backup.
+Inspect/revoke clients or reauthenticate before reconnecting regular clients.
+Provider reauthentication is allowed. Replacement-host recovery needs its own
+observed check; same-host restore is not evidence for it.
 
-## Codex sign-in limitation
+## Verification and reusable acceptance
 
-The shared-instance Codex sign-in flow uses the same loopback origin and published port as the paired browser, including its `/auth/callback` route. Start sign-in from a paired client on the Docker host. The initiating client can check or cancel its attempt, including after refreshing the page. The callback and approval flow have synthetic tests; live Codex sign-in and provider execution through Docker have not been verified. Keep the port on host loopback.
+See [Docker verification](docker-verification.md) for observed checks and gaps.
+On a development machine with pinned Node/pnpm, local Chromium, Docker access
+and free loopback port 3210, run:
+
+```sh
+corepack pnpm run build
+STAF_DOCKER_EVIDENCE=/absolute/new/path/docker-results.txt node test/docker/installation.mjs
+```
+
+This opt-in script builds the real image using unique disposable Compose projects.
+It tests the current browser/CLI pairing and shared Demo chat, invalid tokens,
+Host/Origin checks, revocation, container replacement, stopped backup and
+empty-volume restore guards. It reconstructs schema 29, upgrades to 30, inspects
+the private pre-migration backup, and compares retained data and file hashes.
+Cleanup removes only its generated projects, volumes and local images. The
+evidence path must not exist. It makes no live-provider requests. The older
+`test/browser/docker-smoke.mjs` exercises scratch-shell execution on the retired
+Advanced page and does not establish installation acceptance.
+
+For separate-machine acceptance, record host/client OS, Docker/Compose/OpenSSH
+versions and revision. Open the tunnel from a second machine; pair browser and
+CLI using separate codes; exchange Demo messages; check unauthenticated API
+rejection; inspect and revoke each client from another paired client; verify
+rejection after reload or a new CLI call. Close the tunnel and confirm new
+requests fail. Copy a trusted backup to a replacement Docker host through your
+approved secure transport, then repeat the restore/readback checks. Record
+commands, results and gaps separately from same-host container checks.
+
+## ChatGPT sign-in limitation
+
+The callback uses the paired browser's accepted loopback origin and port.
+Synthetic callback tests do not establish live Docker or SSH sign-in. Coordinate
+authorized checks with [remote setup](https://github.com/lancewilhelm/Staf/issues/23).
+Do not sign in or issue inference merely to validate these instructions.
