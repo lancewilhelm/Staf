@@ -21,7 +21,7 @@ export const providerRegistry: Readonly<Record<string, Registration>> = {
   } },
   openrouter: { description: 'OPENROUTER — API credits/charges', create: ({ env, model, reasoning, instructions }) => openRouterProvider(env, model, fetch, reasoning, instructions) },
   codex: { description: 'CODEX DIRECT — Staf ChatGPT-plan registration; no CLI fallback', create: async ({ model, reasoning, dataDir, sessionId, instructions }) => {
-    if(!model)throw Error('Choose an account-available model for direct Codex');
+    if(!model)throw Error('Choose an account-available model for direct ChatGPT');
     await loadDirectCredential(dataDir || resolve('.staf'));
     return directCodexProvider({model,reasoning,dataDir:dataDir||resolve('.staf'),sessionId:sessionId||randomUUID(),instructions});
   } },

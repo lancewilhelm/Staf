@@ -1,3 +1,4 @@
+import {providerLabel} from './provider-label.js';
 import { emitKeypressEvents } from 'node:readline';
 import { TerminalView, cleanText } from './terminal-view.js';
 import { errorMessage } from './validation.js';
@@ -38,7 +39,8 @@ export async function openSettingsMenu(ops: SharedSettingsOperations, view: Term
   function message(title: string, lines: string[]): void { push({ title, lines: [], choices: [...lines.map(label => ({ label, select: () => {} })), { label: 'Back', select: back }], selected: 0 }); }
   function run(work: (current: () => boolean) => Promise<void>): void { const token = ++version; const active = () => !closed && token === version; work(active).catch(error => { if (active()) message('Settings error', [errorMessage(error)]); }); }
   function confirm(key: 'provider' | 'model' | 'reasoning', value: string, defaults = false): void {
-    push({ title: 'Confirm setting', lines: defaults ? [`${key}: ${value || '(provider default)'}`, 'Applies only to bots created later.'] : key === 'provider' ? [`${key}: ${value}`, 'Next request may send this chat', 'history to this provider.'] : [`${key}: ${value || '(provider default)'}`, 'Applies to this shared bot for new work.'], selected: 1, choices: [
+    const label = key === 'provider' ? providerLabel(value) : value || '(provider default)';
+    push({ title: 'Confirm setting', lines: defaults ? [`${key}: ${label}`, 'Applies only to bots created later.'] : key === 'provider' ? [`${key}: ${label}`, 'Next request may send this chat', 'history to this provider.'] : [`${key}: ${label}`, 'Applies to this shared bot for new work.'], selected: 1, choices: [
       { label: 'Apply setting', select: () => run(async active => { const text = await (defaults ? ops.setDefault(key, value) : ops.set(key, value)); if (active()) message('Setting applied', [text]); }) },
       { label: 'Cancel', select: back },
     ] });
@@ -46,7 +48,7 @@ export async function openSettingsMenu(ops: SharedSettingsOperations, view: Term
   function editor(key: 'model' | 'reasoning', defaults = false): void { push({ title: `Enter ${key}`, lines: ['Empty value uses the provider default.'], choices: [], selected: 0, edit: { value: '', cursor: 0, submit: value => confirm(key, value, defaults) } }); }
   current = { title: 'Staf settings', lines: ['Settings belong to this shared bot.', 'New bot defaults are managed separately.'], selected: 0, choices: [
     { label: 'Show bot settings', select: () => run(async active => { const lines = await ops.show(); if (active()) message('Bot settings', lines); }) },
-    { label: 'Provider', select: () => push({ title: 'Provider', lines: ['Endpoints and credentials are configured on the host.'], selected: 0, choices: ['demo', 'codex', 'openrouter', 'lmstudio', 'live'].map(value => ({ label: value, select: () => confirm('provider', value) })) }) },
+    { label: 'Provider', select: () => push({ title: 'Provider', lines: ['Endpoints and credentials are configured on the host.'], selected: 0, choices: ['demo', 'codex', 'openrouter', 'lmstudio', 'live'].map(value => ({ label: providerLabel(value), select: () => confirm('provider', value) })) }) },
     { label: 'Model', select: () => push({ title: 'Model', lines: [], selected: 0, choices: [
       { label: 'Enter model ID', select: () => editor('model') },
       { label: 'Discover model IDs (metadata request)', select: () => run(async active => { const models = await ops.models(); if (active()) push({ title: 'Models', lines: [], selected: 0, choices: [...models.map(value => ({ label: value, select: () => confirm('model', value) })), { label: 'Back', select: back }] }); }) },
@@ -55,13 +57,13 @@ export async function openSettingsMenu(ops: SharedSettingsOperations, view: Term
     { label: 'Reasoning', select: () => editor('reasoning') },
     { label: 'New bot defaults', select: () => push({ title: 'New bot defaults', lines: ['Only bots created later use these values.'], selected: 0, choices: [
       { label: 'Show defaults', select: () => run(async active => { const lines = await ops.showDefaults(); if (active()) message('New bot defaults', lines); }) },
-      { label: 'Provider', select: () => push({ title: 'Default provider', lines: ['Existing bots keep their settings.'], selected: 0, choices: ['demo', 'codex', 'openrouter', 'lmstudio', 'live'].map(value => ({ label: value, select: () => confirm('provider', value, true) })) }) },
+      { label: 'Provider', select: () => push({ title: 'Default provider', lines: ['Existing bots keep their settings.'], selected: 0, choices: ['demo', 'codex', 'openrouter', 'lmstudio', 'live'].map(value => ({ label: providerLabel(value), select: () => confirm('provider', value, true) })) }) },
       { label: 'Model', select: () => editor('model', true) },
       { label: 'Reasoning', select: () => editor('reasoning', true) },
       { label: 'Back', select: back },
     ] }) },
     { label: 'Host endpoint configuration', select: () => message('Host endpoints', ['Set LMSTUDIO_BASE_URL for LM Studio.', 'Set STAF_BASE_URL for live.', 'Configure on the instance host and restart it.']) },
-    { label: 'Codex sign-in', select: () => close(false, true) },
+    { label: 'ChatGPT sign-in', select: () => close(false, true) },
     { label: 'Close settings', select: () => close(false) },
   ] };
   function keypress(text: string | undefined, key: { name?: string; ctrl?: boolean; meta?: boolean }): void {

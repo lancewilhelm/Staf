@@ -13,7 +13,7 @@ reference for Responses message conversion, cache scope and usage. Its legacy
 ChatGPT backend route and OAuth registration are not copied. Current OpenAI docs
 specify dynamic registration for the app's own name and host, and inference at
 `https://api.openai.com/v1/responses`. Staf uses that contract. It identifies as
-Staf and does not impersonate Hermes or the official Codex client.
+Staf and does not impersonate Hermes or the official ChatGPT client.
 
 `codex-direct-auth.ts` owns the separate direct grant under `DATA_DIR/auth`.
 `codex-host.json` holds a stable host UUID. `codex-direct.json` holds the issued
@@ -136,7 +136,7 @@ Responses `input_tokens` includes `input_tokens_details.cached_tokens`.
 `output_tokens_details.reasoning_tokens` is an output subset. Staf retains these
 subsets without adding them again, preserving missing versus reported zero.
 Hermes uses an uncached internal input bucket and re-adds cached input in its
-prompt total. Staf keeps its existing inclusive convention instead. No Codex
+prompt total. Staf keeps its existing inclusive convention instead. No ChatGPT
 API-price estimate or account-quota inference is added. Historical CLI aggregate
 observations remain labeled as execution scope.
 

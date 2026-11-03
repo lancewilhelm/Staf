@@ -31,7 +31,7 @@ arbitrary requests to change configuration.
 To use OpenRouter, save an API key in the shared instance through global
 Settings or the paired CLI commands below. Select the provider and an explicit
 model in the bot profile. The instance does not silently fall back to another
-provider. Codex uses a Staf-owned sign-in grant. Shared-instance sign-in and
+provider. ChatGPT uses a Staf-owned sign-in grant. Shared-instance sign-in and
 provider calls have synthetic coverage; live access remains unverified.
 
 For LM Studio or generic HTTP environment changes, restart the automatic instance.
@@ -71,19 +71,19 @@ The available providers are `demo`, `codex`, `openrouter`, `lmstudio`, and
 offline echo and does not use a language model. Switching providers can send the
 existing conversation to the newly selected provider on the next request.
 
-### Use Codex
+### Use ChatGPT
 
-1. Start `staf` and enter `/auth codex login`, or select **Codex sign-in** in
+1. Start `staf` and enter `/auth chatgpt login`, or select **ChatGPT sign-in** in
    `/settings`.
-2. Open the printed URL and complete sign-in in the browser. Use `/auth codex
+2. Open the printed URL and complete sign-in in the browser. Use `/auth chatgpt
    status` to inspect the attempt and local credential status.
-3. Select `codex` and an account-available model in `/settings`, or enter
-   `/set provider codex`, confirm with `/confirm-provider`, and enter `/set model MODEL_ID`.
+3. Select **ChatGPT** and an account-available model in `/settings`, or enter
+   `/set provider chatgpt`, confirm with `/confirm-provider`, and enter `/set model MODEL_ID`.
 4. Send a message in chat and inspect the response. A real request uses the
    account's plan permissions. Do not paste credentials into chat.
 
 Sign-in and model calls in the shared instance have synthetic coverage but have
-not been live verified. See [Codex sign-in and recovery](codex-direct.md).
+not been live verified. See [ChatGPT sign-in and recovery](codex-direct.md).
 
 ### Use OpenRouter
 
@@ -146,14 +146,14 @@ and notices can change the next request. Staf does not compact history. See
 ## Resolve common errors
 
 - For `ERR_PNPM_UNSUPPORTED_ENGINE`, check the Node and pnpm versions. Staf
-  requires Node 22.16 or later and pnpm 10.27.0 or later.
+  requires Node 22.16 or later and pnpm 12.16.1 or later.
 - If a provider reports a missing credential or model, check the instance connection or host environment
   and the bot profile. Restart the instance after changing host variables.
 - For HTTP 401, check the selected provider's credential. For 402, check credits.
   For 429, wait before retrying. Staf does not automatically retry paid calls.
 - For LM Studio connection errors, check the server and API root. Staf does not
   start the server or download models.
-- For Codex sign-in errors, use `/auth codex status` and retry sign-in when ready.
+- For ChatGPT sign-in errors, use `/auth chatgpt status` and retry sign-in when ready.
 - If the local client credential is revoked or missing for an existing database,
   pair an explicit client. Staf does not restore the credential automatically.
 
@@ -185,8 +185,8 @@ Informational and success notices expire after six seconds, with a progress bar.
 Hovering or focusing a toast pauses its timer. Errors remain until dismissed;
 correctable errors also remain beside the affected control or message.
 
-A saved Codex sign-in is shared by all agents; it does not establish that the
-provider or a model is available. In **Settings**, **Connect Codex** opens sign-in
+A saved ChatGPT sign-in is shared by all agents; it does not establish that the
+provider or a model is available. In **Settings**, **Connect ChatGPT** opens sign-in
 in a new tab. If the tab is blocked or closed, use **Continue sign-in** for the
 same attempt on the instance host, and return to Settings for progress.
 Cancel a pending attempt or retry a failed or expired one. If the page was
@@ -202,7 +202,7 @@ the explanation; hovering the control also shows it. Press
 Enter to send a message or Shift+Enter to insert a new line. The workspace keeps drafts when switching agents. If sign-in or a model is
 missing, the submitted text remains beside an explanation and Retry control.
 
-In agent settings, Demo is always available; Codex and OpenRouter can be chosen
+In agent settings, Demo is always available; ChatGPT and OpenRouter can be chosen
 when their shared connection is saved. A saved connection does not verify account
 or model access. A disconnected current provider remains visible, and **Open
 provider settings** lets you repair a connection and return to your unsaved
@@ -297,7 +297,7 @@ remove the old revision's `.retired` marker after review. The old files remain
 on disk.
 
 A later request after a provider change can send existing chat history to the new provider. Creation defaults set provider, model, and reasoning for future bots. The instance copies these settings at creation; changing defaults never changes existing bots. Revisions prevent stale clients from overwriting each other. In the CLI, use `instance defaults URL CREDENTIAL_FILE` and `instance defaults-set URL CREDENTIAL_FILE REVISION PROVIDER MODEL REASONING`; use `-` for an empty model or reasoning. Permission and approval settings remain separate. The description is owner-edited metadata visible to other bots; keep private instructions and memory out of it. New bots start with an empty description.
-The deterministic demo provider does not follow the instructions. Select Codex, OpenRouter, LM Studio, or live and an explicit model in the bot profile. OpenRouter uses the managed instance key described above; the instance command does not load the project `.env` file. Codex uses the Staf grant under the directory containing the instance database. From a paired browser, use Codex sign-in and open the provided link on the instance host. The initiating paired client can check or cancel that attempt, including after refreshing the page. The CLI provides `instance codex-auth-start URL CREDENTIAL_FILE`, `codex-auth-current URL CREDENTIAL_FILE`, `codex-auth-status URL CREDENTIAL_FILE ATTEMPT_ID`, `codex-auth-cancel URL CREDENTIAL_FILE ATTEMPT_ID`, `codex-auth-credential URL CREDENTIAL_FILE`, and `codex-auth-logout URL CREDENTIAL_FILE`. The callback listens on the same loopback origin. Revoking the initiating client prevents credential commit. These paths have been tested with synthetic auth only; live sign-in has not been verified. Provider failures do not fall back to another provider. Live provider execution has not been verified in this preview.
+The deterministic demo provider does not follow the instructions. Select ChatGPT, OpenRouter, LM Studio, or live and an explicit model in the bot profile. OpenRouter uses the managed instance key described above; the instance command does not load the project `.env` file. ChatGPT uses the Staf grant under the directory containing the instance database. From a paired browser, use ChatGPT sign-in and open the provided link on the instance host. The initiating paired client can check or cancel that attempt, including after refreshing the page. The CLI provides `instance chatgpt-auth-start URL CREDENTIAL_FILE`, `chatgpt-auth-current URL CREDENTIAL_FILE`, `chatgpt-auth-status URL CREDENTIAL_FILE ATTEMPT_ID`, `chatgpt-auth-cancel URL CREDENTIAL_FILE ATTEMPT_ID`, `chatgpt-auth-credential URL CREDENTIAL_FILE`, and `chatgpt-auth-logout URL CREDENTIAL_FILE`. The callback listens on the same loopback origin. Revoking the initiating client prevents credential commit. These paths have been tested with synthetic auth only; live sign-in has not been verified. Provider failures do not fall back to another provider. Live provider execution has not been verified in this preview.
 
 CLI examples (use a fresh host code for each client):
 

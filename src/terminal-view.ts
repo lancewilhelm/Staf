@@ -1,3 +1,4 @@
+import {providerLabel} from './provider-label.js';
 import type { EffectiveSettings } from './settings.js';
 import type { RuntimeEvent } from './types.js';
 
@@ -16,13 +17,13 @@ export class TerminalView {
     return this.color ? `\x1b[${codes[role]}m${clean}\x1b[0m` : clean;
   }
   context(settings: EffectiveSettings): string {
-    return this.style(`Provider: ${settings.provider.value} | Model: ${settings.model.value || '(provider default)'} | Reasoning: ${settings.reasoning.value}`, 'context');
+    return this.style(`Provider: ${providerLabel(settings.provider.value)} | Model: ${settings.model.value || '(provider default)'} | Reasoning: ${settings.reasoning.value}`, 'context');
   }
   event(event: RuntimeEvent): string {
     switch (event.type) {
       case 'assistant': return `\n${this.style('staf>', 'heading')} ${cleanText(event.text)}\n`;
       case 'assistant_observed': return this.style(`[observed] ${event.text}`, 'dim');
-      case 'provider_start': return this.style(`[provider_start] ${event.provider}`, 'dim');
+      case 'provider_start': return this.style(`[provider_start] ${providerLabel(event.provider)}`, 'dim');
       case 'tool_start': return this.style(`[tool_start] ${event.name}`, 'status');
       case 'tool_result': return this.style(`[tool_result] ${event.name} [${event.success ? 'ok' : 'failed'}]: ${event.content}`, event.success ? 'success' : 'error');
       case 'error': return this.style(`[error] ${event.message}`, 'error');

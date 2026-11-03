@@ -7,6 +7,7 @@ type Status = {id:string; phase:Phase; expiresAt:number};
 type Active = {id:string; initiator:string; attempt:LoginAttempt; controller:AbortController; expiresAt:number; phase:Phase};
 type Options = {
  redirectUri:string;
+ authorizationUrl?:typeof authorizationUrl;
  prepare:()=>Promise<Pick<LoginAttempt,'hostId'|'clientId'|'previous'>>;
  authorized:(initiator:string)=>Promise<boolean>;
  complete:(attempt:LoginAttempt, callback:URL, signal:AbortSignal, beforeCommit:()=>Promise<void>)=>Promise<void>;
@@ -42,7 +43,7 @@ export class InstanceAuth {
    this.expire(a);
    if(a.phase!=='waiting'||this.closed)throw Error('Sign-in interrupted');
    a.attempt={...prepared,state:randomBytes(32).toString('base64url'),nonce:randomBytes(32).toString('base64url'),verifier:randomBytes(48).toString('base64url'),redirectUri:this.options.redirectUri};
-   return {...this.view(a),url:authorizationUrl(a.attempt)};
+   return {...this.view(a),url:(this.options.authorizationUrl??authorizationUrl)(a.attempt)};
   }catch{if(a.phase==='waiting')a.phase='failed';throw Error('Unable to start sign-in');}
  }
  currentStatus(initiator:string):Status|undefined{const a=this.current;if(!a||a.initiator!==initiator)return undefined;this.expire(a);return this.view(a);}

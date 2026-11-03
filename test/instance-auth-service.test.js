@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {startInstance} from '../dist/instance-service.js';
 
-test('paired instance CLI can disconnect a saved Codex credential',async()=>{
+test('paired instance CLI can disconnect a saved ChatGPT credential',async()=>{
  const {mkdtempSync,mkdirSync,writeFileSync,existsSync,rmSync}=await import('node:fs');
  const {tmpdir}=await import('node:os');const {join}=await import('node:path');const {spawn}=await import('node:child_process');
  const dir=mkdtempSync(join(tmpdir(),'staf-codex-cli-')),path=join(dir,'auth','codex-direct.json');mkdirSync(join(dir,'auth'));

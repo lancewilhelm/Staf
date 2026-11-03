@@ -1,7 +1,7 @@
 # Develop Staf
 
 Use Node.js 22.16 or later and Corepack. The `packageManager` field in
-`package.json` selects pnpm 10.27.0, which also matches the Docker build.
+`package.json` selects pnpm 12.16.1, which also matches the Docker build.
 Use Corepack explicitly so a different `pnpm` earlier in your PATH does not
 select a different version:
 
@@ -15,7 +15,34 @@ If an existing `node_modules` was installed with another pnpm major version,
 reinstall the locked dependencies with the pinned version. pnpm may ask to
 recreate `node_modules`; this does not remove instance data or credentials.
 
+Keep the exact pnpm version aligned in `package.json` and `Dockerfile`. Upgrade
+it deliberately after checking the registry's stable `latest` tag, regenerating
+the lockfile, and running the checks below. The lockfile also records pnpm 12's
+package-manager dependencies; application dependency versions remain locked.
+The `start` and `test` scripts invoke their nested build through Corepack so a
+different global pnpm does not override the project pin.
+
+The distribution test uses the version from `package.json` for packing and
+production installation. pnpm 12 excludes the root lockfile from `pnpm pack`, so
+an extracted package installs production dependencies from its manifest with
+`--no-frozen-lockfile`; this is separate from a repository or Docker build,
+which must use `--frozen-lockfile`. Package installs follow manifest ranges and
+do not provide the repository lockfile's exact dependency selection.
+
 ## Verify a change
+
+The browser interface uses Vue single-file components with Composition API and
+`<script setup lang="ts">`. Start at `web/App.vue` for navigation and
+`web/components/` for chat, agent settings, provider choices, and notifications.
+`web/workspace.ts` exposes the existing client controller as a shallow Vue ref;
+the controller owns API calls, draft recovery, polling, and response streams.
+One controller survives `App.vue` hot reloads so it retains browser draft locks.
+The existing CSS in `web/style.css` and `web/toasts.css` owns appearance.
+
+Vite builds the browser assets; `vue-tsc` checks component scripts and templates
+as part of `pnpm run check`. TypeScript is pinned to the 6.0 release line because
+the installed Vue language tools require TypeScript below 7. The server uses
+the same compiler. Upgrade these together when the Vue tools support it.
 
 Build before running an individual test file; tests import the compiled `dist`
 output. Replace the example with the relevant test file.
@@ -54,6 +81,24 @@ node test/browser/held-instance.mjs .staf/chat-review/instance.sqlite 3211
 Open `http://127.0.0.1:3211`, pair with the code printed by that process,
 and create a Demo agent from **New agent**. This fixture uses synthetic providers
 and stores review data separately under `.staf/chat-review`.
+
+**Connect ChatGPT** opens a loopback page labeled **Simulated ChatGPT sign-in**.
+Choose **Complete simulated sign-in** to exercise the connected state. This does
+not sign in to OpenAI, store real credentials, or enable live model responses.
+Earlier fixture links incorrectly opened OpenAI with a synthetic client ID,
+which produced `invalid_authorize_client`.
+
+For real ChatGPT sign-in, start a regular instance with separate data:
+
+```sh
+mkdir -p .staf/live-review
+node dist/cli.js instance serve .staf/live-review/instance.sqlite 3210
+```
+
+Open `http://127.0.0.1:3210`, pair using that instance's code, and use
+**Settings → Connect ChatGPT**. This starts the production flow; fresh live
+registration remains unverified by the offline checks. See
+[ChatGPT sign-in](codex-direct.md). Stop either instance with Ctrl+C.
 
 - Send `Streaming markdown fixture`. Expect a long Markdown response, code Copy,
   a fixed composer and a circular Stop control. Scroll up; incoming text must

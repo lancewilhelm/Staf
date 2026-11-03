@@ -15,9 +15,9 @@ test('shared profile changes persist between clients without modifying legacy fi
  const legacy=join(root,'legacy-session.json');writeFileSync(legacy,'legacy conversation');
  try {
   let result=cli(root,'hello\n/set provider codex\n/confirm-provider\n/set model example-model\n/set reasoning high\n/settings show\n/quit\n');
-  assert.equal(result.status,0,result.stderr);assert.match(result.stdout,/Saved provider: codex/);assert.doesNotMatch(result.stdout,/Command ID:/);assert.doesNotMatch(result.stdout,/user> hello/);assert.match(result.stdout,/Model: example-model/);assert.match(result.stdout,/Reasoning: high/);
+  assert.equal(result.status,0,result.stderr);assert.match(result.stdout,/Saved provider: ChatGPT/);assert.doesNotMatch(result.stdout,/Command ID:/);assert.doesNotMatch(result.stdout,/user> hello/);assert.match(result.stdout,/Model: example-model/);assert.match(result.stdout,/Reasoning: high/);
   result=cli(root,'/settings show\n/set provider demo\n/confirm-provider\nhello again\n/quit\n');
-  assert.equal(result.status,0,result.stderr);assert.match(result.stdout,/Provider: codex/);assert.match(result.stdout,/user> hello/);assert.match(result.stdout,/hello again/);assert.match(result.stdout,/User turns saved: 2/);
+  assert.equal(result.status,0,result.stderr);assert.match(result.stdout,/Provider: ChatGPT/);assert.match(result.stdout,/user> hello/);assert.match(result.stdout,/hello again/);assert.match(result.stdout,/User turns saved: 2/);
   assert.equal(readFileSync(legacy,'utf8'),'legacy conversation');
  } finally {await stop(root);rmSync(root,{recursive:true,force:true});}
 });
@@ -38,10 +38,11 @@ test('one-shot commands update shared bot and future bot defaults independently'
  const root=mkdtempSync(join(tmpdir(),'staf-cli-oneshot-'));
  const run=(...args)=>spawnSync(process.execPath,['dist/cli.js',...args,'--data-dir',root],{encoding:'utf8',timeout:20000,env:{...process.env,NO_COLOR:''}});
  try {
-  let result=run('settings','set','provider','codex','--confirm-provider-change');assert.equal(result.status,0,result.stderr);assert.match(result.stdout,/Saved provider: codex/);
+  let result=run('settings','set','provider','chatgpt','--confirm-provider-change');assert.equal(result.status,0,result.stderr);assert.match(result.stdout,/Saved provider: ChatGPT/);
   result=run('settings','set-default','provider','openrouter');assert.equal(result.status,0,result.stderr);assert.match(result.stdout,/Saved new bot default provider: openrouter/);
-  result=run('settings','show');assert.match(result.stdout,/Provider: codex/);
+  result=run('settings','show');assert.match(result.stdout,/Provider: ChatGPT/);
   result=run('settings','defaults');assert.match(result.stdout,/Provider: openrouter/);
-  result=run('auth','codex','status');assert.equal(result.status,0,result.stderr);assert.match(result.stdout,/not signed in/);
+  result=run('auth','chatgpt','status');assert.equal(result.status,0,result.stderr);assert.match(result.stdout,/ChatGPT:.*not signed in/);
+  result=run('auth','codex','status');assert.equal(result.status,0,result.stderr);assert.match(result.stdout,/ChatGPT:.*not signed in/);
  } finally {await stop(root);rmSync(root,{recursive:true,force:true});}
 });

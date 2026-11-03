@@ -8,7 +8,8 @@ remains open until its actual Linux acceptance checks pass.
 
 The steps use `$HOME/.local/share/staf` and `$HOME/.config/staf`. They do not
 change Hermes or other services. The owner account needs a running systemd user
-manager, `/usr/bin/node` with Node.js 22.16 or later, Git, and pnpm 10.27 or later.
+manager, `/usr/bin/node` with Node.js 22.16 or later, Git, and Corepack with
+the project-pinned pnpm 12.16.1.
 Install prerequisites separately using the host's normal administration method.
 
 ## Install the service
@@ -29,8 +30,8 @@ Install prerequisites separately using the host's normal administration method.
 
    ```sh
    git checkout YOUR_REVIEWED_COMMIT
-   pnpm install --frozen-lockfile
-   pnpm run build
+   corepack pnpm install --frozen-lockfile
+   corepack pnpm run build
    ```
 
 4. If needed, create `$HOME/.config/staf/instance.env` with provider variables

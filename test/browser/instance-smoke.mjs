@@ -168,7 +168,7 @@ try {
   const heldBotId=await evaluate("document.querySelector('#bots').value");
   output='';server.stdin.write('\n');code=await until(()=>output.match(/Pairing code: (\S+)/)?.[1],'controlled server CLI code');
   assert.match(cli('pair',url,credential,code),/Paired/);
-  await action("document.querySelector('#codexLogin').click()", "!document.querySelector('#codexAuthLink').hidden && document.querySelector('#codexAuthStatus').textContent.includes('Continue sign-in')", 'start synthetic Codex sign-in');
+  await action("document.querySelector('#codexLogin').click()", "!document.querySelector('#codexAuthLink').hidden && document.querySelector('#codexAuthStatus').textContent.includes('Continue sign-in')", 'start synthetic ChatGPT sign-in');
   const authAttempt=await evaluate('codexAttempt');assert(authAttempt);
   const syntheticState=await evaluate("new URL(document.querySelector('#codexAuthLink').href).searchParams.get('state')");assert(syntheticState);
   assert.equal(await evaluate(`new URL(document.querySelector('#codexAuthLink').href).searchParams.get('redirect_uri')===${JSON.stringify(url+'/auth/callback')}`),true);

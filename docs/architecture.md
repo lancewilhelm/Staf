@@ -10,25 +10,25 @@ The terminal edits a bot profile through the service. Each edit checks its
 revision, and an accepted request captures the current profile. Creation defaults
 are copied to new bots and do not change existing bots. Provider credentials and
 endpoint configuration belong to the host environment or the instance's managed
-Codex and OpenRouter credentials. The service does not load a project `.env` file. Changing a provider can
+ChatGPT and OpenRouter credentials. The service does not load a project `.env` file. Changing a provider can
 send existing conversation history to the new provider on the next request.
 
-Provider adapters normalize messages and tools for the runtime. Codex uses direct
+Provider adapters normalize messages and tools for the runtime. ChatGPT uses direct
 Responses with a Staf-owned grant and model-bound replay. OpenRouter, LM Studio,
 and the generic live adapter use Chat Completions. The demo returns deterministic
-responses. Codex and OpenRouter stream provisional text through the shared service; LM Studio and the generic live adapter buffer provider output. Only completed provider responses are committed as completed replies; stopped partial output is labeled separately. The terminal displays provisional text, command status and persisted tool progress. The service applies permissions and approval
+responses. ChatGPT and OpenRouter stream provisional text through the shared service; LM Studio and the generic live adapter buffer provider output. Only completed provider responses are committed as completed replies; stopped partial output is labeled separately. The terminal displays provisional text, command status and persisted tool progress. The service applies permissions and approval
 rules before supported actions. See [direct Responses](direct-responses.md),
 [settings](settings.md), and [usage](usage.md).
 
 The shared instance has synthetic provider and authentication coverage. Earlier
-live Codex checks used the prior CLI path and an existing grant; they do not verify
+live ChatGPT checks used the prior CLI path and an existing grant; they do not verify
 shared-instance sign-in or inference. See [verification](direct-responses.md#verification-and-remaining-gaps).
 
 Main-chat progress is owned by the shared service. The version 28 migration stores sanitized provisional snapshots separately from completed messages; restart marks unfinished commands interrupted. The runtime emits provider-step starts and deltas without adding partial text to provider replay or the completed transcript. The GUI subscribes to the shared progress through an authenticated SSE connection; reconnecting starts with the latest saved snapshot. The CLI polls the same shared progress. The GUI preserves a next draft and renders Markdown without raw HTML. Its single circular composer action derives Send, Stop, and disabled Stopping states from shared response progress. It stays in Stopping until the shared service settles cancellation, including cancellation requested by another client; draft editing remains available, with no implicit submission or queue. Configured credentials and unsafe URLs are withheld or redacted before progress persistence. Buffered providers do not invent deltas. This path is tested with synthetic providers and does not establish live provider behavior.
 
 ## Local shared instance preview
 
-The React workspace is built with Vite into static assets served by the same
+The Vue workspace is built with Vite into static assets served by the same
 loopback instance. Its persistent agent list selects main chats using stable
 IDs, including when names coincide. It reads agents, chat work, and
 pending chat approvals from the service and polls while visible. Existing `bots` API
@@ -66,7 +66,14 @@ with chat and task acceptance and rejects archive while work is active. It keeps
 the bot identity, configuration, and history for restoration.
 Inbox approvals are projections of existing records and in-memory requests, not
 a second authorization store. This UI does not add LAN transport or establish
-live Codex behavior.
+live ChatGPT behavior.
+
+`web/App.vue` composes the workspace from focused Vue single-file components.
+`web/workspace.ts` provides one controller and a shallow reactive snapshot to
+those components. API operations, draft persistence, polling, and streaming stay
+in `web/controller.ts`. Markdown passes through remark and rehype with raw HTML
+omitted and sanitization before trusted code-copy controls are added. See the
+[frontend decision](adr/0004-vue-frontend.md).
 
 The default terminal connects to the same instance over authenticated loopback
 HTTP. A detached local daemon owns SQLite and remains alive after the terminal
@@ -86,7 +93,7 @@ CLI client uses a separate credential file. Commands claim a bot and append the
 user message transactionally; completed responses are stored with the command
 state. Stop records a durable request while retaining the pending command and its unique busy lock, aborts the running provider and pending operations, and settles only after the turn returns. A late provider result cannot commit after Stop. The partial output is stored as a stopped conversation entry and excluded from provider replay. Restart marks pending or stopping commands interrupted; it does not resume them. SQLite exclusive locking
 prevents a second process from treating active commands as interrupted. The
-service runs demo, Codex, OpenRouter, LM Studio and live with instance or host credentials and an explicit bot model for each non-demo provider. This preview does not implement the LAN,
+service runs demo, ChatGPT, OpenRouter, LM Studio and live with instance or host credentials and an explicit bot model for each non-demo provider. This preview does not implement the LAN,
 all operational features described in the plans above.
 
 Agent settings and instructions live under `agents/ID/current` beside the
@@ -136,7 +143,7 @@ The version 9 instance migration creates schedule and occurrence tables after a 
 
 The collaboration runtime journals actual bot messages and separate helper attempts. The owner approves each exact message before disclosure. A helper receives only the assignment brief as task context and does not retrieve private memory. Parent stop cancels its helper, and late output remains in helper Activity. Restart interrupts unfinished attempts. Offline synthetic-provider tests cover these paths; live provider behavior remains unverified.
 
-Shared-instance Codex sign-in owns a short-lived in-memory attempt bound to its initiating paired client and the service loopback callback. The credential adapter checks that client remains authorized at the locked credential commit boundary. Callback parameters are not returned in the response. The browser reserves a tab synchronously from the connection action and navigates it after asynchronous authorization setup. A blocked tab leaves a manual link for the same attempt. The browser keeps the sign-in URL only for the attempt that produced it and offers cancellation and retry if it is lost or the attempt fails. Paired CLI and GUI sign-out use the same guarded service operation. Credential status is local and does not verify account or model access. This integration has synthetic service, CLI, and served-browser tests and has not been verified with live authorization.
+Shared-instance ChatGPT sign-in owns a short-lived in-memory attempt bound to its initiating paired client and the service loopback callback. The credential adapter checks that client remains authorized at the locked credential commit boundary. Callback parameters are not returned in the response. The browser reserves a tab synchronously from the connection action and navigates it after asynchronous authorization setup. A blocked tab leaves a manual link for the same attempt. The browser keeps the sign-in URL only for the attempt that produced it and offers cancellation and retry if it is lost or the attempt fails. Paired CLI and GUI sign-out use the same guarded service operation. Credential status is local and does not verify account or model access. This integration has synthetic service, CLI, and served-browser tests and has not been verified with live authorization.
 
 The shared main-chat runtime may request one background task per command through a host-controlled tool. A durable journal binds the command, tool call, objective, and task attempt, so duplicate submissions do not start duplicate work. Explicit main-chat task direction and stop use the attempt ID and do not expand permissions. New bots copy the instance provider, model, and reasoning creation defaults in the creation transaction; later default changes do not alter existing bots. These paths have offline synthetic coverage; live provider behavior remains unverified.
 
@@ -158,7 +165,7 @@ from supported conversation and output paths; the key is rejected from agent
 configuration writes. In-flight work may retain a previous key. Service, CLI,
 and served-browser coverage uses synthetic credentials and streaming provider responses, including tool calls and recovery; live OpenRouter conversation and remote-instance access remain unverified.
 
-The agent editor combines its revisioned profile with the authenticated Codex
+The agent editor combines its revisioned profile with the authenticated ChatGPT
 and OpenRouter presence statuses to offer configured shared connections and the
 offline Demo provider. It retains an existing disconnected provider, blocks a
 new unavailable selection, and keeps unsaved edits mounted while the owner

@@ -1,22 +1,26 @@
-# Sign in to direct Codex with Staf
+# Sign in to direct ChatGPT with Staf
 
 Staf uses a separate registration for ChatGPT plan usage. It does not import or
 refresh official Codex CLI credentials. Shared-instance sign-in and inference
 have synthetic test coverage but have not been live verified.
 
-1. Start `staf`. Enter `/auth codex login`, or choose **Codex sign-in** from
+1. Start `staf`. Enter `/auth chatgpt login`, or choose **ChatGPT sign-in** from
    `/settings`.
 2. Open the printed URL in your browser. Review the Staf name, account, and
    requested permissions, then complete sign-in.
-3. Enter `/auth codex status` to inspect the attempt and local credential status.
-4. In `/settings`, select `codex` and an account-available model. You can also
-   enter `/set provider codex` and `/set model MODEL_ID`.
+3. Enter `/auth chatgpt status` to inspect the attempt and local credential status.
+4. In `/settings`, select **ChatGPT** and an account-available model. You can also
+   enter `/set provider chatgpt` and `/set model MODEL_ID`.
 5. Send a chat message and inspect the response. This request uses the account's
    plan permissions. Do not paste credentials into chat.
 
-The equivalent one-shot commands are `staf auth codex login`, `staf auth codex
-status`, `staf auth codex cancel`, and `staf auth codex logout`. They accept the
+The equivalent one-shot commands are `staf auth chatgpt login`, `staf auth chatgpt
+status`, `staf auth chatgpt cancel`, and `staf auth chatgpt logout`. They accept the
 same trailing connection options as chat.
+
+ChatGPT is the displayed provider name. Existing `codex` auth commands remain
+aliases, and configuration/API provider IDs remain `codex`; saved agents and
+credentials do not need migration.
 
 In the browser, **Settings** offers the same connection for the instance. Open
 the sign-in link on the instance host, then return to see progress. A cancelled,
@@ -25,8 +29,8 @@ that started it; if a refresh loses it, cancel the pending attempt and start
 again. Sign-out requires confirmation; finish active work and sign-in before
 signing out. It leaves agent models and unsent drafts unchanged.
 
-Selecting Codex alone does not start sign-in. `/auth codex cancel` cancels the
-initiating client's pending attempt. `/auth codex logout` removes local tokens;
+Selecting ChatGPT alone does not start sign-in. `/auth chatgpt cancel` cancels the
+initiating client's pending attempt. `/auth chatgpt logout` removes local tokens;
 it does not revoke the server grant. Manage server-side access in
 [ChatGPT Settings](https://chatgpt.com/settings/usage). Status reads the local
 record and does not establish server access or refresh a token.
@@ -42,7 +46,7 @@ If inference fails, check account access, the selected model, and plan limits.
 Failed streams do not commit a completed assistant response. A failed or
 interrupted request may still have consumed provider usage.
 
-Earlier direct Codex text generation, a history follow-up, and a clock-tool round
+Earlier direct ChatGPT text generation, a history follow-up, and a clock-tool round
 trip were live-tested on 2026-10-26 with an existing Staf grant through the prior
 CLI. Those checks do not verify shared-instance sign-in or chat. See
 [verification and remaining gaps](direct-responses.md#verification-and-remaining-gaps).

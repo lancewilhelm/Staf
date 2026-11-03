@@ -1,3 +1,4 @@
+import {providerLabel} from './provider-label.js';
 import { parseMemoryLanguage } from './memory-language.js';
 import { previewMemoryCandidates } from './memory-candidates.js';
 import { executeShellSandbox, scratchLimits, type ShellSandboxResult } from './shell-sandbox.js';
@@ -8,7 +9,7 @@ import type { WorkRef } from './action-journal.js';
 import type { GrantBoundary } from './approval-grants.js';
 type GrantChoice = {scope:'bot'|'all-bots';lifetime:'task'|'remembered'};
 import { InstanceAuth } from './instance-auth.js';
-import { prepareDirectLogin, completeDirectLogin, loadDirectCredential, directAuth } from './codex-direct-auth.js';
+import { prepareDirectLogin, completeDirectLogin, loadDirectCredential, directAuth, authorizationUrl } from './codex-direct-auth.js';
 import { createServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { randomBytes } from 'node:crypto';
@@ -33,7 +34,7 @@ import { resolveSettings } from './settings.js';
 import { usageText } from './usage.js';
 import { loadOpenRouterKey, saveOpenRouterKey, disconnectOpenRouter } from './openrouter-credential.js';
 
-export function startInstance(path: string, port = 0, options: {dataDir?: string; env?: Environment; enableCollaboration?: boolean; enableReusableApprovals?: boolean; localBootstrapToken?: string; authNow?:()=>number; authLifetimeMs?:number; webDependencies?:WebDependencies; searchTransport?:SearchTransport; shellExecutor?:typeof executeShellSandbox; modelRequest?:typeof fetch; authHooks?: {prepare:typeof prepareDirectLogin; complete:typeof completeDirectLogin}; providerFactory?: (profile: {provider:string; model:string | null; reasoning:string | null; instructions:string; chatId:string}, instructions:string) => Promise<Provider>} = {}) {
+export function startInstance(path: string, port = 0, options: {dataDir?: string; env?: Environment; enableCollaboration?: boolean; enableReusableApprovals?: boolean; localBootstrapToken?: string; authNow?:()=>number; authLifetimeMs?:number; webDependencies?:WebDependencies; searchTransport?:SearchTransport; shellExecutor?:typeof executeShellSandbox; modelRequest?:typeof fetch; authHooks?: {prepare:typeof prepareDirectLogin; complete:typeof completeDirectLogin; authorizationUrl?:typeof authorizationUrl}; providerFactory?: (profile: {provider:string; model:string | null; reasoning:string | null; instructions:string; chatId:string}, instructions:string) => Promise<Provider>} = {}) {
   const selectionCatalogs=new Map<string,ModelCatalog>();
   const env = options.env ?? process.env;
   const dataDir = options.dataDir ?? resolve(dirname(path));
@@ -73,7 +74,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
   let loggingOut = false;
   let instanceAuth:InstanceAuth | undefined;
   let activeLogin:{token:string;id:string;clientId:string}|undefined;
-  function authFor(origin:string) {return instanceAuth ??= new InstanceAuth({redirectUri:origin+'/auth/callback',...(options.authNow ? {now:options.authNow} : {}),...(options.authLifetimeMs !== undefined ? {lifetimeMs:options.authLifetimeMs} : {}),prepare:()=> (options.authHooks?.prepare ?? prepareDirectLogin)(dataDir),authorized:async initiator=>!closing && instance.authorized(initiator),complete:(attempt,callback,signal,beforeCommit)=>(options.authHooks?.complete ?? completeDirectLogin)(dataDir,attempt,callback,fetch,signal,beforeCommit)});}
+  function authFor(origin:string) {return instanceAuth ??= new InstanceAuth({redirectUri:origin+'/auth/callback',...(options.authHooks?.authorizationUrl ? {authorizationUrl:options.authHooks.authorizationUrl} : {}),...(options.authNow ? {now:options.authNow} : {}),...(options.authLifetimeMs !== undefined ? {lifetimeMs:options.authLifetimeMs} : {}),prepare:()=> (options.authHooks?.prepare ?? prepareDirectLogin)(dataDir),authorized:async initiator=>!closing && instance.authorized(initiator),complete:(attempt,callback,signal,beforeCommit)=>(options.authHooks?.complete ?? completeDirectLogin)(dataDir,attempt,callback,fetch,signal,beforeCommit)});}
   const approvalWaiters = new Map<string,(state:string)=>void>();
   const disclosureWaiters = new Map<string,(state:string)=>void>();
   function reusablePolicy(work:WorkRef,botId:string,boundary:GrantBoundary,action:{capability:string;operation:string;resource:string;effect:string;limits:Record<string,string|number|boolean>;risk:'risky'}) {
@@ -483,7 +484,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
         if(req.method === 'GET' && kind === 'usage') {const session=instance.chatSession(terminalInfoMatch[1]);return json(200,{text:usageText(session),details:usageText(session,true)});}
         if(req.method === 'GET' && kind === 'context') {
           const session=instance.chatSession(terminalInfoMatch[1]);const last=session.usage?.at(-1);
-          const measurement=last?.scope === 'request' && last.metrics.input !== undefined ? `Last reported request input: ${last.metrics.input} tokens (${last.provider}; ${last.observedAt ?? 'time unavailable'}).` : 'Last request input is unavailable or its scope is unknown.';
+          const measurement=last?.scope === 'request' && last.metrics.input !== undefined ? `Last reported request input: ${last.metrics.input} tokens (${providerLabel(last.provider)}; ${last.observedAt ?? 'time unavailable'}).` : 'Last request input is unavailable or its scope is unknown.';
           return json(200,{text:`${measurement} This is a historical measurement, not current context occupancy. Saved conversation has ${session.messages.length} provider messages. The next request includes dynamic instructions, memory, tools and possibly notices. Its token count and context occupancy are unavailable. Staf does not compact history.`});
         }
         if(req.method === 'POST' && kind === 'models') {
