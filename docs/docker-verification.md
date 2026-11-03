@@ -46,6 +46,17 @@ a failing-before/passing-after fix to the database migration implementation.
 The Dockerfile now initializes new `/data` directories with mode 0700; existing
 volume permissions are not rewritten.
 
+## Independent review
+
+Final code reviewed at `c040291` on separate Standards and Spec axes; no findings
+remain. Review identified and corrected shell inspection failures that could
+allow copying to proceed, mismatched Compose/mount selection, omitted limitations
+in saved evidence, and alternative mount mechanisms on fresh restores.
+The Standards reviewer independently reran all nine guard tests and shell syntax
+checks successfully. The Spec reviewer confirmed the documented recovery scope
+matches the final implementation and retains operational acceptance gaps. Neither
+reviewer used the Docker daemon or live providers.
+
 ## Outstanding operational acceptance
 
 - Run `node test/docker/installation.mjs` with authorized Docker daemon access
