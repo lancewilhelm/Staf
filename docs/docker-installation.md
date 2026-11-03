@@ -84,7 +84,8 @@ migration backups. Agent configuration is not all in SQLite. The service runs
 as `node`; new volumes initialize an owner-only data directory. Existing volumes
 keep their permissions. The recovery helpers support a single-service Compose
 project with one named `/data` volume. They reject bind-mounted or nested data
-mounts; those installations need a separately reviewed full-directory copy.
+mounts, `volumes_from`, tmpfs, config and secret mounts; those installations need
+a separately reviewed full-directory copy and mount-specific recovery procedure.
 Bind mounts must be writable by the image's `node` user. Do not mount the host
 Docker socket into Staf.
 

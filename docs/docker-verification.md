@@ -32,7 +32,7 @@ access was used. CLI-only configuration and help commands do not use the daemon.
 | `docker compose -f compose.yaml config --quiet` | Passed without daemon access. Actual CLI help confirmed recovery command options. |
 | SSH configuration expansion with `ssh -G -F /dev/null` | Verified explicit loopback forwarding, exit-on-forward-failure and keepalives. No connection or authentication performed. |
 | Acceptance preflight | Existing evidence file is preserved and rejected before any Docker command. Invalid recovery project names are rejected before filesystem changes or Docker commands. |
-| `node --test test/docker/recovery-guards.test.mjs` | Five passed. Synthetic Docker command failures test aborts on failed writer/emptiness inspection, honoring the Compose stack/resolved volume, and rejecting bind-mounted data or installed mount drift. The first two tests failed before correcting shell error propagation; the Compose-stack and bind tests failed before correcting mount selection. No daemon was used. |
+| `node --test test/docker/recovery-guards.test.mjs` | Nine passed. Synthetic Docker commands test aborts on failed writer/emptiness inspection, honoring the Compose stack/resolved volume, rejecting bind-mounted data or installed mount drift, and refusing alternative mount mechanisms. The first two tests failed before correcting shell error propagation; Compose-stack/bind and four alternative-mount tests failed before their corresponding fixes. No daemon was used. |
 
 The broader unchanged `node test/browser/gui-smoke.mjs` passed on one rerun. Its
 initial run failed at line 496 with `Missing button Send` after dismissing a

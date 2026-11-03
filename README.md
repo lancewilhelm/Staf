@@ -43,7 +43,9 @@ but is not live verified. Background-task creation from main chat is deferred. E
 Public web reading, owner-configured local search and scratch-only shell are off
 by default and require owner approval. Press Enter in the host
 terminal to issue a fresh one-time code for another client. This preview binds
-only to loopback; it does not support LAN access. See [usage](docs/usage.md#local-shared-instance-offline-preview) for CLI commands and limitations.
+only to loopback. Native and Docker instructions prepare SSH forwarding for
+remote clients; cross-machine verification remains open. See
+[usage](docs/usage.md#local-shared-instance-offline-preview) for CLI commands and limitations.
 
 The loopback instance retains the background-task engine; its separate Activity and task-update workspace is deferred. It is an offline-tested preview with important permission and recovery limitations; see [usage](docs/usage.md#background-task-preview).
 

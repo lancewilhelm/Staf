@@ -30,7 +30,12 @@ async function fixture(t, failure) {
     if (args.includes('config')) {
       if (args.includes('--format')) {
         const mount = process.env.STAF_GUARD_FAILURE === 'bind' ? {type:'bind',source:'/synthetic/data',target:'/data'} : {type:'volume',source:'staf-data',target:'/data'};
-        console.log(JSON.stringify({services:{staf:{volumes:[mount]}},volumes:{'staf-data':{name:'configured-data'}}}));
+        const service = {volumes:[mount]};
+        const extra = process.env.STAF_GUARD_FAILURE;
+        if (['volumes_from','tmpfs','configs','secrets'].includes(extra)) {
+          service[extra] = extra === 'volumes_from' ? ['container:synthetic-source:rw'] : extra === 'tmpfs' ? ['/data/temporary'] : [{source:'synthetic',target:'/data/other'}];
+        }
+        console.log(JSON.stringify({services:{staf:service},volumes:{'staf-data':{name:'configured-data'}}}));
       } else console.log('synthetic-image');
       process.exit(0);
     }
@@ -80,3 +85,11 @@ test('recovery refuses an installed service using a different data store', async
   await assert.rejects(run('/bin/sh', ['deploy/docker-data.sh', 'backup', 'staf', join(f.directory, 'backups')], {cwd: root, env: f.env}), error => /Installed service uses a different data store/.test(error.stderr));
   assert.ok(!(await readFile(f.log, 'utf8')).split('\n').some(line => line.includes('"compose"') && line.includes('"run"')), 'no archive command for a mismatched installed mount');
 });
+
+for (const kind of ['volumes_from', 'tmpfs', 'configs', 'secrets']) {
+  test(`recovery refuses unsupported ${kind} mounts before a fresh restore`, async t => {
+    const f = await fixture(t, kind);
+    await assert.rejects(run('/bin/sh', ['deploy/docker-data.sh', 'restore', 'staf', f.archive], {cwd: root, env: f.env}), error => error.stderr.includes(`does not support ${kind}`));
+    assert.ok(!(await readFile(f.log, 'utf8')).split('\n').some(line => line.includes('"compose"') && line.includes('"run"')), 'no extraction with alternative data mounts');
+  });
+}

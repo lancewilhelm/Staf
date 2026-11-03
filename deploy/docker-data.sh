@@ -28,7 +28,11 @@ compose config --format json > "$configuration"
 volume=$(docker run --rm -i --network none --read-only --entrypoint node "$image" -e '
   const config = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
   if (Object.keys(config.services).length !== 1 || !config.services.staf) throw Error("Recovery requires a single Staf service");
-  const mounts = (config.services.staf.volumes || []).filter(mount => mount.target === "/data" || mount.target.startsWith("/data/"));
+  const service = config.services.staf;
+  for (const kind of ["volumes_from", "tmpfs", "configs", "secrets"]) {
+    if (service[kind]?.length) throw Error("Recovery does not support " + kind + " mounts");
+  }
+  const mounts = (service.volumes || []).filter(mount => mount.target === "/data" || mount.target.startsWith("/data/"));
   if (mounts.length !== 1 || mounts[0].target !== "/data" || mounts[0].type !== "volume") throw Error("Recovery requires one named /data volume; bind and nested mounts are unsupported");
   const name = config.volumes?.[mounts[0].source]?.name;
   if (typeof name !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(name)) throw Error("Invalid named data volume");
