@@ -79,6 +79,9 @@ port 3210, run `node test/docker/installation.mjs` for the actual-container
 journey. It creates and removes unique test projects/volumes and uses no live
 provider. See [Docker acceptance](docker-installation.md#verification-and-reusable-acceptance)
 for prerequisites, retained evidence and separate-machine checks.
+`node --test test/docker/recovery-guards.test.mjs` separately tests shell failure
+propagation and Compose/mount selection with a synthetic Docker command. These
+offline guard tests do not establish actual Docker backup/restore acceptance.
 
 ## Review chat locally without a provider
 

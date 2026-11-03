@@ -24,12 +24,22 @@ access was used. CLI-only configuration and help commands do not use the daemon.
 | --- | --- |
 | `corepack pnpm run build` | Passed; server and current Vue workspace built. |
 | `corepack pnpm run check` | Passed; server and Vue type checks. |
+| `corepack pnpm test` | 455 tests: 452 passed, zero failed, three Docker-dependent scratch-shell tests skipped. |
 | Focused instance/store/service/auth/CLI/OpenRouter/recovery tests | 68 passed, zero skipped; synthetic providers and local files/listeners. |
 | `node --test test/recovery.test.js` | Passed. Real stopped-data tar copy into a separate local directory retains agent revisions/symlinks, credential bytes, archived profiles, chats, defaults, approvals, client authorization/revocation and existing task history. Reconstructed schema 29 upgrades to 30 and leaves a readable private version-29 backup. This is local-process evidence, not Docker or a released-image upgrade. |
 | `node test/browser/recovery-smoke.mjs` | Passed. Reuses the container script's current browser/CLI journey: separate pairing, bidirectional Demo chat, revocation and revoked-browser reload. Local process only. |
 | `sh -n deploy/docker-data.sh deploy/connect.sh` | Passed syntax validation; does not establish actual Docker backup/restore operation. |
 | `docker compose -f compose.yaml config --quiet` | Passed without daemon access. Actual CLI help confirmed recovery command options. |
 | SSH configuration expansion with `ssh -G -F /dev/null` | Verified explicit loopback forwarding, exit-on-forward-failure and keepalives. No connection or authentication performed. |
+| Acceptance preflight | Existing evidence file is preserved and rejected before any Docker command. Invalid recovery project names are rejected before filesystem changes or Docker commands. |
+| `node --test test/docker/recovery-guards.test.mjs` | Five passed. Synthetic Docker command failures test aborts on failed writer/emptiness inspection, honoring the Compose stack/resolved volume, and rejecting bind-mounted data or installed mount drift. The first two tests failed before correcting shell error propagation; the Compose-stack and bind tests failed before correcting mount selection. No daemon was used. |
+
+The broader unchanged `node test/browser/gui-smoke.mjs` passed on one rerun. Its
+initial run failed at line 496 with `Missing button Send` after dismissing a
+failed request. No server, browser implementation or smoke-script change was
+made between attempts; they are unchanged from the base commit. The transient
+failure remains recorded rather than counted as an uninterrupted first pass.
+The separate installation browser/CLI journey passed as recorded above.
 
 The new recovery test adds coverage of the existing storage contract. It is not
 a failing-before/passing-after fix to the database migration implementation.

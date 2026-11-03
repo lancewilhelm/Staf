@@ -82,8 +82,11 @@ The project-scoped `staf-data` volume contains **all of `/data`**: SQLite, agent
 configuration and soul revisions, credentials, provider defaults and database
 migration backups. Agent configuration is not all in SQLite. The service runs
 as `node`; new volumes initialize an owner-only data directory. Existing volumes
-keep their permissions. Bind mounts must be writable by the image's `node` user.
-Do not mount the host Docker socket into Staf.
+keep their permissions. The recovery helpers support a single-service Compose
+project with one named `/data` volume. They reject bind-mounted or nested data
+mounts; those installations need a separately reviewed full-directory copy.
+Bind mounts must be writable by the image's `node` user. Do not mount the host
+Docker socket into Staf.
 
 `docker compose -p staf up -d --force-recreate` retains the named volume. `down`
 retains it too; **`down --volumes` deletes it**. Browser appearance, unsent drafts
@@ -96,6 +99,12 @@ Stop every writer. The helper refuses a volume mounted by a running container,
 checks that an existing instance database is present, creates a unique private
 backup directory, and checks the archive before publishing `data.tar`. Failed
 archives remain named `data.tar.partial`. It does not start or stop Staf for you.
+It resolves the checkout's default Compose overrides or your `COMPOSE_FILE`
+stack, validates the named data mount, and rejects an installed service using a
+different store. Use the same configuration environment as your installation;
+for custom `-f` files, supply the equivalent `COMPOSE_FILE` stack. A temporary
+read-only inspection container parses the configuration without mounting data
+or enabling networking. Inspection errors abort the operation.
 
 ```sh
 docker compose -p staf stop staf

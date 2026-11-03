@@ -13,8 +13,12 @@ const root = resolve(import.meta.dirname, '../..'), run = promisify(execFile);
 const origin = 'http://127.0.0.1:3210';
 const temp = await mkdtemp(join(tmpdir(), 'staf-container-acceptance-'));
 const source = `staf-check-${Date.now()}-${process.pid}`, restored = `${source}-restored`;
-const credential = join(temp, 'client.json'), evidence = [];
-const execute = async (command, args, options = {}) => (await run(command, args, {cwd: root, timeout: 30000, maxBuffer: 4 * 1024 * 1024, ...options})).stdout.trim();
+const credential = join(temp, 'client.json');
+const limitations = 'NOT VERIFIED: separate-machine SSH access, replacement-host restore, released-image upgrade, live providers';
+const evidence = [limitations];
+// The acceptance run must never inherit a user's custom mounts or external volumes.
+const env = {...process.env, COMPOSE_FILE: join(root, 'compose.yaml'), COMPOSE_DISABLE_ENV_FILE: 'true', COMPOSE_ENV_FILES: '', COMPOSE_PROFILES: ''};
+const execute = async (command, args, options = {}) => (await run(command, args, {cwd: root, env, timeout: 30000, maxBuffer: 4 * 1024 * 1024, ...options})).stdout.trim();
 const compose = (project, ...args) => execute('docker', ['compose', '-f', join(root, 'compose.yaml'), '-p', project, ...args]);
 const data = (action, project, path) => execute('sh', [join(root, 'deploy/docker-data.sh'), action, project, path]);
 const cli = (...args) => execute(process.execPath, ['dist/cli.js', 'instance', ...args]);
@@ -86,7 +90,7 @@ try {
   assert.deepEqual(await recoverySnapshot(call, bot.id), expected); await rejectsStatus(revokedToken, 401);
   await rejectsStatus(undefined, 401);
   pass('actual same-host replacement-project restore retains full data and rejects a nonempty destination');
-  console.log('NOT VERIFIED: separate-machine SSH access, replacement-host restore, released-image upgrade, live providers');
+  console.log(limitations);
 } catch (error) {
   evidence.push(`FAILED: ${error.message}`);
   throw error;
