@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { providerLabel } from '../../src/provider-label';
 import { computed, ref, shallowRef, useId, watch } from 'vue';
 import type { ModelCatalog } from '../controller';
 import { useWorkspace } from '../workspace';
@@ -61,7 +62,7 @@ function modelKeydown(event: KeyboardEvent) {
     <legend>Provider, model and reasoning</legend>
     <label>Provider<select :value="provider" @change="change('provider', $event)">
       <option v-if="!provider" value="">Instance default</option>
-      <option v-for="value in providers" :key="value" :value="value">{{ value }}</option>
+      <option v-for="value in providers" :key="value" :value="value">{{ providerLabel(value) }}</option>
     </select></label>
     <label>Model<input :list="list" :value="model" placeholder="Choose or enter a model ID" @input="change('model', $event)" @keydown="modelKeydown" />
       <datalist :id="list"><option v-for="item in catalog?.models" :key="item.id" :value="item.id">{{ item.label }}</option></datalist>

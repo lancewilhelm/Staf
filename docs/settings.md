@@ -10,7 +10,7 @@ to inspect them and `/set-default provider|model|reasoning VALUE` to edit them.
 ## Use the chat menu
 
 Run `staf` and enter `/settings`. In an interactive terminal, the menu offers
-provider, model, reasoning, and Codex sign-in. Use the arrow keys or j/k to move,
+provider, model, reasoning, and ChatGPT sign-in. Use the arrow keys or j/k to move,
 Enter to select, and Escape to go back. The menu confirms changes before saving.
 In a plain terminal, `/settings` prints the current profile.
 
@@ -42,8 +42,8 @@ automatic instance retains its original environment. See the [usage guide](usage
 for restart instructions and [configuration reference](reference.md#terminal-commands-and-environment)
 for supported variables. Never paste a credential into chat or a profile field.
 
-For Codex, use `/auth codex login` or the settings menu's sign-in action. See
-[Codex sign-in](codex-direct.md). Sign-in and model requests in the shared
+For ChatGPT, use `/auth chatgpt login` or the settings menu's sign-in action. See
+[ChatGPT sign-in](codex-direct.md). Sign-in and model requests in the shared
 instance have synthetic coverage but have not been live verified.
 
 ## Conflicts and recovery

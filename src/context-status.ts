@@ -74,12 +74,12 @@ function payloadLine(status:ContextStatus):string {
 export function contextDetails(session:Session,settings:EffectiveSettings,pending?:string,catalog?:ModelCatalog):string {
   const status=contextStatus(session,settings,pending,catalog);
   const lines=[contextLine(status),`Selected: ${status.provider} / ${status.model||'(provider default)'}; size computed now from ${status.messages} messages${status.pending?' including submitted user input':''}.`,
-    `Visible Staf payload: ${status.bytes} UTF-8 bytes. Proxy recipe: ceil(bytes/4), not a tokenizer. JSON/history, Staf instructions and clock schema are included; direct Codex uses Responses item boundaries.`,
+    `Visible Staf payload: ${status.bytes} UTF-8 bytes. Proxy recipe: ceil(bytes/4), not a tokenizer. JSON/history, Staf instructions and clock schema are included; direct ChatGPT uses Responses item boundaries.`,
     'This rough text-size heuristic can be badly wrong for code, non-English text and tokenizers. Native instructions, hidden provider wrappers and native tool state are unknown. Unsubmitted prompt edits are excluded.',
     'Measured input above belongs to the labeled historical request, not the next context. No measured-plus-delta baseline is inferred: the ledger has no exact request/template fingerprint to prove unchanged payload lineage.',
     'Output reserve: not configured or subtracted by Staf; advertised window is not guaranteed usable input capacity. This display is not a safety limit.',
     `Window source: ${status.windowSource||'unavailable; use /context refresh for an explicit metadata read'}${status.fetchedAt?`; fetched ${status.fetchedAt}`:''}. LM Studio/legacy compatible catalogs have no verified window mapping here.`,
-    'Staf does not compact, summarize or truncate history and has no compaction trigger. Direct Codex does not invoke a native CLI compactor. Historical CLI execution usage remains an aggregate.'];
+    'Staf does not compact, summarize or truncate history and has no compaction trigger. Direct ChatGPT does not invoke a native CLI compactor. Historical CLI execution usage remains an aggregate.'];
   if(status.excludedReasoningItems)lines.push(`${status.excludedReasoningItems} opaque reasoning replay items excluded from this visible estimate; their token occupancy is unknown. They remain in the direct request.`);
   if(status.native)lines.push('Codex cumulative exec consumption is NOT active context occupancy.');
   lines.push('Cumulative session consumption remains in /usage and survives resume. Compaction would not reset consumption. No account quota query is made.');

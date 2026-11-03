@@ -9,7 +9,7 @@ const {app, state: s} = useWorkspace();
 const appearances: Appearance[] = ['light', 'dark', 'system'];
 function chooseAppearance(value: Appearance) { emit('update:appearance', value); saveAppearance(value); }
 function signOut() {
-  if (window.confirm('Sign out of Codex for this Staf instance? All agents using it will need a new sign-in.')) void app.signOutAuth();
+  if (window.confirm('Sign out of ChatGPT for this Staf instance? All agents using it will need a new sign-in.')) void app.signOutAuth();
 }
 async function saveRouter() {
   form.busy = true;
@@ -47,14 +47,14 @@ async function disconnectRouter() {
     </fieldset>
     <ProviderDefaults /><h2>Providers</h2><p>Provider connections belong to this Staf instance and are available to all your agents. Each agent has its own model.</p>
     <div class="provider provider-settings">
-      <strong>Codex</strong>
+      <strong>ChatGPT</strong>
       <p>{{ s.credential === 'signed-in' ? 'Saved sign-in found for this instance.' : s.credential === 'signed-out' ? 'No usable sign-in found for this instance.' : 'Checking the sign-in for this instance.' }}</p>
       <p v-if="s.credential === 'signed-in'" class="meta">This saved sign-in has not been checked against the provider.</p>
       <p v-if="s.authStatus" role="status">{{ s.authStatus }}</p>
       <p v-if="s.authAttempt">Sign-in {{ s.authAttempt.phase }}{{ s.authAttempt.phase === 'failed' || s.authAttempt.phase === 'expired' ? '. You can try again.' : '' }}</p>
       <p v-if="s.authAttempt?.phase === 'waiting' && (!s.authUrl || s.authUrlAttemptId !== s.authAttempt.id)">The sign-in link is no longer available here. Cancel this attempt and start again.</p>
       <div class="row">
-        <button :disabled="s.authStarting || !!s.authAttempt && ['waiting', 'exchanging', 'committing'].includes(s.authAttempt.phase)" @click="app.startAuth()">{{ s.credential === 'signed-in' ? 'Sign in again' : 'Connect Codex' }}</button>
+        <button :disabled="s.authStarting || !!s.authAttempt && ['waiting', 'exchanging', 'committing'].includes(s.authAttempt.phase)" @click="app.startAuth()">{{ s.credential === 'signed-in' ? 'Sign in again' : 'Connect ChatGPT' }}</button>
         <a v-if="s.authUrl && s.authAttempt?.phase === 'waiting' && s.authUrlAttemptId === s.authAttempt.id" :href="s.authUrl" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer">Continue sign-in</a>
         <button v-if="s.authAttempt && ['waiting', 'exchanging'].includes(s.authAttempt.phase)" class="quiet" @click="app.cancelAuth()">Cancel sign-in</button>
         <button v-if="s.credential === 'signed-in'" class="quiet" @click="signOut">Sign out</button>

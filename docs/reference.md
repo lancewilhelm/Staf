@@ -23,12 +23,12 @@ as an operating-system service.
 instance directory. `staf --instance URL --credential FILE` connects to a paired
 loopback instance. `staf instance help` lists one-shot instance commands. `staf settings show`,
 `staf settings defaults`, `staf settings set provider|model|reasoning VALUE`,
-`staf settings set-default provider|model|reasoning VALUE`, and `staf auth codex
+`staf settings set-default provider|model|reasoning VALUE`, and `staf auth chatgpt
 login|status|cancel|logout` operate through the same shared instance. These
 commands accept the same trailing connection options. A one-shot provider change requires `--confirm-provider-change`, acknowledging that future requests may send conversation history to the new provider. Use `staf settings unset model|reasoning` or `staf settings unset-default model|reasoning` to clear saved values.
 
 The terminal supports `/help`, `/settings`, `/settings show`, `/settings models`, `/settings reasoning`, `/set provider
-NAME`, `/set model ID`, `/set reasoning LEVEL`, `/models`, `/auth codex
+NAME`, `/set model ID`, `/set reasoning LEVEL`, `/models`, `/auth chatgpt
 login|status|cancel|logout`, `/usage [details|help]`, `/context [refresh|help]`,
 `/confirm-provider`, `/cancel-provider`, `/unset model|reasoning`, `/unset-default model|reasoning`, `/stop`, `/status ID`, `/edit ID TEXT`, `/retry ID`, `/discard ID`, `/defaults`, `/set-default provider|model|reasoning VALUE`, `/approvals`, `/approve ID`, `/deny ID`, and `/quit`. Settings
 commands edit the current bot profile; creation defaults are separate. See
@@ -52,15 +52,15 @@ Models and reasoning belong to the bot profile, not environment variables.
 | `STAF_BASE_URL` | live | API root; defaults to `https://api.openai.com/v1/`. |
 | `STAF_API_KEY` | live | Required API key. |
 
-The supported bot providers are demo, Codex, OpenRouter, LM Studio, and live.
+The supported bot providers are demo, ChatGPT, OpenRouter, LM Studio, and live.
 Live providers require an explicit bot model. The demo echoes messages without a
 model. OpenRouter uses its fixed Chat Completions endpoint. The live adapter uses
 a generic OpenAI-compatible Chat Completions endpoint and can incur API charges.
-Codex uses direct Responses and a separate Staf OAuth grant. A credential alone
+ChatGPT uses direct Responses and a separate Staf OAuth grant. A credential alone
 does not select a provider. Per-bot endpoint overrides are not implemented.
-See [model selection](model-selection.md) and [Codex sign-in](codex-direct.md).
+See [model selection](model-selection.md) and [ChatGPT sign-in](codex-direct.md).
 
-In the browser's agent settings, Demo is always selectable and Codex or
+In the browser's agent settings, Demo is always selectable and ChatGPT or
 OpenRouter is selectable when the instance reports a saved connection. Existing
 disconnected or host-configured selections remain visible. LM Studio and live
 are configured on the host and are not offered as new browser choices. The
@@ -87,9 +87,9 @@ historical input observation and explains that the next request's occupancy is
 unavailable. Staf does not compact history. See [usage accounting](usage-accounting.md)
 and [context display](context.md).
 
-## Direct Codex authentication
+## Direct ChatGPT authentication
 
-The GUI reserves a new tab during the Connect Codex click, then navigates it
+The GUI reserves a new tab during the Connect ChatGPT click, then navigates it
 when authorization setup returns. Continue sign-in remains a fallback for the
 same attempt. Refreshing loses that URL; cancel and restart if it is needed.
 
@@ -110,7 +110,7 @@ sign-in is active and does not change agent configuration.
 
 ## Direct Responses request facts
 
-Codex uses POST `https://api.openai.com/v1/responses` with `store:false`,
+ChatGPT uses POST `https://api.openai.com/v1/responses` with `store:false`,
 `stream:true`, explicit model, Staf instructions, structured input items and
 Staf function tools. Redirects and automatic HTTP retries are disabled. Only a
 completed terminal event commits a response. If its `output` array is empty,
@@ -165,9 +165,9 @@ use that ID. Manual earlier-record pickers are removed. Only the obsolete
 `staf-draft` and `staf-pending` browser keys are deleted; the current
 `staf-workspace-v1:` automatic recovery journal remains intact.
 
-Shared-instance Codex sign-in uses `POST /api/codex-auth/start`, `GET /api/codex-auth/current`, `GET /api/codex-auth/ATTEMPT_ID`, `POST /api/codex-auth/ATTEMPT_ID/cancel`, and `GET /api/codex-auth/credential`, and `POST /api/codex-auth/logout`. The initiating paired client owns an attempt and can recover its status and cancel it after a page refresh. Other paired clients cannot inspect it. The OAuth callback is a loopback route at `/auth/callback`; it does not expose callback parameters in its response. Cancellation, client revocation, expiry, and shutdown prevent a pending commit. Synthetic tests cover these boundaries; live sign-in is unverified.
+Shared-instance ChatGPT sign-in uses `POST /api/codex-auth/start`, `GET /api/codex-auth/current`, `GET /api/codex-auth/ATTEMPT_ID`, `POST /api/codex-auth/ATTEMPT_ID/cancel`, and `GET /api/codex-auth/credential`, and `POST /api/codex-auth/logout`. The initiating paired client owns an attempt and can recover its status and cancel it after a page refresh. Other paired clients cannot inspect it. The OAuth callback is a loopback route at `/auth/callback`; it does not expose callback parameters in its response. Cancellation, client revocation, expiry, and shutdown prevent a pending commit. Synthetic tests cover these boundaries; live sign-in is unverified.
 
-`instance serve [DATABASE_PATH] [PORT]` uses the database directory for Codex credentials and defaults to `.staf/instance.sqlite`
+`instance serve [DATABASE_PATH] [PORT]` uses the database directory for ChatGPT credentials and defaults to `.staf/instance.sqlite`
 and port `3210`, binding `127.0.0.1` only. `instance pair|clients|revoke|bots|create|inspect|edit|archive|restore|read|send|status|response-follow|response-stop`
 use the loopback origin and a separate client credential file; see
 [usage](usage.md#local-shared-instance-offline-preview). `instance create URL CREDENTIAL_FILE NAME [--instructions TEXT] [--provider PROVIDER] [--model MODEL] [--operation-id ID]` joins name
@@ -179,10 +179,10 @@ SHA-256 token hashes in SQLite and limits JSON request bodies to 64 KiB, except 
 The host issues a one-time code at startup and on each terminal Enter. Browser
 requests with an Origin must match the exact server origin; JSON and bearer
 credentials are required for protected writes. No network transport beyond
-loopback is implemented here. Codex and OpenRouter use instance-owned credentials; LM Studio and live use host configuration. Each requires an explicit bot model. Paired clients have derived
+loopback is implemented here. ChatGPT and OpenRouter use instance-owned credentials; LM Studio and live use host configuration. Each requires an explicit bot model. Paired clients have derived
 identifiers; any paired client can list and revoke them. Every paired client is trusted to act for the sole owner, including managing approvals and settings; there is no separate owner role check.
 
-Paired clients can read the latest main-chat progress with `GET /api/bots/{id}/response`, or `responseProgress` within `GET /api/commands/{id}`. The response has the command ID, bot ID, accepted/running/stopping/stopped/completed/failed/interrupted state, provisional text and a safe error. `instance response-follow URL CREDENTIAL_FILE COMMAND_ID` polls and prints changed progress as JSON lines until a terminal state. Text that could complete a known credential may be withheld at chunk boundaries. The service also holds unfinished words for safe URL handling. Provisional snapshots stop growing at one million UTF-16 code units per provider step; the completed response remains available. Version 28 adds a progress table after a database backup; incomplete output is retained separately from committed conversation messages. Codex direct and OpenRouter can emit deltas; LM Studio, generic Chat Completions and demo adapters are buffered. No live provider verification was performed for this change.
+Paired clients can read the latest main-chat progress with `GET /api/bots/{id}/response`, or `responseProgress` within `GET /api/commands/{id}`. The response has the command ID, bot ID, accepted/running/stopping/stopped/completed/failed/interrupted state, provisional text and a safe error. `instance response-follow URL CREDENTIAL_FILE COMMAND_ID` polls and prints changed progress as JSON lines until a terminal state. Text that could complete a known credential may be withheld at chunk boundaries. The service also holds unfinished words for safe URL handling. Provisional snapshots stop growing at one million UTF-16 code units per provider step; the completed response remains available. Version 28 adds a progress table after a database backup; incomplete output is retained separately from committed conversation messages. ChatGPT direct and OpenRouter can emit deltas; LM Studio, generic Chat Completions and demo adapters are buffered. No live provider verification was performed for this change.
 
 Paired clients request Stop with `POST /api/commands/{id}/stop` or `instance response-stop URL CREDENTIAL_FILE COMMAND_ID`. The result is the current progress, including `stopping` while cancellation settles and `stopped` afterward. Repeating a request against the same command returns its current outcome and cannot stop a newer command. The accepted command keeps the per-agent busy lock while stopping; a noncooperative provider can delay settlement. Restart while stopping reports `interrupted`. Version 29 adds the stop journal after a database backup. Stopped partial output is retained as an `assistant_stopped` conversation message, excluded from provider replay.
 

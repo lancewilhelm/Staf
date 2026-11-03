@@ -52,7 +52,7 @@ function scroll(event: Event) {
           <div class="meta">{{ s.response.state === 'failed' || s.response.state === 'interrupted' ? 'Response did not complete. ' : 'Response in progress. ' }}{{ s.response.error }}</div>
         </div>
         <div v-if="selected.provider === 'codex' && s.credential === 'signed-out'" class="provider">
-          <strong>Connect Codex to chat</strong><p>Provider connections are shared by this Staf instance.</p><button class="quiet" @click="emit('providers')">Open provider settings</button>
+          <strong>Connect ChatGPT to chat</strong><p>Provider connections are shared by this Staf instance.</p><button class="quiet" @click="emit('providers')">Open provider settings</button>
         </div>
         <div v-if="selected.provider === 'openrouter' && s.openrouter === 'missing'" class="provider">
           <strong>Connect OpenRouter to chat</strong><p>Provider connections are shared by this Staf instance.</p><button class="quiet" @click="emit('providers')">Open provider settings</button>

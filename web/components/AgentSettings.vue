@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { providerLabel } from '../../src/provider-label';
 import { ref, shallowRef, watch } from 'vue';
 import type { BotProfile } from '../controller';
 import { useWorkspace } from '../workspace';
@@ -71,7 +72,7 @@ async function archive() {
     <p role="status">{{ saving ? 'Loading or saving…' : status }}</p>
     <button v-if="compareAvailable" :disabled="saving" class="quiet" @click="compare">Compare latest settings</button>
     <section v-if="latest" class="saved-settings" aria-label="Current saved settings">
-      <h3>Current saved settings</h3><p>Name: {{ latest.name }}</p><p>Provider: {{ latest.provider }}</p><p>Model: {{ latest.model || '(none)' }}</p><p>Instructions:</p><pre>{{ latest.instructions }}</pre>
+      <h3>Current saved settings</h3><p>Name: {{ latest.name }}</p><p>Provider: {{ providerLabel(latest.provider) }}</p><p>Model: {{ latest.model || '(none)' }}</p><p>Instructions:</p><pre>{{ latest.instructions }}</pre>
     </section>
   </div>
 </template>

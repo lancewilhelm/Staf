@@ -174,7 +174,7 @@ export class Controller {
     const current=submission,uncertain=current.kind==='unknown'||current.kind==='uncertain-busy'||current.kind==='submitting-uncertain';
     if(!this.save({...draft,text:retry?draft.text:'',submission:{id:current.id,text:current.text,kind:uncertain?'submitting-uncertain':'submitting'}}))return;
     const bot=this.state.bots.find(item=>item.id===botId);
-    const setupError=bot?.provider==='codex'&&this.state.credential==='signed-out'?'Connect Codex in Settings to send.':bot?.provider==='openrouter'&&this.state.openrouter!=='saved'?'Connect OpenRouter in Settings to send.':bot&&bot.provider!=='demo'&&!bot.model?.trim()?'Choose a model for this agent to send.':null;
+    const setupError=bot?.provider==='codex'&&this.state.credential==='signed-out'?'Connect ChatGPT in Settings to send.':bot?.provider==='openrouter'&&this.state.openrouter!=='saved'?'Connect OpenRouter in Settings to send.':bot&&bot.provider!=='demo'&&!bot.model?.trim()?'Choose a model for this agent to send.':null;
     if(setupError){this.save({...this.state.draft,submission:{id:current.id,text:current.text,kind:uncertain?'unknown':'rejected',error:setupError}});return}
     await this.submit(botId,current);
   }
@@ -224,7 +224,7 @@ export class Controller {
     if(attempt?.id===previous?.id&&attempt?.phase===previous?.phase)return;
     this.update({notices:this.state.notices.filter(n=>n.topic!=='auth'),authStatus:'',...(attempt?.phase==='waiting'&&attempt.id===this.state.authUrlAttemptId?{}:{authUrl:'',authUrlAttemptId:''})});
     if(!attempt)return;
-    if(attempt.phase==='succeeded')this.notify('Codex sign-in saved. Account and model access have not been verified.','success','auth');
+    if(attempt.phase==='succeeded')this.notify('ChatGPT sign-in saved. Account and model access have not been verified.','success','auth');
     else if(['failed','expired','cancelled','canceled'].includes(attempt.phase))this.notify('Sign-in '+attempt.phase+'. You can try again.',attempt.phase==='failed'||attempt.phase==='expired'?'error':'info','auth');
     else if(attempt.phase!=='waiting')this.notify('Sign-in '+attempt.phase+'…','info','auth');
   }
@@ -248,7 +248,7 @@ export class Controller {
     }finally{this.update({authStarting:false})}
   }
   async cancelAuth(){const attempt=this.state.authAttempt;if(!attempt)return;try{await this.api('/api/codex-auth/'+attempt.id+'/cancel',{});this.update({authUrl:'',authUrlAttemptId:'',authStatus:''});await this.refresh()}catch{const message='Could not cancel sign-in. Check connection and retry.';this.update({authStatus:message});this.notify(message,'error','auth')}}
-  async signOutAuth(){try{await this.api('/api/codex-auth/logout',{});this.update({authUrl:'',authUrlAttemptId:'',authStatus:'',notices:this.state.notices.filter(n=>n.topic!=='auth')});await this.refresh();this.notify('Codex sign-in removed from this instance.','success','auth')}catch(e){this.update({authStatus:'Could not sign out. Check connection and retry.'});this.notify('Could not sign out. Check connection and retry.','error','auth')}}
+  async signOutAuth(){try{await this.api('/api/codex-auth/logout',{});this.update({authUrl:'',authUrlAttemptId:'',authStatus:'',notices:this.state.notices.filter(n=>n.topic!=='auth')});await this.refresh();this.notify('ChatGPT sign-in removed from this instance.','success','auth')}catch(e){this.update({authStatus:'Could not sign out. Check connection and retry.'});this.notify('Could not sign out. Check connection and retry.','error','auth')}}
   async providerDefaults(){return parseProviderDefaults(await this.api<unknown>('/api/provider-defaults'))}
   async saveProviderDefault(revision:string,provider:string,model:string,reasoning:string){return parseProviderDefaults(await this.api<unknown>('/api/provider-defaults',{revision,provider,model:model.trim()||null,reasoning:reasoning==='default'?null:reasoning}))}
   async models(provider:string){return parseModelCatalog(await this.api<unknown>('/api/models',{provider}))}

@@ -187,7 +187,7 @@ export class SettingsSession {
     const effective = resolveSettings({ ...this.input, cli, session: overrides });
     notes.push(`Next request: ${effective.provider.value} / ${effective.model.value || '(provider default model)'} / reasoning ${effective.reasoning.value}.`);
     if (changingProvider || key.startsWith('endpoint.')) notes.push('Existing conversation history will be sent to the selected destination on the next request. Transport, context limits and native tool behavior may differ; history is preserved.');
-    if (target === 'codex') notes.push('Codex direct uses its separate Staf grant; only Staf-dispatched tools are exposed.');
+    if (target === 'codex') notes.push('ChatGPT direct uses its separate Staf grant; only Staf-dispatched tools are exposed.');
     notes.push('Readiness is not probed: credentials/login/server/model availability may still fail on the next request; settings remain available.');
     for (const field of ['provider', 'model', 'reasoning', 'endpoint'] as const) {
       if (['CLI', 'shell', '.env'].includes(before[field].source) && effective[field].value !== before[field].value) notes.push(`Explicit interactive override replaces ${field} from ${before[field].source}.`);

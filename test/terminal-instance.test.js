@@ -17,10 +17,10 @@ async function stop(root){try{process.kill(descriptor(root).pid,'SIGTERM');await
 test('terminal main chat and profile survive client and daemon restarts, and revocation stays revoked',async()=>{
  const root=mkdtempSync(join(tmpdir(),'staf-terminal-instance-'));
  try {
-  let result=cli(root,'hello one\nhello two\nset provider to codex\n/confirm-provider\n/quit\n');assert.equal(result.status,0,result.stderr);assert.match(result.stdout,/User turns saved: 2/);assert.match(result.stdout,/Saved provider: codex/);
+  let result=cli(root,'hello one\nhello two\nset provider to codex\n/confirm-provider\n/quit\n');assert.equal(result.status,0,result.stderr);assert.match(result.stdout,/User turns saved: 2/);assert.match(result.stdout,/Saved provider: ChatGPT/);
   const bot=await request(root,'/api/main-bot',{});assert.equal(bot.body.provider,'codex');const id=bot.body.id;
-  result=cli(root,'/settings\n/quit\n');assert.equal(result.status,0,result.stderr);assert.match(result.stdout,/Provider: codex/);assert.match(result.stdout,/hello one/);assert.match(result.stdout,/hello two/);
-  await stop(root);result=cli(root,'/settings\nset provider to demo\n/confirm-provider\nhello three\n/quit\n');assert.equal(result.status,0,result.stderr);assert.match(result.stdout,/Provider: codex/);assert.match(result.stdout,/User turns saved: 3/);assert.equal((await request(root,'/api/main-bot',{})).body.id,id);
+  result=cli(root,'/settings\n/quit\n');assert.equal(result.status,0,result.stderr);assert.match(result.stdout,/Provider: ChatGPT/);assert.match(result.stdout,/hello one/);assert.match(result.stdout,/hello two/);
+  await stop(root);result=cli(root,'/settings\nset provider to demo\n/confirm-provider\nhello three\n/quit\n');assert.equal(result.status,0,result.stderr);assert.match(result.stdout,/Provider: ChatGPT/);assert.match(result.stdout,/User turns saved: 3/);assert.equal((await request(root,'/api/main-bot',{})).body.id,id);
   const clients=(await request(root,'/api/clients')).body;await request(root,`/api/clients/${clients.find(x=>x.current).id}/revoke`,{});
   result=cli(root,'/quit\n');assert.equal(result.status,1);assert.match(result.stderr,/authorization was revoked/);
   await stop(root);result=cli(root,'/quit\n');assert.equal(result.status,1);assert.match(result.stderr,/authorization was revoked/);
@@ -69,7 +69,7 @@ test('provider switches require explicit confirmation and settings can be cleare
  const root=mkdtempSync(join(tmpdir(),'staf-terminal-settings-'));
  const one=(...args)=>spawnSync(process.execPath,['dist/cli.js','settings',...args,'--data-dir',root],{encoding:'utf8',timeout:20000});
  try{
-  let result=cli(root,'hello\n/set provider codex\n/quit\n');assert.equal(result.status,0,result.stderr);assert.match(result.stdout,/conversation history.*codex/);assert.equal((await request(root,'/api/main-bot',{})).body.provider,'demo');
+  let result=cli(root,'hello\n/set provider codex\n/quit\n');assert.equal(result.status,0,result.stderr);assert.match(result.stdout,/conversation history.*ChatGPT/);assert.equal((await request(root,'/api/main-bot',{})).body.provider,'demo');
   result=cli(root,'set provider to codex\n/cancel-provider\n/confirm-provider\n/quit\n');assert.match(result.stderr,/No provider change/);assert.equal((await request(root,'/api/main-bot',{})).body.provider,'demo');
   result=one('set','provider','codex');assert.equal(result.status,1);assert.match(result.stderr,/conversation history.*confirm-provider-change/);assert.equal((await request(root,'/api/main-bot',{})).body.provider,'demo');
   result=one('set','provider','codex','--confirm-provider-change');assert.equal(result.status,0,result.stderr);assert.equal((await request(root,'/api/main-bot',{})).body.provider,'codex');

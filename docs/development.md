@@ -82,6 +82,24 @@ Open `http://127.0.0.1:3211`, pair with the code printed by that process,
 and create a Demo agent from **New agent**. This fixture uses synthetic providers
 and stores review data separately under `.staf/chat-review`.
 
+**Connect ChatGPT** opens a loopback page labeled **Simulated ChatGPT sign-in**.
+Choose **Complete simulated sign-in** to exercise the connected state. This does
+not sign in to OpenAI, store real credentials, or enable live model responses.
+Earlier fixture links incorrectly opened OpenAI with a synthetic client ID,
+which produced `invalid_authorize_client`.
+
+For real ChatGPT sign-in, start a regular instance with separate data:
+
+```sh
+mkdir -p .staf/live-review
+node dist/cli.js instance serve .staf/live-review/instance.sqlite 3210
+```
+
+Open `http://127.0.0.1:3210`, pair using that instance's code, and use
+**Settings → Connect ChatGPT**. This starts the production flow; fresh live
+registration remains unverified by the offline checks. See
+[ChatGPT sign-in](codex-direct.md). Stop either instance with Ctrl+C.
+
 - Send `Streaming markdown fixture`. Expect a long Markdown response, code Copy,
   a fixed composer and a circular Stop control. Scroll up; incoming text must
   leave your reading position unchanged.

@@ -86,4 +86,4 @@ export function usageText(session:Session, detail=false):string {
   lines.push('Account quota/remaining subscription allowance: unavailable. Context-window occupancy: unavailable. Dollar estimates: not calculated. Local inference is not a claim of zero operating cost.',`Caching: ${caching}`,'Commands: /usage details (per-call sources) | /usage help');
   return lines.join('\n');
 }
-export const usageHelp='Usage: /usage [details|help]. No provider or account request is made. Metrics are optional provider reports, not estimates. OpenRouter costCredits is reported account credits, not upstream cost or a dollar estimate. Codex reports fresh-exec totals, not account quota or dollar charges. Demo is not applicable; legacy HTTP and failed calls may be unavailable. '+caching;
+export const usageHelp='Usage: /usage [details|help]. No provider or account request is made. Metrics are optional provider reports, not estimates. OpenRouter costCredits is reported account credits, not upstream cost or a dollar estimate. ChatGPT reports fresh-exec totals, not account quota or dollar charges. Demo is not applicable; legacy HTTP and failed calls may be unavailable. '+caching;

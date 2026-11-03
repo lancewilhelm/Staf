@@ -30,7 +30,7 @@ try{
  const browserPath=(await readFile(join(temp,'chrome','DevToolsActivePort'),'utf8')).split('\n')[1];browserSocket=new WebSocket(`ws://127.0.0.1:${debug}${browserPath}`);await new Promise((resolve,reject)=>{browserSocket.onopen=resolve;browserSocket.onerror=reject});browserSocket.onmessage=receive;
  await until(()=>evaluate("document.body?.innerText.includes('Pair this browser')"),'pair page');
  await evaluate(`window.testInput=(selector,value)=>{const el=document.querySelector(selector);Object.getOwnPropertyDescriptor(el.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,'value').set.call(el,value);el.dispatchEvent(new Event('input',{bubbles:true}))}; window.testClick=text=>{const b=[...document.querySelectorAll('button')].find(x=>x.textContent.trim()===text);if(!b)throw Error('Missing button '+text);b.click()}`);
- await act(`testInput('input',${JSON.stringify(code)});testClick('Pair')`,"document.body.innerText.includes('Providers') && document.body.innerText.includes('Connect Codex')",'pair browser and open global provider setup');
+ await act(`testInput('input',${JSON.stringify(code)});testClick('Pair')`,"document.body.innerText.includes('Providers') && document.body.innerText.includes('Connect ChatGPT')",'pair browser and open global provider setup');
  assert.equal(await evaluate("document.querySelector('.brand span').textContent"),'STAF','product wordmark');
  assert.equal(await evaluate("[...document.querySelectorAll('.setup button')].some(b=>b.textContent==='Create an agent')"),false,'creation belongs in sidebar');
  assert.equal(await evaluate("!![...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('New agent'))"),true,'agent creation is discoverable in navigation');
@@ -74,7 +74,7 @@ try{
  await evaluate("window.testInput=(selector,value)=>{const el=document.querySelector(selector);Object.getOwnPropertyDescriptor(el.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,'value').set.call(el,value);el.dispatchEvent(new Event('input',{bubbles:true}))};window.testClick=text=>{const b=[...document.querySelectorAll('button')].find(x=>x.textContent.trim()===text);if(!b)throw Error('Missing button '+text);b.click()}");
  console.log('PASS appearance choices, persistence, and device changes');
  await evaluate("window.routerFetch=window.fetch;window.fetch=async(...args)=>String(args[0]).endsWith('/api/openrouter-connection')&&args[1]?.method==='GET'?new Response(JSON.stringify({error:'storage failure'}),{status:400,headers:{'Content-Type':'application/json'}}):window.routerFetch(...args)");
- await until(()=>evaluate("document.body.innerText.includes('OpenRouter credential storage is unavailable') && document.body.innerText.includes('Connect Codex')"),'credential status error leaves Settings available');
+ await until(()=>evaluate("document.body.innerText.includes('OpenRouter credential storage is unavailable') && document.body.innerText.includes('Connect ChatGPT')"),'credential status error leaves Settings available');
  await evaluate("window.fetch=window.routerFetch");
  await until(()=>evaluate("document.body.innerText.includes('No OpenRouter API key saved.')"),'credential status recovers');
  await evaluate("testInput('input[type=password]','synthetic-unsaved-key');testClick('Back to chat')");
@@ -98,7 +98,7 @@ try{
  await act("testClick('Disconnect OpenRouter')","document.body.innerText.includes('No OpenRouter API key saved.')",'disconnect OpenRouter');
 
  await evaluate("window.originalOpen=window.open;window.popupCalls=[];window.open=(...args)=>{window.popupCalls.push(args);return null}");
- await act("testClick('Connect Codex')","!![...document.querySelectorAll('a')].find(a=>a.textContent==='Continue sign-in')",'start synthetic Codex sign-in');
+ await act("testClick('Connect ChatGPT')","!![...document.querySelectorAll('a')].find(a=>a.textContent==='Continue sign-in')",'start synthetic ChatGPT sign-in');
  assert.equal(await evaluate("window.popupCalls.length"),1,'Connect reserves a tab during the user action');
  assert.equal(await evaluate("!!document.querySelector('.toast [role=progressbar]')"),true,'sign-in instruction is a timed toast');
  assert.match(await evaluate("document.body.innerText"),/blocked.*Continue sign-in/i);
@@ -113,8 +113,8 @@ try{
 
  await cdp('Page.reload');await until(()=>evaluate("document.body.innerText.includes('sign-in link is no longer available')"),'recover a pending attempt after reload');
  await evaluate("window.testInput=(selector,value)=>{const el=document.querySelector(selector);Object.getOwnPropertyDescriptor(el.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,'value').set.call(el,value);el.dispatchEvent(new Event('input',{bubbles:true}))};window.testClick=text=>{const b=[...document.querySelectorAll('button')].find(x=>x.textContent.trim()===text);if(!b)throw Error('Missing button '+text);b.click()}");
- await act("testClick('Cancel sign-in')","document.body.innerText.includes('Sign-in cancelled') || document.body.innerText.includes('Sign-in canceled')",'cancel synthetic Codex sign-in');
- await act("testClick('Connect Codex')","!![...document.querySelectorAll('a')].find(a=>a.textContent==='Continue sign-in')",'retry Codex after cancellation');
+ await act("testClick('Cancel sign-in')","document.body.innerText.includes('Sign-in cancelled') || document.body.innerText.includes('Sign-in canceled')",'cancel synthetic ChatGPT sign-in');
+ await act("testClick('Connect ChatGPT')","!![...document.querySelectorAll('a')].find(a=>a.textContent==='Continue sign-in')",'retry ChatGPT after cancellation');
  const signInHref=await evaluate("[...document.querySelectorAll('a')].find(a=>a.textContent==='Continue sign-in').href");
  await until(async()=>{const targets=await cdp('Target.getTargets',{},undefined,browserSocket);return targets.targetInfos.some(target=>target.url===signInHref)},'automatic sign-in tab navigates to the same attempt');
  console.log('PASS automatic sign-in tab navigation');
@@ -139,11 +139,11 @@ try{
  await act("[...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('New agent')).click()","document.body.innerText.includes('Create your agent')",'create agent without connecting');
  await evaluate("testInput('.setup input','Mira');testInput('.setup textarea','Help me plan');document.querySelector('.setup select').value='codex';document.querySelector('.setup select').dispatchEvent(new Event('change',{bubbles:true}));testInput('.setup input[placeholder]','fixture-model');testClick('Create agent')");
  await until(()=>evaluate("document.body.innerText.includes('Agent created.') && !!document.querySelector('[aria-label=Message]')"),'create agent');
- const bot=await evaluate("(async()=>{let t=localStorage.getItem('staf-token');return (await (await fetch('/api/bots',{headers:{Authorization:'Bearer '+t}})).json())[0]})()");assert.equal(bot.name,'Mira');assert.equal(bot.provider,'codex');assert.equal(bot.model,'fixture-model');console.log('PASS create Codex agent without connecting');
+ const bot=await evaluate("(async()=>{let t=localStorage.getItem('staf-token');return (await (await fetch('/api/bots',{headers:{Authorization:'Bearer '+t}})).json())[0]})()");assert.equal(bot.name,'Mira');assert.equal(bot.provider,'codex');assert.equal(bot.model,'fixture-model');console.log('PASS create ChatGPT agent without connecting');
  assert.equal(await evaluate("document.querySelectorAll('.composer .composer-control').length"),1,'one accessible Send/Stop composer control');
  // window.open clones the opener's sessionStorage, as a duplicated tab can.
  await evaluate("testInput('[aria-label=Message]','First tab submission');testClick('Send');testInput('[aria-label=Message]','First tab draft')");
- await until(()=>evaluate("document.body.innerText.includes('Connect Codex in Settings to send.')"),'first tab submission retained');
+ await until(()=>evaluate("document.body.innerText.includes('Connect ChatGPT in Settings to send.')"),'first tab submission retained');
  const openCopy=async()=>{const before=(await browserCdp('Target.getTargets')).targetInfos.map(x=>x.targetId);await evaluate("window.open(location.href,'_blank');void 0");const info=await until(async()=>(await browserCdp('Target.getTargets')).targetInfos.find(x=>x.type==='page'&&!before.includes(x.targetId)),'duplicate tab');const attached=await browserCdp('Target.attachToTarget',{targetId:info.targetId,flatten:true});return {id:info.targetId,eval:async expression=>{const result=await browserCdp('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true},attached.sessionId);if(result.exceptionDetails)throw Error(JSON.stringify(result.exceptionDetails));return result.result.value;}};};
  await evaluate("localStorage.setItem('staf-draft','Obsolete beside active draft');localStorage.setItem('staf-pending','obsolete')");
  const copy=await openCopy();await until(()=>copy.eval("!!document.querySelector('[aria-label=Message]')"),'duplicate tab loads');
@@ -155,7 +155,7 @@ try{
  await copy.eval("[...document.querySelectorAll('.side nav button')][0].click()");
 
  await copy.eval("window.testInput=(selector,value)=>{const el=document.querySelector(selector);Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(el,value);el.dispatchEvent(new Event('input',{bubbles:true}))};window.testClick=text=>[...document.querySelectorAll('button')].find(x=>x.textContent.trim()===text).click();testInput('[aria-label=Message]','Second tab submission');testClick('Send');testInput('[aria-label=Message]','Second tab draft')");
- await until(()=>copy.eval("document.body.innerText.includes('Connect Codex in Settings to send.')"),'duplicate tab submission retained');
+ await until(()=>copy.eval("document.body.innerText.includes('Connect ChatGPT in Settings to send.')"),'duplicate tab submission retained');
  const records=await evaluate(`Object.entries(localStorage).filter(([k])=>k.startsWith('staf-workspace-v1:')&&k.endsWith(':${bot.id}')).map(([,v])=>JSON.parse(v)).filter(x=>x.submission)`);
  const first=records.find(x=>x.text==='First tab draft'),second=records.find(x=>x.text==='Second tab draft');assert.ok(first&&second,'both drafts remain separately durable');assert.notEqual(first.submission.id,second.submission.id,'duplicate tabs use distinct command IDs');
  await browserCdp('Target.closeTarget',{targetId:copy.id});
@@ -179,11 +179,11 @@ try{
  await evaluate("testInput('[aria-label=Message]','Keep this draft');document.querySelector('[aria-label=Message]').focus()");
  await cdp('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',windowsVirtualKeyCode:13,nativeVirtualKeyCode:13});
  await cdp('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13,nativeVirtualKeyCode:13});
- assert.equal(await evaluate("document.querySelector('[aria-label=Message]').value"),'');assert.equal(await evaluate("document.querySelector('.messages').innerText.includes('Keep this draft') && document.body.innerText.includes('Connect Codex in Settings to send.')"),true);const beforeConnect=await evaluate(`(async()=>{const t=localStorage.getItem('staf-token');return await (await fetch('/api/bots/${bot.id}/messages',{headers:{Authorization:'Bearer '+t}})).json()})()`);assert.equal(beforeConnect.length,0);console.log('PASS missing connection preserves the draft and explains setup');
+ assert.equal(await evaluate("document.querySelector('[aria-label=Message]').value"),'');assert.equal(await evaluate("document.querySelector('.messages').innerText.includes('Keep this draft') && document.body.innerText.includes('Connect ChatGPT in Settings to send.')"),true);const beforeConnect=await evaluate(`(async()=>{const t=localStorage.getItem('staf-token');return await (await fetch('/api/bots/${bot.id}/messages',{headers:{Authorization:'Bearer '+t}})).json()})()`);assert.equal(beforeConnect.length,0);console.log('PASS missing connection preserves the draft and explains setup');
  await evaluate("testInput('[aria-label=Message]','Newer setup draft')");
  await act("document.querySelector('.model-button').click();setTimeout(()=>testClick('Agent settings'),0)","!!document.querySelector('.setup select')",'open disconnected agent settings');
  assert.equal(await evaluate("document.querySelector('.setup select').value"),'codex');
- assert.equal(await evaluate("document.querySelector('.setup select option:checked').textContent"),'codex');
+ assert.equal(await evaluate("document.querySelector('.setup select option:checked').textContent"),'ChatGPT');
  assert.equal(await evaluate("document.querySelector('.setup select option[value=demo]').disabled"),false);
  assert.equal(await evaluate("document.querySelector('.setup select option[value=openrouter]').disabled"),false);
  await evaluate("testInput('.setup textarea','Unsaved recovery instructions')");
@@ -203,12 +203,12 @@ try{
  assert.equal(await evaluate("document.querySelector('.setup select').value"),'openrouter');
  assert.equal(await evaluate("document.querySelector('.setup textarea').value"),'Unsaved recovery instructions');
  await evaluate("document.querySelector('.setup select').value='codex';document.querySelector('.setup select').dispatchEvent(new Event('change',{bubbles:true}))");
- await until(()=>evaluate("document.querySelector('.setup select').value==='codex'&&!document.querySelector('[aria-label=\"Provider picker\"] fieldset').disabled"),'return to remembered Codex pair');
+ await until(()=>evaluate("document.querySelector('.setup select').value==='codex'&&!document.querySelector('[aria-label=\"Provider picker\"] fieldset').disabled"),'return to remembered ChatGPT pair');
  await act("testClick('Cancel')","document.querySelector('[aria-label=Message]')?.value==='Newer setup draft'",'retain chat draft after provider recovery');
  await act("testClick('Open provider settings')","document.body.innerText.includes('Sign-in failed')",'open settings with draft retained');
- await act("testClick('Connect Codex')","!![...document.querySelectorAll('a')].find(a=>a.textContent==='Continue sign-in')",'retry Codex after failure');
+ await act("testClick('Connect ChatGPT')","!![...document.querySelectorAll('a')].find(a=>a.textContent==='Continue sign-in')",'retry ChatGPT after failure');
  await evaluate("(async()=>{const state=new URL([...document.querySelectorAll('a')].find(a=>a.textContent==='Continue sign-in').href).searchParams.get('state');await fetch('/auth/callback?code=success&state='+encodeURIComponent(state))})()");
- await until(()=>evaluate("document.body.innerText.includes('Saved sign-in found for this instance.')"),'complete synthetic Codex sign-in');
+ await until(()=>evaluate("document.body.innerText.includes('Saved sign-in found for this instance.')"),'complete synthetic ChatGPT sign-in');
  assert.doesNotMatch(await evaluate("document.querySelector('.toasts').innerText"),/Complete it, then return|tab was blocked/,'completion clears stale sign-in instructions');
 
  assert.equal(await evaluate("!![...document.querySelectorAll('a')].find(a=>a.textContent==='Continue sign-in')"),false);
@@ -216,15 +216,15 @@ try{
  assert.doesNotMatch(await evaluate("document.body.innerText"),/synthetic-(access|refresh|id)-secret/);
  assert.doesNotMatch(JSON.stringify(await evaluate(`(async()=>{const t=localStorage.getItem('staf-token'),headers={Authorization:'Bearer '+t};return await Promise.all(['/api/codex-auth/credential','/api/bots/${bot.id}','/api/bots/${bot.id}/messages'].map(async path=>(await fetch(path,{headers})).json()))})()`)),/synthetic-(access|refresh|id)-secret/);
  assert.doesNotMatch(await readFile(join(bot.configDir,'agent.toml'),'utf8')+await readFile(join(bot.configDir,'soul.md'),'utf8'),/synthetic-(access|refresh|id)-secret/);
- await act("window.confirm=()=>true;testClick('Sign out')","document.body.innerText.includes('No usable sign-in found for this instance.')",'disconnect Codex');
+ await act("window.confirm=()=>true;testClick('Sign out')","document.body.innerText.includes('No usable sign-in found for this instance.')",'disconnect ChatGPT');
  assert.equal(existsSync(join(temp,'auth','codex-direct.json')),false);
- await act("testClick('Connect Codex')","!![...document.querySelectorAll('a')].find(a=>a.textContent==='Continue sign-in')",'reconnect Codex');
+ await act("testClick('Connect ChatGPT')","!![...document.querySelectorAll('a')].find(a=>a.textContent==='Continue sign-in')",'reconnect ChatGPT');
  await evaluate("(async()=>{const state=new URL([...document.querySelectorAll('a')].find(a=>a.textContent==='Continue sign-in').href).searchParams.get('state');await fetch('/auth/callback?code=success&state='+encodeURIComponent(state))})()");
  await until(()=>evaluate("document.body.innerText.includes('Saved sign-in found for this instance.')"),'complete reconnection');
  await act("testClick('Back to chat')","!!document.querySelector('[aria-label=Message]')",'return to saved draft');
  assert.equal(await evaluate("document.querySelector('[aria-label=Message]').value"),'Newer setup draft');
- await until(()=>evaluate("!document.body.innerText.includes('Connect Codex to chat')"),'recognize synthetic connection');
- await act("testClick('Retry')","!document.querySelector('.submission') && document.body.innerText.includes('Demo (offline): Keep this draft')",'retry after connecting Codex');
+ await until(()=>evaluate("!document.body.innerText.includes('Connect ChatGPT to chat')"),'recognize synthetic connection');
+ await act("testClick('Retry')","!document.querySelector('.submission') && document.body.innerText.includes('Demo (offline): Keep this draft')",'retry after connecting ChatGPT');
  await evaluate("testInput('[aria-label=Message]','Line one');document.querySelector('[aria-label=Message]').focus()");
  await cdp('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',text:'\r',unmodifiedText:'\r',windowsVirtualKeyCode:13,nativeVirtualKeyCode:13,modifiers:8});
  await cdp('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13,nativeVirtualKeyCode:13,modifiers:8});
@@ -478,7 +478,7 @@ try{
  await writeFile(join(temp,'auth','codex-direct.json'),JSON.stringify({version:1,issuer:'https://auth.openai.com',subject:'synthetic',clientId:'synthetic-client',hostId:'synthetic-host',accessToken:'synthetic',refreshToken:'synthetic',idToken:'synthetic',scopes:['resource.invoke','chatgpt.tokens.use.direct'],expiresAt:Date.now()+3600000}),{mode:0o600});
  await act("[...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('Settings')).click()","document.body.innerText.includes('Saved sign-in found for this instance.')",'existing instance sign-in is recognized');
  assert.equal(await evaluate(`document.querySelector('.archived-agents .agent-id')?.textContent.trim()==='· '+${JSON.stringify(duplicate.id.slice(-4))}`),true,'archived duplicate uses the shortened ID');
- await act("[...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('New agent')).click()","document.body.innerText.includes('Create your agent') && !document.body.innerText.includes('Connect Codex')",'new agent does not require another provider sign-in');
+ await act("[...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('New agent')).click()","document.body.innerText.includes('Create your agent') && !document.body.innerText.includes('Connect ChatGPT')",'new agent does not require another provider sign-in');
  await evaluate("testInput('.setup input','No model');testInput('.setup textarea','Help with research');document.querySelector('.setup select').value='codex';document.querySelector('.setup select').dispatchEvent(new Event('change',{bubbles:true}));testClick('Create agent')");
  await until(()=>evaluate("document.querySelector('.title')?.textContent==='No model' && !!document.querySelector('[aria-label=Message]')"),'create agent without model');
  await evaluate("testInput('[aria-label=Message]','Keep this until model selection');document.querySelector('[aria-label=Message]').focus()");
@@ -571,6 +571,6 @@ try{
  await cdp('Page.navigate',{url:`http://127.0.0.1:${secondPort}`});await until(()=>evaluate("document.body?.innerText.includes('Pair this browser')"),'configured instance pairing page');
  await evaluate(`(()=>{const input=document.querySelector('input');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,${JSON.stringify(secondCode)});input.dispatchEvent(new Event('input',{bubbles:true}));[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Pair').click()})()`);
  await until(()=>evaluate("document.body.innerText.includes('set up your first agent')"),'configured instance skips provider setup');
- assert.equal(await evaluate("document.body.innerText.includes('Connect Codex')"),false);console.log('PASS existing sign-in skips first-run provider setup');
+ assert.equal(await evaluate("document.body.innerText.includes('Connect ChatGPT')"),false);console.log('PASS existing sign-in skips first-run provider setup');
  console.log('PASS new workspace browser smoke');
 } finally {socket?.close();browserSocket?.close();browser?.kill();secondServer?.kill();server?.kill();proxy?.close();await sleep(200);await rm(temp,{recursive:true,force:true})}

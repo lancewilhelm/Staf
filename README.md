@@ -2,7 +2,7 @@
 
 Staf is a self-hosted agent project in strict TypeScript for Node.js 22.16 or later.
 It has persistent conversations, settings, usage reports and a clock tool.
-Codex now uses direct Responses with a fresh Staf ChatGPT-plan registration.
+ChatGPT now uses direct Responses with a fresh Staf ChatGPT-plan registration.
 OpenRouter is the other initial MVP provider. LM Studio and a generic HTTP
 adapter are also available in the shared instance.
 
@@ -26,8 +26,8 @@ one-shot commands.
 
 Run `pnpm start instance serve .staf/instance.sqlite 3210` and open
 `http://127.0.0.1:3210/`. Enter the host's pairing code to open the chat workspace.
-**Settings** shows the instance-wide Codex connection and offers sign-in when
-needed, progress, cancellation, retry, and sign-out. Connect Codex opens a new
+**Settings** shows the instance-wide ChatGPT connection and offers sign-in when
+needed, progress, cancellation, retry, and sign-out. Connect ChatGPT opens a new
 tab; Continue sign-in is available if the browser blocks it. Workspace notices
 appear as dismissible toasts, with actionable errors retained beside controls. A saved sign-in does not
 verify account or model access. It also offers Light, Dark, and System appearance for this browser;
@@ -37,7 +37,7 @@ Instructions live in its `soul.md` file; settings live in `agent.toml`. You can
 Connect an instance-wide OpenRouter key in global Settings or through the paired CLI; saved presence does not verify account or model access. You can create an agent with just a name before connecting a provider. Agent settings
 offer Demo and configured shared connections, retain disconnected selections, and ask for confirmation before switching providers. Review the agent's model after a switch. Open full agent settings from the chat header avatar. Agent settings include archive; reveal Archived agents in the Agents sidebar to restore them. Tool requests, observed outcomes, and exact-action approvals appear in the chat conversation. The previous Advanced page has been retired;
 other management features remain available through the service and CLI while
-their GUI is developed. Shared-instance Codex sign-in has synthetic coverage
+their GUI is developed. Shared-instance ChatGPT sign-in has synthetic coverage
 but is not live verified. Background-task creation from main chat is deferred. Explicit task API and CLI operations remain available.
 Public web reading, owner-configured local search and scratch-only shell are off
 by default and require owner approval. Press Enter in the host
@@ -61,7 +61,7 @@ The shared instance includes a provisional daily and weekly schedule preview for
 - [Native Linux installation and backup](docs/native-linux-installation.md)
 - [Docker Compose installation and backup](docs/docker-installation.md)
 - [Browser and CLI test plan](docs/mvp-test-plan.md)
-- [Fresh direct Codex sign-in](docs/codex-direct.md)
+- [Fresh direct ChatGPT sign-in](docs/codex-direct.md)
 - [Settings and recovery](docs/settings.md)
 - [Configuration reference](docs/reference.md)
 - [Consumption accounting](docs/usage-accounting.md) and [context display](docs/context.md)
@@ -94,7 +94,7 @@ rotation, cache identity, tools, errors, cancellation, sessions and PTY menus.
 Regressions cover cancellation during OAuth exchange and provider setup, model
 and reasoning shortcuts after a completed turn, unfinished output items, and
 refusal display and replay.
-Direct Codex text generation through the prior CLI, a follow-up using saved history
+Direct ChatGPT text generation through the prior CLI, a follow-up using saved history
 and a resumed clock-tool round trip were live-tested
 with user-authorized `gpt-6-luna` requests and an existing grant on 2026-10-26.
 Fresh browser sign-in and live refresh rotation remain unverified; see
@@ -103,7 +103,7 @@ Public OIDC metadata and the documented direct endpoint contract were checked.
 On a new checkout, run
 `pnpm install --frozen-lockfile`. pnpm 12.16.1 is used for verification.
 
-The workspace receives provisional main-chat response progress over an authenticated event stream and renders Markdown with copyable code. The circular composer action switches from an up-arrow Send to Stop during a response. Use Stop to end the current response while keeping the next draft; the shared service waits for cancellation to settle before accepting another message. The paired CLI can follow progress with `instance response-follow` and request Stop with `instance response-stop`. Incremental text depends on the provider: Codex direct and OpenRouter support it; LM Studio and generic Chat Completions responses are buffered. The shared terminal labels incremental text provisional and displays command status and recorded tool progress.
+The workspace receives provisional main-chat response progress over an authenticated event stream and renders Markdown with copyable code. The circular composer action switches from an up-arrow Send to Stop during a response. Use Stop to end the current response while keeping the next draft; the shared service waits for cancellation to settle before accepting another message. The paired CLI can follow progress with `instance response-follow` and request Stop with `instance response-stop`. Incremental text depends on the provider: ChatGPT direct and OpenRouter support it; LM Studio and generic Chat Completions responses are buffered. The shared terminal labels incremental text provisional and displays command status and recorded tool progress.
 `/usage` shows reported main-chat consumption. `/context` reports historical input
 when available; current context occupancy is unavailable. Shared-instance provider
 sign-in and live chat have not been verified with real credentials.

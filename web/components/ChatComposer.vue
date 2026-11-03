@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { providerLabel } from '../../src/provider-label';
 import { computed, ref, watch } from 'vue';
 import { useWorkspace } from '../workspace';
 import ProviderPicker from './ProviderPicker.vue';
@@ -32,7 +33,7 @@ function openSettings() {
       <button class="quiet" @click="openSettings">Agent settings</button><button class="quiet" @click="picker = false">Close picker</button>
     </div>
     <div class="actions">
-      <button class="model-button" :aria-expanded="picker" aria-label="Choose provider, model and reasoning" @click="picker = !picker">{{ selected.provider }} · {{ selected.model || 'Choose model' }}</button>
+      <button class="model-button" :aria-expanded="picker" aria-label="Choose provider, model and reasoning" @click="picker = !picker">{{ providerLabel(selected.provider) }} · {{ selected.model || 'Choose model' }}</button>
       <button class="composer-control" :aria-label="responding ? stopping ? 'Stopping response' : 'Stop' : 'Send'"
         :title="responding ? stopping ? 'Stopping response' : 'Stop response' : 'Send (Enter)'"
         :disabled="responding ? stopping : !s.draftReady || !!s.draft.submission" @click="responding ? app.stopResponse() : app.send()">

@@ -94,7 +94,25 @@ return {
   },
 };
 }
-const authHooks = { prepare: async () => ({hostId:'urn:uuid:synthetic',clientId:'synthetic-client'}), complete: async (root,_attempt,callback,_fetch,signal,beforeCommit) => {if(callback.searchParams.get('code')!=='success')throw Error('Synthetic failure');signal.throwIfAborted();await mkdir(join(root,'auth'),{recursive:true,mode:0o700});await beforeCommit();await writeFile(join(root,'auth','codex-direct.json'),JSON.stringify({version:1,issuer:'https://auth.openai.com',subject:'synthetic',clientId:'synthetic-client',hostId:'synthetic-host',accessToken:'synthetic-access-secret',refreshToken:'synthetic-refresh-secret',idToken:'synthetic-id-secret',scopes:['resource.invoke','chatgpt.tokens.use.direct'],expiresAt:Date.now()+3600000}),{mode:0o600});} };
+const signInPages = new Map();
+const signInServer = createServer((req, res) => {
+  const url = new URL(req.url || '/', 'http://127.0.0.1');
+  const callback = url.pathname === '/sign-in' ? signInPages.get(url.searchParams.get('state')) : undefined;
+  if (req.method !== 'GET' || !callback) { res.writeHead(404).end(); return; }
+  res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer', 'Content-Security-Policy': "default-src 'none'; frame-ancestors 'none'; base-uri 'none'"});
+  res.end('<!doctype html><title>Simulated ChatGPT sign-in</title><h1>Simulated ChatGPT sign-in</h1><p>This offline review fixture does not connect to a real account. No credentials are needed. Chat responses are synthetic.</p><p><a href="' + callback.replaceAll('&', '&amp;') + '">Complete simulated sign-in</a></p><p>Use a regular Staf instance for real ChatGPT sign-in.</p>');
+});
+await new Promise(resolve => signInServer.listen(0, '127.0.0.1', resolve));
+function simulatedAuthorizationUrl(attempt) {
+  const callback = new URL(attempt.redirectUri);
+  callback.search = new URLSearchParams({state: attempt.state, code: 'success'}).toString();
+  signInPages.clear();
+  signInPages.set(attempt.state, callback.toString());
+  const url = new URL('http://127.0.0.1:' + signInServer.address().port + '/sign-in');
+  url.searchParams.set('state', attempt.state);
+  return url.toString();
+}
+const authHooks = { authorizationUrl: simulatedAuthorizationUrl, prepare: async () => ({hostId:'urn:uuid:synthetic',clientId:'synthetic-client'}), complete: async (root,_attempt,callback,_fetch,signal,beforeCommit) => {if(callback.searchParams.get('code')!=='success')throw Error('Synthetic failure');signal.throwIfAborted();await mkdir(join(root,'auth'),{recursive:true,mode:0o700});await beforeCommit();await writeFile(join(root,'auth','codex-direct.json'),JSON.stringify({version:1,issuer:'https://auth.openai.com',subject:'synthetic',clientId:'synthetic-client',hostId:'synthetic-host',accessToken:'synthetic-access-secret',refreshToken:'synthetic-refresh-secret',idToken:'synthetic-id-secret',scopes:['resource.invoke','chatgpt.tokens.use.direct'],expiresAt:Date.now()+3600000}),{mode:0o600});} };
 const webDependencies={
   resolve:async host=>{console.log('SYNTHETIC_WEB dns '+host);return [{address:'8.8.8.8',family:4}];},
   request:async url=>{console.log('SYNTHETIC_WEB request '+url.hostname);return {status:url.hostname==='one.example'?302:200,headers:url.hostname==='one.example'?{location:'https://two.example/second'}:{'content-type':'text/plain'},body:(async function*(){yield Buffer.from('Synthetic page content')})(),close(){}};},
