@@ -1,7 +1,7 @@
 import {ProviderDefaultsStore} from './provider-choices.js';
 import { DatabaseSync } from 'node:sqlite';
 import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
-import { closeSync, openSync, mkdtempSync, rmSync } from 'node:fs';
+import { closeSync, existsSync, openSync, mkdtempSync, rmSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { AgentConfigStore, AgentConfigUncertain } from './agent-config.js';
@@ -29,6 +29,12 @@ export const starterSoul = "You are an assistant working for the owner. Be clear
 export type BotEdit = { revision: string; name: string; description?: string; instructions: string; provider: string; model: string | null; reasoning: string | null };
 export class BotConflict extends Error {}
 
+export function assertDatasetAvailable(path: string) {
+  if (path !== ':memory:' && existsSync(`${path}.maintenance.json`)) {
+    throw Error('Dataset maintenance was interrupted. Run pnpm dev:recover before starting Staf.');
+  }
+}
+
 /** Instance-owned records. Callers supply execution; no provider runs during creation. */
 export class Instance {
   private readonly db: DatabaseSync;
@@ -38,6 +44,7 @@ export class Instance {
   private readonly grantControllers = new Map<string,Set<AbortController>>();
   readonly migrationBackup: string | undefined;
   constructor(path: string, private readonly redactSkill: (text:string) => string = text => text) {
+    assertDatasetAvailable(path);
     this.temporaryConfigRoot = path === ':memory:' ? mkdtempSync(join(tmpdir(),'staf-config-')) : undefined;
     this.configs = new AgentConfigStore(this.temporaryConfigRoot ?? join(dirname(resolve(path)),'agents'));
     if (path !== ':memory:') {
@@ -47,6 +54,7 @@ export class Instance {
     this.db = new DatabaseSync(path);
     try {
     this.db.exec('PRAGMA locking_mode=EXCLUSIVE; BEGIN EXCLUSIVE; COMMIT;');
+    assertDatasetAvailable(path);
     const hasBots = this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='bots'").get();
     const hasProfiles = this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='bot_profiles'").get();
     const versionRow = this.db.prepare('PRAGMA user_version').get();
