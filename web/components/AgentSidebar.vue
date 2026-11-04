@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AgentImage from './AgentImage.vue';
 import { useWorkspace } from '../workspace';
 import AgentLabel from './AgentLabel.vue';
 import UiIcon from './UiIcon.vue';
@@ -24,7 +25,7 @@ function agentName(agent: {name: string; id: string}) {
       <button v-for="agent in s.bots.filter(b => !b.archived)" class="agent-nav" :key="agent.id" :disabled="saving" :title="agentName(agent)" :aria-label="agentName(agent)"
         :aria-current="agent.id === s.selected && view === 'chat' && s.setup.kind === 'closed' ? 'page' : undefined"
         :class="{active: agent.id === s.selected && view === 'chat' && s.setup.kind === 'closed'}" @click="emit('select', agent.id)">
-        <span class="avatar">{{ agent.name[0]?.toUpperCase() }}</span><span class="identity"><strong><AgentLabel :agent="agent" /></strong><small>{{ providerLabel(agent.provider) }}</small></span> <span class="dots">{{ s.inbox.filter(i => i.botId === agent.id).length || '' }}</span>
+        <AgentImage :image="agent.image" :name="agent.name" /><span class="identity"><strong><AgentLabel :agent="agent" /></strong><small>{{ providerLabel(agent.provider) }}</small></span> <span class="dots">{{ s.inbox.filter(i => i.botId === agent.id).length || '' }}</span>
       </button>
     </nav>
     <details v-if="s.bots.some(agent => agent.archived)" class="archived-agents">

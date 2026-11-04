@@ -5,6 +5,11 @@ import type { BotProfile } from '../controller';
 import { useWorkspace } from '../workspace';
 import ProviderPicker from './ProviderPicker.vue';
 import InstructionsHelp from './InstructionsHelp.vue';
+import AgentImageChooser from './AgentImageChooser.vue';
+import AgentImage from './AgentImage.vue';
+import type {AgentImageInput} from '../../src/agent-image';
+const image=ref<AgentImageInput>({kind:'initials'});
+const imageValid=ref(true);
 const props = defineProps<{id: string; saving: boolean}>();
 const emit = defineEmits<{close: []; providers: []; memory: []; 'update:saving': [value: boolean]}>();
 const { app } = useWorkspace();
@@ -18,17 +23,17 @@ watch(() => props.id, (id, _, onCleanup) => {
   let active = true;
   onCleanup(() => { active = false; });
   void app.botProfile(id).then(value => {
-    if (active) { profile.value = value; name.value = value.name; instructions.value = value.instructions; }
+    if (active) { profile.value = value; name.value = value.name; instructions.value = value.instructions; image.value=value.image; }
   }).catch(error => { if (active) status.value = 'Could not load agent settings. ' + String(error); });
 }, {immediate: true});
 async function save() {
-  if (!profile.value) return;
+  if (!profile.value || !imageValid.value) return;
   if (!name.value.trim()) { status.value = 'Enter a name for this agent.'; return; }
   emit('update:saving', true);
   status.value = '';
   latest.value = null;
   try {
-    await app.saveBotProfile(profile.value, {name: name.value, provider: profile.value.provider, model: profile.value.model ?? '', instructions: instructions.value});
+    await app.saveBotProfile(profile.value, {name: name.value, provider: profile.value.provider, model: profile.value.model ?? '', instructions: instructions.value,image:image.value});
     emit('close');
   } catch (error) {
     compareAvailable.value = true;
@@ -45,6 +50,13 @@ async function compare() {
     status.value = 'Review the current settings below and reconcile your edits before saving. A later change will still cause a conflict.';
   } catch (error) { status.value = 'Could not load the current settings. Your edits are retained. ' + String(error); }
   finally { emit('update:saving', false); }
+}
+function providerSaved(value:BotProfile,baseRevision:string|null) {
+  if(profile.value?.revision===baseRevision) profile.value=value;
+  else {
+    compareAvailable.value=true;
+    status.value='Settings changed while you were editing. Your draft is retained. Compare latest settings before saving.';
+  }
 }
 async function archive() {
   if (!profile.value || !window.confirm('Archive this agent? Its configuration and conversation will be retained.')) return;
@@ -63,17 +75,18 @@ async function archive() {
       <section class="settings-section"><h2 class="section-title">Memory</h2><p class="section-help">Saved memory available only to {{ profile.name }}.</p><button :disabled="saving" class="quiet agent-memory-link" @click="emit('memory')">View agent memory</button></section>
       <p>Provider connections are shared by the instance. A saved connection does not verify account or model access.</p>
       <label>Name<input v-model="name" :disabled="saving" /></label>
+      <AgentImageChooser v-model="image" :name="name" :disabled="saving" @valid="value=>imageValid=value" />
       <label>Instructions<textarea v-model="instructions" :disabled="saving" /></label><InstructionsHelp />
-      <ProviderPicker :id="id" :disabled="saving" @profile="value => profile = value" />
+      <ProviderPicker :id="id" :disabled="saving" @profile="providerSaved" />
       <button :disabled="saving" class="quiet" @click="emit('providers')">Open provider settings</button>
       <p class="meta">Configuration: <code>{{ profile.configDir }}</code></p>
-      <div class="row"><button :disabled="saving" @click="save">Save settings</button><button :disabled="saving" class="quiet" @click="emit('close')">Cancel</button></div>
+      <div class="row"><button :disabled="saving||!imageValid" @click="save">Save settings</button><button :disabled="saving" class="quiet" @click="emit('close')">Cancel</button></div>
       <button v-if="!profile.archived" :disabled="saving" class="quiet" @click="archive">Archive agent</button>
     </template>
     <p role="status">{{ saving ? 'Loading or saving…' : status }}</p>
     <button v-if="compareAvailable" :disabled="saving" class="quiet" @click="compare">Compare latest settings</button>
     <section v-if="latest" class="saved-settings" aria-label="Current saved settings">
-      <h3>Current saved settings</h3><p>Name: {{ latest.name }}</p><p>Provider: {{ providerLabel(latest.provider) }}</p><p>Model: {{ latest.model || '(none)' }}</p><p>Instructions:</p><pre>{{ latest.instructions }}</pre>
+      <h3>Current saved settings</h3><AgentImage :image="latest.image" :name="latest.name" /><button :disabled="saving||!imageValid" class="quiet" @click="image=latest.image">Use latest image</button><p>Name: {{ latest.name }}</p><p>Provider: {{ providerLabel(latest.provider) }}</p><p>Model: {{ latest.model || '(none)' }}</p><p>Instructions:</p><pre>{{ latest.instructions }}</pre>
     </section>
   </div></div>
 </template>

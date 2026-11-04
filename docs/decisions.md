@@ -390,3 +390,19 @@ interaction authority for all menus and pages, with existing production features
 adapted into that style. Use grouped model menu rows, the New agent modal,
 provider cards and the Edit defaults disclosure. Keep manual entry, reasoning,
 connection recovery and agent lifecycle controls within those components.
+
+## Optional agent images
+
+Accepted on 2026-11-03 after reviewing prototype revision
+`f51e14f031414f6d19d416d92984aa5e682769c0`. Ship the six approved rounded shapes
+and regular polygons together, with the existing eight colors selected
+independently. Characters use solid fills and two black circular eyes.
+Polygons have equal sides and angles and vertical symmetry. Initials remain the
+default, and uploads use a square crop. Changes commit through Create or Save.
+
+The choice belongs to shared agent configuration, while uploaded PNG bytes live
+with the instance's backed-up agent files. Existing revision conflicts, direct
+file editing, and retry-safe creation apply. Accepted images are retained for
+configuration history and uncertain-save recovery. See
+[image usage](usage.md#agent-images) and the
+[configuration/API reference](reference.md#agent-image-configuration-and-api).
