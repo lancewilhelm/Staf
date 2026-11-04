@@ -1,0 +1,40 @@
+import assert from 'node:assert/strict';
+import {mkdtemp,rm} from 'node:fs/promises';
+import {join} from 'node:path';
+import {tmpdir} from 'node:os';
+import {startInstance} from '../../dist/instance-service.js';
+import {openWorkspaceBrowser,until} from './workspace-harness.mjs';
+
+const temp=await mkdtemp(join(tmpdir(),'staf-session-upgrade-'));let calls=0,browser;
+const app=startInstance(join(temp,'db'),0,{env:{},providerFactory:async()=>({name:'fixture',capabilities:{toolCalls:false,incrementalText:false,transport:'chat-completions'},async complete(){calls++;return {role:'assistant',content:'Stored result'};}})}),port=await app.listen(),url=`http://127.0.0.1:${port}`;
+let token;
+const api=async(route,body)=>{const response=await fetch(url+'/api/'+route,{method:body===undefined?'GET':'POST',headers:{...(token?{Authorization:'Bearer '+token}:{}),...(body===undefined?{}:{'Content-Type':'application/json'})},...(body===undefined?{}:{body:JSON.stringify(body)})});assert.ok(response.ok);return response.json();};
+try {
+  token=(await api('pair',{code:app.code})).token;
+  const bot=await api('bots',{name:'Upgrade',provider:'demo'}),other=await api('bots',{name:'Other',provider:'demo'}),dataset=(await api('dataset')).id;
+  await api('commands',{id:'legacy-current',botId:bot.id,content:'Accepted before upgrade'});
+  await until(async()=>(await api('commands/legacy-current')).state==='completed','original command');
+  await api('commands',{id:'foreign-command',botId:other.id,content:'Other agent request'});
+  await until(async()=>(await api('commands/foreign-command')).state==='completed','foreign command');
+  const code=app.issueCode();browser=await openWorkspaceBrowser(url,temp);const {evaluate,command}=browser;
+  await until(()=>evaluate("document.body?.innerText.includes('Pair this browser')"),'pairing');await browser.helpers();await evaluate(`testInput('input',${JSON.stringify(code)});testClick('Pair')`);
+  await until(()=>evaluate("document.querySelector('textarea[aria-label=Message]')?.disabled===false"),'ready draft');
+  const prefix='staf-workspace-v1:',unscoped=prefix+'old-writer:'+bot.id,scoped=prefix+dataset+':old-dataset-writer:'+bot.id,foreign=prefix+'foreign-writer:'+bot.id;
+  const draft=text=>({text,submission:{kind:'unknown',id:'legacy-current',text:'Accepted before upgrade'}});
+  await evaluate(`localStorage.setItem(${JSON.stringify(unscoped)},${JSON.stringify(JSON.stringify(draft('Recovered upgrade draft')))});location.reload()`);
+  await until(()=>evaluate("document.querySelector('textarea[aria-label=Message]')?.value==='Recovered upgrade draft'"),'verified unscoped upgrade draft recovered automatically');
+  assert.equal(await evaluate(`localStorage.getItem(${JSON.stringify(unscoped)})`),null);
+  await browser.helpers();await until(()=>evaluate("!document.querySelector('.submission')"),'original completed command checked without replay');
+  await evaluate(`localStorage.setItem(${JSON.stringify(scoped)},${JSON.stringify(JSON.stringify(draft('Recovered dataset draft')))});testInput('textarea[aria-label=Message]','')`);
+  await until(()=>evaluate("document.querySelector('textarea[aria-label=Message]')?.value==='Recovered dataset draft'"),'dataset-scoped pre-session draft recovered');
+  assert.equal(await evaluate(`localStorage.getItem(${JSON.stringify(scoped)})`),null);
+  await until(()=>evaluate("!document.querySelector('.submission')"),'dataset draft command checked');
+  const wrong={text:'Do not adopt this draft',submission:{kind:'unknown',id:'foreign-command',text:'Other agent request'}};
+  await evaluate(`localStorage.setItem(${JSON.stringify(foreign)},${JSON.stringify(JSON.stringify(wrong))});testInput('textarea[aria-label=Message]','')`);
+  await new Promise(resolve=>setTimeout(resolve,1200));assert.equal(await evaluate("document.querySelector('textarea[aria-label=Message]').value"),'');assert.notEqual(await evaluate(`localStorage.getItem(${JSON.stringify(foreign)})`),null);
+  const fresh=await api('bots/'+bot.id+'/sessions',{operationId:'after-upgrade',expectedSessionId:bot.chatId});
+  await evaluate(`localStorage.setItem(${JSON.stringify(unscoped)},${JSON.stringify(JSON.stringify(draft('Old-session draft stays separate')))});location.reload()`);
+  await until(()=>evaluate("document.querySelector('textarea[aria-label=Message]')?.disabled===false"),'new session ready');await new Promise(resolve=>setTimeout(resolve,1200));
+  assert.equal(await evaluate("document.querySelector('textarea[aria-label=Message]').value"),'');assert.notEqual(await evaluate(`localStorage.getItem(${JSON.stringify(unscoped)})`),null);assert.equal((await api('bots/'+bot.id+'/sessions')).current.id,fresh.id);assert.equal(calls,2);
+  console.log('PASS upgrade recovery: current-session verified commands recover both older key formats; foreign and older-session records stay copy-only; no provider replay');
+} finally {await browser?.close();await app.close();await rm(temp,{recursive:true,force:true});}

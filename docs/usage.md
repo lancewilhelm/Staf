@@ -388,7 +388,7 @@ Open an agent and select **History**, then enter an optional session name and
 select **Start fresh session**. The composer and chat start empty. The agent
 retains its soul, configuration, and existing memory behavior. Earlier drafts
 remain under **Earlier browser records** for inspection and copying. Starting a
-session while a command is active reports a conflict.
+session while a chat command or background task is active reports a conflict.
 
 Search history or open an earlier session to inspect its original messages.
 Select **Select reference** beside a message or search result. Search results

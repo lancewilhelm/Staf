@@ -148,6 +148,7 @@ export class Controller {
           if(!isRecord(parsed)||typeof parsed.text!=='string'||(!parsed.text && !parsed.submission && !(Array.isArray(parsed.references)&&parsed.references.length)))continue;
           if(await this.claim(candidate)){key=candidate;break;}
         }
+        if(key===own)await this.recoverLegacyDraft(id,sessionId,own,()=>load===this.draftLoad&&this.state.sessionId===sessionId&&(expectedGeneration===undefined||expectedGeneration===this.generation));
         if(!await this.claim(key))throw Error('Draft is in use');
         if(load!==this.draftLoad || (expectedGeneration!==undefined && expectedGeneration!==this.generation))return;
         this.currentKey=key;
@@ -157,6 +158,37 @@ export class Controller {
     }catch{if(load===this.draftLoad && (expectedGeneration===undefined || expectedGeneration===this.generation)){this.currentKey='';this.update({actionError:'Browser storage or locking is unavailable. Sending is blocked.'});this.notify('Browser storage or locking is unavailable. Sending is blocked.','error')}}
     if(load===this.draftLoad && (expectedGeneration===undefined || expectedGeneration===this.generation))this.update({draft,draftReady:!!this.currentKey});
   }
+  private earlierDraftIdentity(key:string):{botId:string;sessionId:string|null}|null {
+    if(!this.dataset||!key.startsWith(prefix)||key.startsWith(prefix+'creation:')||key.startsWith(prefix+'session-create:'))return null;
+    const parts=key.slice(prefix.length).split(':');
+    if(parts.length===2&&parts[0]&&parts[1])return {botId:parts[1],sessionId:null};
+    if(parts[0]!==this.dataset||!parts[1]||!parts[2])return null;
+    if(parts.length===3)return {botId:parts[2],sessionId:null};
+    if(parts.length===4&&parts[3])return {botId:parts[2],sessionId:parts[3]};
+    return null;
+  }
+  private async recoverLegacyDraft(botId:string,sessionId:string,target:string,valid:()=>boolean):Promise<Draft|null> {
+    const dataset=this.dataset;
+    const keys=Array.from({length:localStorage.length},(_,i)=>localStorage.key(i)).filter((key):key is string=>{if(!key)return false;const identity=this.earlierDraftIdentity(key);return identity?.botId===botId&&identity.sessionId===null;});
+    for(const key of keys){
+      const raw=localStorage.getItem(key);if(!raw)continue;
+      let saved:unknown;try{saved=JSON.parse(raw);}catch{continue;}
+      if(!isRecord(saved)||typeof saved.text!=='string'||!isRecord(saved.submission)||typeof saved.submission.id!=='string'||!/^[\w-]{1,100}$/.test(saved.submission.id)||typeof saved.submission.text!=='string')continue;
+      try {
+        const command=await this.api<{botId:string;sessionId:string;content:string;references?:unknown}>('/api/commands/'+encodeURIComponent(saved.submission.id));
+        if(command.botId!==botId||command.sessionId!==sessionId||command.content!==saved.submission.text||this.dataset!==dataset||!valid()||localStorage.getItem(key)!==raw)continue;
+        const references=parseSelectedReferences(command.references);
+        if(saved.submission.references!==undefined&&JSON.stringify(parseSelectedReferences(saved.submission.references).map(source=>source.reference))!==JSON.stringify(references.map(source=>source.reference)))continue;
+        const draft:Draft={text:saved.text,references:parseSelectedReferences(saved.references),submission:{id:saved.submission.id,text:saved.submission.text,references,kind:'unknown',error:'Recovering the original request.'}};
+        const previous=localStorage.getItem(target);
+        if(previous!==null){const existing=normalizeDraft(JSON.parse(previous));if(existing.text||existing.submission||existing.references?.length)continue;}
+        if(!await this.claim(key)||!await this.claim(target))continue;
+        if(this.dataset!==dataset||!valid()||localStorage.getItem(key)!==raw||localStorage.getItem(target)!==previous)continue;
+        localStorage.setItem(target,JSON.stringify(draft));localStorage.removeItem(key);return draft;
+      }catch{/* An unverified record remains available for copy-out. */}
+    }
+    return null;
+  }
   private async recoverNext(){
     const id=this.state.selected,current=this.currentKey,sessionId=this.state.sessionId;
     if(this.recovering||!id||!sessionId||!current||this.state.draft.text||this.state.draft.submission||this.state.draft.references?.length)return;
@@ -165,14 +197,15 @@ export class Controller {
       const keys=Array.from({length:localStorage.length},(_,i)=>localStorage.key(i)).filter((key):key is string=>!!key&&key!==current&&key.startsWith(prefix+this.dataset+':')&&key.endsWith(':'+id+':'+sessionId)&&!key.includes(':creation:'));
       for(const key of keys){
         const saved=localStorage.getItem(key);if(!saved)continue;
-        const candidate:Draft=JSON.parse(saved);if(typeof candidate.text!=='string'||(!candidate.text&&!candidate.submission))continue;
+        const candidate=normalizeDraft(JSON.parse(saved));if(typeof candidate.text!=='string'||(!candidate.text&&!candidate.submission&&!candidate.references?.length))continue;
         if(!await this.claim(key))continue;
         if(this.currentKey!==current||this.state.selected!==id||this.state.draft.text||this.state.draft.submission||this.state.draft.references?.length)return;
         const latest=localStorage.getItem(key);if(!latest)continue;
-        const draft=normalizeDraft(JSON.parse(latest));if(typeof draft.text!=='string'||(!draft.text&&!draft.submission))continue;
+        const draft=normalizeDraft(JSON.parse(latest));if(typeof draft.text!=='string'||(!draft.text&&!draft.submission&&!draft.references?.length))continue;
         this.currentKey=key;this.update({draft});void this.refresh();return;
       }
-
+      const draft=await this.recoverLegacyDraft(id,sessionId,current,()=>this.currentKey===current&&this.state.selected===id&&this.state.sessionId===sessionId&&!this.state.draft.text&&!this.state.draft.submission&&!this.state.draft.references?.length);
+      if(draft){this.update({draft});void this.refresh();}
     }catch{this.update({actionError:'Could not recover another saved draft.'});this.notify('Could not recover another saved draft.','error')}finally{this.recovering=false}
   }
   private save(draft:Draft):boolean{try{if(!this.currentKey)return false;localStorage.setItem(this.currentKey,JSON.stringify(draft));this.update({draft});if(!draft.text&&!draft.submission)void this.recoverNext();return true}catch{this.update({actionError:'Browser storage is unavailable. Sending is blocked; copy your text before leaving.'});this.notify('Browser storage is unavailable. Sending is blocked; copy your text before leaving.','error');return false}}
@@ -274,12 +307,11 @@ export class Controller {
     }finally{this.checking=false}
   }
   async checkEarlierSubmission(key:string) {
-    if(!this.dataset||!key.startsWith(prefix+this.dataset+':'))throw Error('The record has no verifiable dataset identity');
-    const parts=key.slice(prefix.length).split(':');if(parts.length!==4)throw Error('The record has no verifiable session identity');
+    const identity=this.earlierDraftIdentity(key);if(!identity)throw Error('The record has no verifiable draft identity');
     const raw=localStorage.getItem(key);const value:unknown=raw?JSON.parse(raw):null;
     if(!isRecord(value)||!isRecord(value.submission)||typeof value.submission.id!=='string'||typeof value.submission.text!=='string')throw Error('No saved submission');
     const command=await this.api<{botId:string;sessionId:string;content:string;state:string;error:string|null}>('/api/commands/'+encodeURIComponent(value.submission.id));
-    if(command.botId!==parts[2]||command.sessionId!==parts[3]||command.content!==value.submission.text)throw Error('Saved submission does not match the original command');
+    if(command.botId!==identity.botId||(identity.sessionId!==null&&command.sessionId!==identity.sessionId)||command.content!==value.submission.text)throw Error('Saved submission does not match the original command');
     return command;
   }
   async inspectReference(botId:string,reference:WorkspaceReference) {

@@ -944,6 +944,7 @@ export class Instance {
       const bot=this.botIdentity(input.botId);if(!bot)throw Error('Agent not found');if(bot.archived)throw new BotConflict('Agent is archived');
       const current=this.currentSession(input.botId);if(current.id!==input.expectedSessionId)throw new BotConflict('Active session changed');
       if(this.db.prepare("SELECT 1 FROM commands WHERE bot_id=? AND state='pending'").get(input.botId))throw new BotConflict('Agent is busy');
+      if(this.db.prepare("SELECT 1 FROM task_attempts WHERE bot_id=? AND state IN ('queued','running','stopping','waiting')").get(input.botId))throw new BotConflict('Agent is busy with background work');
       this.db.prepare('UPDATE conversation_sessions SET active=0,replay=(SELECT session FROM sessions WHERE bot_id=?) WHERE id=?').run(input.botId,current.id);
       this.db.prepare('DELETE FROM sessions WHERE bot_id=?').run(input.botId);
       const id=randomUUID(),createdAt=Date.now();this.db.prepare('INSERT INTO conversation_sessions VALUES (?,?,?,?,1,NULL)').run(id,input.botId,name,createdAt);

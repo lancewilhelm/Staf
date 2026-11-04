@@ -72,6 +72,12 @@ identity, and refuses active work. Command acceptance captures session identity;
 later execution and retries use that identity. No compaction, automatic summary,
 or automatic conversation rollover runs.
 
+Queued, running, stopping, and waiting background tasks also block fresh-session
+creation. Their terminal notices remain in the earlier session. Browser upgrades
+recover an older draft key only after its original command proves the agent,
+current conversation session, submitted text, and captured source identities.
+Unverifiable records and records for another session remain separate for copying.
+
 Schemas 32 and 33 add immutable document sources, extracted passages, artifacts,
 and artifact revisions. Bounded original bytes and revisions are SQLite blobs,
 so their publication and existing database backup boundary stay atomic. PDF

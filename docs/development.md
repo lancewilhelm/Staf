@@ -107,8 +107,9 @@ variables for reset, recovery, and startup.
 Reset removes paired client authorizations. Pair browsers and CLI clients again
 with a new launcher code. Browser drafts and pending creations are scoped to a
 dataset; records from a prior dataset stay separate. On an ordinary upgrade,
-older unscoped drafts with a matching stored command and agent, and creations
-with a matching stored operation, can recover automatically. Other unscoped
+older unscoped or pre-session drafts can recover when their stored command
+proves the agent, current session, submitted text, and any saved references.
+Creations with a matching stored operation can also recover. Other unscoped
 records remain in browser storage. Open **Earlier browser records** to inspect
 and copy their text and operation IDs; Staf cannot establish their origin or
 submit them automatically. Copy needed text before resetting. Normal backend

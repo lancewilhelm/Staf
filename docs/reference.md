@@ -270,6 +270,10 @@ session at acceptance. Stale explicit submissions fail. Exact retries check thei
 original captured session and source identities even after the active session
 changes or a source is retired.
 
+Fresh-session creation refuses queued, running, stopping, or waiting background
+work as well as pending chat commands. Older work settles and records its notice
+before the session can change, so that notice cannot be assigned to a fresh chat.
+
 Reference variants are `{kind: 'session-message', sessionId, messageId, start?}`,
 `{kind: 'document-excerpt', documentId, excerptId}`, and
 `{kind: 'artifact-revision', artifactId, revision}`. `start` is an optional zero-based

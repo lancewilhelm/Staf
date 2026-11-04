@@ -85,3 +85,20 @@ test('a history search selects the matching part of a long original message',()=
     assert.equal(instance.readSession(bot.id,bot.chatId).messages[0].content,original);
   } finally {instance.close();}
 });
+
+test('older background work settles before a fresh session can start',()=>{
+  const instance=new Instance(':memory:');
+  try {
+    const bot=instance.createBot({name:'Background',instructions:''});
+    instance.acceptTask({id:'older-task',botId:bot.id,objective:'An older assignment',limitMs:10000});
+    const input={botId:bot.id,expectedSessionId:bot.chatId,operationId:'after-task'};
+    assert.throws(()=>instance.createSession(input),/busy/i);
+    instance.taskStart('older-task');assert.throws(()=>instance.createSession(input),/busy/i);
+    instance.taskStop('older-task','Owner stopped the assignment');assert.throws(()=>instance.createSession(input),/busy/i);
+    instance.taskFinish('older-task','stopped','An older task outcome');
+    const session=instance.createSession(input);instance.claim({id:'after-task-command',botId:bot.id,sessionId:session.id,content:'Fresh request'});
+    assert.deepEqual(instance.execution('after-task-command').notices,[]);
+    assert.equal(instance.execution('after-task-command').session.messages.length,0);
+    assert.ok(instance.readSession(bot.id,bot.chatId).messages.some(message=>message.content.includes('older task outcome')));
+  } finally {instance.close();}
+});

@@ -6,7 +6,8 @@ configuration and memory, but begins with no previous messages, provider replay,
 execution events or summaries. Nothing is compacted, automatically truncated,
 or automatically carried over. Browsing history does not change active context.
 
-Starting a session is refused while that agent has a pending chat command. It
+Starting a session is refused while that agent has a pending chat command or
+queued, running, stopping, or waiting background work. It
 uses the current session as an optimistic precondition and a retained operation
 ID for retries. If creation is uncertain, retry the control to check the same
 operation. Commands capture a session at acceptance. An explicit stale session
@@ -15,10 +16,12 @@ retry of an existing command checks the original command and session first.
 Stop remains agent-wide for the active command.
 
 Browser drafts are stored per dataset, agent, session and tab. Drafts from an
-earlier session and pre-session drafts remain in **Earlier browser records** for
-copying; they are not automatically submitted to the new session. For a
-session-scoped saved submission, use **Check original submission** to inspect
-the original command without retargeting it. A selection in
+earlier session remain in **Earlier browser records** for copying. Older
+pre-session keys recover automatically only when a stored command proves the
+agent, current session, submitted text, and any saved source identities. Other
+records remain separate and are not automatically submitted. Use **Check original
+submission** to inspect a verifiable original command without retargeting it.
+A selection in
 history adds a stable session-message reference to the next draft. Search
 results select an excerpt around the matching text, including a character
 position for long messages. The source selection is visible before sending.
