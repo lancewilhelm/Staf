@@ -17,6 +17,8 @@ async function search(){error.value='';selected.value=null;const bot=props.botId
 async function inspect(doc:DocumentSummary,next=0){error.value='';const bot=props.botId;try{const result=await app.readDocument(bot,doc.id,controller.signal,next);if(bot!==props.botId)return;selected.value=result.document;excerpts.value=result.excerpts;offset.value=next;}catch(e){if(bot===props.botId)error.value=String(e);}}
 async function retire(doc:DocumentSummary){error.value='';try{await app.retireDocument(props.botId,doc.id);if(selected.value?.id===doc.id){selected.value=null;excerpts.value=[];}await load();status.value='Document retired.';}catch(e){error.value=String(e);}}
 async function download(doc:DocumentSummary){try{await app.downloadDocument(props.botId,doc.id,doc.name);}catch(e){error.value=String(e);}}
+async function openSource(documentId:string,excerptId:string){const page=Number(excerptId);const start=Number.isSafeInteger(page)&&page>0?Math.floor((page-1)/50)*50:0;const data=await app.readDocument(props.botId,documentId,controller.signal,start);await inspect(data.document,start);}
+defineExpose({openSource});
 </script>
 <template>
   <div class="settings-scroll"><section class="setup settings-content">
@@ -28,8 +30,8 @@ async function download(doc:DocumentSummary){try{await app.downloadDocument(prop
     <h2>Library</h2><p v-if="!documents.length">No documents imported.</p>
     <nav class="row" aria-label="Document library pages"><button class="quiet" :disabled="libraryOffset===0" @click="load(Math.max(0,libraryOffset-500))">Previous documents</button><button class="quiet" :disabled="documents.length !== 500" @click="load(libraryOffset+500)">Next documents</button></nav>
     <ul class="memory-list"><li v-for="doc in documents" :key="doc.id" class="memory-entry"><strong>{{ doc.name }}</strong><span v-if="doc.retired"> — Retired</span><div class="row"><button class="quiet" @click="inspect(doc)">Inspect</button><button class="quiet" @click="download(doc)">Download original</button><button v-if="!doc.retired" class="quiet" @click="retire(doc)">Retire</button></div></li></ul>
-    <h2>{{ selected ? selected.name : 'Passages' }}</h2><p v-if="selected" class="meta">SHA-256: {{ selected.digest }}</p><p v-if="!excerpts.length">No passages to show.</p>
+    <h2>{{ selected ? selected.name : 'Passages' }}</h2><details v-if="selected" class="meta"><summary>Source details</summary><p>SHA-256: {{ selected.digest }}</p></details><p v-if="!excerpts.length">No passages to show.</p>
     <nav v-if="selected" class="row" aria-label="Document passages"><button class="quiet" :disabled="offset===0" @click="inspect(selected,Math.max(0,offset-50))">Previous passages</button><button class="quiet" :disabled="excerpts.length !== 50" @click="inspect(selected,offset+50)">Next passages</button></nav>
-    <ul class="memory-list"><li v-for="excerpt in excerpts" :key="excerpt.documentId + ':' + excerpt.excerptId" class="memory-entry"><p class="meta">{{ excerpt.name }} · {{ excerpt.page ? `Page ${excerpt.page}` : `Line ${excerpt.line}` }} · SHA-256 {{ excerpt.digest }}</p><p class="memory-text">{{ excerpt.text }}</p><button v-if="!selected?.retired" class="quiet" @click="emit('reference',{kind:'document-excerpt',documentId:excerpt.documentId,excerptId:excerpt.excerptId})">Select passage</button></li></ul>
+    <ul class="memory-list"><li v-for="excerpt in excerpts" :key="excerpt.documentId + ':' + excerpt.excerptId" class="memory-entry"><p class="meta">{{ excerpt.name }} · {{ excerpt.page ? `Page ${excerpt.page}` : `Line ${excerpt.line}` }}</p><p class="memory-text">{{ excerpt.text }}</p><button v-if="!selected?.retired" class="quiet" @click="emit('reference',{kind:'document-excerpt',documentId:excerpt.documentId,excerptId:excerpt.excerptId})">Select passage</button></li></ul>
   </section></div>
 </template>

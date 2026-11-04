@@ -61,6 +61,50 @@ Main-chat progress is owned by the shared service. The version 28 migration stor
 
 ## Local shared instance preview
 
+### Conversation sessions, sources, and artifacts
+
+Schema 31 maps existing visible messages and commands to an initial conversation
+session. It preserves the private replay and observed usage, with triggers
+binding new messages and commands to the active session. Creating a fresh
+session seals the prior replay, clears the active replay, and changes the active
+session in one transaction. It checks the expected session and a stable operation
+identity, and refuses active work. Command acceptance captures session identity;
+later execution and retries use that identity. No compaction, automatic summary,
+or automatic conversation rollover runs.
+
+Schemas 32 and 33 add immutable document sources, extracted passages, artifacts,
+and artifact revisions. Bounded original bytes and revisions are SQLite blobs,
+so their publication and existing database backup boundary stay atomic. PDF
+extraction runs in a bounded worker before source publication. Authorization and
+agent availability are checked again after extraction. Retirement leaves originals
+available to the owner while excluding them from future model source selection.
+
+Schema 34 reconciles feature tables from the isolated development branches after
+a protected backup, and stores accepted command reference snapshots. A reference
+resolver checks agent ownership and exact source identity. The command's retry
+fingerprint includes its canonical selected references. Request-only source
+context supplies bounded, labeled, untrusted excerpts without rewriting the
+original user message, source, or memory. A later turn does not automatically
+receive prior command excerpts. Source digests retain original identity; the
+content digest supplied to the model describes the disclosed, redacted excerpt.
+
+The workspace caches document and artifact views per agent while navigating,
+keeps drafts scoped by dataset/agent/session, and clears protected views on
+pairing loss. Captured source metadata opens a protected excerpt and its original
+session, document, or artifact revision. Artifact previews share the Markdown
+sanitizer and disable links and images. Downloads require a paired client and use
+fixed types and safe filenames.
+
+`workspaceCapabilities` composes the scoped feature adapters for registration by
+the future Code Mode host. It binds the accepted agent, session, command, and abort
+signal and rechecks active work before each action. The Code Mode host remains
+responsible for capability registration and its action policy. No second direct
+provider-tool interface is registered here. Offline providers and served browser
+journeys verify the implemented boundaries; live model selection and citation
+behavior remain unverified.
+
+### Shared workspace and execution
+
 The Vue workspace is built with Vite into static assets served by the same
 loopback instance. Its persistent agent list selects main chats using stable
 IDs, including when names coincide. It reads agents, chat work, and

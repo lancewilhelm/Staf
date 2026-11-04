@@ -44,7 +44,7 @@ try {
  await evaluate("[...document.querySelectorAll('.session-history button')].find(b=>b.textContent.trim()==='Initial session').click()");
  await until(()=>evaluate("document.querySelector('.session-history').innerText.includes('GUI old source')"),'old history');
  await evaluate("[...document.querySelectorAll('.session-history button')].find(b=>b.textContent.trim()==='Select reference').click()");
- assert.match(await evaluate("document.querySelector('.session-history').innerText"),/session-message/);
+ await until(()=>evaluate("document.querySelector('.reference-selection')?.innerText.includes('Initial session')"),'original message selected for the next request');
  await cdp('Page.reload');await until(()=>evaluate("!!document.querySelector('.session-history') && !document.querySelector('.messages').innerText.includes('GUI old source')"),'restart active session');
  console.log('PASS paired served GUI fresh session, separate draft, original command status, search, reference and reload');
 }finally{socket?.close();browser?.kill();server?.kill();await rm(temp,{recursive:true,force:true});}

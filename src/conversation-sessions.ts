@@ -17,8 +17,8 @@ CREATE TRIGGER IF NOT EXISTS conversation_new_command AFTER INSERT ON commands B
 
 export type ConversationSession = {id:string;name:string;createdAt:number;active:number};
 export type SessionHistoryMessage = {id:string;role:string;content:string};
-export type SessionSearchResult = {sessionId:string;messageId:string;role:string;content:string};
-export type SessionMessageReference = {kind:'session-message';sessionId:string;messageId:string};
+export type SessionSearchResult = {sessionId:string;messageId:string;role:string;content:string;start:number};
+export type SessionMessageReference = {kind:'session-message';sessionId:string;messageId:string;start?:number};
 export class ConversationSessions {
  constructor(private readonly db:DatabaseSync) {}
  current(botId:string) {
@@ -39,11 +39,16 @@ export class ConversationSessions {
  }
  search(botId:string,query:string) {
   this.current(botId);if(!query.trim()||query.length>200)throw Error('Search must contain 1 to 200 characters');
-  return this.db.prepare('SELECT s.id AS sessionId,m.id AS messageId,m.role,substr(m.content,1,1000) AS content FROM messages m JOIN conversation_message_sessions x ON x.message_id=m.id JOIN conversation_sessions s ON s.id=x.session_id WHERE m.bot_id=? AND s.bot_id=? AND instr(lower(m.content),lower(?))>0 ORDER BY m.seq DESC LIMIT 100').all(botId,botId,query).map(row=>({sessionId:String(row.sessionId),messageId:String(row.messageId),role:String(row.role),content:String(row.content)} satisfies SessionSearchResult));
+  const folded=(text:string)=>text.replace(/[A-Z]/g,letter=>letter.toLowerCase());
+  return this.db.prepare('SELECT s.id AS sessionId,m.id AS messageId,m.role,m.content FROM messages m JOIN conversation_message_sessions x ON x.message_id=m.id JOIN conversation_sessions s ON s.id=x.session_id WHERE m.bot_id=? AND s.bot_id=? AND instr(lower(m.content),lower(?))>0 ORDER BY m.seq DESC LIMIT 100').all(botId,botId,query).map(row=>{
+    const content=String(row.content),start=Math.max(0,folded(content).indexOf(folded(query))-160);
+    return {sessionId:String(row.sessionId),messageId:String(row.messageId),role:String(row.role),content:content.slice(start,start+1000),start} satisfies SessionSearchResult;
+  });
  }
  resolve(botId:string,ref:SessionMessageReference) {
-  const row=this.db.prepare('SELECT m.id AS messageId,s.id AS sessionId,m.role,substr(m.content,1,4000) AS content FROM messages m JOIN conversation_message_sessions x ON x.message_id=m.id JOIN conversation_sessions s ON s.id=x.session_id WHERE s.bot_id=? AND m.bot_id=? AND s.id=? AND m.id=?').get(botId,botId,ref.sessionId,ref.messageId);
+  const row=this.db.prepare('SELECT m.id AS messageId,s.id AS sessionId,m.role,m.content FROM messages m JOIN conversation_message_sessions x ON x.message_id=m.id JOIN conversation_sessions s ON s.id=x.session_id WHERE s.bot_id=? AND m.bot_id=? AND s.id=? AND m.id=?').get(botId,botId,ref.sessionId,ref.messageId);
   if(!row || typeof row.content!=='string' || typeof row.role!=='string')throw Error('Session message not found');
-  return {kind:'session-message' as const,sessionId:ref.sessionId,messageId:ref.messageId,role:row.role,content:row.content};
+  const start=ref.start??0;if(!Number.isSafeInteger(start)||start<0||start>row.content.length)throw Error('Invalid source excerpt position');
+  return {kind:'session-message' as const,sessionId:ref.sessionId,messageId:ref.messageId,role:row.role,content:row.content.slice(start,start+4000),start,totalCharacters:row.content.length};
  }
 }

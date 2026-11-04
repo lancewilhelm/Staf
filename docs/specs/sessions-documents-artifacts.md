@@ -1,7 +1,8 @@
 # Fresh sessions, document sources, and artifacts
 
-Status: authorized for implementation. These are target behaviors until the
-implementation and its checks establish them.
+Status: implementation and offline verification are in progress in
+[PR #72](https://github.com/lancewilhelm/Staf/pull/72). The acceptance criteria
+remain the review contract. Code Mode host registration is a separate integration.
 
 ## Problem statement
 

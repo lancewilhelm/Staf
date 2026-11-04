@@ -370,14 +370,62 @@ can be retried inline; retrying a failed or interrupted accepted command starts 
 new command. Resolve or dismiss that message before sending the next draft. The
 CLI takes text as an argument and has no interactive draft.
 
-Providers receive the recorded conversation and tool history on each turn; the preview does not compact
-or limit it. It does not import existing file-based sessions. The workspace polls
+Providers receive the active session's recorded conversation and tool history on
+each turn. A fresh session starts with empty conversation context. Older sessions
+enter a request only through explicitly selected source excerpts or authorized
+source-reading capabilities. Staf does not compact history or create automatic
+summaries. It does not import existing file-based sessions. The workspace polls
 while visible; it does not provide push updates or a general backup and restore
 workflow. When an existing preview database
 requires a stored-format migration, Staf creates a SQLite backup next to it before the
 schema change and prints its path. Commands accepted before private fingerprints were introduced remain available through status, but their IDs cannot be resubmitted because their original input cannot be verified. New SQLite database files are created with owner-only permissions. Existing database permissions are left unchanged; restrict them and the containing directory as appropriate. SQLite data and paired client authorizations persist across
 restart. Only one process may own the database at a time. This is loopback-only,
 not a LAN deployment.
+
+## Start fresh sessions and use sources
+
+Open an agent and select **History**, then enter an optional session name and
+select **Start fresh session**. The composer and chat start empty. The agent
+retains its soul, configuration, and existing memory behavior. Earlier drafts
+remain under **Earlier browser records** for inspection and copying. Starting a
+session while a command is active reports a conflict.
+
+Search history or open an earlier session to inspect its original messages.
+Select **Select reference** beside a message or search result. Search results
+select an excerpt around the match. **Sources for your next message** shows the
+selected source. Remove a source there before sending if it is unnecessary.
+Reading history does not change the active session.
+
+Open **Documents** to import UTF-8 `.txt`, `.md`, or `.csv` files, or a PDF with a
+readable text layer. Search for a literal phrase and select a passage. Use
+**Download original** to retrieve the original bytes. Retiring a document removes
+it from new searches and source selection while keeping its original available
+for inspection. See [document formats and limits](document-sources.md).
+
+Select **Save artifact** beside a completed assistant response to start a saved
+deliverable. Give it a name and save it. **Artifacts** also creates text, Markdown,
+or CSV without a provider. Editing creates a new immutable revision. Choose a
+revision to inspect or download its exact content. A stale save retains the draft
+and reports a conflict. See [artifact behavior](artifacts.md).
+
+Source selection is explicit and scoped to the addressed agent. Up to eight
+excerpts can accompany a command, with at most 6,000 characters per excerpt and
+24,000 characters in total. Partial excerpts identify their range. The original
+source stays intact. The command captures those identities and excerpts before
+execution, so an uncertain retry cannot silently change them. Select **Selected
+sources** in the conversation to inspect an excerpt or open its original.
+
+Source text is untrusted data. It does not grant permissions, change standing
+instructions, or create retained memory. Selected excerpts are request context;
+they are not inserted into the original user message or automatically replayed
+on later turns. Saved source identities and excerpts remain with their command.
+Model replies and previously sent requests can still contain information derived
+from those sources.
+
+The service exports scoped session, document, and artifact methods for the
+separately developed Code Mode host. This feature does not register additional
+direct provider tools or claim live model citation reliability. The owner can
+use all workspace controls and explicit references with the existing chat path.
 
 ## Background task preview
 

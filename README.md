@@ -63,6 +63,15 @@ The shared instance includes a provisional daily and weekly schedule preview for
 
 ## Use Staf
 
+Each agent can start a fresh conversation session while keeping its earlier
+conversations as original sources. **History** searches and opens those sessions.
+**Documents** imports local text, Markdown, CSV, and text-based PDF sources.
+**Artifacts** saves deliverables with immutable revisions and protected downloads.
+Select individual source passages for your next message. Staf preserves original
+history and does not compact it or create automatic summaries. See
+[sessions](docs/session-workspace.md), [documents](docs/document-sources.md), and
+[artifacts](docs/artifacts.md).
+
 - [Usage guide](docs/usage.md)
 - [Native Linux installation and backup](docs/native-linux-installation.md)
 - [Docker Compose installation and backup](docs/docker-installation.md)

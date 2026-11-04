@@ -27,15 +27,16 @@ registration. No provider tools are registered by this feature.
 
 Provenance accepts only messages belonging to the specified session and agent.
 The capability adapter checks the active session and the pending command's
-captured session on every operation. The component accepts `botId`, optional
-`initialText` and `initialProvenance`; mount a fresh component for a new prefill.
-It emits `reference` with `{kind: 'artifact-revision', artifactId, revision}`
-and `back`. The coordinator owns toolbar mounting, completed-assistant-message
-saving, and reference selection.
+captured session on every operation. Open **Artifacts** from the chat toolbar,
+or **Save artifact** beside a completed response. The view retains an unfinished
+draft while navigating and requires finishing or cancelling that draft before
+opening a different artifact. Selecting a revision as a source adds it to the
+next chat draft. A completed-message prefill retains its original provenance.
 
 Schema version 34 reconciles the session, document, artifact, and reference
 tables after the protected upgrade backup, including datasets written by
 isolated feature branches. Existing session mappings and replay are retained.
 The offline service tests exercise real SQLite, synthetic chat, paired-client
 access, conflict/retry behavior, downloads and restart; they do not establish
-live provider behavior or the final integrated GUI journey.
+live provider behavior. The integrated served GUI journey also checks creation,
+revision selection, exact downloads, source selection, reload, and restart.

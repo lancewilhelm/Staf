@@ -1,39 +1,16 @@
 import { createHash } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { isRecord } from './validation.js';
+import { parseWorkspaceReferences, referenceLimits } from './workspace-reference-input.js';
+export { parseWorkspaceReferences, referenceLimits } from './workspace-reference-input.js';
 import type { ResolvedReference, WorkspaceReference } from './workspace-reference-types.js';
 export type { ResolvedReference, WorkspaceReference } from './workspace-reference-types.js';
 
-export const referenceLimits = {count: 8, excerptCharacters: 6000, totalCharacters: 24000};
 export const workspaceReferenceSchema = `CREATE TABLE IF NOT EXISTS command_references (
   command_id TEXT PRIMARY KEY REFERENCES commands(id),
   selection TEXT NOT NULL,
   resolved TEXT NOT NULL
 );`;
-
-function identifier(value: unknown): value is string {
-  return typeof value === 'string' && /^[\w:.-]{1,200}$/.test(value);
-}
-
-export function parseWorkspaceReferences(value: unknown): WorkspaceReference[] {
-  if (value === undefined) return [];
-  if (!Array.isArray(value) || value.length > referenceLimits.count) throw Error('Select at most eight source references.');
-  const references = value.map((item: unknown): WorkspaceReference => {
-    if (!isRecord(item)) throw Error('Invalid source reference.');
-    if (item.kind === 'session-message' && identifier(item.sessionId) && identifier(item.messageId)) {
-      return {kind: item.kind, sessionId: item.sessionId, messageId: item.messageId};
-    }
-    if (item.kind === 'document-excerpt' && identifier(item.documentId) && identifier(item.excerptId)) {
-      return {kind: item.kind, documentId: item.documentId, excerptId: item.excerptId};
-    }
-    if (item.kind === 'artifact-revision' && identifier(item.artifactId) && typeof item.revision === 'number' && Number.isSafeInteger(item.revision) && item.revision > 0) {
-      return {kind: item.kind, artifactId: item.artifactId, revision: item.revision};
-    }
-    throw Error('Invalid source reference.');
-  });
-  if (new Set(references.map(item => JSON.stringify(item))).size !== references.length) throw Error('A source reference was selected more than once.');
-  return references;
-}
 
 export function resolvedReference(reference: WorkspaceReference, source: {title: string; location: string; content: string; sourceDigest?: string}): ResolvedReference {
   const content = source.content.slice(0, referenceLimits.excerptCharacters);

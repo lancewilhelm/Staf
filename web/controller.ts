@@ -1,3 +1,5 @@
+import {parseResolvedReference, parseSelectedReferences} from './source-selection';
+import type {WorkspaceReference, SelectedReference} from '../src/workspace-reference-types';
 export type ArtifactFormat = 'text'|'markdown'|'csv';
 export type ArtifactSource = {sessionId:string;messageId:string};
 export type ArtifactCreateInput = {operationId:string;name:string;format:ArtifactFormat;content:string;source?:ArtifactSource};
@@ -14,18 +16,18 @@ export type Bot={revision?:string;id:string;name:string;provider:string;model:st
 export type BotProfile=Bot & {revision:string;instructions:string;description:string;reasoning:string|null;configDir:string;providerChoices?:Record<string,{model:string|null;reasoning:string|null}>};
 export type Message={id:string;role:string;content:string};
 export type ResponseProgress={id:string;botId:string;state:'accepted'|'running'|'stopping'|'stopped'|'completed'|'failed'|'interrupted';text:string;error:string|null};
-export type ChatWork={id:string;progress:ResponseProgress;events:Array<{id:number;type:string;name:string;success:number|null;detail:string|null}>};
+export type ChatWork={references?:SelectedReference[];id:string;progress:ResponseProgress;events:Array<{id:number;type:string;name:string;success:number|null;detail:string|null}>};
 export type InboxItem={kind:'question';id:string;botId:string|null;attemptId:string;text:string}|{kind:'approval';approvalKind:'clock'|'web'|'search'|'shell'|'disclosure';id:string;botId:string|null;work:{kind:'task'|'command';id:string};detail:unknown};
-type SubmissionIdentity={id:string;text:string};
+type SubmissionIdentity={id:string;text:string;references?:SelectedReference[]};
 export type Submission=SubmissionIdentity & (
   | {kind:'submitting'|'submitting-uncertain'|'pending'}
   | {kind:'unknown'|'uncertain-busy'|'busy'|'rejected';error:string}
   | {kind:'failed'|'interrupted';error:string|null}
 );
-export type Draft={text:string;submission:Submission|null};
+export type Draft={text:string;submission:Submission|null;references?:SelectedReference[]};
 export type Connection={kind:'connecting'}|{kind:'pairing';message:string}|{kind:'ready'}|{kind:'offline';message:string};
 export type Setup={kind:'closed'}|{kind:'create';name:string;instructions:string;provider:string;model:string;reasoning?:string;operationId:string|null;status:string};
-export type Workspace={connection:Connection;setup:Setup;bots:Bot[];selected:string|null;sessionId:string|null;messages:Message[];work:ChatWork[];response:ResponseProgress|null;responseConnection:'connecting'|'connected'|'reconnecting';inbox:InboxItem[];credential:'signed-in'|'signed-out'|'unknown';openrouter:'saved'|'missing'|'unknown'|'error';authAttempt:{id:string;phase:string}|null;authUrl:string;authUrlAttemptId:string;freshness:string;notice:string;notices:ToastNotice[];authStarting:boolean;authStatus:string;actionError:string;draft:Draft;draftReady:boolean;legacyRecords:Array<{key:string;value:string}>};
+export type Workspace={datasetId?:string;connection:Connection;setup:Setup;bots:Bot[];selected:string|null;sessionId:string|null;messages:Message[];work:ChatWork[];response:ResponseProgress|null;responseConnection:'connecting'|'connected'|'reconnecting';inbox:InboxItem[];credential:'signed-in'|'signed-out'|'unknown';openrouter:'saved'|'missing'|'unknown'|'error';authAttempt:{id:string;phase:string}|null;authUrl:string;authUrlAttemptId:string;freshness:string;notice:string;notices:ToastNotice[];authStarting:boolean;authStatus:string;actionError:string;draft:Draft;draftReady:boolean;legacyRecords:Array<{key:string;value:string}>};
 class ApiError extends Error {constructor(message:string,readonly status:number){super(message);}}
 const isRecord=(value:unknown):value is Record<string,unknown>=>typeof value==='object'&&value!==null&&!Array.isArray(value);
 type ProviderDefaults={revision:string;providers:Record<string,{model:string|null;reasoning:string|null}>};
@@ -56,9 +58,10 @@ function isResponseProgress(value:unknown,botId:string):value is ResponseProgres
 }
 const prefix='staf-workspace-v1:';
 function normalizeDraft(draft:Draft):Draft {
+  draft={...draft,...(draft.references===undefined?{}:{references:parseSelectedReferences(draft.references)}),submission:draft.submission?{...draft.submission,...(draft.submission.references===undefined?{}:{references:parseSelectedReferences(draft.submission.references)})}:null};
   const submission=draft.submission;
-  if(submission?.kind==='submitting'||submission?.kind==='submitting-uncertain')return {...draft,submission:{id:submission.id,text:submission.text,kind:'unknown',error:'Recovering the original request.'}};
-  if(submission && submission.kind==='busy' && 'uncertain' in submission && submission.uncertain===true)return {...draft,submission:{id:submission.id,text:submission.text,kind:'uncertain-busy',error:'Another response is in progress. The original request may still arrive.'}};
+  if(submission?.kind==='submitting'||submission?.kind==='submitting-uncertain')return {...draft,submission:{id:submission.id,text:submission.text,references:submission.references,kind:'unknown',error:'Recovering the original request.'}};
+  if(submission && submission.kind==='busy' && 'uncertain' in submission && submission.uncertain===true)return {...draft,submission:{id:submission.id,text:submission.text,references:submission.references,kind:'uncertain-busy',error:'Another response is in progress. The original request may still arrive.'}};
   return draft;
 }
 export class Controller {
@@ -77,7 +80,7 @@ export class Controller {
     if(!response.ok||!isRecord(data)||typeof data.id!=='string'||!/^[a-f0-9]{64}$/.test(data.id))throw Error('Dataset identity unavailable');
     if(gen!==this.generation)return false;
     if(this.dataset!==data.id){
-      const changed=this.dataset!==null;this.dataset=data.id;this.draftLoad++;this.currentKey='';this.retainedCreation=null;this.watchResponse(null);
+      const changed=this.dataset!==null;this.dataset=data.id;this.update({datasetId:data.id});this.draftLoad++;this.currentKey='';this.retainedCreation=null;this.watchResponse(null);
       if(changed)this.update({setup:{kind:'closed'},bots:[],selected:null,sessionId:null,messages:[],work:[],response:null,draft:{text:'',submission:null},draftReady:false,notice:'The development dataset changed. Previous browser drafts and pending creations remain saved separately.'});
       void this.restoreCreation(data.id);
     }
@@ -111,7 +114,7 @@ export class Controller {
     }})();
   }
   async pair(code:string){try{const gen=++this.generation;if(!await this.syncDataset(gen))return;const result=await this.api<{token:string}>('/api/pair',{code});localStorage.setItem('staf-token',result.token);this.token=result.token;await this.refresh()}catch(e){this.update({connection:{kind:'pairing',message:String(e)}})}}
-  async refresh(){const gen=++this.generation;try{if(!await this.syncDataset(gen))return;if(!this.token){this.update({connection:{kind:'pairing',message:''}});return}const [bots,allInbox,credential,current,openrouter]=await Promise.all([this.api<Bot[]>('/api/bots'),this.api<InboxItem[]>('/api/inbox'),this.api<{signedIn:boolean}>('/api/codex-auth/credential'),this.api<{attempt:{id:string;phase:string}|null}>('/api/codex-auth/current'),this.api<{saved:boolean}>('/api/openrouter-connection').catch(()=>({saved:null}))]);const inbox=allInbox.filter(item=>item.kind==='approval'&&item.work.kind==='command');const preferred=this.state.selected||sessionStorage.getItem('staf-selected-agent');const selected=preferred && bots.some(b=>b.id===preferred&&!b.archived)?preferred:bots.find(b=>!b.archived)?.id??null;const chat=selected?await this.api<{sessionId:string;messages:Message[];requests:ChatWork[]}>('/api/bots/'+selected+'/chat-work'):{sessionId:null,messages:[],requests:[]};const {messages,requests:work,sessionId}=chat;if(gen!==this.generation)return;const changed=selected!==this.state.selected||sessionId!==this.state.sessionId;if(changed)this.update({selected,sessionId,draft:{text:'',submission:null},draftReady:false,response:null});if(changed||!this.state.draftReady){await this.loadDraft(selected,gen);if(gen!==this.generation)return;}this.reconcileAuth(current.attempt);this.update({connection:{kind:'ready'},bots,selected,messages,...(changed?{response:null}:{}),work,inbox,credential:credential.signedIn?'signed-in':'signed-out',openrouter:openrouter.saved===null?'error':openrouter.saved?'saved':'missing',authAttempt:current.attempt,freshness:''});this.watchResponse(selected);void this.recoverLegacy();if(!this.state.draft.text&&!this.state.draft.submission)void this.recoverNext();if(this.state.draft.submission && (['pending','unknown'].includes(this.state.draft.submission.kind)||this.state.draft.submission.kind==='uncertain-busy'))void this.checkSubmission()}catch(e){if(gen!==this.generation)return;if(e instanceof ApiError&&e.status===401){this.token='';this.watchResponse(null);localStorage.removeItem('staf-token');this.update({connection:{kind:'pairing',message:'Pairing expired or was revoked.'}})}else this.update({connection:{kind:'offline',message:'Connection unavailable. Showing the last successful update.'},freshness:String(e)})}}
+  async refresh(){const gen=++this.generation;try{if(!await this.syncDataset(gen))return;if(!this.token){this.update({connection:{kind:'pairing',message:''}});return}const [bots,allInbox,credential,current,openrouter]=await Promise.all([this.api<Bot[]>('/api/bots'),this.api<InboxItem[]>('/api/inbox'),this.api<{signedIn:boolean}>('/api/codex-auth/credential'),this.api<{attempt:{id:string;phase:string}|null}>('/api/codex-auth/current'),this.api<{saved:boolean}>('/api/openrouter-connection').catch(()=>({saved:null}))]);const inbox=allInbox.filter(item=>item.kind==='approval'&&item.work.kind==='command');const preferred=this.state.selected||sessionStorage.getItem('staf-selected-agent');const selected=preferred && bots.some(b=>b.id===preferred&&!b.archived)?preferred:bots.find(b=>!b.archived)?.id??null;const chat=selected?await this.api<{sessionId:string;messages:Message[];requests:ChatWork[]}>('/api/bots/'+selected+'/chat-work'):{sessionId:null,messages:[],requests:[]};const {messages,requests,sessionId}=chat;const work=requests.map(item=>({...item,references:parseSelectedReferences(item.references)}));if(gen!==this.generation)return;const changed=selected!==this.state.selected||sessionId!==this.state.sessionId;if(changed)this.update({selected,sessionId,draft:{text:'',submission:null},draftReady:false,response:null});if(changed||!this.state.draftReady){await this.loadDraft(selected,gen);if(gen!==this.generation)return;}this.reconcileAuth(current.attempt);this.update({connection:{kind:'ready'},bots,selected,messages,...(changed?{response:null}:{}),work,inbox,credential:credential.signedIn?'signed-in':'signed-out',openrouter:openrouter.saved===null?'error':openrouter.saved?'saved':'missing',authAttempt:current.attempt,freshness:''});this.watchResponse(selected);void this.recoverLegacy();if(!this.state.draft.text&&!this.state.draft.submission&&!this.state.draft.references?.length)void this.recoverNext();if(this.state.draft.submission && (['pending','unknown'].includes(this.state.draft.submission.kind)||this.state.draft.submission.kind==='uncertain-busy'))void this.checkSubmission()}catch(e){if(gen!==this.generation)return;if(e instanceof ApiError&&e.status===401){this.token='';this.watchResponse(null);localStorage.removeItem('staf-token');this.update({connection:{kind:'pairing',message:'Pairing expired or was revoked.'}})}else this.update({connection:{kind:'offline',message:'Connection unavailable. Showing the last successful update.'},freshness:String(e)})}}
   async select(id:string){
     if(id===this.state.selected)return;
     sessionStorage.setItem('staf-selected-agent',id);this.generation++;
@@ -142,7 +145,7 @@ export class Controller {
         for(const candidate of ordered){
           const saved=localStorage.getItem(candidate);if(!saved)continue;
           const parsed:unknown=JSON.parse(saved);
-          if(!isRecord(parsed)||typeof parsed.text!=='string'||(!parsed.text && !parsed.submission))continue;
+          if(!isRecord(parsed)||typeof parsed.text!=='string'||(!parsed.text && !parsed.submission && !(Array.isArray(parsed.references)&&parsed.references.length)))continue;
           if(await this.claim(candidate)){key=candidate;break;}
         }
         if(!await this.claim(key))throw Error('Draft is in use');
@@ -156,7 +159,7 @@ export class Controller {
   }
   private async recoverNext(){
     const id=this.state.selected,current=this.currentKey,sessionId=this.state.sessionId;
-    if(this.recovering||!id||!sessionId||!current||this.state.draft.text||this.state.draft.submission)return;
+    if(this.recovering||!id||!sessionId||!current||this.state.draft.text||this.state.draft.submission||this.state.draft.references?.length)return;
     this.recovering=true;
     try{
       const keys=Array.from({length:localStorage.length},(_,i)=>localStorage.key(i)).filter((key):key is string=>!!key&&key!==current&&key.startsWith(prefix+this.dataset+':')&&key.endsWith(':'+id+':'+sessionId)&&!key.includes(':creation:'));
@@ -164,7 +167,7 @@ export class Controller {
         const saved=localStorage.getItem(key);if(!saved)continue;
         const candidate:Draft=JSON.parse(saved);if(typeof candidate.text!=='string'||(!candidate.text&&!candidate.submission))continue;
         if(!await this.claim(key))continue;
-        if(this.currentKey!==current||this.state.selected!==id||this.state.draft.text||this.state.draft.submission)return;
+        if(this.currentKey!==current||this.state.selected!==id||this.state.draft.text||this.state.draft.submission||this.state.draft.references?.length)return;
         const latest=localStorage.getItem(key);if(!latest)continue;
         const draft=normalizeDraft(JSON.parse(latest));if(typeof draft.text!=='string'||(!draft.text&&!draft.submission))continue;
         this.currentKey=key;this.update({draft});void this.refresh();return;
@@ -227,29 +230,29 @@ export class Controller {
     if(!botId||!sessionId||(!retry&&!draft.text.trim()))return;
     if(this.state.response&&['accepted','running','stopping'].includes(this.state.response.state))return;
     let submission=draft.submission;
-    if(!retry){if(submission)return;submission={kind:'submitting',id:crypto.randomUUID(),text:draft.text}}
-    else if(submission && (submission.kind==='failed'||submission.kind==='interrupted'))submission={kind:'submitting',id:crypto.randomUUID(),text:submission.text};
+    if(!retry){if(submission)return;submission={kind:'submitting',id:crypto.randomUUID(),text:draft.text,references:draft.references}}
+    else if(submission && (submission.kind==='failed'||submission.kind==='interrupted'))submission={kind:'submitting',id:crypto.randomUUID(),text:submission.text,references:submission.references};
     if(!submission)return;
     const current=submission,uncertain=current.kind==='unknown'||current.kind==='uncertain-busy'||current.kind==='submitting-uncertain';
-    if(!this.save({...draft,text:retry?draft.text:'',submission:{id:current.id,text:current.text,kind:uncertain?'submitting-uncertain':'submitting'}}))return;
+    if(!this.save({...draft,text:retry?draft.text:'',references:retry?draft.references:[],submission:{id:current.id,text:current.text,references:current.references,kind:uncertain?'submitting-uncertain':'submitting'}}))return;
     const bot=this.state.bots.find(item=>item.id===botId);
     const setupError=bot?.provider==='codex'&&this.state.credential==='signed-out'?'Connect ChatGPT in Settings to send.':bot?.provider==='openrouter'&&this.state.openrouter!=='saved'?'Connect OpenRouter in Settings to send.':bot&&bot.provider!=='demo'&&!bot.model?.trim()?'Choose a model for this agent to send.':null;
-    if(setupError){this.save({...this.state.draft,submission:{id:current.id,text:current.text,kind:uncertain?'unknown':'rejected',error:setupError}});return}
+    if(setupError){this.save({...this.state.draft,submission:{id:current.id,text:current.text,references:current.references,kind:uncertain?'unknown':'rejected',error:setupError}});return}
     await this.submit(botId,sessionId,current);
   }
   async stopResponse(){const response=this.state.response;if(!response||!['accepted','running','stopping'].includes(response.state))return;try{await this.api('/api/commands/'+encodeURIComponent(response.id)+'/stop',{});}catch(e){this.update({actionError:'Could not stop the response. Retry Stop while the response is active.'});this.notify('Could not stop the response. Retry Stop.','error')}}
   private async submit(botId:string,sessionId:string,submission:Submission){
-    const {id,text}=submission,uncertain=submission.kind==='unknown'||submission.kind==='uncertain-busy'||submission.kind==='submitting-uncertain';
+    const {id,text,references}=submission,uncertain=submission.kind==='unknown'||submission.kind==='uncertain-busy'||submission.kind==='submitting-uncertain';
     try{
-      const result=await this.api<{kind:string}>('/api/commands',{id,botId,sessionId,content:text});
+      const result=await this.api<{kind:string}>('/api/commands',{id,botId,sessionId,content:text,references:references?.map(source=>source.reference)??[]});
       if(this.state.selected!==botId||this.state.sessionId!==sessionId||this.state.draft.submission?.id!==id)return;
-      if(result.kind==='busy'){this.save({...this.state.draft,submission:uncertain?{id,text,kind:'uncertain-busy',error:'Another response is in progress. The original request may still arrive.'}:{id,text,kind:'busy',error:'Another response is in progress.'}});return}
-      this.save({...this.state.draft,submission:{id,text,kind:'pending'}});
+      if(result.kind==='busy'){this.save({...this.state.draft,submission:uncertain?{id,text,references:submission.references,kind:'uncertain-busy',error:'Another response is in progress. The original request may still arrive.'}:{id,text,references:submission.references,kind:'busy',error:'Another response is in progress.'}});return}
+      this.save({...this.state.draft,submission:{id,text,references:submission.references,kind:'pending'}});
       await this.refresh();
     }catch(e){
       if(this.state.selected!==botId||this.state.sessionId!==sessionId||this.state.draft.submission?.id!==id)return;
       const rejected=!uncertain&&e instanceof ApiError&&e.status>=400&&e.status<500&&e.status!==401;
-      this.save({...this.state.draft,submission:{id,text,kind:rejected?'rejected':'unknown',error:String(e)}});
+      this.save({...this.state.draft,submission:{id,text,references:submission.references,kind:rejected?'rejected':'unknown',error:String(e)}});
     }
   }
   dismissSubmission(){const submission=this.state.draft.submission;if(submission&&['busy','rejected','failed','interrupted'].includes(submission.kind))this.save({...this.state.draft,submission:null})}
@@ -262,12 +265,12 @@ export class Controller {
       if(this.state.selected!==botId||this.state.sessionId!==sessionId||this.state.draft.submission?.id!==submission.id)return;
       const {id,text}=submission;
       if(command.state==='completed'||command.state==='stopped'){this.save({...this.state.draft,submission:null});void this.refresh()}
-      else if(command.state==='failed'||command.state==='interrupted')this.save({...this.state.draft,submission:{id,text,kind:command.state,error:command.error}});
-      else this.save({...this.state.draft,submission:{id,text,kind:'pending'}});
+      else if(command.state==='failed'||command.state==='interrupted')this.save({...this.state.draft,submission:{id,text,references:submission.references,kind:command.state,error:command.error}});
+      else this.save({...this.state.draft,submission:{id,text,references:submission.references,kind:'pending'}});
     }catch(e){
       if(this.state.selected!==botId||this.state.sessionId!==sessionId||this.state.draft.submission?.id!==submission.id)return;
       if(e instanceof ApiError&&e.status===404){if(submission.kind!=='uncertain-busy')await this.submit(botId,sessionId,submission);return}
-      if(submission.kind!=='uncertain-busy')this.save({...this.state.draft,submission:{id:submission.id,text:submission.text,kind:'unknown',error:String(e)}});
+      if(submission.kind!=='uncertain-busy')this.save({...this.state.draft,submission:{id:submission.id,text:submission.text,references:submission.references,kind:'unknown',error:String(e)}});
     }finally{this.checking=false}
   }
   async checkEarlierSubmission(key:string) {
@@ -279,9 +282,23 @@ export class Controller {
     if(command.botId!==parts[2]||command.sessionId!==parts[3]||command.content!==value.submission.text)throw Error('Saved submission does not match the original command');
     return command;
   }
+  async inspectReference(botId:string,reference:WorkspaceReference) {
+    return parseResolvedReference(await this.api<unknown>('/api/bots/'+encodeURIComponent(botId)+'/references/preview',{reference,inspect:true}));
+  }
+  async addReference(reference:WorkspaceReference) {
+    const botId=this.state.selected,sessionId=this.state.sessionId,key=this.currentKey;
+    if(!botId||!sessionId||!this.state.draftReady)throw Error('Wait for the current draft to load.');
+    const resolved=parseResolvedReference(await this.api<unknown>('/api/bots/'+encodeURIComponent(botId)+'/references/preview',{reference}));
+    if(this.state.selected!==botId||this.state.sessionId!==sessionId||this.currentKey!==key)throw Error('The conversation changed. Select the source again.');
+    const sources=this.state.draft.references??[];
+    if(sources.some(source=>JSON.stringify(source.reference)===JSON.stringify(resolved.reference)))return;
+    if(sources.length>=8)throw Error('Select at most eight source references.');
+    this.save({...this.state.draft,references:[...sources,{reference:resolved.reference,title:resolved.title,location:resolved.location}]});
+  }
+  removeReference(index:number) {this.save({...this.state.draft,references:(this.state.draft.references??[]).filter((_,i)=>i!==index)});}
   async sessionList(botId:string,offset=0) {return this.api<{current:{id:string;name:string};sessions:Array<{id:string;name:string;createdAt:number;active:number}>}>('/api/bots/'+encodeURIComponent(botId)+'/sessions?offset='+offset);}
   async sessionRead(botId:string,sessionId:string,offset=0) {return this.api<{messages:Message[]}>('/api/bots/'+encodeURIComponent(botId)+'/sessions/'+encodeURIComponent(sessionId)+'?offset='+offset);}
-  async sessionSearch(botId:string,query:string) {return this.api<Array<{sessionId:string;messageId:string;role:string;content:string}>>('/api/bots/'+encodeURIComponent(botId)+'/session-search?q='+encodeURIComponent(query));}
+  async sessionSearch(botId:string,query:string) {return this.api<Array<{sessionId:string;messageId:string;role:string;content:string;start:number}>>('/api/bots/'+encodeURIComponent(botId)+'/session-search?q='+encodeURIComponent(query));}
   async startSession(botId:string,name:string) {
     const sessionId=this.state.sessionId,dataset=this.dataset;if(!sessionId||!dataset||this.state.selected!==botId)throw Error('Current session unavailable');
     const journal=prefix+'session-create:'+dataset+':'+botId+':';

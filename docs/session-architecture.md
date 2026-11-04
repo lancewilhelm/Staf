@@ -1,5 +1,12 @@
 # Evolving session and execution architecture
 
+The owner selected fresh conversation sessions with explicit access to original
+older sessions on 2026-11-03 and rejected compaction. That implemented direction
+is described in [session behavior](session-workspace.md) and
+[the session decision](adr/0006-fresh-sessions-with-original-references.md).
+The historical task and execution mechanisms below remain proposals except
+where newer implementation documentation explicitly says otherwise.
+
 Recorded on 2026-10-25. This note captures product direction and proposals. It does
 not describe features already implemented in Staf. The current CLI processes one
 turn at a time and waits for provider work. It has no agent scheduler or background

@@ -7,7 +7,7 @@ export function sessionCapabilities(instance:Instance, scope:{botId:string;sessi
   function check() {
     signal.throwIfAborted();
     const command=instance.command(commandId);
-    if(!command || command.botId!==botId || command.sessionId!==sessionId || command.state!=='pending' || instance.currentSession(botId).id!==sessionId)throw Error('Session capability no longer authorized');
+    if(!command || command.botId!==botId || command.sessionId!==sessionId || command.state!=='pending' || instance.responseStopping(commandId) || instance.currentSession(botId).id!==sessionId)throw Error('Session capability no longer authorized');
   }
   return {
     current(){check();return instance.currentSession(botId);},

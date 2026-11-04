@@ -284,6 +284,48 @@ terminal. Stop the fixture with Ctrl+C when finished.
 
 ## Write manual test steps
 
+### Review sessions, documents, and artifacts
+
+Use Node.js 22.16 or later, Corepack, and the locked dependencies. Stop a previous
+development launcher before switching this checkout onto the same data. Keep
+the existing development data, connection, and port settings. Use the normal
+persistent launcher and existing paired browser:
+
+```sh
+corepack pnpm dev
+```
+
+Open an agent, send a message, then choose **History → Start fresh session**.
+Expect an empty chat and composer, with the earlier conversation available in
+history. An earlier unsent draft remains under **Earlier browser records**.
+Search history, select an original message, and inspect **Sources for your next
+message**. Sending includes that source without changing the original message.
+
+Open **Documents**, import a small text file and a text-based PDF, and search for
+known phrases. Select a passage and send a message. Its **Selected sources**
+control opens the excerpt and the original. The offline Demo does not interpret
+sources; use the existing selected connection when judging model answers.
+
+Choose **Save artifact** beside a completed response, name it, and save it. Edit
+the artifact and inspect both revisions. Download each revision and expect its
+exact text. In another paired tab, save a newer revision while the first tab has
+an edit open. The first tab's stale save should retain its draft and report a
+conflict. Restart the launcher to verify sources and revisions remain available.
+
+For the controlled offline journey after building, run:
+
+```sh
+node test/browser/workspace-smoke.mjs
+```
+
+It uses disposable SQLite, synthetic providers, real browser uploads/downloads,
+and blocked external browser networking. It checks session isolation, source
+selection, revisions, restart, revocation, and narrow Light/Dark layouts. It saves
+screenshots under `test-results/workspace/`. It does not prove live-provider or
+Docker behavior.
+
+### Preserve the existing development setup
+
 For browser or shared-instance changes, use the persistent development workspace
 as the default handoff. Name the branch or PR to test. State the prerequisites:
 Node.js 22.16 or later, Corepack, and the locked dependencies installed. Include

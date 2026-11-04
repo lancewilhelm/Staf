@@ -122,8 +122,8 @@ function legacyContent(raw: string) {
         </div>
         <MemoryView v-else-if="view === 'agent-memory' && memoryAgentId" :key="memoryAgentId" :scope="{kind: 'bot', botId: memoryAgentId}" :back-label="settingsAgentId === memoryAgentId ? 'Back to agent settings' : 'Back to chat'" @back="closeAgentMemory" @shared="openUserMemory" />
         <MemoryView v-else-if="view === 'user-memory'" key="user-memory" :scope="{kind: 'user'}" :back-label="sharedReturn === 'agent-memory' ? 'Back to agent memory' : 'Back to settings'" @back="closeUserMemory" />
-        <ChatView v-else-if="view === 'chat'" @create="createAgent" @providers="openSettings" @settings="openAgentSettings" />
       </template>
+      <KeepAlive v-if="s.connection.kind !== 'pairing'" :key="s.datasetId"><ChatView v-if="view === 'chat'" @create="createAgent" @providers="openSettings" @settings="openAgentSettings" /></KeepAlive>
     </main>
     <NewAgent v-if="s.setup.kind === 'create'" />
   </div>

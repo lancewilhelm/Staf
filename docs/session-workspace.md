@@ -19,9 +19,9 @@ earlier session and pre-session drafts remain in **Earlier browser records** for
 copying; they are not automatically submitted to the new session. For a
 session-scoped saved submission, use **Check original submission** to inspect
 the original command without retargeting it. A selection in
-history emits a stable session-message reference and displays its identity; it
-also attempts to copy it. This feature does not yet attach that reference to a
-chat request. The integration coordinator owns that flow.
+history adds a stable session-message reference to the next draft. Search
+results select an excerpt around the matching text, including a character
+position for long messages. The source selection is visible before sending.
 
 The paired API exposes `GET/POST /api/bots/:botId/sessions`,
 `GET /api/bots/:botId/sessions/:sessionId?offset=0&limit=100`, and
@@ -41,7 +41,7 @@ creation retains the previous private replay with its original session. Existing
 instance backup and development recovery procedures continue to cover the database.
 
 The tests use disposable SQLite stores and synthetic providers. They do not
-verify a live provider, billing, or remote deployment. Coordinator integration
-should document these controls in the consolidated usage, reference and
-architecture pages, connect reference selection to the shared chat toolbar,
-and verify combined workflows. Schema version 34 reconciles missing feature tables after a protected backup.
+verify a live provider, billing, or remote deployment. The integrated served
+journey checks history selection together with document sources, artifact
+revisions, source inspection, reload, restart, and revoked access. Schema
+version 34 reconciles missing feature tables after a protected backup.

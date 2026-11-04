@@ -1,4 +1,4 @@
-import { workspaceReferenceSchema } from './workspace-references.js';
+import { CommandReferences, parseWorkspaceReferences, resolvedReference, workspaceReferenceSchema, type WorkspaceReference } from './workspace-references.js';
 import { ArtifactStore, artifactSchema, type ArtifactSource, type ArtifactCreate, type ArtifactRevise } from './artifacts.js';
 import { ConversationSessions, conversationSessionSchema, type SessionMessageReference } from './conversation-sessions.js';
 import { DocumentStore, documentSchema, documentCapabilities, type DocumentImport } from './document-sources.js';
@@ -910,6 +910,30 @@ export class Instance {
   searchSessions(botId:string,query:string) {return new ConversationSessions(this.db).search(botId,query);}
   resolveSessionMessage(botId:string,ref:SessionMessageReference) {return new ConversationSessions(this.db).resolve(botId,ref);}
   commandSession(id:string) {const row=this.db.prepare('SELECT session_id FROM conversation_command_sessions WHERE command_id=?').get(id);return typeof row?.session_id==='string'?row.session_id:undefined;}
+  resolveWorkspaceReference(botId:string, reference:WorkspaceReference, inspect=false) {
+    if (!this.hasBot(botId)) throw Error('Agent not found');
+    switch (reference.kind) {
+      case 'session-message': {
+        const row = this.db.prepare('SELECT m.content,s.name,m.role FROM messages m JOIN conversation_message_sessions x ON x.message_id=m.id JOIN conversation_sessions s ON s.id=x.session_id WHERE m.bot_id=? AND s.bot_id=? AND s.id=? AND m.id=?').get(botId,botId,reference.sessionId,reference.messageId);
+        if (!row || typeof row.content !== 'string' || typeof row.name !== 'string' || typeof row.role !== 'string') throw Error('Session message not found');
+        const start=reference.start??0;
+        if (!Number.isSafeInteger(start)||start<0||start>row.content.length) throw Error('Invalid source excerpt position.');
+        return resolvedReference(reference, {title:row.name,location:`Original ${row.role==='assistant_stopped'?'stopped assistant':row.role} message`+(start?`; from character ${start+1}`:''),content:row.content.slice(start),sourceDigest:createHash('sha256').update(row.content,'utf8').digest('hex')});
+      }
+      case 'document-excerpt': {
+        const source = this.documentRead(botId,reference.documentId).document;
+        if (source.retired && !inspect) throw Error('Document retired. Remove it from the selected sources.');
+        const excerpt = this.documentResolve(botId,reference.documentId,reference.excerptId);
+        return resolvedReference(reference, {title:excerpt.name,location:excerpt.page === null ? `Line ${excerpt.line}` : `Page ${excerpt.page}`,content:excerpt.text,sourceDigest:excerpt.digest});
+      }
+      case 'artifact-revision': {
+        const artifact = this.artifactRead(botId,reference.artifactId,reference.revision);
+        return resolvedReference(reference, {title:artifact.name,location:`Revision ${artifact.revision}`,content:artifact.content,sourceDigest:artifact.digest});
+      }
+      default: {const exhaustive:never=reference;return exhaustive;}
+    }
+  }
+  commandReferences(id:string) {return new CommandReferences(this.db).read(id);}
   createSession(input:{botId:string;expectedSessionId:string;operationId:string;name?:string}) {
     const name=input.name?.trim() || 'New session';
     if(!/^[\w-]{1,100}$/.test(input.operationId)||!input.expectedSessionId||name.length>100)throw Error('Invalid session creation');
@@ -975,7 +999,7 @@ export class Instance {
     for(const event of events){const id=String(event.command_id);const group=byCommand.get(id) ?? [];group.push(event);byCommand.set(id,group);}
     const requests=this.db.prepare('SELECT c.id FROM commands c JOIN conversation_command_sessions x ON x.command_id=c.id WHERE c.bot_id=? AND x.session_id=? ORDER BY c.rowid').all(botId,this.currentSession(botId).id).map(row=>{
       const id=String(row.id);
-      return {id,progress:this.responseProgress(id),events:byCommand.get(id) ?? []};
+      return {id,progress:this.responseProgress(id),events:byCommand.get(id) ?? [],references:this.commandReferences(id).map(({reference,title,location})=>({reference,title,location}))};
     });
     return {sessionId:this.currentSession(botId).id,requests,messages:this.db.prepare('SELECT m.id,m.role,m.content FROM messages m JOIN conversation_message_sessions x ON x.message_id=m.id WHERE m.bot_id=? AND x.session_id=? AND m.id NOT IN (SELECT message_id FROM task_notices) ORDER BY m.seq').all(botId,this.currentSession(botId).id)};
   }
@@ -989,9 +1013,12 @@ export class Instance {
   commandSkills(id:string) { return this.db.prepare('SELECT event FROM command_skill_activity WHERE command_id=? ORDER BY rowid').all(id).map(item=>{ const event=JSON.parse(String(item.event)); if (typeof event.name === 'string') event.name=this.redactSkill(event.name); if (typeof event.digest === 'string' && event.sourceDigest === undefined) { event.sourceDigest=event.digest; delete event.digest; } return event; }); }
   commandSkillLoaded(id:string,event:object) { this.db.prepare('INSERT INTO command_skill_activity VALUES (?,?)').run(id,JSON.stringify(event)); }
   /** Claims and persists the user message together; retries only inspect the existing command. */
-  claim(input: {id: string; botId: string; content: string; sessionId?:string}, visibleContent = input.content) {
+  claim(input: {id: string; botId: string; content: string; sessionId?:string; references?:WorkspaceReference[]}, visibleContent = input.content) {
     if (!input.id.trim() || !input.content.trim()) throw new Error('Command ID and content are required');
-    const digest = createHmac('sha256', this.fingerprintKey).update(JSON.stringify([input.id,input.botId,input.content])).digest('hex');
+    const references = parseWorkspaceReferences(input.references);
+    const identity:unknown[] = [input.id,input.botId,input.content];
+    if (references.length) identity.push(references);
+    const digest = createHmac('sha256', this.fingerprintKey).update(JSON.stringify(identity)).digest('hex');
     this.db.exec('BEGIN IMMEDIATE');
     try {
       const existing = this.command(input.id);
@@ -1010,6 +1037,7 @@ export class Instance {
       this.db.prepare("INSERT INTO commands VALUES (?, ?, ?, 'pending', NULL)").run(input.id, input.botId, visibleContent);
       this.db.prepare('INSERT INTO command_fingerprints VALUES (?, ?)').run(input.id, digest);
       this.db.prepare('INSERT INTO command_profiles VALUES (?, ?)').run(input.id, JSON.stringify(bot));
+      new CommandReferences(this.db).capture(input.id,references,reference=>this.resolveWorkspaceReference(input.botId,reference));
       this.db.prepare('INSERT INTO command_notices SELECT ?,n.message_id FROM task_notices n JOIN conversation_message_sessions x ON x.message_id=n.message_id WHERE n.bot_id=? AND n.delivered=0 AND x.session_id=?').run(input.id,input.botId,this.currentSession(input.botId).id);
       this.db.prepare("INSERT INTO messages VALUES (?, ?, 'user', ?, (SELECT COALESCE(MAX(seq),0)+1 FROM messages WHERE bot_id=?))").run('command-user-'+input.id, input.botId, visibleContent, input.botId);
       this.db.exec('COMMIT'); return {kind: 'accepted' as const};

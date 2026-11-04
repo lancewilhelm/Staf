@@ -240,6 +240,51 @@ HTTP request.
 A paired client can inspect and update copied bot defaults with `GET` and `POST /api/creation-defaults`; updates require the current revision. Provider, model, and reasoning are copied into new bots, never inherited by existing bots. The loopback instance task preview adds `task-start`, `tasks`, `task`, `task-stop`, `task-retry`, `task-replace`, `task-direct`, `task-answer`, and `task-follow` commands. See [background task preview](usage.md#background-task-preview) for syntax and limitations. The service accepts an optional `limitMs` from 1,000 through 86,400,000 and defaults to 300,000.
 
 
+### Conversation sessions and workspace sources
+
+These routes require the existing paired-client and origin checks. IDs are opaque
+identifiers. All source operations are scoped to the agent in the route.
+
+| Route | Behavior |
+| --- | --- |
+| `GET /api/bots/:botId/sessions?offset=0&limit=100` | Current session and paged session list. Limit 1–200. |
+| `POST /api/bots/:botId/sessions` | Create a fresh session with `operationId`, `expectedSessionId`, and optional `name`. |
+| `GET /api/bots/:botId/sessions/:sessionId?offset=0&limit=100` | Original visible messages without private provider replay. |
+| `GET /api/bots/:botId/session-search?q=TEXT` | Up to 100 literal matches with a bounded excerpt and its character start. |
+| `POST /api/bots/:botId/references/preview` | Resolve one `reference`; optional `inspect: true` allows inspecting an already retired document. |
+| `GET /api/bots/:botId/documents` | Up to 500 sources, with optional `offset`. |
+| `POST /api/bots/:botId/documents` | Import with `operationId`, `name`, and canonical `base64` bytes. Dedicated upload limit. |
+| `POST /api/bots/:botId/documents/search` | Literal `query`, up to 50 passages. |
+| `GET /api/bots/:botId/documents/:id` | Source metadata and passages. |
+| `GET /api/bots/:botId/documents/:id/excerpts/:offset` | Next source passage page. |
+| `GET /api/bots/:botId/documents/:id/original` | Protected original attachment download. |
+| `POST /api/bots/:botId/documents/:id/retire` | Retire from future search and selection. |
+| `GET, POST /api/bots/:botId/artifacts` | List or create artifacts. Creation includes `operationId`, `name`, `format`, `content`, and optional `source`. |
+| `GET, POST /api/bots/:botId/artifacts/:id/revisions` | List revisions or save with `operationId`, `expectedRevision`, and `content`. |
+| `GET /api/bots/:botId/artifacts/:id/revisions/:revision` | Exact saved revision. |
+| `GET /api/bots/:botId/artifacts/:id/revisions/:revision/download` | Protected UTF-8 attachment download. |
+
+Commands accept an optional `sessionId` and `references` array. The browser always
+sends its captured session ID. Legacy callers that omit it capture the active
+session at acceptance. Stale explicit submissions fail. Exact retries check their
+original captured session and source identities even after the active session
+changes or a source is retired.
+
+Reference variants are `{kind: 'session-message', sessionId, messageId, start?}`,
+`{kind: 'document-excerpt', documentId, excerptId}`, and
+`{kind: 'artifact-revision', artifactId, revision}`. `start` is an optional zero-based
+UTF-16 character offset for a session excerpt. The command status includes
+captured excerpts and digests; chat-work records include their source metadata.
+The bounds are eight references, 6,000 characters per excerpt, and 24,000 total.
+Known credential values are redacted before disclosure to a provider. The
+disclosed excerpt digest describes its actual redacted content.
+
+Documents accept at most 10 MiB, 200 PDF pages, and 1,000,000 extracted characters.
+Artifacts accept at most 1 MiB of UTF-8 text per revision. Document imports and
+artifact mutations use dedicated body limits. Existing unrelated JSON request
+limits remain unchanged. See [documents](document-sources.md) and
+[artifacts](artifacts.md) for format, extraction, retention, and retry details.
+
 ### Shared-instance skills API
 
 Authenticated clients use `GET` and `POST /api/skills` to list or import. Imports require `name`, `description`, `provenance` and literal `body` strings. `GET /api/skills/ID` inspects the current revision. `POST /api/skills/ID/update` adds a revision with those fields and the expected `revision`. `POST /api/skills/ID/enabled` takes a boolean `enabled`; `POST /api/skills/ID/availability` takes `botId` and boolean `available`. `GET /api/bots/BOT_ID/skills` lists currently enabled skills available to that bot. Known configured credentials are redacted before storage and from returned skill content. The catalog `digest` identifies the original submitted bytes, before redaction. Load evidence identifies this as `sourceDigest` and adds `loadedContentDigest`, the SHA-256 of the UTF-8 redacted body placed in the tool result. Older load evidence lacks a loaded-content digest. Existing stored records and backups are not rewritten. See [usage](usage.md#skills-in-the-shared-instance) for CLI syntax, selection and revocation limits.
