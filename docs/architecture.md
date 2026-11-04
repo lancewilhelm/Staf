@@ -14,6 +14,8 @@ Instance startup checks that marker before initialization and again after taking
 the database lock. Maintenance fences the original and replacement SQLite files
 with an unsupported schema version until the database and agent files are durable,
 so an older checkout cannot open a partially published dataset even after a crash.
+Maintenance reopens SQLite at the published path before further writes so its
+rollback journal stays beside the active database.
 Recovery retains the unchanged original before replacement begins, restores the
 prior copy after replacement starts, and finalizes a committed dataset without
 discarding later writes. Development startup

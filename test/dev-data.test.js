@@ -35,6 +35,19 @@ test('dataset identity survives restart and changes on reset', () => {
   } finally {rmSync(root,{recursive:true,force:true});}
 });
 
+test('published SQLite journal stays beside its database during maintenance', async () => {
+  const root=mkdtempSync(join(tmpdir(),'staf-dev-journal-')),path=join(root,'instance.sqlite');
+  const child=fork('scripts/dev-data.mjs',['reset'],{cwd:process.cwd(),env:{...process.env,STAF_DEV_DATA_DIR:root,STAF_DEV_TEST_PAUSE:'fence-released'},stdio:['ignore','ignore','pipe','ipc']});
+  let errors='';child.stderr.on('data',data=>errors+=data);
+  try {
+    await new Promise((resolve,reject)=>{child.once('message',resolve);child.once('exit',()=>reject(Error('Exited before checkpoint: '+errors)));});
+    assert.equal(existsSync(path+'-journal'),true,'SQLite rollback journal must follow the published database path');
+  } finally {
+    if(child.exitCode===null&&child.signalCode===null){child.kill('SIGKILL');await new Promise(resolve=>child.once('exit',resolve));}
+    rmSync(root,{recursive:true,force:true});
+  }
+});
+
 async function interrupt(root, action) {
   const child=fork('scripts/dev-data.mjs',[action],{cwd:process.cwd(),env:{...process.env,STAF_DEV_DATA_DIR:root,STAF_DEV_TEST_PAUSE:'database-published'},stdio:['ignore','ignore','pipe','ipc']});
   let errors='';child.stderr.on('data',data=>errors+=data);

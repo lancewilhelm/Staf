@@ -93,9 +93,14 @@ try {
   const active=JSON.parse(readFileSync(marker,'utf8'));
   if(active.version!==1||typeof active.backup!=='string')throw Error('Invalid maintenance marker.');
   writeMarker({dataRoot,backup:active.backup,phase:'replacing'});
+  // SQLite derives its journal path when opened. Reopen after publishing so a
+  // later write cannot leave the live journal in the temporary directory.
+  publishedLock.close();publishedLock=undefined;
   // The durable marker remains in place through every destructive publication step.
   for(const suffix of ['-wal','-shm','-journal'])rmSync(path+suffix,{force:true});
   renameSync(stagedPath,path);sync(dataRoot);
+  publishedLock=new DatabaseSync(path);
+  publishedLock.exec('PRAGMA locking_mode=EXCLUSIVE; BEGIN EXCLUSIVE; COMMIT;');
   await testCheckpoint('database-published');
   rmSync(agentRoot,{recursive:true,force:true});
   if(existsSync(join(stage,'agents')))renameSync(join(stage,'agents'),agentRoot);
