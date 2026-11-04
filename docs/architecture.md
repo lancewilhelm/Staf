@@ -6,6 +6,23 @@ to the loopback backend; source changes rebuild and restart that backend. The
 service remains authoritative for connections and shared data. See the
 [development workflow](development.md#run-the-development-workspace).
 
+Development reset builds the seed through `Instance` in a separate directory.
+The launcher and maintenance commands share a data-directory owner port, and
+maintenance also takes the SQLite exclusive lock. Before publishing a database
+and agent-file replacement, maintenance saves both and writes a durable marker.
+Instance startup checks that marker before initialization and again after taking
+the database lock. Explicit recovery restores the prior copy. Development startup
+also saves a complete copy and installs the marker before schema migration.
+Provider connection files stay outside the replacement set. Explicit restoration
+clears client authorizations and assigns a new browser dataset identity.
+
+The shared service derives an opaque dataset identity from an instance secret and
+returns it to the browser. Browser creation and draft records use that identity,
+and the service rejects requests that carry a different identity. Old unscoped
+records stay in storage without automatic recovery. The identity survives an
+ordinary restart and changes on reset or explicit restore. Interrupted maintenance
+recovery restores the pre-operation identity and does not replay work.
+
 A shared instance owns bot profiles, conversations, task attempts, permissions,
 and provider execution. The browser and terminal are paired clients of the same
 loopback service. The automatic terminal instance stores its SQLite database and

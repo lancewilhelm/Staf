@@ -1,4 +1,6 @@
-import {spawn} from 'node:child_process';
+import {spawn,execFile} from 'node:child_process';
+import {promisify} from 'node:util';
+const run=promisify(execFile);
 import {cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile, appendFile} from 'node:fs/promises';
 import {existsSync} from 'node:fs';
 import {homedir, tmpdir} from 'node:os';
@@ -55,9 +57,37 @@ try {
  assert.equal((await call('/api/commands/smoke-pending')).state,'interrupted');
  assert.equal(messages.filter(message=>message.role==='user' && message.content==='what time is it?').length,1);
  assert.equal((await call('/api/inbox')).some(item=>item.work?.id==='smoke-pending'),false);
+ const dataset=(await (await fetch(url+'/api/dataset')).json()).id;
+ const creationKey=`staf-workspace-v1:creation:${dataset}:retained-operation`;
+ const oldKey='staf-workspace-v1:creation:legacy-operation';
+ const record={kind:'create',operationId:'retained-operation',name:'Retained creation',instructions:'Saved text',provider:'demo',model:'',status:''};
+ await evaluate(`localStorage.setItem(${JSON.stringify(creationKey)},${JSON.stringify(JSON.stringify(record))});localStorage.setItem(${JSON.stringify(oldKey)},${JSON.stringify(JSON.stringify({...record,operationId:'legacy-operation',name:'Legacy creation'}))})`);
+ await cdp('Page.reload');
+ await until(()=>evaluate("document.body.innerText.includes('Recovered creation. Check status')"),'same dataset restores pending creation');
+ assert.equal(await evaluate("document.querySelector('.setup input').value"),'Retained creation');
+ await evaluate("window.savedFetch=window.fetch;window.fetch=async(...args)=>{const response=await window.savedFetch(...args);if(args[0]==='/api/bots'&&args[1]?.method==='POST'){window.creationHeld=true;await new Promise(resolve=>window.releaseCreation=resolve)}return response};[...document.querySelectorAll('button')].find(b=>b.textContent==='Retry same creation').click()");
+ await until(()=>evaluate('window.creationHeld'),'old creation response held');
+ process.kill(-launcher.pid,'SIGINT');await new Promise(resolveExit=>launcher.once('exit',resolveExit));
+ await run(process.execPath,['scripts/dev-data.mjs','reset'],{cwd:checkout,env});
+ output='';launcher=spawn('corepack',['pnpm','dev'],{cwd:checkout,env,detached:true,stdio:['pipe','pipe','pipe']});launcher.stdout.on('data',b=>output+=b);launcher.stderr.on('data',b=>output+=b);
+ const newCode=await until(()=>output.match(/Pairing code: (\S+)/)?.[1],'reset backend ready');
+ await until(()=>evaluate("document.body.innerText.includes('Pair this browser')"),'reset expires prior pairing');
+ assert.equal(await evaluate("document.body.innerText.includes('Retained creation')"),false);
+ await evaluate(`{const el=document.querySelector('input');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(el,${JSON.stringify(newCode)});el.dispatchEvent(new Event('input',{bubbles:true}));[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Pair').click()}`);
+ await until(()=>evaluate("!!localStorage.getItem('staf-token') && document.body.innerText.includes('Project guide')"),'pair new dataset');
+ await evaluate("if(typeof window.releaseCreation==='function')window.releaseCreation()");
+ await sleep(200);
+ assert.equal(await evaluate("document.body.innerText.includes('Retained creation')"),false,'old creation is not shown after reset');
+ assert.equal(await evaluate(`localStorage.getItem(${JSON.stringify(creationKey)})!==null && localStorage.getItem(${JSON.stringify(oldKey)})!==null`),true,'old records remain quarantined');
+ assert.equal(await evaluate("document.body.innerText.includes('Recovered creation. Check status')"),false);
+ await cdp('Page.reload');await until(()=>evaluate("document.body.innerText.includes('Project guide')"),'new dataset reload');
+ assert.equal(await evaluate("document.body.innerText.includes('Retained creation') || document.body.innerText.includes('Legacy creation')"),false);
+ const newToken=await evaluate("localStorage.getItem('staf-token')");
+ const stale=await fetch(url+'/api/bots',{method:'POST',headers:{Authorization:`Bearer ${newToken}`,'Content-Type':'application/json','X-Staf-Dataset':dataset},body:JSON.stringify({operationId:'retained-operation',name:'Retained creation'})});assert.equal(stale.status,409);
+ assert.equal((await (await fetch(url+'/api/bots',{headers:{Authorization:`Bearer ${newToken}`}})).json()).some(item=>item.name==='Retained creation'),false);
  process.kill(-launcher.pid,'SIGINT');await new Promise(resolveExit=>launcher.once('exit',resolveExit));
  await until(async()=>{try{await fetch(url,{signal:AbortSignal.timeout(300)});return false;}catch{return true;}},'shutdown with browser still open');
- console.log('PASS development command: browser pairing, shared demo chat, frontend HMR, backend restart, draft retention, reconnection, interrupted command without replay, and shutdown with browser open');
+ console.log('PASS development command: browser pairing, shared demo chat, frontend HMR, backend restart, draft retention, reconnection, interrupted command without replay, same-dataset creation recovery, reset pairing and stale-record isolation');
 } finally {
  socket?.close();if(browser && browser.exitCode===null){browser.kill('SIGTERM');await new Promise(resolveExit=>browser.once('exit',resolveExit));}
  if(launcher && launcher.exitCode===null && launcher.signalCode===null){process.kill(-launcher.pid,'SIGINT');await new Promise(resolveExit=>launcher.once('exit',resolveExit));}

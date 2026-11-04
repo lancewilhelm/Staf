@@ -1,7 +1,7 @@
 # Use Staf
 
 For the persistent, hot-reloading local browser workspace and a terminal paired
-to the same development instance, see [Run the development workspace](development.md#run-the-development-workspace).
+to the same development instance, see [Run the development workspace](development.md#run-the-development-workspace). For a synthetic seed and explicit reset or recovery, see [Reset and recover development data](development.md#reset-and-recover-development-data).
 
 ## Start the shared terminal
 

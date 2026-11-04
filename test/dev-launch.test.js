@@ -49,19 +49,35 @@ test('development command serves one persistent instance and releases its owners
     assert.equal((await call('/api/commands', token, {id:'development-command',botId:bot.id,content:'hello'}))[1].kind, 'accepted');
     const rival = launch(); await new Promise(resolve => rival.once('exit', resolve));
     assert.notEqual(rival.exitCode, 0); assert.match(output, /active checkout/i);
+    await assert.rejects(run(process.execPath,['scripts/dev-data.mjs','reset'],{cwd:checkout,env}),/ownership conflict/i);
     const conflict = launch({STAF_DEV_DATA_DIR:join(temp,'other-data')}); await new Promise(resolve => conflict.once('exit', resolve));
     assert.notEqual(conflict.exitCode, 0); assert.match(output, new RegExp(`Port ${port} is in use. Active checkout:`));
     const client = join(temp,'client.json'); await writeFile(client,JSON.stringify({token}));
     const cli = await run(process.execPath,['dist/cli.js','instance','bots',url,client],{cwd:checkout,env});
     assert.ok(JSON.parse(cli.stdout).some(item => item.id === bot.id));
     await stop(child);
+    const old=new DatabaseSync(join(dir,'instance.sqlite'));old.exec('PRAGMA user_version=29');old.close();
     output = ''; child = launch({},nextCheckout); await until(() => output.includes('Pairing code:'), 'restart in another checkout');
     assert.ok(output.includes(nextCheckout));
+    const backup=output.match(/Complete pre-upgrade backup: (.+)/)?.[1];assert.ok(backup);
+    assert.equal(await readFile(join(backup,'agents',bot.id,'current','soul.md'),'utf8'),await readFile(join(dir,'agents',bot.id,'current','soul.md'),'utf8'));
+    const saved=new DatabaseSync(join(backup,'instance.sqlite'),{readOnly:true});assert.equal(saved.prepare('PRAGMA user_version').get().user_version,29);saved.close();
     assert.equal((await call('/api/bots', token))[1].find(item => item.id === bot.id).name, 'Development agent');
     assert.equal((await call('/api/commands/development-command', token))[1].state, 'completed');
     for (const [name, value] of [['codex-direct.json', direct], ['codex-host.json', host], ['openrouter.json', router]]) assert.equal(await readFile(join(connections,'auth',name),'utf8'),value);
     assert.doesNotMatch(output,/synthetic-access|synthetic-refresh|synthetic-openrouter-key/);
   } finally { if (child.exitCode === null && child.signalCode === null) await stop(child); await rm(temp,{recursive:true,force:true}); }
+});
+
+test('development startup refuses an interrupted dataset before initializing it', {timeout:30000}, async () => {
+  const temp=await mkdtemp(join(tmpdir(),'staf-dev-barrier-')),checkout=join(temp,'checkout'),dir=join(temp,'data');
+  try {
+    await checkoutAt(checkout);await mkdir(dir);await writeFile(join(dir,'instance.sqlite.maintenance.json'),'{}');
+    const child=spawn('corepack',['pnpm','dev'],{cwd:checkout,env:{PATH:process.env.PATH,HOME:process.env.HOME,TMPDIR:temp,STAF_DEV_DATA_DIR:dir,STAF_DEV_PORT:String(await freePort())},stdio:['ignore','pipe','pipe']});
+    let output='';child.stdout.on('data',b=>output+=b);child.stderr.on('data',b=>output+=b);
+    await new Promise(resolve=>child.once('exit',resolve));assert.notEqual(child.exitCode,0);assert.match(output,/maintenance was interrupted.*dev:recover/i);
+    await assert.rejects(readFile(join(dir,'instance.sqlite')),{code:'ENOENT'});
+  } finally {await rm(temp,{recursive:true,force:true});}
 });
 
 test('development startup rejects a newer schema without changing it', {timeout:30000}, async () => {
