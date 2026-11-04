@@ -25,6 +25,7 @@ const clockAction: Action = { capability:'clock', operation:'read', resource:'ut
 const clockBoundary = { enabledCapabilities:['clock'], actions:[clockAction] };
 const modes: ApprovalMode[] = ['ask-every-time','ask-for-risky-actions','never-ask'];
 export const INSTANCE_SCHEMA_VERSION = 30;
+const MAINTENANCE_VERSION = 2147483647;
 
 export const starterSoul = "You are an assistant working for the owner. Be clear and candid. Distinguish observations from assumptions. Follow the owner's role instructions and work within the permissions and task scope granted to you.";
 export type BotEdit = { revision: string; name: string; description?: string; instructions: string; provider: string; model: string | null; reasoning: string | null };
@@ -39,6 +40,13 @@ export function assertDatasetAvailable(path: string, maintenanceToken?:string) {
   }
 }
 
+function upgradeVersion(path:string, token:string|undefined):number|undefined {
+  if (!token) return undefined;
+  const marker:unknown=JSON.parse(readFileSync(`${path}.maintenance.json`,'utf8'));
+  if (!marker || typeof marker!=='object' || !('token' in marker) || marker.token!==token || !('schemaVersion' in marker) || typeof marker.schemaVersion!=='number' || !Number.isSafeInteger(marker.schemaVersion) || marker.schemaVersion<0 || marker.schemaVersion>=INSTANCE_SCHEMA_VERSION) throw Error('Invalid upgrade maintenance marker.');
+  return marker.schemaVersion;
+}
+
 /** Instance-owned records. Callers supply execution; no provider runs during creation. */
 export class Instance {
   private readonly db: DatabaseSync;
@@ -46,6 +54,7 @@ export class Instance {
   private readonly temporaryConfigRoot: string | undefined;
   private readonly fingerprintKey: Uint8Array;
   private readonly datasetKey: Uint8Array;
+  private maintenanceToken: string | undefined;
   private readonly grantControllers = new Map<string,Set<AbortController>>();
   readonly migrationBackup: string | undefined;
   constructor(path: string, private readonly redactSkill: (text:string) => string = text => text, maintenanceToken?:string) {
@@ -63,7 +72,11 @@ export class Instance {
     const hasBots = this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='bots'").get();
     const hasProfiles = this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='bot_profiles'").get();
     const versionRow = this.db.prepare('PRAGMA user_version').get();
-    const version = Number(versionRow?.user_version ?? 0);
+    const storedVersion = Number(versionRow?.user_version ?? 0);
+    const originalVersion=upgradeVersion(path,maintenanceToken);
+    if (originalVersion!==undefined && storedVersion!==MAINTENANCE_VERSION) throw Error('Upgrade database is not fenced.');
+    const version = originalVersion ?? storedVersion;
+    this.maintenanceToken=maintenanceToken;
     if (version > INSTANCE_SCHEMA_VERSION) throw new Error(`Database version ${version} is newer than this Staf (maximum ${INSTANCE_SCHEMA_VERSION}). Use a compatible checkout or select another data directory; the database was not reset.`);
     if (hasBots && version < INSTANCE_SCHEMA_VERSION && path !== ':memory:') {
       this.migrationBackup = `${path}.before-${version < 2 ? 'profiles' : version < 3 ? 'tasks' : version < 4 ? 'approvals' : version < 5 ? 'task-inbox' : version < 6 ? 'memory' : version < 7 ? 'memory-confirmation' : version < 8 ? 'skills' : version < 9 ? 'schedules' : version < 10 ? 'schedule-retries' : version < 11 ? 'schedule-lineage' : version < 12 ? 'bot-description' : version < 13 ? 'delegation-scope' : version < 14 ? 'collaboration' : version < 15 ? 'disclosure' : version < 16 ? 'chat-tasks' : version < 17 ? 'creation-defaults' : version < 18 ? 'web-actions' : version < 19 ? 'search-actions' : version < 20 ? 'scratch-shell' : version < 21 ? 'approval-grants' : version < 22 ? 'schedule-web-scope' : version < 23 ? 'schedule-search-scope' : version < 24 ? 'schedule-shell-scope' : version < 25 ? 'main-bot' : version < 26 ? 'command-events' : version < 27 ? 'bot-creation' : version < 28 ? 'response-progress' : 'response-stop'}-${randomUUID()}.sqlite`;
@@ -139,7 +152,7 @@ export class Instance {
     if(version < 29)this.db.exec("CREATE TABLE IF NOT EXISTS response_stops (command_id TEXT PRIMARY KEY REFERENCES commands(id))");
     if(version < 30 && !this.db.prepare("SELECT 1 FROM pragma_table_info('command_runtime_events') WHERE name='detail'").get())this.db.exec('ALTER TABLE command_runtime_events ADD COLUMN detail TEXT');
     this.db.exec('CREATE INDEX IF NOT EXISTS command_runtime_events_command ON command_runtime_events(command_id,seq)');
-    this.db.exec(`PRAGMA user_version=${INSTANCE_SCHEMA_VERSION}`);
+    if (!maintenanceToken) this.db.exec(`PRAGMA user_version=${INSTANCE_SCHEMA_VERSION}`);
     for (const row of this.db.prepare("SELECT id,bot_id FROM task_attempts WHERE state IN ('queued','running','stopping','waiting') ORDER BY rowid").all()) {
       if (typeof row.id !== 'string' || typeof row.bot_id !== 'string') throw Error('Invalid interrupted task');
       this.cancelTaskInputs(row.id);
@@ -325,6 +338,10 @@ export class Instance {
       }
     }
     return false;
+  }
+  finishUpgrade(token:string) {
+    if (!this.maintenanceToken || this.maintenanceToken!==token) throw Error('Invalid upgrade maintenance token.');
+    this.db.exec(`PRAGMA user_version=${INSTANCE_SCHEMA_VERSION}`);this.maintenanceToken=undefined;
   }
   close() { this.db.close(); if(this.temporaryConfigRoot)rmSync(this.temporaryConfigRoot,{recursive:true,force:true}); }
   shellConfig() {const row=this.db.prepare('SELECT revision,docker_binary AS dockerBinary,docker_socket AS dockerSocket,image_id AS imageId FROM shell_config WHERE id=1').get();if(!row || typeof row.revision!=='number' || !(row.dockerBinary===null || typeof row.dockerBinary==='string') || !(row.dockerSocket===null || typeof row.dockerSocket==='string') || !(row.imageId===null || typeof row.imageId==='string'))throw Error('Invalid shell configuration');return {revision:row.revision,dockerBinary:row.dockerBinary,dockerSocket:row.dockerSocket,imageId:row.imageId};}

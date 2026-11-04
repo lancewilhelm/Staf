@@ -4,7 +4,7 @@ import { cpSync, existsSync, mkdtempSync, readFileSync, renameSync, rmSync } fro
 import { join, relative, isAbsolute, resolve } from 'node:path';
 import { acquireOwner, devContext } from './dev-context.mjs';
 import { seed } from './dev-seed.mjs';
-import { copyAgents, saveBackup, sync, syncTree, writeMarker } from './dev-storage.mjs';
+import { copyAgents, MAINTENANCE_VERSION, saveBackup, sync, syncTree, writeMarker } from './dev-storage.mjs';
 
 async function main() {
 const action=process.argv[2];
@@ -20,7 +20,7 @@ async function testCheckpoint(name) {
   await new Promise(resolve=>process.once('message',resolve));
 }
 const owner=await acquireOwner(context);
-let lock, stage;
+let lock, publishedLock, stage;
 try {
   if(action==='reset') {
     interrupted();
@@ -66,16 +66,26 @@ try {
     if(action==='restore') {const backup=saveBackup({dataRoot,db:lock,existed,reason:'restore'});writeMarker({dataRoot,backup});console.log(`Backup: ${backup}`);}
     console.log(`Restoring backup: ${target}`);
   }
+  // Fence both inodes: a lock on the original does not protect a renamed replacement.
+  lock.exec(`PRAGMA user_version=${MAINTENANCE_VERSION}`);sync(path);
+  const stagedPath=join(stage,'instance.sqlite');
+  publishedLock=new DatabaseSync(stagedPath);
+  publishedLock.exec('PRAGMA locking_mode=EXCLUSIVE; BEGIN EXCLUSIVE; COMMIT;');
+  const targetVersion=Number(publishedLock.prepare('PRAGMA user_version').get().user_version);
+  if(!Number.isSafeInteger(targetVersion)||targetVersion<0||targetVersion>=MAINTENANCE_VERSION)throw Error('Invalid backup schema version.');
+  publishedLock.exec(`PRAGMA user_version=${MAINTENANCE_VERSION}`);sync(stagedPath);sync(stage);
   // The durable marker remains in place through every destructive publication step.
   for(const suffix of ['-wal','-shm','-journal'])rmSync(path+suffix,{force:true});
-  if(existsSync(join(stage,'instance.sqlite')))renameSync(join(stage,'instance.sqlite'),path);else rmSync(path,{force:true});
+  renameSync(stagedPath,path);sync(dataRoot);
   await testCheckpoint('database-published');
   rmSync(agentRoot,{recursive:true,force:true});
   if(existsSync(join(stage,'agents')))renameSync(join(stage,'agents'),agentRoot);
-  sync(dataRoot);rmSync(marker);sync(dataRoot);
+  sync(dataRoot);
+  publishedLock.exec(`PRAGMA user_version=${targetVersion}`);sync(path);
+  rmSync(marker);sync(dataRoot);
   console.log(action==='reset'?'Development dataset reset. Pair clients again.':'Recovery complete.');
 } finally {
-  lock?.close();if(stage)rmSync(stage,{recursive:true,force:true});
+  publishedLock?.close();lock?.close();if(stage)rmSync(stage,{recursive:true,force:true});
   await new Promise(resolve=>owner.close(resolve));
 }
 

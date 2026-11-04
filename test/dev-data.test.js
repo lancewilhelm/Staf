@@ -41,6 +41,25 @@ async function interrupt(root, action) {
   await new Promise((resolve,reject)=>{child.once('message',resolve);child.once('exit',()=>reject(Error('Exited before checkpoint: '+errors)));});
   child.kill('SIGKILL');await new Promise(resolve=>child.once('exit',resolve));
 }
+// Models the older constructor's schema gate; actual older-build startup is
+// checked separately so this test does not depend on Git history in CI.
+function legacySchemaGate(path) {
+  const db=new DatabaseSync(path);
+  try {const version=Number(db.prepare('PRAGMA user_version').get().user_version);if(version>30)throw Error('newer database');}
+  finally {db.close();}
+}
+test('published and interrupted replacements reject an older schema-aware writer', async () => {
+  const root=mkdtempSync(join(tmpdir(),'staf-dev-legacy-')),path=join(root,'instance.sqlite');
+  const child=fork('scripts/dev-data.mjs',['reset'],{cwd:process.cwd(),env:{...process.env,STAF_DEV_DATA_DIR:root,STAF_DEV_TEST_PAUSE:'database-published'},stdio:['ignore','ignore','pipe','ipc']});
+  let errors='';child.stderr.on('data',data=>errors+=data);
+  try {
+    await new Promise((resolve,reject)=>{child.once('message',resolve);child.once('exit',()=>reject(Error('Exited before checkpoint: '+errors)));});
+    assert.throws(()=>legacySchemaGate(path),/newer database/);
+    child.kill('SIGKILL');await new Promise(resolve=>child.once('exit',resolve));
+    assert.throws(()=>legacySchemaGate(path),/newer database/);
+    assert.equal(command(root,'recover').status,0);
+  } finally {if(child.exitCode===null&&child.signalCode===null)child.kill('SIGKILL');rmSync(root,{recursive:true,force:true});}
+});
 test('reset and repeated recovery interruptions retain a usable complete backup', async () => {
   const root=mkdtempSync(join(tmpdir(),'staf-dev-crash-')),path=join(root,'instance.sqlite');
   try {
@@ -66,8 +85,20 @@ test('development upgrade snapshots the database and agent files before migratio
     const upgrade=prepareUpgrade(root);assert.ok(upgrade);assert.throws(()=>new Instance(path),/maintenance/i);
     db=new DatabaseSync(join(upgrade.backup,'instance.sqlite'));assert.equal(db.prepare('PRAGMA user_version').get().user_version,29);db.close();
     assert.ok(existsSync(join(upgrade.backup,'agents',bot.id,'current')));
-    instance=new Instance(path,undefined,upgrade.token);finishUpgrade(root);assert.equal(instance.bot(bot.id).instructions,'Soul before upgrade');instance.close();
+    instance=new Instance(path,undefined,upgrade.token);finishUpgrade(root,()=>instance.finishUpgrade(upgrade.token));assert.equal(instance.bot(bot.id).instructions,'Soul before upgrade');instance.close();
     db=new DatabaseSync(path);assert.equal(db.prepare('PRAGMA user_version').get().user_version,30);db.close();
+  } finally {rmSync(root,{recursive:true,force:true});}
+});
+test('an interrupted upgrade remains fenced before and after initialization', () => {
+  const root=mkdtempSync(join(tmpdir(),'staf-dev-upgrade-fence-')),path=join(root,'instance.sqlite');
+  try {
+    let instance=new Instance(path);instance.close();
+    const db=new DatabaseSync(path);db.exec('PRAGMA user_version=29');db.close();
+    const upgrade=prepareUpgrade(root);assert.ok(upgrade);
+    assert.throws(()=>legacySchemaGate(path),/newer database/);
+    instance=new Instance(path,undefined,upgrade.token);instance.close();
+    assert.throws(()=>legacySchemaGate(path),/newer database/);
+    assert.equal(command(root,'recover').status,0);
   } finally {rmSync(root,{recursive:true,force:true});}
 });
 test('an interrupted upgrade restores the complete pre-upgrade dataset', () => {
