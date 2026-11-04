@@ -22,3 +22,12 @@ test('response Markdown excludes raw HTML and executable URLs', () => {
   assert.doesNotMatch(html, /<script|onerror|javascript:|data:text\/html|src="x"/);
   assert.match(html, />bad<\/a>/);
 });
+
+test('artifact Markdown does not load images or expose external links', () => {
+  const html = execFileSync(process.execPath, ['--experimental-strip-types','--input-type=module','-e',
+    "import {renderArtifactMarkdown} from './web/markdown.ts'; console.log(renderArtifactMarkdown(process.argv[1]))",
+    '[link](https://example.com) ![image](https://example.com/a.png) <script>bad</script>'],
+  {cwd:new URL('..',import.meta.url),encoding:'utf8'});
+  assert.match(html, />link<\/a>/);assert.match(html, /image/);
+  assert.doesNotMatch(html, /https:|<img|<script|href=/);
+});

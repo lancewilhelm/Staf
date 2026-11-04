@@ -1,3 +1,4 @@
+import { ArtifactConflict, parseArtifactCreate, parseArtifactRevise } from './artifacts.js';
 import {providerLabel} from './provider-label.js';
 import { parseMemoryLanguage } from './memory-language.js';
 import { previewMemoryCandidates } from './memory-candidates.js';
@@ -281,7 +282,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
       let body: unknown = {};
       if (req.method === 'POST') {
         if (!req.headers['content-type']?.startsWith('application/json')) return json(415,{error:'JSON required'});
-        const bodyLimit=(req.url === '/api/skills' || /^\/api\/skills\/[\w-]+\/update$/.test(req.url ?? '')) ? 1600000 : 65536;
+        const bodyLimit=/^\/api\/bots\/[\w-]+\/artifacts(?:\/[\w-]+\/revisions)?$/.test(req.url ?? '') ? 6300000 : (req.url === '/api/skills' || /^\/api\/skills\/[\w-]+\/update$/.test(req.url ?? '')) ? 1600000 : 65536;
         const chunks:Buffer[]=[];let size=0;
         for await (const chunk of req) { const bytes=Buffer.isBuffer(chunk)?chunk:Buffer.from(chunk);size+=bytes.length;if(size>bodyLimit)return json(413,{error:'Body too large'});chunks.push(bytes); }
         body = JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(Buffer.concat(chunks)));
@@ -460,6 +461,23 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
         if(req.method === 'POST') {if(typeof value.revision !== 'number' || typeof value.provider !== 'string' || !(value.model === null || typeof value.model === 'string') || !(value.reasoning === null || typeof value.reasoning === 'string'))return json(400,{error:'Invalid creation defaults'});return json(200,instance.setCreationDefaults({revision:value.revision,provider:value.provider,model:value.model,reasoning:value.reasoning}));}
       }
       if (req.method === 'POST' && req.url === '/api/main-bot') return json(200,instance.mainBot());
+      const artifactMatch=req.url?.match(/^\/api\/bots\/([\w-]+)\/artifacts(?:\/([\w-]+)\/revisions(?:\/(\d+)(?:\/(download))?)?)?$/);
+      if (artifactMatch?.[1]) {
+        const botId=artifactMatch[1],id=artifactMatch[2],revision=artifactMatch[3] ? Number(artifactMatch[3]) : undefined;
+        if(req.method==='GET' && !id) return json(200,instance.artifacts(botId));
+        if(req.method==='POST' && !id) return json(201,instance.artifactCreate(botId,parseArtifactCreate(value)));
+        if(id && req.method==='GET' && revision===undefined) return json(200,instance.artifactRevisions(botId,id));
+        if(id && req.method==='POST' && revision===undefined) return json(201,instance.artifactRevise(botId,id,parseArtifactRevise(value)));
+        if(id && req.method==='GET' && revision!==undefined && Number.isSafeInteger(revision) && revision>0) {
+          const artifact=instance.artifactRead(botId,id,revision);
+          if(!artifactMatch[4]) return json(200,artifact);
+          if(typeof artifact.content!=='string' || typeof artifact.name!=='string')throw Error('Invalid stored artifact');
+          const type=artifact.format==='markdown'?'text/markdown':artifact.format==='csv'?'text/csv':'text/plain';
+          const ext=artifact.format==='markdown'?'md':artifact.format==='csv'?'csv':'txt';
+          const name=artifact.name.replace(/[^A-Za-z0-9_-]+/g,'-').replace(/^-+|-+$/g,'').slice(0,80) || 'artifact';
+          res.writeHead(200,{'Content-Type':type+'; charset=utf-8','Content-Disposition':`attachment; filename="${name}.${ext}"`,'X-Content-Type-Options':'nosniff','Cache-Control':'no-store'});return res.end(Buffer.from(artifact.content,'utf8'));
+        }
+      }
       if (req.method === 'GET' && req.url === '/api/bots') return json(200,instance.bots());
       if (req.method === 'POST' && req.url === '/api/bots') {
         if (typeof value.name !== 'string' || !value.name.trim() || value.name.length > 200 || (value.instructions !== undefined && (typeof value.instructions !== 'string' || value.instructions.length > 30000))) return json(400,{error:'Invalid name or instructions'});
@@ -612,7 +630,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
         return json(200,claim);
       }
       return json(404,{error:'Not found'});
-    } catch (error) { if(error instanceof AgentConfigInvalid)return json(422,{error:error.message,code:'invalid_agent_configuration'});if(error instanceof AgentConfigUncertain)return json(503,{error:error.message,code:'configuration_save_uncertain'});return json((error instanceof BotConflict || error instanceof AgentConfigConflict || error instanceof MemoryConflict || error instanceof SkillConflict || error instanceof ScheduleConflict) ? 409 : 400,{error:error instanceof Error ? error.message : 'Request failed'}); }
+    } catch (error) { if(error instanceof AgentConfigInvalid)return json(422,{error:error.message,code:'invalid_agent_configuration'});if(error instanceof AgentConfigUncertain)return json(503,{error:error.message,code:'configuration_save_uncertain'});return json((error instanceof ArtifactConflict || error instanceof BotConflict || error instanceof AgentConfigConflict || error instanceof MemoryConflict || error instanceof SkillConflict || error instanceof ScheduleConflict) ? 409 : 400,{error:error instanceof Error ? error.message : 'Request failed'}); }
   });
   return { server, code, migrationBackup: instance.migrationBackup, finishUpgrade: (token:string)=>instance.finishUpgrade(token), issueCode: () => (code = randomBytes(18).toString('base64url')), close: () => new Promise<void>((resolve,reject)=>{closing=true; instanceAuth?.shutdown(); if(scheduleTimer) clearInterval(scheduleTimer); for(const subscriber of responseSubscribers)subscriber.response.end();for(const controller of active) controller.abort(); server.close(error=>{instance.close(); if(error)reject(error);else resolve();});}), listen: () => new Promise<number>((resolve,reject)=>{server.once('error',reject);server.listen(port,'127.0.0.1',()=>{const a=server.address();if(a && typeof a !== 'string') { tickSchedules(); scheduleTimer=setInterval(tickSchedules,30000); resolve(a.port); }else reject(Error('Listen failed'));});}) };
 }

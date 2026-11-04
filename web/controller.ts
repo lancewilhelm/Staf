@@ -1,3 +1,9 @@
+export type ArtifactFormat = 'text'|'markdown'|'csv';
+export type ArtifactSource = {sessionId:string;messageId:string};
+export type ArtifactCreateInput = {operationId:string;name:string;format:ArtifactFormat;content:string;source?:ArtifactSource};
+export type ArtifactSummary = {id:string;name:string;format:ArtifactFormat;revision:number;createdAt:string;updatedAt:string;sourceSessionId:string|null;sourceMessageId:string|null};
+export type ArtifactRevisionInfo = {revision:number;digest:string;createdAt:string};
+export type ArtifactRevision = {id:string;name:string;format:ArtifactFormat;revision:number;content:string;digest:string;createdAt:string;artifactCreatedAt:string;sourceSessionId:string|null;sourceMessageId:string|null};
 import type {ToastNotice} from './toast-notice';
 import {responseEvents} from './response-stream';
 import type { Memory, MemoryScope } from '../src/memory-types';
@@ -342,6 +348,17 @@ export class Controller {
       }
       throw error;
     }
+  }
+  async artifactList(botId:string) {return this.api<ArtifactSummary[]>('/api/bots/'+encodeURIComponent(botId)+'/artifacts');}
+  async artifactRevisions(botId:string,id:string) {return this.api<ArtifactRevisionInfo[]>('/api/bots/'+encodeURIComponent(botId)+'/artifacts/'+encodeURIComponent(id)+'/revisions');}
+  async artifactRead(botId:string,id:string,revision:number) {return this.api<ArtifactRevision>('/api/bots/'+encodeURIComponent(botId)+'/artifacts/'+encodeURIComponent(id)+'/revisions/'+revision);}
+  async artifactCreate(botId:string,input:ArtifactCreateInput) {return this.api<ArtifactRevision>('/api/bots/'+encodeURIComponent(botId)+'/artifacts',input);}
+  async artifactRevise(botId:string,id:string,input:{operationId:string;expectedRevision:number;content:string}) {return this.api<ArtifactRevision>('/api/bots/'+encodeURIComponent(botId)+'/artifacts/'+encodeURIComponent(id)+'/revisions',input);}
+  async artifactDownload(botId:string,id:string,revision:number) {
+    const dataset=this.dataset,token=this.token;if(!dataset || !token)throw Error('Access unavailable');
+    const response=await fetch('/api/bots/'+encodeURIComponent(botId)+'/artifacts/'+encodeURIComponent(id)+'/revisions/'+revision+'/download',{headers:{Authorization:'Bearer '+token,'X-Staf-Dataset':dataset}});
+    if(!response.ok || response.headers.get('X-Staf-Dataset')!==dataset || this.dataset!==dataset || this.token!==token)throw Error('Download failed or access changed');
+    return response.blob();
   }
   async saveBotProfile(profile:BotProfile,edit:{name:string;provider:string;model:string;instructions:string}){await this.api('/api/bots/'+profile.id+'/profile',{revision:profile.revision,name:edit.name,description:profile.description,instructions:edit.instructions,provider:edit.provider,model:edit.model.trim()||null,reasoning:profile.reasoning});await this.refresh()}
   async setArchived(profile:BotProfile,archived:boolean){await this.api('/api/bots/'+profile.id+'/'+(archived?'archive':'restore'),{revision:profile.revision});await this.refresh()}
