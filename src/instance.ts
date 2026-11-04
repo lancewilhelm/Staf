@@ -1,3 +1,4 @@
+import { ArtifactStore, artifactSchema, type ArtifactSource, type ArtifactCreate, type ArtifactRevise } from './artifacts.js';
 import {ProviderDefaultsStore} from './provider-choices.js';
 import { DatabaseSync } from 'node:sqlite';
 import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
@@ -24,7 +25,7 @@ import { ApprovalGrants, approvalGrantSchema, type GrantBoundary } from './appro
 const clockAction: Action = { capability:'clock', operation:'read', resource:'utc', effect:'read', limits:{}, risk:'safe' };
 const clockBoundary = { enabledCapabilities:['clock'], actions:[clockAction] };
 const modes: ApprovalMode[] = ['ask-every-time','ask-for-risky-actions','never-ask'];
-export const INSTANCE_SCHEMA_VERSION = 30;
+export const INSTANCE_SCHEMA_VERSION = 33;
 const MAINTENANCE_VERSION = 2147483647;
 
 export const starterSoul = "You are an assistant working for the owner. Be clear and candid. Distinguish observations from assumptions. Follow the owner's role instructions and work within the permissions and task scope granted to you.";
@@ -79,7 +80,7 @@ export class Instance {
     this.maintenanceToken=maintenanceToken;
     if (version > INSTANCE_SCHEMA_VERSION) throw new Error(`Database version ${version} is newer than this Staf (maximum ${INSTANCE_SCHEMA_VERSION}). Use a compatible checkout or select another data directory; the database was not reset.`);
     if (hasBots && version < INSTANCE_SCHEMA_VERSION && path !== ':memory:') {
-      this.migrationBackup = `${path}.before-${version < 2 ? 'profiles' : version < 3 ? 'tasks' : version < 4 ? 'approvals' : version < 5 ? 'task-inbox' : version < 6 ? 'memory' : version < 7 ? 'memory-confirmation' : version < 8 ? 'skills' : version < 9 ? 'schedules' : version < 10 ? 'schedule-retries' : version < 11 ? 'schedule-lineage' : version < 12 ? 'bot-description' : version < 13 ? 'delegation-scope' : version < 14 ? 'collaboration' : version < 15 ? 'disclosure' : version < 16 ? 'chat-tasks' : version < 17 ? 'creation-defaults' : version < 18 ? 'web-actions' : version < 19 ? 'search-actions' : version < 20 ? 'scratch-shell' : version < 21 ? 'approval-grants' : version < 22 ? 'schedule-web-scope' : version < 23 ? 'schedule-search-scope' : version < 24 ? 'schedule-shell-scope' : version < 25 ? 'main-bot' : version < 26 ? 'command-events' : version < 27 ? 'bot-creation' : version < 28 ? 'response-progress' : 'response-stop'}-${randomUUID()}.sqlite`;
+      this.migrationBackup = `${path}.before-${version < 2 ? 'profiles' : version < 3 ? 'tasks' : version < 4 ? 'approvals' : version < 5 ? 'task-inbox' : version < 6 ? 'memory' : version < 7 ? 'memory-confirmation' : version < 8 ? 'skills' : version < 9 ? 'schedules' : version < 10 ? 'schedule-retries' : version < 11 ? 'schedule-lineage' : version < 12 ? 'bot-description' : version < 13 ? 'delegation-scope' : version < 14 ? 'collaboration' : version < 15 ? 'disclosure' : version < 16 ? 'chat-tasks' : version < 17 ? 'creation-defaults' : version < 18 ? 'web-actions' : version < 19 ? 'search-actions' : version < 20 ? 'scratch-shell' : version < 21 ? 'approval-grants' : version < 22 ? 'schedule-web-scope' : version < 23 ? 'schedule-search-scope' : version < 24 ? 'schedule-shell-scope' : version < 25 ? 'main-bot' : version < 26 ? 'command-events' : version < 27 ? 'bot-creation' : version < 28 ? 'response-progress' : version < 30 ? 'response-stop' : 'artifacts'}-${randomUUID()}.sqlite`;
       const previousUmask = process.umask(0o077);
       try {
         this.db.prepare('VACUUM INTO ?').run(this.migrationBackup);
@@ -155,6 +156,7 @@ export class Instance {
     if(version < 29)this.db.exec("CREATE TABLE IF NOT EXISTS response_stops (command_id TEXT PRIMARY KEY REFERENCES commands(id))");
     if(version < 30 && !this.db.prepare("SELECT 1 FROM pragma_table_info('command_runtime_events') WHERE name='detail'").get())this.db.exec('ALTER TABLE command_runtime_events ADD COLUMN detail TEXT');
     this.db.exec('CREATE INDEX IF NOT EXISTS command_runtime_events_command ON command_runtime_events(command_id,seq)');
+    if (version < 33) this.db.exec(artifactSchema);
     if (!maintenanceToken) this.db.exec(`PRAGMA user_version=${INSTANCE_SCHEMA_VERSION}`);
     for (const row of this.db.prepare("SELECT id,bot_id FROM task_attempts WHERE state IN ('queued','running','stopping','waiting') ORDER BY rowid").all()) {
       if (typeof row.id !== 'string' || typeof row.bot_id !== 'string') throw Error('Invalid interrupted task');
@@ -883,6 +885,19 @@ export class Instance {
     catch(error){this.db.exec('ROLLBACK');if(disclosureId)this.interruptDisclosure(disclosureId);throw error;}
   }
   private taskContext(botId:string) { return this.db.prepare('SELECT m.id,m.role,m.content,EXISTS(SELECT 1 FROM task_notices n WHERE n.message_id=m.id) AS isNotice FROM messages m WHERE m.bot_id=? ORDER BY m.seq').all(botId); }
+  // Replace this validator with the session store's ownership check after integration.
+  artifactSourceValid(botId:string, source:ArtifactSource) { const bot=this.botIdentity(botId); return !!bot && bot.chatId===source.sessionId && !!this.db.prepare('SELECT 1 FROM messages WHERE id=? AND bot_id=?').get(source.messageId,botId); }
+  private artifactStore() {return new ArtifactStore(this.db,(botId,source)=>this.artifactSourceValid(botId,source));}
+  artifacts(botId:string) {if(!this.botIdentity(botId))throw Error('Agent not found');return this.artifactStore().list(botId);}
+  artifactRevisions(botId:string,id:string) {return this.artifactStore().revisions(botId,id);}
+  artifactRead(botId:string,id:string,revision:number) {return this.artifactStore().read(botId,id,revision);}
+  artifactCreate(botId:string,input:ArtifactCreate) {if(!this.botIdentity(botId))throw Error('Agent not found');return this.artifactStore().create(botId,input);}
+  artifactRevise(botId:string,id:string,input:ArtifactRevise) {return this.artifactStore().revise(botId,id,input);}
+  artifactCapabilities(scope:{botId:string;sessionId:string;commandId:string;signal:AbortSignal}) {
+    const {botId,sessionId,commandId,signal}=scope;
+    const check=()=>{signal.throwIfAborted();const bot=this.botIdentity(botId),command=this.command(commandId);if(!bot || bot.archived || bot.chatId!==sessionId || command?.botId!==botId || command.state!=='pending' || this.responseStopping(commandId))throw Error('Artifact work scope is no longer active');};
+    return {read:(id:string,revision:number)=>{check();return this.artifactRead(botId,id,revision);},create:(input:ArtifactCreate)=>{check();return this.artifactCreate(botId,input);},revise:(id:string,input:ArtifactRevise)=>{check();return this.artifactRevise(botId,id,input);}};
+  }
   messages(botId: string) { return this.db.prepare('SELECT id, role, content FROM messages WHERE bot_id=? ORDER BY seq').all(botId); }
   hasBot(botId:string) {return !!this.botIdentity(botId);}
   command(id: string) { return this.db.prepare('SELECT id, bot_id AS botId, content, state, error FROM commands WHERE id=?').get(id); }
