@@ -14,8 +14,9 @@ Instance startup checks that marker before initialization and again after taking
 the database lock. Maintenance fences the original and replacement SQLite files
 with an unsupported schema version until the database and agent files are durable,
 so an older checkout cannot open a partially published dataset even after a crash.
-Recovery restores the prior copy until publication is committed; thereafter it
-finalizes the committed dataset without discarding later writes. Development startup
+Recovery retains the unchanged original before replacement begins, restores the
+prior copy after replacement starts, and finalizes a committed dataset without
+discarding later writes. Development startup
 also saves a complete copy and fences the database before schema migration.
 Provider connection files stay outside the replacement set. Explicit restoration
 clears client authorizations and assigns a new browser dataset identity.

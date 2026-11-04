@@ -124,9 +124,10 @@ corepack pnpm dev:recover
 corepack pnpm dev
 ```
 
-Recovery restores the complete copy that preceded an incomplete operation. If
-publication had already completed, recovery finalizes it instead of rolling it
-back. The marker remains until recovery succeeds, including after another interruption.
+Recovery keeps the original dataset if replacement had not begun, or restores
+the complete prior copy if replacement was interrupted. If publication had
+already completed, recovery finalizes it instead of rolling it back. The marker
+remains until recovery succeeds, including after another interruption.
 Recovery does not resume requests. If a schema is newer than the checkout, select
 a compatible checkout, or explicitly reset the seed. To restore an earlier backup,
 stop the instance and pass a backup directory printed by Staf:

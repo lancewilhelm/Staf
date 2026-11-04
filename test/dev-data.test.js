@@ -83,6 +83,32 @@ test('recovery finalizes a committed publication without discarding later writes
     const check=new DatabaseSync(path);assert.equal(check.prepare('SELECT value FROM legacy_write').get().value,'retained');check.close();
   } finally {if(child.exitCode===null&&child.signalCode===null)child.kill('SIGKILL');rmSync(root,{recursive:true,force:true});}
 });
+test('recovery preserves older writes after a crash before the original is fenced', async () => {
+  const root=mkdtempSync(join(tmpdir(),'staf-dev-prepared-')),path=join(root,'instance.sqlite');
+  const initial=new Instance(path);initial.close();
+  const child=fork('scripts/dev-data.mjs',['reset'],{cwd:process.cwd(),env:{...process.env,STAF_DEV_DATA_DIR:root,STAF_DEV_TEST_PAUSE:'backup-saved'},stdio:['ignore','ignore','pipe','ipc']});
+  let errors='';child.stderr.on('data',data=>errors+=data);
+  try {
+    await new Promise((resolve,reject)=>{child.once('message',resolve);child.once('exit',()=>reject(Error(errors)));});
+    child.kill('SIGKILL');await new Promise(resolve=>child.once('exit',resolve));
+    const db=new DatabaseSync(path);db.exec("CREATE TABLE legacy_write (value TEXT); INSERT INTO legacy_write VALUES ('retained')");db.close();
+    const result=command(root,'recover');assert.equal(result.status,0,result.stderr);
+    const check=new DatabaseSync(path);assert.equal(check.prepare('SELECT value FROM legacy_write').get().value,'retained');check.close();
+  } finally {if(child.exitCode===null&&child.signalCode===null)child.kill('SIGKILL');rmSync(root,{recursive:true,force:true});}
+});
+test('recovery unfences the unchanged original after a prepared operation crashes', async () => {
+  const root=mkdtempSync(join(tmpdir(),'staf-dev-prepared-fence-')),path=join(root,'instance.sqlite');
+  let instance=new Instance(path);const bot=instance.createBot({name:'Original',instructions:'Original soul',provider:'demo'});instance.close();
+  const child=fork('scripts/dev-data.mjs',['reset'],{cwd:process.cwd(),env:{...process.env,STAF_DEV_DATA_DIR:root,STAF_DEV_TEST_PAUSE:'original-fenced'},stdio:['ignore','ignore','pipe','ipc']});
+  let errors='';child.stderr.on('data',data=>errors+=data);
+  try {
+    await new Promise((resolve,reject)=>{child.once('message',resolve);child.once('exit',()=>reject(Error(errors)));});
+    child.kill('SIGKILL');await new Promise(resolve=>child.once('exit',resolve));
+    assert.throws(()=>legacySchemaGate(path),/newer database/);
+    const result=command(root,'recover');assert.equal(result.status,0,result.stderr);
+    instance=new Instance(path);assert.equal(instance.bot(bot.id).instructions,'Original soul');instance.close();
+  } finally {if(child.exitCode===null&&child.signalCode===null)child.kill('SIGKILL');rmSync(root,{recursive:true,force:true});}
+});
 test('a committed but still fenced publication can be finalized after a crash', async () => {
   const root=mkdtempSync(join(tmpdir(),'staf-dev-finalize-')),path=join(root,'instance.sqlite');
   const child=fork('scripts/dev-data.mjs',['reset'],{cwd:process.cwd(),env:{...process.env,STAF_DEV_DATA_DIR:root,STAF_DEV_TEST_PAUSE:'publication-committed'},stdio:['ignore','ignore','pipe','ipc']});

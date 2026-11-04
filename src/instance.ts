@@ -43,7 +43,7 @@ export function assertDatasetAvailable(path: string, maintenanceToken?:string) {
 function upgradeVersion(path:string, token:string|undefined):number|undefined {
   if (!token) return undefined;
   const marker:unknown=JSON.parse(readFileSync(`${path}.maintenance.json`,'utf8'));
-  if (!marker || typeof marker!=='object' || !('token' in marker) || marker.token!==token || !('schemaVersion' in marker) || typeof marker.schemaVersion!=='number' || !Number.isSafeInteger(marker.schemaVersion) || marker.schemaVersion<0 || marker.schemaVersion>=INSTANCE_SCHEMA_VERSION) throw Error('Invalid upgrade maintenance marker.');
+  if (!marker || typeof marker!=='object' || !('phase' in marker) || marker.phase!=='upgrading' || !('token' in marker) || marker.token!==token || !('schemaVersion' in marker) || typeof marker.schemaVersion!=='number' || !Number.isSafeInteger(marker.schemaVersion) || marker.schemaVersion<0 || marker.schemaVersion>=INSTANCE_SCHEMA_VERSION) throw Error('Invalid upgrade maintenance marker.');
   return marker.schemaVersion;
 }
 
