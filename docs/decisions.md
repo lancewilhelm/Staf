@@ -1,5 +1,16 @@
 # Implementation decisions
 
+## Fresh sessions with original references
+
+On 2026-11-03 the owner rejected compaction and selected fresh conversation
+sessions with tools for searching, reading, and referencing original older
+sessions. A new session retains the agent's identity, standing instructions,
+and memory while starting without previous conversation messages or provider
+replay. The owner also authorized document sources and revisioned artifacts in
+parallel with Code Mode. See the [session decision](adr/0006-fresh-sessions-with-original-references.md)
+and [implementation specification](specs/sessions-documents-artifacts.md).
+These describe the target until the implementation establishes the behavior.
+
 ## Keep conversation state and tool dispatch in Staf
 
 Accepted on 2026-10-25. Each adapter translates its own protocol into Staf messages.

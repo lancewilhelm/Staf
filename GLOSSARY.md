@@ -32,6 +32,24 @@ _Avoid_: Transcript copy, invented dialogue
 The persistent conversation through which the user talks to and directs an agent.
 _Avoid_: Task, Activity
 
+**Conversation session**:
+A distinct conversation within an agent's main chat, with its own messages and
+active context. A fresh session can refer explicitly to original older sessions.
+_Avoid_: Compacted history, agent, task attempt
+
+**Source reference**:
+An explicit link to original material used in a conversation, such as a session
+message, document passage, or artifact revision.
+_Avoid_: Memory, summary, copied conversation
+
+**Document source**:
+An owner-supplied file and its readable passages available to a particular agent.
+_Avoid_: Memory, soul, artifact
+
+**Artifact**:
+A saved deliverable with inspectable revisions and a record of its source when known.
+_Avoid_: Chat message, document source, temporary output
+
 **Task**:
 A piece of work carried out for an agent, with an objective, progress, and an outcome.
 _Avoid_: Agent, main chat
