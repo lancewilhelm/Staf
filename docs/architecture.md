@@ -1,5 +1,11 @@
 # Staf runtime and provider boundary
 
+The local development launcher runs Vite and the shared instance as separate
+processes. Vite serves the workspace and forwards same-origin service requests
+to the loopback backend; source changes rebuild and restart that backend. The
+service remains authoritative for connections and shared data. See the
+[development workflow](development.md#run-the-development-workspace).
+
 A shared instance owns bot profiles, conversations, task attempts, permissions,
 and provider execution. The browser and terminal are paired clients of the same
 loopback service. The automatic terminal instance stores its SQLite database and
