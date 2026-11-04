@@ -29,6 +29,76 @@ an extracted package installs production dependencies from its manifest with
 which must use `--frozen-lockfile`. Package installs follow manifest ranges and
 do not provide the repository lockfile's exact dependency selection.
 
+## Run the development workspace
+
+After the pinned-toolchain setup above, run:
+
+```sh
+corepack pnpm dev
+```
+
+Open `http://127.0.0.1:3210/` and enter the one-time pairing code printed by
+the launcher. The launcher identifies the checkout, data directory, URL, and
+backend status. It uses `~/.staf/development` by default, outside worktrees and
+separate from `~/.staf/terminal-instance`. It keeps the database, agent files,
+provider credentials, and ChatGPT registration identity there across launches
+and checkout changes. It does not import another tool's sign-in.
+
+To use connections from an existing **Staf** instance while keeping development
+conversations separate, stop the existing instance and set
+`STAF_DEV_CONNECTION_DIR` to its data directory before launching. The launcher
+reports the selected connection directory and uses the same Staf credential and
+registration files. Do not run both instances against that connection store at
+the same time. Connection changes, logout, and token refresh affect the shared
+store. Nothing is copied or imported from another tool. Unset the variable to use the
+development instance's own connection store. Avoid copying a live rotating
+credential into two independent stores.
+
+`STAF_DEV_DATA_DIR` explicitly selects another development data directory
+outside the active checkout. If it points to an existing Staf instance, stop its
+owner first: this selects the entire instance and its conversations, not a copy.
+Unset it to return to the separate default development instance.
+`STAF_DEV_PORT` changes the loopback workspace port when necessary; use the same
+port to retain that browser origin's paired state and drafts.
+
+Frontend edits hot reload. Edits under `src/` and `tsconfig.json` compile and
+restart the backend; a compilation error leaves the previous backend running
+and is reported in the launcher. A restart interrupts unfinished work under the
+existing recovery rules: it does not replay uncertain provider or tool actions.
+Browser clients reconnect and retain their local drafts. Only one development
+launcher may own a data directory; it reports the active checkout on contention.
+A conflicting workspace port also reports the checkout when another Staf
+development launcher owns it. The SQLite lock still protects against other
+instance launch paths. Stop the launcher with Ctrl+C; its Vite server and backend
+stop with it. It does not stop other instances.
+
+For an interactive terminal connected to this same instance, press Enter in
+the launcher for a fresh pairing code, then in another terminal run:
+
+```sh
+mkdir -p "$HOME/.staf/dev-client"
+node dist/cli.js instance pair http://127.0.0.1:3210 "$HOME/.staf/dev-client/client.json" PAIRING_CODE
+node dist/cli.js --data-dir "$HOME/.staf/dev-client" --instance http://127.0.0.1:3210 --credential "$HOME/.staf/dev-client/client.json"
+```
+
+Replace `PAIRING_CODE` with the newly printed code. The launcher compiles the
+CLI on startup. The terminal keeps its pending-command recovery files in the
+separate `dev-client` directory. Pair once; reuse the client file on later launches. Use the
+selected port in both commands if changed. The terminal opens the shared main
+chat; other agents are accessible through `node dist/cli.js instance help`.
+
+If startup reports that the database schema is newer than the checkout, stop
+and use a compatible checkout or explicitly select another data directory. The
+launcher never resets or downgrades the data. Seeded reset and complete schema
+recovery are not implemented by this workflow; retain the database, agent files,
+and credentials together when making a recoverable copy.
+
+For a disposable offline check, run `node --test test/dev-launch.test.js` and
+`node test/browser/dev-smoke.mjs` after installing dependencies. The latter
+requires the Chrome executable described below. These checks use synthetic
+credentials and demo responses; they do not prove live sign-in, token refresh,
+provider access, or inference.
+
 ## Verify a change
 
 The browser interface uses Vue single-file components with Composition API and

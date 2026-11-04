@@ -1,5 +1,8 @@
 # Use Staf
 
+For the persistent, hot-reloading local browser workspace and a terminal paired
+to the same development instance, see [Run the development workspace](development.md#run-the-development-workspace).
+
 ## Start the shared terminal
 
 Build and link the CLI once, then start it from your working directory:

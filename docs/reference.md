@@ -1,5 +1,15 @@
 # Configuration reference
 
+## Development workspace
+
+`corepack pnpm dev` serves the loopback workspace at `http://127.0.0.1:3210`
+and stores development state in `~/.staf/development`. `STAF_DEV_DATA_DIR`
+explicitly selects another Staf instance directory outside the checkout;
+`STAF_DEV_CONNECTION_DIR` selects the connection store of an existing Staf
+instance without copying it; `STAF_DEV_PORT` selects another loopback port. The service inherits its launch
+environment. See [development](development.md#run-the-development-workspace)
+for ownership, pairing, restart, and schema recovery limitations.
+
 ## Shared terminal
 
 `staf` starts or connects to a detached, loopback-only shared instance and opens
@@ -74,6 +84,7 @@ connection presence.
 
 | Command | Effect |
 | --- | --- |
+| `pnpm dev` | Start the persistent local development workspace and watch frontend and backend sources. |
 | `pnpm run build` | Build the Vue/Vite browser workspace and compile server source to `dist/`. |
 | `pnpm run check` | Check server and browser TypeScript without emitting output. |
 | `pnpm test` | Build and run JavaScript tests against compiled output. |

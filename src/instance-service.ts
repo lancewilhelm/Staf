@@ -34,7 +34,7 @@ import { resolveSettings } from './settings.js';
 import { usageText } from './usage.js';
 import { loadOpenRouterKey, saveOpenRouterKey, disconnectOpenRouter } from './openrouter-credential.js';
 
-export function startInstance(path: string, port = 0, options: {dataDir?: string; env?: Environment; enableCollaboration?: boolean; enableReusableApprovals?: boolean; localBootstrapToken?: string; authNow?:()=>number; authLifetimeMs?:number; webDependencies?:WebDependencies; searchTransport?:SearchTransport; shellExecutor?:typeof executeShellSandbox; modelRequest?:typeof fetch; authHooks?: {prepare:typeof prepareDirectLogin; complete:typeof completeDirectLogin; authorizationUrl?:typeof authorizationUrl}; providerFactory?: (profile: {provider:string; model:string | null; reasoning:string | null; instructions:string; chatId:string}, instructions:string) => Promise<Provider>} = {}) {
+export function startInstance(path: string, port = 0, options: {dataDir?: string; publicOrigin?: string; env?: Environment; enableCollaboration?: boolean; enableReusableApprovals?: boolean; localBootstrapToken?: string; authNow?:()=>number; authLifetimeMs?:number; webDependencies?:WebDependencies; searchTransport?:SearchTransport; shellExecutor?:typeof executeShellSandbox; modelRequest?:typeof fetch; authHooks?: {prepare:typeof prepareDirectLogin; complete:typeof completeDirectLogin; authorizationUrl?:typeof authorizationUrl}; providerFactory?: (profile: {provider:string; model:string | null; reasoning:string | null; instructions:string; chatId:string}, instructions:string) => Promise<Provider>} = {}) {
   const selectionCatalogs=new Map<string,ModelCatalog>();
   const env = options.env ?? process.env;
   const dataDir = options.dataDir ?? resolve(dirname(path));
@@ -263,8 +263,8 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
     const json = (status: number, value: unknown) => { res.writeHead(status, {'Content-Type':'application/json'}); res.end(JSON.stringify(value)); };
     try {
       const address = server.address(); if (!address || typeof address === 'string') throw Error('Not listening');
-      const origin = `http://127.0.0.1:${address.port}`;
-      if (req.headers.host !== `127.0.0.1:${address.port}` || (req.headers.origin && req.headers.origin !== origin)) return json(403,{error:'Invalid origin'});
+      const origin = options.publicOrigin ?? `http://127.0.0.1:${address.port}`;
+      if (req.headers.host !== new URL(origin).host || (req.headers.origin && req.headers.origin !== origin)) return json(403,{error:'Invalid origin'});
       if ((req.url ?? '').startsWith('/auth/callback')) {const result=await authFor(origin).accept(req.method ?? '',req.url ?? '');res.setHeader('Referrer-Policy','no-referrer');res.writeHead(result === 'accepted' ? 200 : 400,{'Content-Type':'text/plain; charset=utf-8'});return res.end(result === 'accepted' ? 'Sign-in completed. Return to Staf.' : 'Sign-in could not be completed. Return to Staf.');}
       const csp="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'";
       if (req.method === 'GET' && (req.url === '/' || /^\/assets\/[\w.-]+\.(js|css)$/.test(req.url ?? ''))) {

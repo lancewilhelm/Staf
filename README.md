@@ -24,6 +24,11 @@ one-shot commands.
 
 ## Local shared instance preview
 
+For the persistent hot-reloading development workspace, run `corepack pnpm dev`
+after [toolchain setup](docs/development.md#develop-staf). See the
+[development guide](docs/development.md#run-the-development-workspace) for
+data selection, pairing, and recovery limitations.
+
 Run `pnpm start instance serve .staf/instance.sqlite 3210` and open
 `http://127.0.0.1:3210/`. Enter the host's pairing code to open the chat workspace.
 **Settings** shows the instance-wide ChatGPT connection and offers sign-in when
