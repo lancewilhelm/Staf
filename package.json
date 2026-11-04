@@ -11,6 +11,8 @@
   },
   "scripts": {
     "dev": "node scripts/dev.mjs",
+    "dev:reset": "corepack pnpm exec tsc -p tsconfig.json && node scripts/dev-data.mjs reset",
+    "dev:recover": "corepack pnpm exec tsc -p tsconfig.json && node scripts/dev-data.mjs recover",
     "build": "vite build && tsc -p tsconfig.json",
     "start": "corepack pnpm run build && node dist/cli.js",
     "test": "corepack pnpm run build && node --test test/*.test.js",
