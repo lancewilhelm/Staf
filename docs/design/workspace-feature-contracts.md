@@ -17,7 +17,7 @@ integration, and review fixes. Small shared-file insertions are expected.
 
 Use these independent migration slots: 31 for conversation sessions, 32 for
 documents, and 33 for artifacts. Each branch may set its own maximum version;
-integration sets 33 and retains all three guarded schema additions. Put each
+integration sets 34 and retains all three guarded schema additions. Put each
 feature's table definitions in its own module. Preserve protected backups.
 
 The final integration additionally reserves migration 34 for captured command

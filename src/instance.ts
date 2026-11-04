@@ -160,10 +160,10 @@ export class Instance {
     if(version < 30 && !this.db.prepare("SELECT 1 FROM pragma_table_info('command_runtime_events') WHERE name='detail'").get())this.db.exec('ALTER TABLE command_runtime_events ADD COLUMN detail TEXT');
     this.db.exec('CREATE INDEX IF NOT EXISTS command_runtime_events_command ON command_runtime_events(command_id,seq)');
     if (version < 34) {
-      const sessionTables = ['conversation_sessions', 'conversation_message_sessions', 'conversation_command_sessions', 'conversation_session_operations'];
-      if (sessionTables.some(name => !this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name))) this.db.exec(conversationSessionSchema);
-      this.db.exec(documentSchema);
-      this.db.exec(artifactSchema);
+      const missingTable = (name:string) => !this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name);
+      if (['conversation_sessions', 'conversation_message_sessions', 'conversation_command_sessions', 'conversation_session_operations'].some(missingTable)) this.db.exec(conversationSessionSchema);
+      if (['document_sources', 'document_excerpts'].some(missingTable)) this.db.exec(documentSchema);
+      if (['artifacts', 'artifact_revisions', 'artifact_operations'].some(missingTable)) this.db.exec(artifactSchema);
       this.db.exec(workspaceReferenceSchema);
     }
     if (!maintenanceToken) this.db.exec(`PRAGMA user_version=${INSTANCE_SCHEMA_VERSION}`);

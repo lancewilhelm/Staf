@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { startInstance } from '../dist/instance-service.js';
-import { Instance } from '../dist/instance.js';
+import { Instance, INSTANCE_SCHEMA_VERSION } from '../dist/instance.js';
 
 test('artifact revisions retain bytes, provenance and retry identity across clients and restart', async()=>{
  const dir=mkdtempSync(join(tmpdir(),'staf-artifacts-')),path=join(dir,'db');let app=startInstance(path,0,{env:{}}),port=await app.listen();
@@ -51,6 +51,8 @@ test('scoped artifact capabilities recheck active command and same agent',()=>{
   captured.botId=other.id;captured.sessionId=other.chatId;
   const item=scope.create({operationId:'scope-create',name:'x',format:'text',content:'hello'});assert.equal(scope.read(item.id,1).content,'hello');
   assert.throws(()=>instance.artifactCapabilities({botId:other.id,sessionId:other.chatId,commandId:'scoped-command',signal:abort.signal}).read(item.id,1),/scope/);
+  assert.throws(()=>instance.artifactCapabilities({botId:bot.id,sessionId:other.chatId,commandId:'scoped-command',signal:abort.signal}).read(item.id,1),/scope/);
+  instance.complete('scoped-command','done');assert.throws(()=>scope.read(item.id,1),/scope/);
   abort.abort();assert.throws(()=>scope.read(item.id,1));
  }finally{instance.close();}
 });
@@ -60,6 +62,6 @@ test('slot 33 upgrades a version 30 dataset with a protected backup', async()=>{
  const dir=mkdtempSync(join(tmpdir(),'staf-artifact-migration-')),path=join(dir,'db');let instance=new Instance(path);
  try{const bot=instance.createBot({name:'Persist',instructions:''});instance.close();let db=new DatabaseSync(path);db.exec('DROP TABLE artifact_operations; DROP TABLE artifact_revisions; DROP TABLE artifacts; PRAGMA user_version=30');db.close();
   instance=new Instance(path);assert.ok(instance.migrationBackup);assert.equal(statSync(instance.migrationBackup).mode & 0o077,0);assert.equal(instance.artifacts(bot.id).length,0);assert.equal(instance.artifactCreate(bot.id,{operationId:'migrated',name:'x',format:'text',content:'kept'}).revision,1);instance.close();
-  db=new DatabaseSync(path);assert.equal(db.prepare('PRAGMA user_version').get().user_version,33);db.close();const backup=new DatabaseSync(instance.migrationBackup,{readOnly:true});assert.equal(backup.prepare('PRAGMA user_version').get().user_version,30);backup.close();instance=undefined;
+  db=new DatabaseSync(path);assert.equal(db.prepare('PRAGMA user_version').get().user_version,INSTANCE_SCHEMA_VERSION);db.close();const backup=new DatabaseSync(instance.migrationBackup,{readOnly:true});assert.equal(backup.prepare('PRAGMA user_version').get().user_version,30);backup.close();instance=undefined;
  }finally{instance?.close();rmSync(dir,{recursive:true,force:true});}
 });

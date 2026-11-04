@@ -25,23 +25,17 @@ exact bytes. The instance also exposes typed agent-scoped create, revise, and
 read methods and an active-command capability adapter for future Code Mode host
 registration. No provider tools are registered by this feature.
 
-On this branch provenance accepts only messages owned by the addressed agent
-and its existing main chat ID. The integration must replace
-`Instance.artifactSourceValid` and the capability adapter's session check with
-the session branch's captured-session ownership validation. The component
-accepts `botId`, optional `initialText` and `initialProvenance`; mount a fresh
-component for a new prefill. It emits `reference` with
-`{kind: 'artifact-revision', artifactId, revision}` and `back`. The coordinator
-owns toolbar mounting, completed-assistant-message saving, and reference
-selection. These are not wired in this feature branch.
+Provenance accepts only messages belonging to the specified session and agent.
+The capability adapter checks the active session and the pending command's
+captured session on every operation. The component accepts `botId`, optional
+`initialText` and `initialProvenance`; mount a fresh component for a new prefill.
+It emits `reference` with `{kind: 'artifact-revision', artifactId, revision}`
+and `back`. The coordinator owns toolbar mounting, completed-assistant-message
+saving, and reference selection.
 
-The schema occupies migration slot 33. Integrating branches must retain the
-guarded migrations for sessions (31), documents (32), and artifacts (33), keep
-schema maximum 33, and preserve the existing protected upgrade and backup flow.
-A database opened by this standalone branch is already marked version 33 but
-does not contain slots 31 or 32. Integration must detect and install missing
-session and document schemas for such databases, or use a compatible dataset
-that has not been opened by this standalone branch.
+Schema version 34 reconciles the session, document, artifact, and reference
+tables after the protected upgrade backup, including datasets written by
+isolated feature branches. Existing session mappings and replay are retained.
 The offline service tests exercise real SQLite, synthetic chat, paired-client
 access, conflict/retry behavior, downloads and restart; they do not establish
 live provider behavior or the final integrated GUI journey.

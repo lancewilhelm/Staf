@@ -44,4 +44,4 @@ The tests use disposable SQLite stores and synthetic providers. They do not
 verify a live provider, billing, or remote deployment. Coordinator integration
 should document these controls in the consolidated usage, reference and
 architecture pages, connect reference selection to the shared chat toolbar,
-reconcile migration versions 31–33, and verify combined workflows.
+and verify combined workflows. Schema version 34 reconciles missing feature tables after a protected backup.

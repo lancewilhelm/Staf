@@ -88,3 +88,43 @@ test('scoped history capabilities stop when captured work ends or aborts', async
   instance.claim({id:'work2',botId:bot.id,sessionId:next,content:'next'});const scoped=sessionCapabilities(instance,{botId:bot.id,sessionId:next,commandId:'work2',signal:abort.signal});abort.abort();assert.throws(()=>scoped.search('current'));
  }finally{instance.close()}
 });
+
+test('isolated schema versions reconcile missing features without changing session history or replay', async () => {
+ const {DatabaseSync}=await import('node:sqlite');
+ for (const version of [31,32,33]) {
+  const dir=mkdtempSync(join(tmpdir(),'staf-feature-reconcile-')),path=join(dir,'db');let instance=new Instance(path);
+  try {
+   const bot=instance.createBot({name:'Existing',instructions:'',provider:'demo'}),first=instance.currentSession(bot.id).id;
+   instance.claim({id:'old',botId:bot.id,content:'original'});
+   const replay={version:1,id:first,provider:'synthetic',messages:[{role:'user',content:'original'},{role:'assistant',content:'answer'}],events:[]};
+   instance.saveExecution('old',replay,true);
+   const oldMessage=instance.readSession(bot.id,first).messages[0].id;
+   const fresh=instance.createSession({botId:bot.id,expectedSessionId:first,operationId:'fresh'}).id;
+   instance.claim({id:'new',botId:bot.id,content:'fresh'});instance.complete('new','done');instance.close();instance=undefined;
+   const db=new DatabaseSync(path);db.exec(`DROP TABLE command_references; DROP TABLE document_excerpts; DROP TABLE document_sources; DROP TABLE artifact_operations; DROP TABLE artifact_revisions; DROP TABLE artifacts; PRAGMA user_version=${version}`);db.close();
+   instance=new Instance(path);assert.ok(instance.migrationBackup);assert.equal(instance.currentSession(bot.id).id,fresh);
+   assert.equal(instance.readSession(bot.id,first).messages[0].id,oldMessage);assert.equal(instance.commandSession('old'),first);assert.equal(instance.commandSession('new'),fresh);
+   assert.deepEqual(instance.readSession(bot.id,first).messages.map(m=>m.content),['original','answer']);assert.deepEqual(instance.messages(bot.id).map(m=>m.content),['fresh','done']);
+   assert.equal(instance.artifactCreate(bot.id,{operationId:'old-source',name:'saved',format:'text',content:'saved',source:{sessionId:first,messageId:oldMessage}}).sourceSessionId,first);
+   assert.throws(()=>instance.artifactCreate(bot.id,{operationId:'wrong-source',name:'saved',format:'text',content:'saved',source:{sessionId:fresh,messageId:oldMessage}}),/Source message/);
+   const doc=await instance.documentImport({botId:bot.id,operationId:'document',name:'source.txt',bytes:Buffer.from('document text')},new AbortController().signal,()=>{});assert.equal(instance.documentRead(bot.id,doc.id).excerpts[0].text,'document text');
+   const backupPath=instance.migrationBackup;instance.close();instance=undefined;const verified=new DatabaseSync(path,{readOnly:true});try{assert.equal(verified.prepare('PRAGMA user_version').get().user_version,34);assert.ok(verified.prepare("SELECT 1 FROM sqlite_master WHERE name='command_references'").get());assert.equal(verified.prepare('SELECT replay FROM conversation_sessions WHERE id=?').get(first).replay,JSON.stringify(replay));}finally{verified.close()}
+   const backup=new DatabaseSync(backupPath,{readOnly:true});try{assert.equal(backup.prepare('PRAGMA user_version').get().user_version,version);}finally{backup.close()}
+  } finally {instance?.close();rmSync(dir,{recursive:true,force:true});}
+ }
+});
+
+test('isolated versions without session tables restore initial history and replay', async () => {
+ const {DatabaseSync}=await import('node:sqlite');
+ for (const version of [31,32,33]) {
+  const dir=mkdtempSync(join(tmpdir(),'staf-missing-session-')),path=join(dir,'db');let instance=new Instance(path);
+  try {
+   const bot=instance.createBot({name:'Existing',instructions:'',provider:'demo'});
+   instance.claim({id:'original',botId:bot.id,content:'saved'});
+   const replay={version:1,id:bot.chatId,provider:'synthetic',messages:[{role:'user',content:'saved'},{role:'assistant',content:'answer'}],events:[]};
+   instance.saveExecution('original',replay,true);instance.close();instance=undefined;
+   const db=new DatabaseSync(path);db.exec(`DROP TRIGGER conversation_new_bot; DROP TRIGGER conversation_new_message; DROP TRIGGER conversation_new_command; DROP TABLE conversation_session_operations; DROP TABLE conversation_command_sessions; DROP TABLE conversation_message_sessions; DROP TABLE conversation_sessions; PRAGMA user_version=${version}`);db.close();
+   instance=new Instance(path);assert.ok(instance.migrationBackup);assert.equal(instance.currentSession(bot.id).id,bot.chatId);assert.equal(instance.commandSession('original'),bot.chatId);assert.deepEqual(instance.messages(bot.id).map(m=>m.content),['saved','answer']);assert.deepEqual(instance.chatSession(bot.id),replay);
+  } finally {instance?.close();rmSync(dir,{recursive:true,force:true});}
+ }
+});
