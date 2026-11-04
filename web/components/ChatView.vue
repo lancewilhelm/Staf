@@ -6,6 +6,7 @@ import ChatWorkItems from './ChatWorkItems.vue';
 import SubmissionStatus from './SubmissionStatus.vue';
 import ChatComposer from './ChatComposer.vue';
 import BrandMark from './BrandMark.vue';
+import SessionHistory from './SessionHistory.vue';
 const emit = defineEmits<{create: []; providers: []; settings: [id: string]}>();
 const { state: s } = useWorkspace();
 const selected = computed(() => s.value.bots.find(agent => agent.id === s.value.selected));
@@ -60,6 +61,7 @@ function scroll(event: Event) {
       </template>
       <div v-else class="empty"><strong>Let's set up your first agent.</strong><p>Create an agent now, even if your provider is not connected.</p><button @click="emit('create')">Create an agent</button></div>
     </div>
+    <SessionHistory v-if="selected" :key="selected.id" :bot-id="selected.id" />
     <ChatComposer v-if="selected" @settings="id => emit('settings', id)" />
   </div></div>
 </template>

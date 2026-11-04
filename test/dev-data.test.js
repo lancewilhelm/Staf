@@ -4,7 +4,7 @@ import { fork, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { Instance } from '../dist/instance.js';
+import { Instance, INSTANCE_SCHEMA_VERSION } from '../dist/instance.js';
 import { startInstance } from '../dist/instance-service.js';
 import { DatabaseSync } from 'node:sqlite';
 import { prepareUpgrade, finishUpgrade } from '../scripts/dev-upgrade.mjs';
@@ -173,7 +173,7 @@ test('development upgrade snapshots the database and agent files before migratio
     instance=new Instance(path,undefined,upgrade.token);assert.ok(instance.migrationBackup);
     db=new DatabaseSync(instance.migrationBackup);assert.equal(db.prepare('PRAGMA user_version').get().user_version,29);db.close();
     finishUpgrade(root,()=>instance.finishUpgrade(upgrade.token));assert.equal(instance.bot(bot.id).instructions,'Soul before upgrade');instance.close();
-    db=new DatabaseSync(path);assert.equal(db.prepare('PRAGMA user_version').get().user_version,30);db.close();
+    db=new DatabaseSync(path);assert.equal(db.prepare('PRAGMA user_version').get().user_version,INSTANCE_SCHEMA_VERSION);db.close();
   } finally {rmSync(root,{recursive:true,force:true});}
 });
 test('an interrupted upgrade remains fenced before and after initialization', () => {

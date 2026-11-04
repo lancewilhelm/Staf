@@ -1,3 +1,4 @@
+import { ConversationSessions, conversationSessionSchema, type SessionMessageReference } from './conversation-sessions.js';
 import {ProviderDefaultsStore} from './provider-choices.js';
 import { DatabaseSync } from 'node:sqlite';
 import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
@@ -24,7 +25,7 @@ import { ApprovalGrants, approvalGrantSchema, type GrantBoundary } from './appro
 const clockAction: Action = { capability:'clock', operation:'read', resource:'utc', effect:'read', limits:{}, risk:'safe' };
 const clockBoundary = { enabledCapabilities:['clock'], actions:[clockAction] };
 const modes: ApprovalMode[] = ['ask-every-time','ask-for-risky-actions','never-ask'];
-export const INSTANCE_SCHEMA_VERSION = 30;
+export const INSTANCE_SCHEMA_VERSION = 31;
 const MAINTENANCE_VERSION = 2147483647;
 
 export const starterSoul = "You are an assistant working for the owner. Be clear and candid. Distinguish observations from assumptions. Follow the owner's role instructions and work within the permissions and task scope granted to you.";
@@ -79,7 +80,7 @@ export class Instance {
     this.maintenanceToken=maintenanceToken;
     if (version > INSTANCE_SCHEMA_VERSION) throw new Error(`Database version ${version} is newer than this Staf (maximum ${INSTANCE_SCHEMA_VERSION}). Use a compatible checkout or select another data directory; the database was not reset.`);
     if (hasBots && version < INSTANCE_SCHEMA_VERSION && path !== ':memory:') {
-      this.migrationBackup = `${path}.before-${version < 2 ? 'profiles' : version < 3 ? 'tasks' : version < 4 ? 'approvals' : version < 5 ? 'task-inbox' : version < 6 ? 'memory' : version < 7 ? 'memory-confirmation' : version < 8 ? 'skills' : version < 9 ? 'schedules' : version < 10 ? 'schedule-retries' : version < 11 ? 'schedule-lineage' : version < 12 ? 'bot-description' : version < 13 ? 'delegation-scope' : version < 14 ? 'collaboration' : version < 15 ? 'disclosure' : version < 16 ? 'chat-tasks' : version < 17 ? 'creation-defaults' : version < 18 ? 'web-actions' : version < 19 ? 'search-actions' : version < 20 ? 'scratch-shell' : version < 21 ? 'approval-grants' : version < 22 ? 'schedule-web-scope' : version < 23 ? 'schedule-search-scope' : version < 24 ? 'schedule-shell-scope' : version < 25 ? 'main-bot' : version < 26 ? 'command-events' : version < 27 ? 'bot-creation' : version < 28 ? 'response-progress' : 'response-stop'}-${randomUUID()}.sqlite`;
+      this.migrationBackup = `${path}.before-${version < 2 ? 'profiles' : version < 3 ? 'tasks' : version < 4 ? 'approvals' : version < 5 ? 'task-inbox' : version < 6 ? 'memory' : version < 7 ? 'memory-confirmation' : version < 8 ? 'skills' : version < 9 ? 'schedules' : version < 10 ? 'schedule-retries' : version < 11 ? 'schedule-lineage' : version < 12 ? 'bot-description' : version < 13 ? 'delegation-scope' : version < 14 ? 'collaboration' : version < 15 ? 'disclosure' : version < 16 ? 'chat-tasks' : version < 17 ? 'creation-defaults' : version < 18 ? 'web-actions' : version < 19 ? 'search-actions' : version < 20 ? 'scratch-shell' : version < 21 ? 'approval-grants' : version < 22 ? 'schedule-web-scope' : version < 23 ? 'schedule-search-scope' : version < 24 ? 'schedule-shell-scope' : version < 25 ? 'main-bot' : version < 26 ? 'command-events' : version < 27 ? 'bot-creation' : version < 28 ? 'response-progress' : version < 30 ? 'response-stop' : 'conversation-sessions'}-${randomUUID()}.sqlite`;
       const previousUmask = process.umask(0o077);
       try {
         this.db.prepare('VACUUM INTO ?').run(this.migrationBackup);
@@ -155,6 +156,7 @@ export class Instance {
     if(version < 29)this.db.exec("CREATE TABLE IF NOT EXISTS response_stops (command_id TEXT PRIMARY KEY REFERENCES commands(id))");
     if(version < 30 && !this.db.prepare("SELECT 1 FROM pragma_table_info('command_runtime_events') WHERE name='detail'").get())this.db.exec('ALTER TABLE command_runtime_events ADD COLUMN detail TEXT');
     this.db.exec('CREATE INDEX IF NOT EXISTS command_runtime_events_command ON command_runtime_events(command_id,seq)');
+    if(version < 31)this.db.exec(conversationSessionSchema);
     if (!maintenanceToken) this.db.exec(`PRAGMA user_version=${INSTANCE_SCHEMA_VERSION}`);
     for (const row of this.db.prepare("SELECT id,bot_id FROM task_attempts WHERE state IN ('queued','running','stopping','waiting') ORDER BY rowid").all()) {
       if (typeof row.id !== 'string' || typeof row.bot_id !== 'string') throw Error('Invalid interrupted task');
@@ -882,12 +884,35 @@ export class Instance {
     try {const next=this.finishTask(id,state,outcome,disclosureId);this.db.exec('COMMIT');return next;}
     catch(error){this.db.exec('ROLLBACK');if(disclosureId)this.interruptDisclosure(disclosureId);throw error;}
   }
-  private taskContext(botId:string) { return this.db.prepare('SELECT m.id,m.role,m.content,EXISTS(SELECT 1 FROM task_notices n WHERE n.message_id=m.id) AS isNotice FROM messages m WHERE m.bot_id=? ORDER BY m.seq').all(botId); }
-  messages(botId: string) { return this.db.prepare('SELECT id, role, content FROM messages WHERE bot_id=? ORDER BY seq').all(botId); }
+  private taskContext(botId:string) { return this.db.prepare('SELECT m.id,m.role,m.content,EXISTS(SELECT 1 FROM task_notices n WHERE n.message_id=m.id) AS isNotice FROM messages m JOIN conversation_message_sessions x ON x.message_id=m.id WHERE m.bot_id=? AND x.session_id=? ORDER BY m.seq').all(botId,this.currentSession(botId).id); }
+  currentSession(botId:string) {return new ConversationSessions(this.db).current(botId);}
+  listSessions(botId:string,offset=0,limit=100) {return new ConversationSessions(this.db).list(botId,offset,limit);}
+  readSession(botId:string,sessionId:string,offset=0,limit=100) {return new ConversationSessions(this.db).read(botId,sessionId,offset,limit);}
+  searchSessions(botId:string,query:string) {return new ConversationSessions(this.db).search(botId,query);}
+  resolveSessionMessage(botId:string,ref:SessionMessageReference) {return new ConversationSessions(this.db).resolve(botId,ref);}
+  commandSession(id:string) {const row=this.db.prepare('SELECT session_id FROM conversation_command_sessions WHERE command_id=?').get(id);return typeof row?.session_id==='string'?row.session_id:undefined;}
+  createSession(input:{botId:string;expectedSessionId:string;operationId:string;name?:string}) {
+    const name=input.name?.trim() || 'New session';
+    if(!/^[\w-]{1,100}$/.test(input.operationId)||!input.expectedSessionId||name.length>100)throw Error('Invalid session creation');
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const prior=this.db.prepare('SELECT bot_id,expected_session_id,name,session_id FROM conversation_session_operations WHERE id=?').get(input.operationId);
+      if(prior){if(prior.bot_id!==input.botId||prior.expected_session_id!==input.expectedSessionId||prior.name!==name)throw new BotConflict('Session operation conflict');const session=this.db.prepare('SELECT id,name,created_at AS createdAt FROM conversation_sessions WHERE id=?').get(String(prior.session_id));this.db.exec('COMMIT');return session;}
+      const bot=this.botIdentity(input.botId);if(!bot)throw Error('Agent not found');if(bot.archived)throw new BotConflict('Agent is archived');
+      const current=this.currentSession(input.botId);if(current.id!==input.expectedSessionId)throw new BotConflict('Active session changed');
+      if(this.db.prepare("SELECT 1 FROM commands WHERE bot_id=? AND state='pending'").get(input.botId))throw new BotConflict('Agent is busy');
+      this.db.prepare('UPDATE conversation_sessions SET active=0,replay=(SELECT session FROM sessions WHERE bot_id=?) WHERE id=?').run(input.botId,current.id);
+      this.db.prepare('DELETE FROM sessions WHERE bot_id=?').run(input.botId);
+      const id=randomUUID(),createdAt=Date.now();this.db.prepare('INSERT INTO conversation_sessions VALUES (?,?,?,?,1,NULL)').run(id,input.botId,name,createdAt);
+      this.db.prepare('INSERT INTO conversation_session_operations VALUES (?,?,?,?,?)').run(input.operationId,input.botId,input.expectedSessionId,name,id);
+      this.db.exec('COMMIT');return {id,name,createdAt};
+    }catch(error){this.db.exec('ROLLBACK');throw error;}
+  }
+  messages(botId: string) { return this.db.prepare('SELECT m.id,m.role,m.content FROM messages m JOIN conversation_message_sessions x ON x.message_id=m.id WHERE m.bot_id=? AND x.session_id=? ORDER BY m.seq').all(botId,this.currentSession(botId).id); }
   hasBot(botId:string) {return !!this.botIdentity(botId);}
-  command(id: string) { return this.db.prepare('SELECT id, bot_id AS botId, content, state, error FROM commands WHERE id=?').get(id); }
+  command(id: string) { return this.db.prepare('SELECT c.id,c.bot_id AS botId,c.content,c.state,c.error,x.session_id AS sessionId FROM commands c LEFT JOIN conversation_command_sessions x ON x.command_id=c.id WHERE c.id=?').get(id); }
   responseProgress(id:string) {return this.db.prepare("SELECT c.id,c.bot_id AS botId,CASE WHEN c.state='pending' THEN CASE WHEN EXISTS(SELECT 1 FROM response_stops s WHERE s.command_id=c.id) THEN 'stopping' WHEN p.command_id IS NULL THEN 'accepted' ELSE 'running' END ELSE c.state END AS state,COALESCE(p.text,'') AS text,c.error FROM commands c LEFT JOIN response_progress p ON p.command_id=c.id WHERE c.id=?").get(id);}
-  latestResponse(botId:string) {const row=this.db.prepare('SELECT id FROM commands WHERE bot_id=? ORDER BY rowid DESC LIMIT 1').get(botId);return typeof row?.id==='string'?this.responseProgress(row.id):null;}
+  latestResponse(botId:string) {const row=this.db.prepare('SELECT c.id FROM commands c JOIN conversation_command_sessions x ON x.command_id=c.id WHERE c.bot_id=? AND x.session_id=? ORDER BY c.rowid DESC LIMIT 1').get(botId,this.currentSession(botId).id);return typeof row?.id==='string'?this.responseProgress(row.id):null;}
   updateResponse(id:string,text:string) {this.db.prepare("INSERT INTO response_progress(command_id,text) SELECT id,? FROM commands WHERE id=? AND state='pending' ON CONFLICT(command_id) DO UPDATE SET text=excluded.text").run(text,id);}
   requestResponseStop(id:string) {
     const command=this.command(id);
@@ -914,26 +939,26 @@ export class Instance {
     return this.db.prepare('SELECT type,name,success FROM command_runtime_events WHERE command_id=? ORDER BY seq').all(id).map(row=>row.type === 'tool_result' ? {type:'tool_result' as const,name:String(row.name),success:row.success === 1} : {type:'tool_start' as const,name:String(row.name)});
   }
   chatWork(botId:string) {
-    const events=this.db.prepare('SELECT e.command_id,e.seq AS id,e.type,e.name,e.success,e.detail FROM command_runtime_events e JOIN commands c ON c.id=e.command_id WHERE c.bot_id=? ORDER BY e.seq').all(botId);
+    const events=this.db.prepare('SELECT e.command_id,e.seq AS id,e.type,e.name,e.success,e.detail FROM command_runtime_events e JOIN commands c ON c.id=e.command_id JOIN conversation_command_sessions x ON x.command_id=c.id WHERE c.bot_id=? AND x.session_id=? ORDER BY e.seq').all(botId,this.currentSession(botId).id);
     const byCommand=new Map<string,typeof events>();
     for(const event of events){const id=String(event.command_id);const group=byCommand.get(id) ?? [];group.push(event);byCommand.set(id,group);}
-    const requests=this.db.prepare('SELECT id FROM commands WHERE bot_id=? ORDER BY rowid').all(botId).map(row=>{
+    const requests=this.db.prepare('SELECT c.id FROM commands c JOIN conversation_command_sessions x ON x.command_id=c.id WHERE c.bot_id=? AND x.session_id=? ORDER BY c.rowid').all(botId,this.currentSession(botId).id).map(row=>{
       const id=String(row.id);
       return {id,progress:this.responseProgress(id),events:byCommand.get(id) ?? []};
     });
-    return {requests,messages:this.db.prepare('SELECT id,role,content FROM messages WHERE bot_id=? AND id NOT IN (SELECT message_id FROM task_notices) ORDER BY seq').all(botId)};
+    return {sessionId:this.currentSession(botId).id,requests,messages:this.db.prepare('SELECT m.id,m.role,m.content FROM messages m JOIN conversation_message_sessions x ON x.message_id=m.id WHERE m.bot_id=? AND x.session_id=? AND m.id NOT IN (SELECT message_id FROM task_notices) ORDER BY m.seq').all(botId,this.currentSession(botId).id)};
   }
   chatSession(botId:string):Session {
-    const bot=this.botIdentity(botId);if(!bot || typeof bot.chatId !== 'string')throw Error('Agent not found');
+    const bot=this.botIdentity(botId);if(!bot || typeof bot.chatId !== 'string')throw Error('Agent not found');const sessionId=this.currentSession(botId).id;
     const row=this.db.prepare('SELECT session FROM sessions WHERE bot_id=?').get(botId);
-    if(typeof row?.session !== 'string')return {version:1,id:bot.chatId,provider:null,messages:[],events:[]};
-    const parsed:unknown=JSON.parse(row.session);if(!validSession(parsed,bot.chatId))throw Error('Invalid stored session');return parsed;
+    if(typeof row?.session !== 'string')return {version:1,id:sessionId,provider:null,messages:[],events:[]};
+    const parsed:unknown=JSON.parse(row.session);if(!validSession(parsed,sessionId))throw Error('Invalid stored session');return parsed;
   }
 
   commandSkills(id:string) { return this.db.prepare('SELECT event FROM command_skill_activity WHERE command_id=? ORDER BY rowid').all(id).map(item=>{ const event=JSON.parse(String(item.event)); if (typeof event.name === 'string') event.name=this.redactSkill(event.name); if (typeof event.digest === 'string' && event.sourceDigest === undefined) { event.sourceDigest=event.digest; delete event.digest; } return event; }); }
   commandSkillLoaded(id:string,event:object) { this.db.prepare('INSERT INTO command_skill_activity VALUES (?,?)').run(id,JSON.stringify(event)); }
   /** Claims and persists the user message together; retries only inspect the existing command. */
-  claim(input: {id: string; botId: string; content: string}, visibleContent = input.content) {
+  claim(input: {id: string; botId: string; content: string; sessionId?:string}, visibleContent = input.content) {
     if (!input.id.trim() || !input.content.trim()) throw new Error('Command ID and content are required');
     const digest = createHmac('sha256', this.fingerprintKey).update(JSON.stringify([input.id,input.botId,input.content])).digest('hex');
     this.db.exec('BEGIN IMMEDIATE');
@@ -941,19 +966,20 @@ export class Instance {
       const existing = this.command(input.id);
       if (existing) {
         const prior = this.db.prepare('SELECT digest FROM command_fingerprints WHERE command_id=?').get(input.id);
-        if (existing.botId !== input.botId || prior?.digest !== digest) throw new Error('Command ID conflict or unverifiable prior submission');
+        if (existing.botId !== input.botId || prior?.digest !== digest || (input.sessionId!==undefined && existing.sessionId!==input.sessionId)) throw new Error('Command ID conflict or unverifiable prior submission');
         this.db.exec('COMMIT'); return {kind: 'existing' as const, command: existing};
       }
       const bot = this.bot(input.botId);
       if (!bot) throw new Error('Agent not found');
       if (bot.archived) throw new BotConflict('Agent is archived');
+      if(input.sessionId!==undefined && input.sessionId!==this.currentSession(input.botId).id)throw new BotConflict('Active session changed');
       if (this.db.prepare("SELECT id FROM commands WHERE bot_id=? AND state='pending'").get(input.botId)) {
         this.db.exec('COMMIT'); return {kind: 'busy' as const};
       }
       this.db.prepare("INSERT INTO commands VALUES (?, ?, ?, 'pending', NULL)").run(input.id, input.botId, visibleContent);
       this.db.prepare('INSERT INTO command_fingerprints VALUES (?, ?)').run(input.id, digest);
       this.db.prepare('INSERT INTO command_profiles VALUES (?, ?)').run(input.id, JSON.stringify(bot));
-      this.db.prepare('INSERT INTO command_notices SELECT ?,message_id FROM task_notices WHERE bot_id=? AND delivered=0').run(input.id,input.botId);
+      this.db.prepare('INSERT INTO command_notices SELECT ?,n.message_id FROM task_notices n JOIN conversation_message_sessions x ON x.message_id=n.message_id WHERE n.bot_id=? AND n.delivered=0 AND x.session_id=?').run(input.id,input.botId,this.currentSession(input.botId).id);
       this.db.prepare("INSERT INTO messages VALUES (?, ?, 'user', ?, (SELECT COALESCE(MAX(seq),0)+1 FROM messages WHERE bot_id=?))").run('command-user-'+input.id, input.botId, visibleContent, input.botId);
       this.db.exec('COMMIT'); return {kind: 'accepted' as const};
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
@@ -964,7 +990,8 @@ export class Instance {
     if (!command || command.state !== 'pending' || typeof command.botId !== 'string' || typeof command.content !== 'string' || typeof row?.profile !== 'string') throw Error('Command is not pending');
     const profile: unknown = JSON.parse(row.profile);
     if (!profile || typeof profile !== 'object' || !('provider' in profile) || typeof profile.provider !== 'string' || !('model' in profile) || !(profile.model === null || typeof profile.model === 'string') || !('reasoning' in profile) || !(profile.reasoning === null || typeof profile.reasoning === 'string') || !('instructions' in profile) || typeof profile.instructions !== 'string' || !('chatId' in profile) || typeof profile.chatId !== 'string') throw Error('Invalid captured profile');
-    const captured = profile as {provider:string;model:string | null;reasoning:string | null;instructions:string;chatId:string};
+    const sessionId=this.commandSession(id);if(!sessionId)throw Error('Command session missing');
+    const captured = {...profile,chatId:sessionId} as {provider:string;model:string | null;reasoning:string | null;instructions:string;chatId:string};
     const saved = this.db.prepare('SELECT session FROM sessions WHERE bot_id=?').get(command.botId);
     let session: Session;
     if (typeof saved?.session === 'string') {
@@ -973,7 +1000,7 @@ export class Instance {
       session = parsed;
     } else {
       const messages: Message[] = [];
-      for (const m of this.db.prepare('SELECT id,role,content FROM messages WHERE bot_id=? AND id NOT IN (SELECT message_id FROM task_notices) ORDER BY seq').all(command.botId).slice(0, -1)) {
+      for (const m of this.db.prepare('SELECT m.id,m.role,m.content FROM messages m JOIN conversation_message_sessions x ON x.message_id=m.id WHERE m.bot_id=? AND x.session_id=? AND m.id NOT IN (SELECT message_id FROM task_notices) ORDER BY m.seq').all(command.botId,sessionId).slice(0, -1)) {
         if (m.role === 'user' && typeof m.content === 'string') { if (messages.at(-1)?.role === 'user') messages.pop(); messages.push({role:'user',content:m.content}); }
         else if (m.role === 'assistant' && typeof m.content === 'string' && messages.at(-1)?.role === 'user') messages.push({role:'assistant',content:m.content});
       }
