@@ -4,9 +4,10 @@ import { basename, dirname, join } from 'node:path';
 import * as TOML from '@iarna/toml';
 
 import {parseChoices,type ProviderChoices} from './provider-choices.js';
+import {imageSetting,parseImageSetting,type AgentImage} from './agent-image.js';
 
-export type AgentSettings = {name:string; description:string; provider:string; model:string|null; reasoning:string|null; instructions:string; providerChoices?:ProviderChoices};
-export type AgentConfig = AgentSettings & {revision:string; configDir:string};
+export type AgentSettings = {name:string; description:string; provider:string; model:string|null; reasoning:string|null; instructions:string; providerChoices?:ProviderChoices;image?:AgentImage};
+export type AgentConfig = AgentSettings & {revision:string; configDir:string;image:AgentImage};
 export class AgentConfigConflict extends Error {}
 export class AgentConfigInvalid extends Error {}
 export class AgentConfigUncertain extends Error {}
@@ -25,13 +26,13 @@ function retireRevision(dir:string, revision:string, archived:boolean) {
   renameSync(marker,join(dir,'.retired'));syncDirectory(dir);
 }
 function parseSettings(data:ReturnType<typeof TOML.parse>, instructions:string):AgentSettings {
-  const allowed=['name','description','provider','model','reasoning','providerChoices'];
+  const allowed=['name','description','provider','model','reasoning','providerChoices','image'];
   if (Object.keys(data).some(key=>!allowed.includes(key)) || typeof data.name!=='string' || !data.name.trim() || data.name.length>200 || typeof data.description!=='string' || Buffer.byteLength(data.description,'utf8')>4096 || typeof data.provider!=='string' || !['demo','codex','openrouter','lmstudio','live'].includes(data.provider) || !(data.model===undefined || typeof data.model==='string' && data.model.length<=200) || !(data.reasoning===undefined || typeof data.reasoning==='string' && data.reasoning.length<=100) || instructions.length>30000) throw Error('Invalid agent.toml or soul.md');
   const providerChoices=parseChoices(data.providerChoices??{});
   // Active top-level values are authoritative, including after a direct edit.
   providerChoices[data.provider]={model:data.model??null,reasoning:data.reasoning??null};
   parseChoices(providerChoices);
-  return {providerChoices,name:data.name,description:data.description,provider:data.provider,model:data.model??null,reasoning:data.reasoning??null,instructions};
+  return {providerChoices,name:data.name,description:data.description,provider:data.provider,model:data.model??null,reasoning:data.reasoning??null,instructions,image:parseImageSetting(data.image)};
 }
 function parseAgentFiles(settings:string,instructions:string):AgentSettings {
   if (Buffer.from(settings,'utf8').toString('utf8')!==settings || Buffer.from(instructions,'utf8').toString('utf8')!==instructions) throw Error('Configuration files must contain valid UTF-8 text');
@@ -46,7 +47,8 @@ function serializedChoices(input:AgentSettings) {
   parseChoices(histories);return histories;
 }
 function formatAgentToml(input:AgentSettings):string {
-  const values={name:input.name,description:input.description,provider:input.provider,...(input.model===null?{}:{model:input.model}),...(input.reasoning===null?{}:{reasoning:input.reasoning})};
+  const image=imageSetting(input.image);
+  const values={name:input.name,description:input.description,provider:input.provider,...(input.model===null?{}:{model:input.model}),...(input.reasoning===null?{}:{reasoning:input.reasoning}),...(image===null?{}:{image})};
   for (const value of [...Object.values(values),input.instructions]) if (Buffer.from(value,'utf8').toString('utf8')!==value) throw Error('Configuration files must contain valid UTF-8 text');
   parseSettings(values,input.instructions);
   return TOML.stringify({...values,providerChoices:serializedChoices(input)});
@@ -55,8 +57,9 @@ function updateAgentToml(source:string,input:AgentSettings):string {
   const tableStart=source.search(/^\s*\[/m);
   const historySource=tableStart<0?'':source.slice(tableStart);
   if(tableStart>=0) source=source.slice(0,tableStart);
-  const values={name:input.name,description:input.description,provider:input.provider,model:input.model,reasoning:input.reasoning};
-  const existing=parseAgentFiles(source,input.instructions);
+  const values={name:input.name,description:input.description,provider:input.provider,model:input.model,reasoning:input.reasoning,image:imageSetting(input.image)};
+  const parsedExisting=parseAgentFiles(source,input.instructions);
+  const existing={...parsedExisting,image:imageSetting(parsedExisting.image)};
   const replacements:Array<{start:number;end:number;text:string}>=[];
   const found=new Set<string>();let offset=0;
   while (offset<source.length) {
@@ -94,7 +97,7 @@ function updateAgentToml(source:string,input:AgentSettings):string {
   for (const replacement of replacements.reverse()) result=result.slice(0,replacement.start)+replacement.text+result.slice(replacement.end);
   for (const [key,value] of Object.entries(values)) if (!found.has(key) && value!==null) result+=(result && !result.endsWith('\n')?'\n':'')+TOML.stringify({[key]:value});
   const parsed=parseAgentFiles(result,input.instructions);
-  if (parsed.name!==input.name || parsed.description!==input.description || parsed.provider!==input.provider || parsed.model!==input.model || parsed.reasoning!==input.reasoning) throw new AgentConfigConflict('Cannot safely update this TOML layout. Edit agent.toml directly.');
+  if (parsed.name!==input.name || parsed.description!==input.description || parsed.provider!==input.provider || parsed.model!==input.model || parsed.reasoning!==input.reasoning || imageSetting(parsed.image)!==imageSetting(input.image)) throw new AgentConfigConflict('Cannot safely update this TOML layout. Edit agent.toml directly.');
   const histories=serializedChoices(input);
   const original=historySource?TOML.parse(historySource).providerChoices??{}:{};
   if(JSON.stringify(original)===JSON.stringify(histories))return result+historySource;
@@ -189,7 +192,7 @@ export class AgentConfigStore {
       const generation=rememberPublished(join(base,target),files,archived);
       if (revisionFiles(join(base,target),archived).fileFingerprint!==files.fileFingerprint) throw new AgentConfigInvalid(`Configuration changed while reading ${configDir}. Inspect the files and retry.`);
       const revision=createHash('sha256').update(files.contentFingerprint).update('\0').update(generation).digest('hex');
-      return {...settings,revision,configDir};
+      return {...settings,image:settings.image??{kind:'initials'},revision,configDir};
     } catch (error) {
       if (error instanceof AgentConfigInvalid) throw error;
       throw new AgentConfigInvalid(`Invalid configuration at ${configDir}: ${error instanceof Error ? error.message : 'cannot read files'}`);
@@ -208,7 +211,7 @@ export class AgentConfigStore {
       const current=this.readFiles(id,archived);
       if (current.revision!==expected) throw new AgentConfigConflict('Profile changed. Refresh before editing.');
       const existing=parseAgentFiles(current.settings,current.instructions);
-      const same=existing.name===input.name && existing.description===input.description && existing.provider===input.provider && existing.model===input.model && existing.reasoning===input.reasoning && JSON.stringify(existing.providerChoices)===JSON.stringify(input.providerChoices);
+      const same=existing.name===input.name && existing.description===input.description && existing.provider===input.provider && existing.model===input.model && existing.reasoning===input.reasoning && imageSetting(existing.image)===imageSetting(input.image) && JSON.stringify(existing.providerChoices)===JSON.stringify(input.providerChoices);
       if (same) settings=current.settings;
       else settings=updateAgentToml(current.settings,input);
     }

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AgentImage from './AgentImage.vue';
 import { computed, ref, watch } from 'vue';
 import { useWorkspace } from '../workspace';
 import ResponseText from './ResponseText.vue';
@@ -33,7 +34,7 @@ function scroll(event: Event) {
         <template v-if="s.messages.length">
           <div v-for="message in s.messages" :key="message.id" class="message" :class="{'user-message': message.role === 'user'}">
             <div v-if="message.role === 'user'" class="user-bubble"><div class="who">YOU</div><div class="bubble">{{ message.content }}</div></div>
-            <template v-else><div class="who"><span class="avatar">{{ selected.name[0]?.toUpperCase() }}</span>{{ selected.name }}{{ message.role === 'assistant_stopped' ? ' · stopped' : '' }}</div><ResponseText :text="message.content" /></template>
+            <template v-else><div class="who"><AgentImage :image="selected.image" :name="selected.name" />{{ selected.name }}{{ message.role === 'assistant_stopped' ? ' · stopped' : '' }}</div><ResponseText :text="message.content" /></template>
             <SubmissionStatus v-if="submission && message.id === 'command-user-' + submission.id" />
             <ChatWorkItems v-if="message.role === 'user'" :work="s.work.find(work => message.id === 'command-user-' + work.id)" :inbox="relevant" />
           </div>

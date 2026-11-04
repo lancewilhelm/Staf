@@ -5,6 +5,8 @@ import { closeSync, existsSync, openSync, mkdtempSync, readFileSync, rmSync } fr
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { AgentConfigStore, AgentConfigUncertain } from './agent-config.js';
+import {AgentImageAssets} from './agent-image-assets.js';
+import {imageSetting,type AgentImage,type AgentImageInput} from './agent-image.js';
 import { hasCode } from './validation.js';
 import type { Session, Message } from './types.js';
 import { validSession } from './validation.js';
@@ -28,7 +30,7 @@ export const INSTANCE_SCHEMA_VERSION = 30;
 const MAINTENANCE_VERSION = 2147483647;
 
 export const starterSoul = "You are an assistant working for the owner. Be clear and candid. Distinguish observations from assumptions. Follow the owner's role instructions and work within the permissions and task scope granted to you.";
-export type BotEdit = { revision: string; name: string; description?: string; instructions: string; provider: string; model: string | null; reasoning: string | null };
+export type BotEdit = { revision: string; name: string; description?: string; instructions: string; provider: string; model: string | null; reasoning: string | null;image?:AgentImageInput };
 export class BotConflict extends Error {}
 
 export function assertDatasetAvailable(path: string, maintenanceToken?:string) {
@@ -51,6 +53,7 @@ function upgradeVersion(path:string, token:string|undefined):number|undefined {
 export class Instance {
   private readonly db: DatabaseSync;
   private readonly configs: AgentConfigStore;
+  private images:AgentImageAssets|undefined;
   private readonly temporaryConfigRoot: string | undefined;
   private readonly fingerprintKey: Uint8Array;
   private readonly datasetKey: Uint8Array;
@@ -498,18 +501,22 @@ export class Instance {
     const result=this.db.prepare('UPDATE creation_defaults SET revision=revision+1,provider=?,model=?,reasoning=? WHERE id=1 AND revision=?').run(input.provider,input.model,input.reasoning,input.revision);
     if(!result.changes)throw new BotConflict('Creation defaults changed. Refresh before editing.');return this.creationDefaults();
   }
-  createBot(input: {name: string; instructions: string; provider?: string; model?: string; reasoning?: string; operationId?: string}, advertisedModel?:string) {
+  private imageAssets() {return this.images??=new AgentImageAssets(join(dirname(dirname(this.configs.location('placeholder'))),'.images'));}
+  agentImage(assetId:string) {return this.imageAssets().read(assetId);}
+  createBot(input: {name: string; instructions: string; provider?: string; model?: string; reasoning?: string; operationId?: string;image?:AgentImageInput}, advertisedModel?:string) {
     if (!input.name.trim() || (input.provider !== undefined && !input.provider.trim())) throw new Error('Name and provider are required');
     const id = randomUUID(), chatId = randomUUID();
     this.db.exec('BEGIN IMMEDIATE');
     try {
-      const digest=input.operationId ? createHmac('sha256',this.fingerprintKey).update(JSON.stringify([input.name,input.instructions,input.provider ?? null,input.model ?? null,input.reasoning ?? null])).digest('hex') : null;
+      const image:AgentImage=input.image?.kind==='upload-data'?this.imageAssets().accept(input.image):input.image??{kind:'initials'};
+      const savedImage=imageSetting(image);
+      const digest=input.operationId ? createHmac('sha256',this.fingerprintKey).update(JSON.stringify([input.name,input.instructions,input.provider ?? null,input.model ?? null,input.reasoning ?? null,...(savedImage===null?[]:[savedImage])])).digest('hex') : null;
       if(input.operationId) { const existing=this.db.prepare('SELECT digest,bot_id FROM bot_creation_operations WHERE id=?').get(input.operationId); if(existing) { if(existing.digest!==digest || typeof existing.bot_id!=='string') throw new BotConflict('Creation operation ID conflict'); const bot=this.bot(existing.bot_id); this.db.exec('COMMIT'); return bot; } }
       const defaults=this.creationDefaults();const provider=input.provider ?? defaults.provider;
       const first=this.providerDefaults().read().providers[provider];
       const chosenModel=input.model ?? (input.provider===undefined?defaults.model:first?.model??advertisedModel??null);
       const chosenReasoning=input.reasoning ?? (input.provider===undefined?defaults.reasoning:first?.reasoning??null);
-      this.configs.publish(id,{name:input.name,description:'',provider,model:chosenModel,reasoning:chosenReasoning,instructions:input.instructions,providerChoices:{[provider]:{model:chosenModel,reasoning:chosenReasoning}}},false);
+      this.configs.publish(id,{name:input.name,description:'',provider,model:chosenModel,reasoning:chosenReasoning,instructions:input.instructions,providerChoices:{[provider]:{model:chosenModel,reasoning:chosenReasoning}},image},false);
       this.db.prepare('INSERT INTO bots VALUES (?, ?, ?, ?, ?, ?, ?)').run(id, chatId, '', '', 'demo', null, null);
       this.db.prepare('INSERT INTO bot_profiles (bot_id,revision,soul,archived) VALUES (?, 1, ?, 0)').run(id, '');
       if(input.operationId && digest) this.db.prepare('INSERT INTO bot_creation_operations VALUES (?,?,?)').run(input.operationId,digest,id);
@@ -543,7 +550,8 @@ export class Instance {
       if (!current) throw new Error('Agent not found');
       if (current.revision !== edit.revision) throw new BotConflict('Profile changed. Refresh before editing.');
       const providerChoices={...current.providerChoices,[current.provider]:{model:current.model,reasoning:current.reasoning},[edit.provider]:{model:edit.model,reasoning:edit.reasoning}};
-      const config=this.configs.publish(id,{name:edit.name,description:edit.description ?? current.description,instructions:edit.instructions,provider:edit.provider,model:edit.model,reasoning:edit.reasoning,providerChoices},current.archived,edit.revision);
+      const image=edit.image?.kind==='upload-data'?this.imageAssets().accept(edit.image):edit.image??current.image;
+      const config=this.configs.publish(id,{name:edit.name,description:edit.description ?? current.description,instructions:edit.instructions,provider:edit.provider,model:edit.model,reasoning:edit.reasoning,providerChoices,image},current.archived,edit.revision);
       try { this.db.exec('COMMIT'); } catch { throw new AgentConfigUncertain('Configuration save may have taken effect. Inspect the current configuration before retrying.'); }
       return {...current,...config};
     } catch (error) { try { this.db.exec('ROLLBACK'); } catch {} throw error; }
