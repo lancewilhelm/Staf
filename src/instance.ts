@@ -1,5 +1,7 @@
+import { workspaceReferenceSchema } from './workspace-references.js';
 import { ArtifactStore, artifactSchema, type ArtifactSource, type ArtifactCreate, type ArtifactRevise } from './artifacts.js';
 import { ConversationSessions, conversationSessionSchema, type SessionMessageReference } from './conversation-sessions.js';
+import { DocumentStore, documentSchema, documentCapabilities, type DocumentImport } from './document-sources.js';
 import {ProviderDefaultsStore} from './provider-choices.js';
 import { DatabaseSync } from 'node:sqlite';
 import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
@@ -158,8 +160,11 @@ export class Instance {
     if(version < 30 && !this.db.prepare("SELECT 1 FROM pragma_table_info('command_runtime_events') WHERE name='detail'").get())this.db.exec('ALTER TABLE command_runtime_events ADD COLUMN detail TEXT');
     this.db.exec('CREATE INDEX IF NOT EXISTS command_runtime_events_command ON command_runtime_events(command_id,seq)');
     if (version < 34) {
-      if (!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='conversation_sessions'").get()) this.db.exec(conversationSessionSchema);
+      const sessionTables = ['conversation_sessions', 'conversation_message_sessions', 'conversation_command_sessions', 'conversation_session_operations'];
+      if (sessionTables.some(name => !this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name))) this.db.exec(conversationSessionSchema);
+      this.db.exec(documentSchema);
       this.db.exec(artifactSchema);
+      this.db.exec(workspaceReferenceSchema);
     }
     if (!maintenanceToken) this.db.exec(`PRAGMA user_version=${INSTANCE_SCHEMA_VERSION}`);
     for (const row of this.db.prepare("SELECT id,bot_id FROM task_attempts WHERE state IN ('queued','running','stopping','waiting') ORDER BY rowid").all()) {
@@ -331,6 +336,16 @@ export class Instance {
       const bot=this.bot(id); this.db.exec('COMMIT'); return bot;
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
   }
+  private documentStore() { return new DocumentStore(this.db); }
+  private documentAgent(botId:string) { const bot=this.bot(botId); if(!bot || bot.archived)throw Error('Agent unavailable'); }
+  documents(botId:string,offset=0) { this.documentAgent(botId); return this.documentStore().list(botId,offset); }
+  documentImport(input:DocumentImport, signal:AbortSignal, check:()=>void) { const authorize=()=>{check();this.documentAgent(input.botId);};return this.documentStore().import(input,signal,authorize); }
+  documentRead(botId:string,id:string,offset=0) {this.documentAgent(botId);return {document:this.documentStore().read(botId,id),excerpts:this.documentStore().excerpts(botId,id,offset)};}
+  documentOriginal(botId:string,id:string) {this.documentAgent(botId);return this.documentStore().original(botId,id);}
+  documentSearch(botId:string,query:string) {this.documentAgent(botId);return this.documentStore().search(botId,query);}
+  documentRetire(botId:string,id:string) {this.documentAgent(botId);return this.documentStore().retire(botId,id);}
+  documentResolve(botId:string,id:string,excerptId:string) {this.documentAgent(botId);return this.documentStore().resolve(botId,id,excerptId);}
+  documentCapabilities(scope:{botId:string;sessionId:string;commandId:string;signal:AbortSignal;check:()=>void}) {return documentCapabilities(this.documentStore(),{...scope,check:()=>{scope.check();this.documentAgent(scope.botId);}});}
   authorize(token: string) { this.db.prepare('INSERT INTO clients VALUES (?)').run(createHash('sha256').update(token).digest('hex')); }
   authorized(token: string) { return !!this.db.prepare('SELECT 1 FROM clients WHERE token_hash=?').get(createHash('sha256').update(token).digest('hex')); }
   clients(token: string) {

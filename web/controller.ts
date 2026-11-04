@@ -4,6 +4,7 @@ export type ArtifactCreateInput = {operationId:string;name:string;format:Artifac
 export type ArtifactSummary = {id:string;name:string;format:ArtifactFormat;revision:number;createdAt:string;updatedAt:string;sourceSessionId:string|null;sourceMessageId:string|null};
 export type ArtifactRevisionInfo = {revision:number;digest:string;createdAt:string};
 export type ArtifactRevision = {id:string;name:string;format:ArtifactFormat;revision:number;content:string;digest:string;createdAt:string;artifactCreatedAt:string;sourceSessionId:string|null;sourceMessageId:string|null};
+import type { DocumentSummary, DocumentExcerpt } from '../src/document-types';
 import type {ToastNotice} from './toast-notice';
 import {responseEvents} from './response-stream';
 import type { Memory, MemoryScope } from '../src/memory-types';
@@ -340,6 +341,12 @@ export class Controller {
   async models(provider:string){return parseModelCatalog(await this.api<unknown>('/api/models',{provider}))}
   async selectProvider(profile:BotProfile,provider:string,edit:{model?:string|null;reasoning?:string|null}={}){const result=parseSelection(await this.api<unknown>('/api/bots/'+profile.id+'/selection',{revision:profile.revision,provider,...edit}));await this.refresh();return result}
   async botProfile(id:string){return this.api<BotProfile>('/api/bots/'+id)}
+  async documents(botId:string,signal?:AbortSignal,offset=0) {return this.api<DocumentSummary[]>('/api/bots/'+encodeURIComponent(botId)+'/documents'+(offset?'/pages/'+offset:''),undefined,signal);}
+  async uploadDocument(botId:string,operationId:string,file:File,signal?:AbortSignal) {const bytes=new Uint8Array(await file.arrayBuffer());if(bytes.length>10*1024*1024)throw Error('Document exceeds 10 MiB');let binary='';for(let i=0;i<bytes.length;i+=32768)binary+=String.fromCharCode(...bytes.subarray(i,i+32768));return this.api<DocumentSummary>('/api/bots/'+encodeURIComponent(botId)+'/documents',{operationId,name:file.name,base64:btoa(binary)},signal);}
+  async searchDocuments(botId:string,query:string,signal?:AbortSignal) {return this.api<DocumentExcerpt[]>('/api/bots/'+encodeURIComponent(botId)+'/documents/search',{query},signal);}
+  async readDocument(botId:string,id:string,signal?:AbortSignal,offset=0) {return this.api<{document:DocumentSummary;excerpts:DocumentExcerpt[]}>('/api/bots/'+encodeURIComponent(botId)+'/documents/'+encodeURIComponent(id)+(offset?'/excerpts/'+offset:''),undefined,signal);}
+  async retireDocument(botId:string,id:string) {return this.api<DocumentSummary>('/api/bots/'+encodeURIComponent(botId)+'/documents/'+encodeURIComponent(id)+'/retire',{});}
+  async downloadDocument(botId:string,id:string,name:string) {const dataset=this.dataset;if(!dataset)throw Error('Dataset identity unavailable');const response=await fetch('/api/bots/'+encodeURIComponent(botId)+'/documents/'+encodeURIComponent(id)+'/original',{headers:{Authorization:'Bearer '+this.token,'X-Staf-Dataset':dataset}});if(!response.ok || response.headers.get('X-Staf-Dataset')!==dataset || this.dataset!==dataset)throw Error('Could not download document');const blob=await response.blob();const url=URL.createObjectURL(blob);try{const link=document.createElement('a');link.href=url;link.download=name;link.click();}finally{URL.revokeObjectURL(url);}}
   async memories(scope: MemoryScope, signal: AbortSignal): Promise<Memory[]> {
     const token = this.token;
     try {
