@@ -30,6 +30,18 @@ try {
   const existed=existsSync(path);
   lock=new DatabaseSync(path);
   lock.exec('PRAGMA locking_mode=EXCLUSIVE; BEGIN EXCLUSIVE; COMMIT;');
+  if(action==='recover') {
+    const record=JSON.parse(readFileSync(marker,'utf8'));
+    if(record.version!==1||typeof record.backup!=='string'||(record.phase!==undefined&&record.phase!=='published'))throw Error('Invalid maintenance marker; inspect it before manual recovery.');
+    if(record.phase==='published') {
+      const version=record.publishedVersion;
+      if(!Number.isSafeInteger(version)||version<0||version>=MAINTENANCE_VERSION)throw Error('Invalid published schema version.');
+      const actual=Number(lock.prepare('PRAGMA user_version').get().user_version);
+      if(actual===MAINTENANCE_VERSION){lock.exec(`PRAGMA user_version=${version}`);sync(path);}
+      else if(!Number.isSafeInteger(actual)||actual<version||actual>=MAINTENANCE_VERSION)throw Error('Unexpected published schema version.');
+      rmSync(marker);sync(dataRoot);console.log('Committed publication finalized.');return;
+    }
+  }
   if(action==='reset') {
     interrupted();
     const backup=saveBackup({dataRoot,db:lock,existed,reason:'reset'});
@@ -81,7 +93,12 @@ try {
   rmSync(agentRoot,{recursive:true,force:true});
   if(existsSync(join(stage,'agents')))renameSync(join(stage,'agents'),agentRoot);
   sync(dataRoot);
+  const record=JSON.parse(readFileSync(marker,'utf8'));
+  if(record.version!==1||typeof record.backup!=='string')throw Error('Invalid maintenance marker.');
+  writeMarker({dataRoot,backup:record.backup,publishedVersion:targetVersion});
+  await testCheckpoint('publication-committed');
   publishedLock.exec(`PRAGMA user_version=${targetVersion}`);sync(path);
+  await testCheckpoint('fence-released');
   rmSync(marker);sync(dataRoot);
   console.log(action==='reset'?'Development dataset reset. Pair clients again.':'Recovery complete.');
 } finally {

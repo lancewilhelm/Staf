@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
-import { existsSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { INSTANCE_SCHEMA_VERSION } from '../dist/instance.js';
 import { MAINTENANCE_VERSION, saveBackup, sync, syncTree, writeMarker } from './dev-storage.mjs';
@@ -26,6 +26,9 @@ export function prepareUpgrade(dataRoot) {
 export function finishUpgrade(dataRoot, releaseFence) {
   const path=join(dataRoot,'instance.sqlite'),agents=join(dataRoot,'agents');
   sync(path);if(existsSync(agents))syncTree(agents);sync(dataRoot);
+  const record=JSON.parse(readFileSync(path+'.maintenance.json','utf8'));
+  if(record.version!==1||typeof record.backup!=='string'||typeof record.token!=='string'||!Number.isSafeInteger(record.schemaVersion))throw Error('Invalid upgrade maintenance marker.');
+  writeMarker({dataRoot,backup:record.backup,token:record.token,schemaVersion:record.schemaVersion,publishedVersion:INSTANCE_SCHEMA_VERSION});
   releaseFence();sync(path);
   rmSync(path+'.maintenance.json');sync(dataRoot);
 }

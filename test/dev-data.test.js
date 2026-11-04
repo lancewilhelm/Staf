@@ -70,6 +70,52 @@ test('reset and repeated recovery interruptions retain a usable complete backup'
     instance=new Instance(path);assert.equal(instance.bot(bot.id).instructions,'Retained soul');assert.deepEqual(instance.messages(bot.id).map(row=>row.content),['Saved message','Saved response']);instance.close();
   } finally {rmSync(root,{recursive:true,force:true});}
 });
+test('recovery finalizes a committed publication without discarding later writes', async () => {
+  const root=mkdtempSync(join(tmpdir(),'staf-dev-committed-')),path=join(root,'instance.sqlite');
+  const child=fork('scripts/dev-data.mjs',['reset'],{cwd:process.cwd(),env:{...process.env,STAF_DEV_DATA_DIR:root,STAF_DEV_TEST_PAUSE:'fence-released'},stdio:['ignore','ignore','pipe','ipc']});
+  let errors='';child.stderr.on('data',data=>errors+=data);
+  try {
+    await new Promise((resolve,reject)=>{child.once('message',resolve);child.once('exit',()=>reject(Error(errors)));});
+    child.kill('SIGKILL');await new Promise(resolve=>child.once('exit',resolve));
+    // Model an older writer, which does not know the maintenance marker.
+    const db=new DatabaseSync(path);db.exec("CREATE TABLE legacy_write (value TEXT); INSERT INTO legacy_write VALUES ('retained')");db.close();
+    const result=command(root,'recover');assert.equal(result.status,0,result.stderr);
+    const check=new DatabaseSync(path);assert.equal(check.prepare('SELECT value FROM legacy_write').get().value,'retained');check.close();
+  } finally {if(child.exitCode===null&&child.signalCode===null)child.kill('SIGKILL');rmSync(root,{recursive:true,force:true});}
+});
+test('a committed but still fenced publication can be finalized after a crash', async () => {
+  const root=mkdtempSync(join(tmpdir(),'staf-dev-finalize-')),path=join(root,'instance.sqlite');
+  const child=fork('scripts/dev-data.mjs',['reset'],{cwd:process.cwd(),env:{...process.env,STAF_DEV_DATA_DIR:root,STAF_DEV_TEST_PAUSE:'publication-committed'},stdio:['ignore','ignore','pipe','ipc']});
+  let errors='';child.stderr.on('data',data=>errors+=data);
+  try {
+    await new Promise((resolve,reject)=>{child.once('message',resolve);child.once('exit',()=>reject(Error(errors)));});
+    child.kill('SIGKILL');await new Promise(resolve=>child.once('exit',resolve));
+    assert.throws(()=>legacySchemaGate(path),/newer database/);
+    const result=command(root,'recover');assert.equal(result.status,0,result.stderr);
+    const instance=new Instance(path);assert.ok(instance.bots().length>=3);instance.close();
+  } finally {if(child.exitCode===null&&child.signalCode===null)child.kill('SIGKILL');rmSync(root,{recursive:true,force:true});}
+});
+test('restoring an empty backup and interrupted recovery never exposes an unfenced path', async () => {
+  const root=mkdtempSync(join(tmpdir(),'staf-dev-empty-backup-')),path=join(root,'instance.sqlite');
+  const pause=async(args)=>{
+    const child=fork('scripts/dev-data.mjs',args,{cwd:process.cwd(),env:{...process.env,STAF_DEV_DATA_DIR:root,STAF_DEV_TEST_PAUSE:'database-published'},stdio:['ignore','ignore','pipe','ipc']});
+    let errors='';child.stderr.on('data',data=>errors+=data);
+    await new Promise((resolve,reject)=>{child.once('message',resolve);child.once('exit',()=>reject(Error(errors)));});
+    try {assert.ok(existsSync(path));assert.throws(()=>legacySchemaGate(path),/newer database/);}
+    finally {child.kill('SIGKILL');await new Promise(resolve=>child.once('exit',resolve));}
+    assert.throws(()=>legacySchemaGate(path),/newer database/);
+  };
+  try {
+    const reset=command(root,'reset');assert.equal(reset.status,0,reset.stderr);
+    const empty=reset.stdout.match(/Backup: (.+)/)?.[1];assert.ok(empty);
+    await pause(['restore',empty]);
+    await pause(['recover']);
+    const result=command(root,'recover');assert.equal(result.status,0,result.stderr);
+    const instance=new Instance(path);assert.ok(instance.bots().length>=3);instance.close();
+    const restore=spawnSync(process.execPath,['scripts/dev-data.mjs','restore',empty],{cwd:process.cwd(),env:{...process.env,STAF_DEV_DATA_DIR:root},encoding:'utf8'});assert.equal(restore.status,0,restore.stderr);
+    assert.ok(existsSync(path));const emptyInstance=new Instance(path);assert.equal(emptyInstance.bots().length,0);emptyInstance.close();
+  } finally {rmSync(root,{recursive:true,force:true});}
+});
 test('reset refuses an exclusive database owner', () => {
   const root=mkdtempSync(join(tmpdir(),'staf-dev-busy-')),path=join(root,'instance.sqlite');
   let instance;
@@ -85,7 +131,9 @@ test('development upgrade snapshots the database and agent files before migratio
     const upgrade=prepareUpgrade(root);assert.ok(upgrade);assert.throws(()=>new Instance(path),/maintenance/i);
     db=new DatabaseSync(join(upgrade.backup,'instance.sqlite'));assert.equal(db.prepare('PRAGMA user_version').get().user_version,29);db.close();
     assert.ok(existsSync(join(upgrade.backup,'agents',bot.id,'current')));
-    instance=new Instance(path,undefined,upgrade.token);finishUpgrade(root,()=>instance.finishUpgrade(upgrade.token));assert.equal(instance.bot(bot.id).instructions,'Soul before upgrade');instance.close();
+    instance=new Instance(path,undefined,upgrade.token);assert.ok(instance.migrationBackup);
+    db=new DatabaseSync(instance.migrationBackup);assert.equal(db.prepare('PRAGMA user_version').get().user_version,29);db.close();
+    finishUpgrade(root,()=>instance.finishUpgrade(upgrade.token));assert.equal(instance.bot(bot.id).instructions,'Soul before upgrade');instance.close();
     db=new DatabaseSync(path);assert.equal(db.prepare('PRAGMA user_version').get().user_version,30);db.close();
   } finally {rmSync(root,{recursive:true,force:true});}
 });

@@ -16,7 +16,7 @@ export function saveBackup({dataRoot,db,existed,reason}) {
   writeFileSync(join(backup,'manifest.json'),JSON.stringify({version:1,database:existed}),{mode:0o600});syncTree(backup);sync(backupRoot);sync(dataRoot);
   return backup;
 }
-export function writeMarker({dataRoot,backup,token,schemaVersion}) {
+export function writeMarker({dataRoot,backup,token,schemaVersion,publishedVersion}) {
   const marker=join(dataRoot,'instance.sqlite.maintenance.json'),pending=marker+'.'+randomUUID();
-  writeFileSync(pending,JSON.stringify({version:1,backup,...(token?{token,schemaVersion}:{})}),{flag:'wx',mode:0o600});sync(pending);renameSync(pending,marker);sync(dataRoot);
+  writeFileSync(pending,JSON.stringify({version:1,backup,...(token?{token,schemaVersion}:{}),...(publishedVersion===undefined?{}:{phase:'published',publishedVersion})}),{flag:'wx',mode:0o600});sync(pending);renameSync(pending,marker);sync(dataRoot);
 }
