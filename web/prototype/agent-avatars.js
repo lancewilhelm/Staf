@@ -1,18 +1,16 @@
-// THROWAWAY: three avatar families on the existing workspace, selected by ?variant=.
+// THROWAWAY: one gallery mixing rounded shapes and regular polygons in the workspace.
 // All agent, chat, crop, and appearance changes live only in this page's memory.
 const root = document.getElementById('prototype-app');
-const params = new URLSearchParams(location.search);
-let family = families.find(item => item.id === params.get('variant')) ?? families[0];
 let view = 'chat', sidebar = 'expanded', theme = 'light', draft = null, chooser = false;
 let fileError = '', drag = null, lastAction = 'Ready', nextId = 200;
 const agents = [
-  {id: 'prototype-agent-a101', name: 'Milo', shape: 1, color: 0},
-  {id: 'prototype-agent-b202', name: 'Scout', shape: 0, color: 4},
-  {id: 'prototype-agent-c303', name: 'Lumen', shape: 2, color: 2},
-  {id: 'prototype-agent-d404', name: 'Atlas', shape: 1, color: 5},
-  {id: 'prototype-agent-e505', name: 'Scout', shape: 2, color: 6},
-  {id: 'prototype-agent-f606', name: 'Notes', shape: 0, color: 3},
-].map((agent, index) => ({...agent, instructions: 'Be thoughtful, clear, and practical.', image: index === 5 ? {kind: 'initials'} : {kind: 'avatar', shape: agent.shape, color: agent.color}, messages: []}));
+  {id: 'prototype-agent-a101', name: 'Milo', family: 'A', shape: 1, color: 0},
+  {id: 'prototype-agent-b202', name: 'Scout', family: 'C', shape: 0, color: 4},
+  {id: 'prototype-agent-c303', name: 'Lumen', family: 'A', shape: 2, color: 2},
+  {id: 'prototype-agent-d404', name: 'Atlas', family: 'C', shape: 1, color: 5},
+  {id: 'prototype-agent-e505', name: 'Scout', family: 'C', shape: 2, color: 6},
+  {id: 'prototype-agent-f606', name: 'Notes', family: 'A', shape: 0, color: 3},
+].map(({id, name, family, shape, color}, index) => ({id, name, instructions: 'Be thoughtful, clear, and practical.', image: index === 5 ? {kind: 'initials'} : {kind: 'avatar', family, shape, color}, messages: []}));
 let selectedId = agents[0].id;
 const sampleMessages = [
   {role: 'user', text: 'Help me make a little room for a creative project this week.'},
@@ -22,12 +20,13 @@ const sampleMessages = [
 ];
 for (const agent of agents) agent.messages = structuredClone(sampleMessages);
 const selected = () => agents.find(agent => agent.id === selectedId) ?? agents[0];
+const avatarName = image => families.find(group => group.id === image.family).shapes[image.shape];
 const escapeHtml = value => String(value).replace(/[&<>"']/g, char => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[char]));
 const icon = name => `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${{plus: 'M12 5v14M5 12h14', close: 'm6 6 12 12M6 18 18 6', gear: 'M9 3h6l1 3 3 1 2 5-2 5-3 1-1 3H9l-1-3-3-1-2-5 2-5 3-1 1-3ZM15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0', panel: 'M3 4h18v16H3ZM9 4v16'}[name]}"/></svg>`;
 const brand = '<svg viewBox="0 0 100 100" aria-hidden="true"><g fill="currentColor"><circle cx="50" cy="14" r="11"/><circle cx="84.24" cy="38.88" r="11"/><circle cx="71.16" cy="79.12" r="11"/><circle cx="28.84" cy="79.12" r="11"/><circle cx="15.76" cy="38.88" r="11"/></g></svg>';
 
 function imageMarkup(image, name, size = 30) {
-  const content = image.kind === 'avatar' ? characterSvg(family.id, image.shape, colors[image.color].hex)
+  const content = image.kind === 'avatar' ? characterSvg(image.family, image.shape, colors[image.color].hex)
     : image.kind === 'upload' ? `<img src="${escapeHtml(image.url)}" alt="">` : escapeHtml(name.trim()[0]?.toUpperCase() ?? 'A');
   return `<span class="p-avatar ${image.kind === 'initials' ? 'p-initial' : ''}" style="width:${size}px;height:${size}px" aria-hidden="true">${content}</span>`;
 }
@@ -41,7 +40,7 @@ function paletteMarkup(image, action) {
   return `<div class="p-colors" role="group" aria-label="Character color">${colors.map((color, index) => `<button type="button" class="p-color" data-action="${action}" data-color="${index}" aria-label="${color.name}" title="${color.name}" aria-pressed="${image.kind === 'avatar' && image.color === index}" style="--swatch:${color.hex}"><span></span></button>`).join('')}</div>`;
 }
 function shapesMarkup(image, action) {
-  return `<div class="p-shapes" role="group" aria-label="Character shape">${family.shapes.map((shape, index) => `<button type="button" class="p-shape" data-action="${action}" data-shape="${index}" aria-label="${shape}" aria-pressed="${image.kind === 'avatar' && image.shape === index}">${characterSvg(family.id, index, colors[image.kind === 'avatar' ? image.color : 0].hex)}<span>${shape}</span></button>`).join('')}</div>`;
+  return families.map(group => `<div class="p-shape-family"><h4>${group.name}</h4><div class="p-shapes" role="group" aria-label="${group.name}">${group.shapes.map((shape, index) => `<button type="button" class="p-shape" data-action="${action}" data-family="${group.id}" data-shape="${index}" aria-label="${shape}" aria-pressed="${image.kind === 'avatar' && image.family === group.id && image.shape === index}">${characterSvg(group.id, index, colors[image.kind === 'avatar' ? image.color : 0].hex)}<span>${shape}</span></button>`).join('')}</div></div>`).join('');
 }
 function sidebarMarkup() {
   return `<aside class="side" id="agent-sidebar"><div class="sidebar-head"><button class="brand" data-action="chat" aria-label="Staf, return to chat">${brand}<span>staf</span></button>${sidebar === 'expanded' ? panelButton() : ''}</div><div class="caption" id="agents-label">Agents</div><button class="new-agent" data-action="new" aria-label="New agent" title="New agent">${icon('plus')}<span>New agent</span></button><nav aria-labelledby="agents-label">${agents.map(agent => `<button class="agent-nav ${agent.id === selectedId && view === 'chat' ? 'active' : ''}" data-action="select" data-id="${agent.id}" aria-label="${escapeHtml(label(agent))}" title="${escapeHtml(label(agent))}" ${agent.id === selectedId && view === 'chat' ? 'aria-current="page"' : ''}><span class="avatar ${agent.image.kind !== 'initials' ? 'p-character' : ''}">${badge(agent)}</span><span class="identity"><strong>${nameMarkup(agent)}</strong><small>${agent.name === 'Atlas' ? 'OpenRouter' : 'ChatGPT'}</small></span></button>`).join('')}</nav><div class="minor"><button data-action="appearance" aria-label="Settings" title="Settings">${icon('gear')}<span>Settings</span></button><div class="workspace-caption">Personal workspace</div></div></aside>`;
@@ -57,7 +56,7 @@ function chatMarkup() {
 }
 function studyMarkup() {
   const agent = selected();
-  return `<aside class="p-study" aria-label="Avatar comparison"><span class="eyebrow">CHARACTER STUDY · ${family.id}</span><h2>${family.name}</h2><p>${family.detail}</p><div class="p-hero">${badge(agent, 84)}</div>${sizesMarkup(agent.image, agent.name)}${shapesMarkup(agent.image, 'try-shape')}${paletteMarkup(agent.image, 'try-color')}<button class="quiet p-edit" data-action="choose">Try shapes & colors</button><p>Flat SVG. Solid colors.<br>One family for the whole set.</p>${agent.image.kind === 'avatar' ? '<a class="p-download" href="#" data-action="download">Download this character as SVG ↗</a>' : ''}</aside>`;
+  return `<aside class="p-study" aria-label="Avatar gallery"><span class="eyebrow">CHARACTER STUDY</span><h2>Rounded + polygons</h2><p>Simple shapes. Little black eyes.</p><div class="p-hero">${badge(agent, 84)}</div>${sizesMarkup(agent.image, agent.name)}${shapesMarkup(agent.image, 'try-shape')}${paletteMarkup(agent.image, 'try-color')}<button class="quiet p-edit" data-action="choose">Try shapes & colors</button><p>One gallery. Pick any shape.<br>The same eight colors.</p>${agent.image.kind === 'avatar' ? '<a class="p-download" href="#" data-action="download">Download this character as SVG ↗</a>' : ''}</aside>`;
 }
 function uploadMarkup() {
   const image = draft.image;
@@ -71,19 +70,19 @@ function chooserMarkup() {
   return `<section class="p-chooser" aria-label="Agent image chooser"><h3>Agent image</h3><div class="p-mode-row" role="group" aria-label="Image type">${[['initials', 'Initials'], ['avatar', 'Built-in avatar'], ['upload', 'Uploaded image']].map(([kind, title]) => `<button type="button" class="p-mode" data-action="mode" data-kind="${kind}" aria-pressed="${mode === kind}">${title}</button>`).join('')}</div><div class="p-preview-head"><span data-draft-preview="80">${imageMarkup(preview, draft.name, 80)}</span><div data-draft-sizes>${sizesMarkup(preview, draft.name)}</div></div>${mode === 'avatar' ? `<h3>Shape</h3>${shapesMarkup(image, 'shape')}<h3 style="margin-top:20px">Color <span class="meta">· ${colors[image.color].name}</span></h3>${paletteMarkup(image, 'color')}` : mode === 'upload' ? uploadMarkup() : '<p class="p-edit-note">Use the first letter of this agent’s name.</p>'}</section>`;
 }
 function formMarkup(isNew) {
-  return `<form id="agent-form"><div class="${isNew ? 'modal-head' : ''}">${isNew ? '<h2>Create agent</h2><button type="button" class="icon-button" data-action="cancel" aria-label="Close dialog">' + icon('close') + '</button>' : '<span class="eyebrow">AGENT SETTINGS</span><h1 class="page-title">' + escapeHtml(draft.name || 'Agent settings') + '</h1>'}</div><p class="page-intro">${isNew ? 'Choose a name and optional instructions.' : 'Edit this agent’s name, image, and instructions.'}</p><label>Name<input id="agent-name" name="name" value="${escapeHtml(draft.name)}" placeholder="e.g. Robin" required></label><div class="p-image-summary"><span data-draft-summary>${imageMarkup(draft.image.kind === 'upload-pending' ? {kind: 'initials'} : draft.image, draft.name, 40)}</span><div><button class="quiet" type="button" data-action="toggle-chooser">${chooser ? 'Close image chooser' : 'Change image'}</button><p class="meta">${draft.image.kind === 'initials' ? 'Initials' : draft.image.kind === 'avatar' ? family.shapes[draft.image.shape] + ' · ' + colors[draft.image.color].name : 'Uploaded image'}</p></div></div>${chooserMarkup()}<label>Instructions<textarea id="agent-instructions" name="instructions">${escapeHtml(draft.instructions)}</textarea></label><div class="p-form-actions"><button type="submit" ${draft.image.kind === 'upload-pending' ? 'disabled' : ''}>${isNew ? 'Create agent' : 'Save changes'}</button><button class="quiet" type="button" data-action="cancel">Cancel</button></div><p class="p-edit-note">Preview first. Your choice applies when you ${isNew ? 'create the agent' : 'save changes'}.</p></form>`;
+  return `<form id="agent-form"><div class="${isNew ? 'modal-head' : ''}">${isNew ? '<h2>Create agent</h2><button type="button" class="icon-button" data-action="cancel" aria-label="Close dialog">' + icon('close') + '</button>' : '<span class="eyebrow">AGENT SETTINGS</span><h1 class="page-title">' + escapeHtml(draft.name || 'Agent settings') + '</h1>'}</div><p class="page-intro">${isNew ? 'Choose a name and optional instructions.' : 'Edit this agent’s name, image, and instructions.'}</p><label>Name<input id="agent-name" name="name" value="${escapeHtml(draft.name)}" placeholder="e.g. Robin" required></label><div class="p-image-summary"><span data-draft-summary>${imageMarkup(draft.image.kind === 'upload-pending' ? {kind: 'initials'} : draft.image, draft.name, 40)}</span><div><button class="quiet" type="button" data-action="toggle-chooser">${chooser ? 'Close image chooser' : 'Change image'}</button><p class="meta">${draft.image.kind === 'initials' ? 'Initials' : draft.image.kind === 'avatar' ? avatarName(draft.image) + ' · ' + colors[draft.image.color].name : 'Uploaded image'}</p></div></div>${chooserMarkup()}<label>Instructions<textarea id="agent-instructions" name="instructions">${escapeHtml(draft.instructions)}</textarea></label><div class="p-form-actions"><button type="submit" ${draft.image.kind === 'upload-pending' ? 'disabled' : ''}>${isNew ? 'Create agent' : 'Save changes'}</button><button class="quiet" type="button" data-action="cancel">Cancel</button></div><p class="p-edit-note">Preview first. Your choice applies when you ${isNew ? 'create the agent' : 'save changes'}.</p></form>`;
 }
 function appearanceMarkup() {
   return `<div class="settings-scroll"><div class="setup settings-content"><span class="eyebrow">WORKSPACE SETTINGS</span><h1 class="page-title">Appearance</h1><p class="page-intro">Choose how this workspace looks.</p><h2 class="section-title">Theme</h2><div class="p-appearance">${['light', 'dark'].map(value => `<button class="quiet" data-action="theme" data-theme="${value}" aria-pressed="${theme === value}">${value === 'light' ? 'Light' : 'Dark'}</button>`).join('')}</div><h2 class="section-title">Sidebar</h2><button class="quiet" data-action="sidebar">${sidebar === 'expanded' ? 'Use Focus rail' : 'Expand sidebar'}</button><div class="p-form-actions"><button class="quiet" data-action="chat">Back to chat</button></div></div></div>`;
 }
 function stateLabel() {
   const agent = selected(), image = agent.image;
-  const saved = image.kind === 'avatar' ? `${family.shapes[image.shape]} · ${colors[image.color].name}` : image.kind === 'upload' ? 'Uploaded image' : 'Initials';
-  const editing = draft ? ` · unsaved ${draft.image.kind === 'avatar' ? family.shapes[draft.image.shape] + '/' + colors[draft.image.color].name : draft.image.kind}` : '';
+  const saved = image.kind === 'avatar' ? `${avatarName(image)} · ${colors[image.color].name}` : image.kind === 'upload' ? 'Uploaded image' : 'Initials';
+  const editing = draft ? ` · unsaved ${draft.image.kind === 'avatar' ? avatarName(draft.image) + '/' + colors[draft.image.color].name : draft.image.kind}` : '';
   return `${agent.name} · ${saved}${editing} · ${lastAction}`;
 }
 function barMarkup() {
-  return `<div class="p-bar" aria-label="Prototype controls"><div class="p-bar-top"><button class="p-arrow" data-action="previous" aria-label="Previous family">‹</button><div class="p-options" role="group" aria-label="Avatar family">${families.map(item => `<button class="p-variant" data-action="variant" data-variant="${item.id}" aria-label="${item.id}: ${item.name}" aria-pressed="${family.id === item.id}">${item.id}</button>`).join('')}</div><span class="p-family-label">${family.name}</span><button data-action="theme" data-theme="${theme === 'light' ? 'dark' : 'light'}" aria-label="Switch to ${theme === 'light' ? 'dark' : 'light'} theme">${theme === 'light' ? '◐ Dark' : '◑ Light'}</button><button class="p-arrow" data-action="next" aria-label="Next family">›</button></div><output id="prototype-state" aria-live="polite">${escapeHtml(stateLabel())}</output><div class="p-bottom">PROTOTYPE · Changes stay in this page · ← → compare families</div></div>`;
+  return `<div class="p-bar" aria-label="Prototype controls"><div class="p-bar-top"><span class="p-family-label">Rounded shapes + regular polygons</span><button data-action="theme" data-theme="${theme === 'light' ? 'dark' : 'light'}" aria-label="Switch to ${theme === 'light' ? 'dark' : 'light'} theme">${theme === 'light' ? '◐ Dark' : '◑ Light'}</button></div><output id="prototype-state" aria-live="polite">${escapeHtml(stateLabel())}</output><div class="p-bottom">PROTOTYPE · Changes stay in this page</div></div>`;
 }
 function render() {
   const focused = document.activeElement;
@@ -109,13 +108,6 @@ function beginEdit({isNew = false, openChooser = false} = {}) {
   if (isNew) document.getElementById('agent-name')?.focus();
 }
 function cancel() { draft = null; chooser = false; view = 'chat'; fileError = ''; lastAction = 'Cancelled'; render(); document.querySelector('[data-action="edit"]')?.focus(); }
-function setFamily(id) {
-  family = families.find(item => item.id === id) ?? family;
-  const url = new URL(location.href); url.searchParams.set('variant', family.id);
-  try { history.replaceState(null, '', url); } catch { /* Sandboxed inline previews keep the comparison in memory. */ }
-  lastAction = 'Family ' + family.id; render();
-}
-function cycle(direction) { setFamily(families[(families.indexOf(family) + direction + families.length) % families.length].id); }
 function updateDraftViews() {
   if (!draft) return;
   const image = draft.image.kind === 'upload-pending' ? {kind: 'initials'} : draft.image;
@@ -160,9 +152,7 @@ root.addEventListener('click', event => {
   const button = event.target.closest('[data-action]'); if (!button) return;
   const action = button.dataset.action;
   if (button.tagName === 'A') event.preventDefault();
-  if (action === 'variant') setFamily(button.dataset.variant);
-  else if (action === 'previous' || action === 'next') cycle(action === 'next' ? 1 : -1);
-  else if (action === 'sidebar') { sidebar = sidebar === 'expanded' ? 'focus' : 'expanded'; render(); }
+  if (action === 'sidebar') { sidebar = sidebar === 'expanded' ? 'focus' : 'expanded'; render(); }
   else if (action === 'theme') { theme = button.dataset.theme; render(); }
   else if (action === 'new') beginEdit({isNew: true});
   else if (action === 'edit' || action === 'choose') beginEdit({openChooser: action === 'choose'});
@@ -172,20 +162,22 @@ root.addEventListener('click', event => {
   else if (action === 'toggle-chooser') { chooser = !chooser; render(); }
   else if (action === 'mode') {
     const kind = button.dataset.kind;
-    draft.image = kind === 'avatar' ? {kind: 'avatar', shape: 0, color: 0} : kind === 'upload' ? {kind: 'upload-pending'} : {kind: 'initials'};
+    draft.image = kind === 'avatar' ? {kind: 'avatar', family: 'A', shape: 0, color: 0} : kind === 'upload' ? {kind: 'upload-pending'} : {kind: 'initials'};
     fileError = ''; render();
   } else if (action === 'shape' || action === 'color') {
-    if (draft.image.kind !== 'avatar') draft.image = {kind: 'avatar', shape: 0, color: 0};
+    if (draft.image.kind !== 'avatar') draft.image = {kind: 'avatar', family: 'A', shape: 0, color: 0};
+    if (action === 'shape') draft.image.family = button.dataset.family;
     draft.image[action] = Number(button.dataset[action]); render();
   } else if (action === 'try-shape' || action === 'try-color') {
     beginEdit({openChooser: true});
-    if (draft.image.kind !== 'avatar') draft.image = {kind: 'avatar', shape: 0, color: 0};
+    if (draft.image.kind !== 'avatar') draft.image = {kind: 'avatar', family: 'A', shape: 0, color: 0};
+    if (action === 'try-shape') draft.image.family = button.dataset.family;
     const field = action === 'try-shape' ? 'shape' : 'color'; draft.image[field] = Number(button.dataset[field]); render();
   } else if (action === 'sample-upload') sampleUpload();
   else if (action === 'download' && selected().image.kind === 'avatar') {
     const image = selected().image, link = document.createElement('a');
-    const url = URL.createObjectURL(new Blob([characterSvg(family.id, image.shape, colors[image.color].hex)], {type: 'image/svg+xml'}));
-    link.href = url; link.download = `staf-${family.id}-${family.shapes[image.shape].toLowerCase()}-${colors[image.color].name.toLowerCase()}.svg`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+    const url = URL.createObjectURL(new Blob([characterSvg(image.family, image.shape, colors[image.color].hex)], {type: 'image/svg+xml'}));
+    link.href = url; link.download = `staf-${image.family}-${avatarName(image).toLowerCase().replaceAll(' ', '-')}-${colors[image.color].name.toLowerCase()}.svg`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 });
 root.addEventListener('input', event => {
@@ -210,7 +202,7 @@ root.addEventListener('submit', event => {
     draft = null; chooser = false; view = 'chat'; lastAction = 'Saved in this page'; render();
   } else if (event.target.id === 'chat-form') {
     const input = document.getElementById('message-input'); if (!input.value.trim()) return;
-    selected().messages.push({role: 'user', text: input.value.trim()}, {role: 'assistant', text: 'A shape and a pair of eyes can go a long way. Which family feels most like your Staf?'}); render();
+    selected().messages.push({role: 'user', text: input.value.trim()}, {role: 'assistant', text: 'A shape and a pair of eyes can go a long way. Try a rounded character alongside one of the polygons.'}); render();
     const messages = document.querySelector('.messages'); messages.scrollTop = messages.scrollHeight;
   }
 });
@@ -227,8 +219,6 @@ for (const type of ['pointerup', 'pointercancel']) root.addEventListener(type, (
 document.addEventListener('keydown', event => {
   if (event.target.id === 'message-input' && event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); event.target.form.requestSubmit(); return; }
   if (event.target.closest('input,textarea,select,[contenteditable=true],[role=slider]') || view === 'new') return;
-  if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); cycle(event.key === 'ArrowRight' ? 1 : -1); }
   if (event.key === 'Escape' && view !== 'chat') cancel();
 });
-window.addEventListener('popstate', () => { family = families.find(item => item.id === new URLSearchParams(location.search).get('variant')) ?? families[0]; render(); });
 render();

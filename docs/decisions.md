@@ -399,5 +399,9 @@ image belongs to shared agent identity. Built-in characters use simple vector
 art with solid colors and separate shape and color choices.
 
 The [agent avatar prototype brief](agent-avatar-prototype-brief.md) records the
-confirmed scope and three visual families to compare in the approved workspace.
-These are design choices for a future prototype, not implemented capabilities.
+confirmed scope and prototype review journey in the approved workspace. After
+reviewing the first comparison, the owner selected rounded shapes and regular
+polygons together in one gallery, retaining the eight colors. Eyes are solid
+black circles without pupils. Polygons have equal sides and angles and are
+symmetrical. Each agent selects its own shape from either group. These remain
+design choices demonstrated by a prototype, not implemented capabilities.

@@ -1,8 +1,9 @@
 # Agent avatar prototype brief
 
-Scope confirmed in the 2026-11-03 design interview. Use this brief with
-`/prototype` to compare three visual families in the existing Staf UI. Avatar
-selection and image uploads are planned features, not current runtime behavior.
+Scope confirmed in the 2026-11-03 design interview and prototype review. The
+owner selected rounded shapes and regular polygons together in one gallery.
+Avatar selection and image uploads are planned features, not current runtime
+behavior.
 
 ## Run the comparison
 
@@ -22,10 +23,9 @@ provider connection, or credentials. To generate it without opening a browser,
 append `--no-open`. You can also open
 [the generated comparison](../.prototype/agent-avatars/index.html) directly.
 
-Use A, B, or C in the floating bar, or the left and right arrow keys. Arrow keys
-retain their normal behavior inside text inputs and crop sliders. The file URL
-retains the `variant` choice. Reloading resets agents, images, chat, and appearance
-to the synthetic starting state.
+Open Change image to choose from both shape groups, then choose a color
+separately. Each agent keeps its own shape choice. Reloading resets agents,
+images, chat, and appearance to the synthetic starting state.
 
 ## Accepted direction
 
@@ -33,7 +33,8 @@ Each agent has three image choices: Initials, Built-in avatar, or Uploaded image
 The choice is shared across clients and used wherever that agent appears in the
 GUI. Optionality belongs to each agent. There is no browser-wide display toggle.
 
-The built-in gallery offers roughly 8–12 original geometric shapes with eyes.
+The eventual built-in gallery offers roughly 8–12 original geometric shapes
+with eyes across the two selected groups. The current prototype has six shapes.
 The owner chooses shape and color separately. Every shape supports the same
 curated palette of roughly eight colors, readable in light and dark themes.
 Different agents can use the same shape and color. Names remain the primary
@@ -43,11 +44,12 @@ Characters share one visual style, with different shapes. Grok bots inspire the
 appeal, while Staf has its own character designs. The first version uses static
 vector graphics with solid colors. This replaces the earlier soft 3D rendering
 direction. A vector art tool must be able to recreate each character with a few
-basic shapes or short paths. Eyes are simple circles or ovals.
+basic shapes or short paths. Every character has two solid black circular eyes,
+placed symmetrically. Eyes have no pupils or whites.
 
 Use solid fills without gradients, textures, blur, lighting effects, or rendered
-3D assets. Any suggestion of depth comes from a small number of flat geometric
-faces. The selected gallery uses one family from the comparison below.
+3D assets. Use one solid fill for the body and two black circles for the eyes.
+The existing eight colors are retained.
 
 Images replace the existing initial badges in the expanded sidebar, Focus rail,
 chat header, and agent messages. Selecting Initials restores the current badge.
@@ -62,9 +64,8 @@ Browsing shapes, colors, or crops updates a preview. The existing Create agent
 or Save changes action persists the selection with the rest of the form.
 Cancel preserves the previous saved choice.
 
-Compare three visual directions in the existing Staf UI. Each direction is an
-alternative for the gallery's shared style. Select one direction for the final
-family. Include the existing 24, 28, and 30 px badge sizes.
+Include rounded shapes and regular polygons together in the existing Staf UI.
+Preview the existing 24, 28, and 30 px badge sizes.
 
 ## Current UI context
 
@@ -82,42 +83,40 @@ These observations come from a static read of local code, not a browser session.
   appearance and layout preferences to each browser. The selected image is a
   proposed addition to shared agent identity.
 
-## Prototype comparison
+## Prototype verdict
 
-The question is which simple vector family gives Staf a friendly, distinct
-identity while remaining readable at 24 px. Compare the following alternatives.
-Each is a simplified vector interpretation of the previously discussed family.
+The owner chose both rounded shapes and faceted polygons from the original
+comparison. Keep them together in one gallery with the same eyes and palette.
+Loops and arches are excluded from the selected gallery.
 
-- A, Rounded shapes: circles, rounded squares, and capsules. Use a solid body
-  color and simple eyes. This replaces the shaded clay treatment.
-- B, Loops and arches: rings, arches, and broad S-curves. Use solid filled
-  silhouettes with open spaces and the same eye treatment across the family.
-  This replaces the highlighted inflated treatment.
-- C, Faceted polygons: triangles, pentagons, and irregular polygons with softened
-  corners. A few solid filled faces can suggest geometry. Keep the eyes simple.
+- Rounded shapes include a circle, rounded square, and capsule.
+- Regular polygons include an equilateral triangle, regular pentagon, and
+  regular hexagon. Each polygon has equal sides and equal angles, with a vertex
+  at the top and a vertical axis of symmetry.
 
-Give each direction at least three representative shapes. Use the same palette
-and sample agents across directions so the comparison tests the character
-family. The eventual gallery has roughly 8–12 shapes in the selected family.
+Generate polygon vertices at equal angular intervals on a circle. This keeps
+the sides and angles equal without hand-adjusted points. Each built-in image
+stores its own shape group, shape, and color in the prototype's agent model.
 
 Use editable SVG composed of basic shapes and short paths. Keep the primary
 color independently replaceable. Avoid embedded raster images. Prioritize clear
 silhouettes and visible eyes over small decorative details.
 
-Host the comparison inside the approved Staf workspace. Preserve its layout,
-typography, palette, and interactions. Switch families through a development-only
-floating bar and a shareable `?variant=A`, `B`, or `C` query parameter. Keep the
-agent, selected color, and workspace state consistent while switching families.
+Host the gallery inside the approved Staf workspace. Preserve its layout,
+typography, palette, and interactions. The floating prototype bar retains the
+theme control and saved/draft selection state. Choosing a shape for one agent
+leaves other agents' images unchanged.
 
 ## Review journey
 
 The prototype must make these comparisons possible with synthetic agents and
 in-memory state.
 
-1. Compare A, B, and C in the expanded sidebar, Focus rail, chat header, and
-   agent messages. Include actual 24, 28, and 30 px sizes and a larger preview.
-2. Choose different shapes and colors independently. Check the whole palette
-   on more than one shape in each family.
+1. Review rounded shapes and polygons in the expanded sidebar, Focus rail,
+   chat header, and agent messages. Include actual 24, 28, and 30 px sizes and a
+   larger preview.
+2. Choose a rounded shape for one agent and a polygon for another. Check that
+   both retain their choices. Choose colors independently from the same palette.
 3. Compare light and dark themes and a narrow viewport. Check eye visibility,
    silhouette recognition, name readability, and the existing duplicate suffix.
 4. Open Change image from New agent and agent Settings. Compare Initials,
@@ -139,10 +138,9 @@ prototype on a dedicated prototype branch and provide one project task-runner
 command to launch it. Use the existing synthetic setup where practical.
 
 Hand back the launch command, comparison URL, and the review journey above.
-Capture the complete comparison and the owner's chosen family on the prototype
+Capture the complete comparison and the owner's chosen gallery on the prototype
 branch. Reference that source from the eventual implementation issue.
 
-The owner selects the final family after viewing the prototype. The verdict is
-pending that review. Judge it by
-small-size readability, original character, ease of vector editing, and fit with
-Staf's existing appearance. Production implementation follows separately.
+The original three-family comparison is retained in commit `58455f9`. The
+selected combination and revised geometry are captured in the subsequent
+prototype revision. Production implementation follows separately.

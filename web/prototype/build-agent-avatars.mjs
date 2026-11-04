@@ -22,11 +22,11 @@ const inline = html.replace(/\b(\d+(?:\.\d+)?)d?vh\b/g, (_, number) => `${Number
   .replace('</head>', '<style>html,body,#prototype-app{background:transparent!important;margin:0;padding:0}html{font-family:var(--font-sans,system-ui);color:var(--foreground)}.shell{background:transparent}.p-bar{position:absolute}</style></head>');
 await writeFile(resolve(directory, 'inline.html'), inline);
 await writeFile(resolve(directory, 'DMSans-OFL.txt'), (await read('web/assets/DMSans-OFL.txt')).replace(/\r\n/g, '\n').replace(/[ \t]+$/gm, ''));
-console.log(`Agent avatar prototype: ${pathToFileURL(output).href}?variant=A`);
-console.log('A: Rounded shapes · B: Loops and arches · C: Faceted polygons');
-console.log('Use the floating controls or left/right arrows. Changes stay in memory.');
+console.log(`Agent avatar prototype: ${pathToFileURL(output).href}`);
+console.log('One gallery: rounded shapes + regular polygons, with eight colors.');
+console.log('Open Change image to choose a shape and color. Changes stay in memory.');
 if (!process.argv.includes('--no-open')) {
-  const url = pathToFileURL(output).href + '?variant=A';
+  const url = pathToFileURL(output).href;
   const command = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'explorer.exe' : 'xdg-open';
   const child = spawn(command, [url], {stdio: 'ignore', detached: true});
   child.on('error', () => console.log('Open the file URL above in your browser.'));
