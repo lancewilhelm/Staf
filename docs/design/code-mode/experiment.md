@@ -65,10 +65,23 @@ those registrations. The guest calls `await capabilities['documents.search'](inp
 there is no separate direct provider tool for a registered method.
 
 `checkScope(call, input)` checks feature-owned authority without fetching the
-payload or changing anything. The host runs it before dispatch and before cached
-result release. `invoke(call, input)` runs after the common host checks and start
-permit. A changing method should use the host-minted `call.operationId` for its
+payload or changing anything. It returns `scopeClaim(() => { ...; return
+undefined; })`, whose synchronous assertion rechecks the captured authorization
+revision or current permissions. The host runs that assertion again inside the
+start transaction and immediately before result release. Async scope validation
+consumes active time, so a stalled guard cannot retain a worker indefinitely.
+`invoke(call, input)` runs after the common host checks and start permit. A changing method should use the host-minted `call.operationId` for its
 idempotent service operation. An unexplained changing exception is uncertain.
+
+The host derives a keyed change identity from the accepted work, capability,
+resource and schema-normalized arguments. Object key order does not change that
+identity. Before asking for approval and again inside the permit transaction,
+it checks the action journal for a matching successful change. An identical
+change runs at most once per accepted request, including across fresh scripts.
+A new owner request has a new command identity. Distinct revisions or genuinely
+different changes have different arguments. `RunReport.priorChanges` exposes
+observed change identities and states for inspection and feature-owned
+reconciliation. The guest cannot clear those guards with a recovery flag.
 
 `call.context` contains the immutable accepted `{botId, sessionId, commandId,
 signal}`. `call.signal` additionally cancels this execution's outstanding
@@ -102,7 +115,8 @@ not limits that this experiment silently relaxes for production.
 The focused tests use the real worker, disposable SQLite instances, synthetic
 application methods and synthetic providers. They cover dependent reads, selected
 outputs, exact approval, denial caught by guest code, expiry with controlled time,
-revocation, read concurrency, exclusive changes, Stop from another paired client,
+revocation at the final permit, completed-change recovery guards, stalled scope
+checks, read concurrency, exclusive changes, Stop from another paired client,
 unawaited effects, late outcomes, bounded correction and output budgets, scoped
 read reuse, unsafe constructed arguments, malformed bridge messages and interrupted
 restart. They also retain results after a later provider failure.
@@ -118,3 +132,12 @@ checks. A passing local fixture does not authorize adoption.
 See [development](../../development.md#review-the-code-mode-experiment) to repeat
 the demo and checks. The [original verification plan](verification.md) remains the
 complete adoption checklist, including the uncompleted gates above.
+
+## Review record
+
+Independent Standards and Spec reviews ran against commit `2c5caa8`. Standards
+found an unbounded scope wait. Spec found that wait, repeated completed changes,
+a missing atomic feature-scope assertion and a missing work fence after final
+policy revocation. The implementation now has regression tests for each finding.
+The parent made and checked those corrections; the corrected diff was not sent
+through another independent review. See [review resolutions](review.md).

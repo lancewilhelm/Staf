@@ -24,7 +24,9 @@ export interface CapabilityCall {
 }
 export type Json = null | boolean | number | string | Json[] | {[key: string]: Json};
 export const jsonValue: z.ZodType<Json> = z.lazy(() => z.union([
-  z.null(), z.boolean(), z.number().finite(), z.string(), z.array(jsonValue), z.record(z.string(), jsonValue),
+  z.null(), z.boolean(), z.number().finite(), z.string(), z.array(jsonValue), z.unknown().superRefine((value, context) => {
+    if (value !== null && typeof value === 'object' && Object.hasOwn(value, '__proto__')) context.addIssue({code: 'custom', message: 'Unsupported JSON property'});
+  }).pipe(z.record(z.string(), jsonValue)),
 ]));
 
 /** Reject non-JSON values before serialization can erase or transform them. */
@@ -35,6 +37,7 @@ export function json(input: unknown, maxBytes = 256 * 1024): Json {
     if (typeof value !== 'object' || value === null || seen.has(value)) throw Error('Expected JSON data');
     const proto: unknown = Object.getPrototypeOf(value);
     if (proto !== Object.prototype && proto !== null && !Array.isArray(value)) throw Error('Expected plain JSON data');
+    if (Object.hasOwn(value, '__proto__')) throw Error('Unsupported JSON property');
     if (Object.getOwnPropertySymbols(value).length) throw Error('Expected JSON properties');
     seen.add(value);
     for (const descriptor of Object.values(Object.getOwnPropertyDescriptors(value))) {
@@ -65,12 +68,23 @@ export class ResourceScope {
   static create(input: z.input<typeof resourceSchema>): ResourceScope { return Object.freeze(new ResourceScope(Object.freeze(resourceSchema.parse(input)))); }
 }
 export const resourceScope = ResourceScope.create;
+/** Feature-owned revision assertion, checked synchronously at the dispatch boundary. */
+export class ScopeClaim {
+  private constructor(private readonly check: () => undefined) {}
+  static create(check: () => undefined): ScopeClaim {const claim = new ScopeClaim(check); Object.freeze(claim); return claim;}
+  assertCurrent(): void {
+    const result: unknown = this.check();
+    if (result instanceof Promise) void result.catch(() => {});
+    if (result !== undefined) throw Error('Scope assertion must be synchronous');
+  }
+}
+export const scopeClaim = ScopeClaim.create;
 export interface ApplicationCapability<Input, Output> {
   readonly description: string;
   readonly input: DataSchema<Input>;
   readonly output: DataSchema<Output>;
   readonly effect: {readonly kind: 'read' | 'change'; readonly resource: (call: CapabilityCall, input: Input) => ResourceScope};
-  readonly checkScope: (call: CapabilityCall, input: Input) => Promise<void>;
+  readonly checkScope: (call: CapabilityCall, input: Input) => Promise<ScopeClaim>;
   readonly invoke: (call: CapabilityCall, input: Input) => Promise<Output>;
 }
 interface BoundCapability {
@@ -80,7 +94,8 @@ interface BoundCapability {
   readonly kind: 'read' | 'change';
   bind(call: CapabilityCall, input: Json): {
     resource: ResourceScope;
-    checkScope(): Promise<void>;
+    input: Json;
+    checkScope(): Promise<ScopeClaim>;
     invoke(): Promise<Json>;
   };
 }
@@ -97,7 +112,11 @@ export function applicationCapability<Input, Output>(definition: ApplicationCapa
       const input = frozen.input.parse(raw);
       const resource = frozen.effect.resource(call, input);
       if (!(resource instanceof ResourceScope)) throw Error('Invalid resource scope');
-      return {resource, checkScope: () => frozen.checkScope(call, input), invoke: async () => json(frozen.output.parse(json(await frozen.invoke(call, input))))};
+      return {resource, input: json(input), checkScope: async () => {
+        const claim = await frozen.checkScope(call, input);
+        if (!(claim instanceof ScopeClaim)) throw Error('Feature scope claim required');
+        return claim;
+      }, invoke: async () => json(frozen.output.parse(json(await frozen.invoke(call, input))))};
     },
   });
   return entry;

@@ -1,4 +1,5 @@
 import {randomUUID} from 'node:crypto';
+import {limits} from './protocol.js';
 import type {Json} from './contract.js';
 
 export type ApprovalAnswer = 'approve' | 'deny' | 'expired' | 'cancelled';
@@ -26,7 +27,9 @@ interface Waiting {
 /** Per-agent FIFO, with expiry starting only when the owner sees the request. */
 export class CodeApprovals {
   private readonly waiting: Waiting[] = [];
-  constructor(private readonly lifetimeMs: number, private readonly now = Date.now) {}
+  constructor(private readonly lifetimeMs: number, private readonly now = Date.now) {
+    if (!Number.isSafeInteger(lifetimeMs) || lifetimeMs <= 0 || lifetimeMs > limits.approvalMs) throw Error('Invalid approval lifetime');
+  }
   list(): ExactApproval[] {this.expire(); return this.waiting.flatMap(item => item.presented ? [structuredClone(item.presented)] : []);}
   private present(): void {
     const bots = new Set<string>();

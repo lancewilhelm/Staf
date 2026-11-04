@@ -3,12 +3,12 @@ import {randomUUID} from 'node:crypto';
 import {createInterface} from 'node:readline/promises';
 import {setTimeout as delay} from 'node:timers/promises';
 import {startInstance} from '../dist/instance-service.js';
-import {applicationCapability,dataSchema,resourceScope} from '../dist/code-mode/contract.js';
+import {applicationCapability,dataSchema,resourceScope,scopeClaim} from '../dist/code-mode/contract.js';
 import {z} from 'zod';
 
 const directory='.staf/code-mode-review';mkdirSync(directory,{recursive:true});
 const schema=dataSchema(z.strictObject({value:z.string()}));
-const capability=applicationCapability({description:'Uppercase synthetic text',input:schema,output:schema,effect:{kind:'read',resource:call=>resourceScope({family:'demo',owner:call.context.botId,key:call.context.sessionId})},checkScope:async()=>{},invoke:async(call,input)=>({value:input.value.toUpperCase()})});
+const capability=applicationCapability({description:'Uppercase synthetic text',input:schema,output:schema,effect:{kind:'read',resource:call=>resourceScope({family:'demo',owner:call.context.botId,key:call.context.sessionId})},checkScope:async()=>scopeClaim(()=>undefined),invoke:async(call,input)=>({value:input.value.toUpperCase()})});
 const app=startInstance(`${directory}/instance.sqlite`,0,{env:{},codeModeLab:{capabilities:{'demo.read':capability},policy:()=> 'prompt'},providerFactory:async()=>({name:'synthetic-code-demo',capabilities:{toolCalls:true,incrementalText:false,transport:'demo'},async complete(messages,tools){
   const last=messages.at(-1);
   if(last.role==='tool')return {role:'assistant',content:last.content};

@@ -45,3 +45,11 @@ and [its integration reference](experiment.md#integration-contract). The checkpo
 sketch remains historical. Adapters retain the exact accepted context and can use
 the additional `call.signal` to cancel an individual execution. No feature-owned
 services are implemented here. The integration commit is supplied with the PR.
+
+`checkScope` now returns a `ScopeClaim`, created with `scopeClaim`. Its callback
+must synchronously assert current feature authority and return `undefined`.
+This closes the gap between async scope validation and the atomic start permit.
+It checks authorization, not whether the feature's content revision still has its
+pre-change value. The feature operation remains responsible for its own revision
+preconditions and `operationId` handling. The exact public types and the
+synthetic examples are in the executable contract and tests.

@@ -4,7 +4,7 @@ import {CodeApprovals} from './approvals.js';
 import {CapabilityRegistry, ids, json, type CapabilityCall, type Json} from './contract.js';
 import {startNativeLabGuest, type GuestRequest, type GuestRun} from './executor.js';
 import {limits, type HostMessage} from './protocol.js';
-import {CodeModeStore, type EndReason} from './store.js';
+import {CodeModeStore, CompletedChange, type EndReason} from './store.js';
 
 export type ExperimentLimits = {-readonly [Key in keyof typeof limits]: number};
 export interface CapabilityRequest {
@@ -30,7 +30,9 @@ export interface RunReport {
   readonly outputs: Json[];
   readonly actions: {id: string; name: string; state: string; result: string | null}[];
   readonly receipts: {id: string; name: string}[];
+  readonly priorChanges: {id: string; operationId: string; name: string; state: string; resource: Json}[];
 }
+class PolicyUnavailable extends Error {}
 let residents = 0;
 export class CodeModeWork {
   readonly limits: ExperimentLimits;
@@ -48,7 +50,8 @@ export class CodeModeWork {
     options.store.claimOwner();
     this.limits = {...limits};
     for (const [key, value] of Object.entries(options.limits ?? {})) {
-      if (!(key in limits) || !Number.isFinite(value) || value <= 0) throw Error('Invalid experiment limit');
+      if (key === 'approvalMs') throw Error('Approval lifetime is configured by the service queue');
+      if (!(key in limits) || !Number.isSafeInteger(value) || value <= 0) throw Error('Invalid experiment limit');
     }
     for (const key of Object.keys(limits)) {
       // Key narrowed against the canonical limit object, not guest input.
@@ -70,7 +73,12 @@ export class CodeModeWork {
         if (event.kind !== 'child') return [];
         const action = inspection.actions.find(action => action.id === event.childId);
         return action ? [{id: action.id, name: event.name, state: action.state, result: action.result}] : [];
-      }), receipts: [...this.receipts.values()].map(({id, name}) => ({id, name}))};
+      }), receipts: [...this.receipts.values()].map(({id, name}) => ({id, name})),
+      priorChanges: inspection.events.flatMap(event => {
+        if (event.kind !== 'child' || event.effect !== 'change') return [];
+        const action = inspection.actions.find(action => action.id === event.childId);
+        return action && ['succeeded', 'uncertain'].includes(action.state) ? [{id: action.id, operationId: event.operationId, name: event.name, state: action.state, resource: event.resource}] : [];
+      })};
   }
   execute(input: {providerCallId: string; source: string}): Promise<RunReport> {
     if (this.disposed || this.current) return Promise.reject(Error('Code work unavailable or already running'));
@@ -97,12 +105,12 @@ export class CodeModeWork {
     const controller = new AbortController();
     const signal = AbortSignal.any([store.context.signal, controller.signal]);
     let open = true, end: EndReason = 'completed', guest: GuestRun | undefined;
-    let reads = 0, changing = false, effects = 0, busy = false, lastTick = performance.now(), measuredGuestMs = 0;
+    let reads = 0, changing = false, effects = 0, checking = 0, busy = false, lastTick = performance.now(), measuredGuestMs = 0;
     const queue: {kind: 'read' | 'change'; execute(): Promise<void>; cancel(): void}[] = [];
     const pending = new Set<Promise<void>>();
     const started = new Map<string, 'read' | 'change'>();
     const tick = () => {
-      const now = performance.now(); if (busy || effects > 0) this.activeMs += now - lastTick; lastTick = now;
+      const now = performance.now(); if (busy || effects > 0 || checking > 0) this.activeMs += now - lastTick; lastTick = now;
       if (open && this.activeMs >= this.limits.activeMs) terminate('limit', true);
     };
     const terminate = (reason: EndReason, fence: boolean) => {
@@ -149,23 +157,38 @@ export class CodeModeWork {
         const call: CapabilityCall = Object.freeze({context: store.context, signal, executionId, childId: ids.child.parse(randomUUID()), operationId: ids.operation.parse(randomUUID())});
         const bound = definition.bind(call, input);
         if (bound.resource.identity.owner !== call.context.botId) throw Error('Capability resource owner differs from accepted work');
-        const detail = Object.freeze({name, input, effect: definition.kind, resource: json(bound.resource.identity)} satisfies CapabilityRequest);
+        const detail = Object.freeze({name, input: bound.input, effect: definition.kind, resource: json(bound.resource.identity)} satisfies CapabilityRequest);
         if (receipt && JSON.stringify(receipt.resource) !== JSON.stringify(detail.resource)) throw Error('Read receipt scope changed');
         if (JSON.stringify(this.safe(json(detail))) !== JSON.stringify(detail)) throw Error('Action cannot be retained faithfully');
+        const changeKey = definition.kind === 'change' ? store.fingerprint(json({botId: call.context.botId, sessionId: call.context.sessionId, commandId: call.context.commandId, ...detail})) : null;
         const fingerprint = store.fingerprint(json({context: {botId: call.context.botId, sessionId: call.context.sessionId, commandId: call.context.commandId}, executionId, childId: call.childId, operationId: call.operationId, ...detail}));
         const expected = {id: call.childId, fingerprint, work: {kind: 'command', id: store.context.commandId} satisfies {kind: 'command'; id: string}};
         const prepared = store.journal.prepare({...expected, summary: `${name}: ${JSON.stringify(detail.input)}`});
         if (prepared.kind !== 'created') throw Error('Child identity conflict');
-        store.record({kind: 'child', executionId, childId: call.childId, operationId: call.operationId, name, effect: definition.kind, resource: detail.resource});
+        store.record({kind: 'child', executionId, childId: call.childId, operationId: call.operationId, name, effect: definition.kind, resource: detail.resource, changeKey});
         return await new Promise(resolve => {
           const cancel = () => {
             if (store.journal.get(call.childId)?.state === 'prepared') store.journal.cancel(call.childId);
             resolve({ok: false, error: 'Code execution closed'});
           };
+          const decide = () => {
+            try {
+              const value: unknown = policy(call, detail);
+              if (value !== 'allow' && value !== 'prompt' && value !== 'block') throw new PolicyUnavailable();
+              return value;
+            } catch {throw new PolicyUnavailable('Host policy unavailable');}
+          };
+          const scope = async () => {
+            tick(); checking++;
+            try {guard(); const claim = await bound.checkScope(); guard(); claim.assertCurrent(); return claim;}
+            catch {if (open) terminate('blocked', true); throw Error('Feature scope unavailable');}
+            finally {tick(); checking--;}
+          };
           queue.push({kind: definition.kind, cancel, execute: async () => {
             try {
-              guard(); await bound.checkScope(); guard();
-              let decision = policy(call, detail), ownerApproved = false;
+              await scope();
+              store.assertChangeFresh(changeKey, call.childId);
+              let decision = decide(), ownerApproved = false;
               if (decision === 'block') {terminate('blocked', true); throw Error('Capability unavailable');}
               if (decision === 'prompt') {
                 const answer = await approvals.request({botId: call.context.botId, sessionId: call.context.sessionId, commandId: call.context.commandId, childId: call.childId, ...detail}, signal);
@@ -173,11 +196,18 @@ export class CodeModeWork {
                 if (answer === 'approve') ownerApproved = true;
                 if (answer !== 'approve') {terminate(answer === 'deny' ? 'denied' : answer === 'expired' ? 'expired' : 'stopped', true); throw Error('Approval ended');}
               }
-              guard(); await bound.checkScope(); guard();
-              store.start(executionId, prepared.permit, expected, () => {
-                guard(); decision = policy(call, detail);
-                if (decision === 'block' || decision === 'prompt' && !ownerApproved) throw Error('Capability revoked or approval changed');
-              });
+              const currentScope = await scope();
+              try {
+                store.start(executionId, prepared.permit, expected, () => {
+                  guard(); decision = decide();
+                  if (decision === 'block' || decision === 'prompt' && !ownerApproved) throw Error('Capability revoked or approval changed');
+                  currentScope.assertCurrent();
+                }, changeKey);
+              } catch (error) {
+                // Persist the terminal fence after the failed start transaction rolls back.
+                if (!(error instanceof CompletedChange)) terminate('blocked', true);
+                throw error;
+              }
               started.set(call.childId, definition.kind); tick(); effects++;
               let value: Json;
               try {
@@ -189,17 +219,19 @@ export class CodeModeWork {
                 if (definition.kind === 'change') terminate('uncertain', true);
                 throw Error('Capability failed');
               } finally {tick(); effects--; started.delete(call.childId);}
-              guard(); await bound.checkScope(); guard();
-              if (policy(call, detail) === 'block') throw Error('Capability revoked');
+              const releaseScope = await scope();
+              if (decide() === 'block') {terminate('blocked', true); throw Error('Capability revoked');}
+              try {releaseScope.assertCurrent();} catch {terminate('blocked', true); throw Error('Feature scope revoked');}
               if (definition.kind === 'read' && !receipt) {
                 const bytes = Buffer.byteLength(JSON.stringify(value));
                 if (this.cacheBytes + bytes > this.limits.cacheBytes) {terminate('limit', true); throw Error('Temporary read limit');}
-                this.cacheBytes += bytes; const id = randomUUID(); this.receipts.set(id, {id, name, input, value, resource: detail.resource});
+                this.cacheBytes += bytes; const id = randomUUID(); this.receipts.set(id, {id, name, input: bound.input, value, resource: detail.resource});
               }
               resolve({ok: true, value});
-            } catch {
+            } catch (error) {
+              if (error instanceof PolicyUnavailable) terminate('blocked', true);
               if (store.journal.get(call.childId)?.state === 'prepared') store.journal.cancel(call.childId);
-              resolve({ok: false, error: 'Capability not completed; inspect the action history'});
+              resolve({ok: false, error: error instanceof CompletedChange ? 'Matching change already completed; inspect priorChanges before continuing' : 'Capability not completed; inspect the action history'});
             }
           }});
           pump();
@@ -208,7 +240,7 @@ export class CodeModeWork {
     };
     try {
       residents++;
-      guest = startNativeLabGuest({source, names: registry.names(), guestMs: this.limits.guestMs - this.guestMs, request, phase: (running, elapsed) => {
+      guest = startNativeLabGuest({source, names: registry.names(), heapBytes: this.limits.heapBytes, stackBytes: this.limits.stackBytes, guestMs: this.limits.guestMs - this.guestMs, request, phase: (running, elapsed) => {
         tick(); busy = running; measuredGuestMs = elapsed;
       }});
       if (signal.aborted) guest.stop();

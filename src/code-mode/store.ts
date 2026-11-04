@@ -8,7 +8,7 @@ const reason = z.enum(['completed', 'error', 'syntax', 'denied', 'expired', 'sto
 export type EndReason = z.infer<typeof reason>;
 const eventSchema = z.discriminatedUnion('kind', [
   z.strictObject({kind: z.literal('execution'), id: z.string(), providerCallId: z.string(), source: z.string(), botId: z.string(), sessionId: z.string()}),
-  z.strictObject({kind: z.literal('child'), executionId: z.string(), childId: z.string(), operationId: z.string(), name: z.string(), effect: z.enum(['read', 'change']), resource: jsonValue}),
+  z.strictObject({kind: z.literal('child'), executionId: z.string(), childId: z.string(), operationId: z.string(), name: z.string(), effect: z.enum(['read', 'change']), resource: jsonValue, changeKey: z.string().nullable().default(null)}),
   z.strictObject({kind: z.literal('output'), executionId: z.string(), value: jsonValue, final: z.boolean()}),
   z.strictObject({kind: z.literal('end'), executionId: z.string(), reason}),
   z.strictObject({kind: z.literal('fence'), reason}),
@@ -16,6 +16,7 @@ const eventSchema = z.discriminatedUnion('kind', [
 ]);
 export type CodeEvent = z.infer<typeof eventSchema>;
 /** Uses the instance's existing event and action tables; no feature migration slot. */
+export class CompletedChange extends Error {}
 export class CodeModeStore {
   readonly journal: ActionJournal;
   private closed = false;
@@ -37,7 +38,7 @@ export class CodeModeStore {
   fingerprint(value: Json): string {
     const key = this.db.prepare("SELECT value FROM instance_secrets WHERE name='command-fingerprint'").get()?.value;
     if (!(key instanceof Uint8Array)) throw Error('Missing instance identity key');
-    return createHmac('sha256', key).update(JSON.stringify(value)).digest('hex');
+    return createHmac('sha256', key).update(JSON.stringify(canonical(value))).digest('hex');
   }
   assertLive(): void {
     if (this.closed) throw Error('Code store closed');
@@ -51,11 +52,17 @@ export class CodeModeStore {
     this.assertLive();
     if (this.events().some(event => event.kind === 'end' && event.executionId === executionId)) throw Error('Code execution closed');
   }
-  /** No hook or await occurs between this check, the permit claim and dispatch. */
-  start(executionId: string, permit: StartPermit, expected: {id: string; fingerprint: string; work: {kind: 'command'; id: string}}, livePolicy: () => void): void {
+  assertChangeFresh(changeKey: string | null, childId: string): void {
+    if (!changeKey) return;
+    const earlier = this.events().find(event => event.kind === 'child' && event.childId !== childId && event.changeKey === changeKey && this.journal.get(event.childId)?.state === 'succeeded');
+    if (earlier) throw new CompletedChange('A matching change already completed');
+  }
+  /** Only synchronous authority assertions run inside the permit transaction. */
+  start(executionId: string, permit: StartPermit, expected: {id: string; fingerprint: string; work: {kind: 'command'; id: string}}, livePolicy: () => void, changeKey: string | null): void {
     this.db.exec('BEGIN IMMEDIATE');
     try {
       this.assertRunOpen(executionId); livePolicy();
+      this.assertChangeFresh(changeKey, expected.id);
       this.journal.startInInstanceTransaction(permit, this.db, expected);
       this.db.exec('COMMIT'); this.journal.finalizeInstanceStart(permit);
     } catch (error) {this.db.exec('ROLLBACK'); throw error;}
@@ -94,4 +101,10 @@ export function readCodeModeHistory(db: DatabaseSync, commandId: string) {
     if (event.kind !== 'child') return [];
     const action = journal.get(event.childId); return action ? [action] : [];
   }), interrupted: state === 'interrupted' && events.some(event => event.kind === 'execution' && !events.some(end => end.kind === 'end' && end.executionId === event.id))};
+}
+
+function canonical(value: Json): Json {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value !== null && typeof value === 'object') return Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key] ?? null)]));
+  return value;
 }

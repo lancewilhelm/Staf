@@ -20,7 +20,7 @@ test('real worker awaits host promises without Node globals or a module loader',
 import {Instance} from '../dist/instance.js';
 import {CodeModeWork} from '../dist/code-mode/host.js';
 import {CodeApprovals} from '../dist/code-mode/approvals.js';
-import {CapabilityRegistry,applicationCapability,dataSchema,resourceScope,json} from '../dist/code-mode/contract.js';
+import {CapabilityRegistry,applicationCapability,dataSchema,resourceScope,scopeClaim,json} from '../dist/code-mode/contract.js';
 import {z} from 'zod';
 import {setTimeout as delay} from 'node:timers/promises';
 import {mkdtempSync,rmSync} from 'node:fs';
@@ -29,7 +29,7 @@ import {join} from 'node:path';
 
 const input=dataSchema(z.strictObject({value:z.string().max(2000)}));
 const output=dataSchema(z.strictObject({value:z.string()}));
-const noop=async()=>{};
+const noop=async()=>scopeClaim(()=>undefined);
 function setup(t, options={}) {
   const instance=new Instance(options.path??':memory:');
   const bot=instance.createBot({name:'Code test',instructions:'Test'});
@@ -141,7 +141,7 @@ test('three independent reads overlap, changes stay exclusive and ordered',async
 test('Stop ordered before the start permit wins even after async scope validation',async t=>{
   let release,entered=false,dispatched=false;
   const gate=new Promise(resolve=>{release=resolve;});
-  const x=setup(t,{makeCapabilities:({capability})=>({'fixture.read':capability('read',async(call,input)=>{dispatched=true;return input;},async()=>{entered=true;await gate;})})});
+  const x=setup(t,{makeCapabilities:({capability})=>({'fixture.read':capability('read',async(call,input)=>{dispatched=true;return input;},async()=>{entered=true;await gate;return scopeClaim(()=>undefined);})})});
   const running=execute(x,'return await capabilities["fixture.read"]({value:"x"});');
   await until(()=>entered);x.instance.requestResponseStop('code-test');x.controller.abort();release();
   const report=await running;assert.equal(report.reason,'stopped');assert.equal(dispatched,false);assert.equal(report.actions[0].state,'cancelled');
@@ -149,7 +149,7 @@ test('Stop ordered before the start permit wins even after async scope validatio
 
 test('cached read release rechecks scope without calling the service again',async t=>{
   let allowed=true,invokes=0;
-  const x=setup(t,{makeCapabilities:({capability})=>({'fixture.read':capability('read',async(call,input)=>{invokes++;return input;},async()=>{if(!allowed)throw Error('revoked');})})});
+  const x=setup(t,{makeCapabilities:({capability})=>({'fixture.read':capability('read',async(call,input)=>{invokes++;return input;},async()=>{if(!allowed)throw Error('revoked');return scopeClaim(()=>{if(!allowed)throw Error('revoked');return undefined;});})})});
   const first=await execute(x,'return await capabilities["fixture.read"]({value:"private"});');allowed=false;
   const second=await execute(x,`return await staf.reuse(${JSON.stringify(first.receipts[0].id)});`,'reuse');
   assert.equal(invokes,1);assert.deepEqual(second.outputs,[]);assert.equal(second.actions[0].state,'cancelled');
@@ -207,4 +207,63 @@ test('accepted context cannot be redirected by client selection or supplied extr
   selected='another-session';
   await execute(x,'return await capabilities["fixture.read"]({value:"ok",sessionId:"forged"});','forged');
   assert.deepEqual(observed,[x.context.sessionId]);assert.notEqual(observed[0],selected);
+});
+
+test('prototype-named JSON cannot silently change at the bridge boundary',()=>{
+  const value=JSON.parse('{"__proto__":{"secret":"value"}}');
+  assert.throws(()=>json(value));
+  assert.equal(workerMessage.safeParse({type:'emit',seq:1,value}).success,false);
+});
+
+test('a stalled scope check consumes active time and cannot retain a worker',async t=>{
+  let entered=false;
+  const x=setup(t,{limits:{activeMs:50,settleMs:20},makeCapabilities:({capability})=>({'fixture.read':capability('read',async(call,input)=>input,async()=>{entered=true;return new Promise(()=>{});})})});
+  const running=execute(x,'return await capabilities["fixture.read"]({value:"stalled"});');
+  await until(()=>entered);
+  let timeout;
+  const result=await Promise.race([running,new Promise(resolve=>{timeout=setTimeout(()=>{x.controller.abort();resolve(null);},250);})]);clearTimeout(timeout);
+  assert.notEqual(result,null,'scope validation must end at the active deadline');assert.equal(result.reason,'limit');assert.equal(result.actions[0].state,'cancelled');
+});
+
+test('completed changes cannot repeat in a fresh recovery script',async t=>{
+  let changes=0;
+  const x=setup(t,{makeCapabilities:({capability})=>({'fixture.change':capability('change',async(call,input)=>{changes++;return input;})})});
+  await execute(x,'await capabilities["fixture.change"]({value:"once"}); throw Error("later failure");','initial');
+  const recovery=await execute(x,'return await capabilities["fixture.change"]({value:"once"});','recovery');
+  assert.equal(changes,1);assert.equal(recovery.actions[0].state,'cancelled');
+});
+
+test('a final scope revision assertion fences caught errors and later invocations',async t=>{
+  let assertions=0,dispatched=0;
+  const x=setup(t,{makeCapabilities:({capability})=>({'fixture.read':capability('read',async(call,input)=>{dispatched++;return input;},async()=>scopeClaim(()=>{if(++assertions===3)throw Error('Scope revoked at permit');return undefined;}))})});
+  const report=await execute(x,'try {await capabilities["fixture.read"]({value:"x"});}catch{} return await capabilities["fixture.read"]({value:"alternative"});');
+  assert.equal(report.reason,'blocked');assert.equal(dispatched,0);assert.equal(report.actions.length,1);
+  assert.throws(()=>execute(x,'return 1','after-revocation'),/fenced/);
+});
+
+test('policy blocked at the final permit durably fences the whole accepted request',async t=>{
+  let checks=0;
+  const x=setup(t,{policy:()=>++checks===2?'block':'allow'});
+  const report=await execute(x,'try {await capabilities["fixture.read"]({value:"x"});}catch{} return await capabilities["fixture.read"]({value:"alternative"});');
+  assert.equal(report.reason,'blocked');assert.equal(x.calls.length,0);assert.equal(report.actions.length,1);
+  assert.equal(x.store.events().find(e=>e.kind==='fence').reason,'blocked');
+  assert.throws(()=>execute(x,'return 1','after-policy'),/fenced/);
+});
+
+test('matching completed changes are normalized and do not ask for approval again',async t=>{
+  let changes=0;
+  const schema=dataSchema(z.object({value:z.string(),count:z.number().default(1)}));
+  const cap=applicationCapability({description:'Synthetic normalized change',input:schema,output:schema,effect:{kind:'change',resource:call=>resourceScope({family:'synthetic',owner:call.context.botId,key:'same'})},checkScope:noop,invoke:async(call,input)=>{changes++;return input;}});
+  const x=setup(t,{policy:()=> 'prompt',capabilities:{'fixture.change':cap}});
+  const first=execute(x,'await capabilities["fixture.change"]({value:"once"}); throw Error("later failure");');
+  const approval=await until(()=>x.approvals.list()[0]);x.approvals.decide(approval.id,'approve');await first;
+  const next=await execute(x,'return await capabilities["fixture.change"]({count:1,value:"once",ignored:"not-a-new-effect"});','retry');
+  assert.equal(changes,1);assert.equal(x.approvals.list().length,0);assert.equal(next.priorChanges.length,1);
+});
+
+test('invalid or throwing host policy fails closed for the whole request',async t=>{
+  const x=setup(t,{policy:()=>undefined});
+  const report=await execute(x,'try{await capabilities["fixture.read"]({value:"x"});}catch{} return 1;');
+  assert.equal(report.reason,'blocked');assert.equal(x.calls.length,0);
+  assert.throws(()=>execute(x,'return 1','later'),/fenced/);
 });

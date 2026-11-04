@@ -16,6 +16,8 @@ export function startNativeLabGuest(input: {
   source: string;
   names: string[];
   guestMs: number;
+  heapBytes?: number;
+  stackBytes?: number;
   request: (request: GuestRequest) => Promise<Extract<HostMessage, {type: 'response'}>['result']>;
   phase: (busy: boolean, guestMs: number) => void;
 }): GuestRun {
@@ -67,7 +69,7 @@ export function startNativeLabGuest(input: {
       if (terminal) return;
     }
   });
-  child.stdin.write(JSON.stringify({type: 'start', source: input.source, names: input.names, guestMs: input.guestMs} satisfies HostMessage) + '\n');
+  child.stdin.write(JSON.stringify({type: 'start', source: input.source, names: input.names, guestMs: input.guestMs, heapBytes: input.heapBytes ?? limits.heapBytes, stackBytes: input.stackBytes ?? limits.stackBytes} satisfies HostMessage) + '\n');
   // Startup and a broken pump cannot retain a resident process forever.
   const startup = setTimeout(fail, 10_000);
   child.stdout.once('data', () => clearTimeout(startup));

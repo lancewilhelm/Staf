@@ -8,7 +8,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {startInstance} from '../dist/instance-service.js';
 import {Instance} from '../dist/instance.js';
-import {applicationCapability,dataSchema,resourceScope} from '../dist/code-mode/contract.js';
+import {applicationCapability,dataSchema,resourceScope,scopeClaim} from '../dist/code-mode/contract.js';
 import {z} from 'zod';
 
 async function eventually(read,accept=value=>!!value){for(let i=0;i<300;i++){const value=await read();if(accept(value))return value;await delay(10);}throw Error('Expected service state did not arrive');}
@@ -16,7 +16,7 @@ const echo=dataSchema(z.strictObject({value:z.string()}));
 const scope=call=>resourceScope({family:'synthetic',owner:call.context.botId,key:call.context.sessionId});
 async function fixture(t,{policy=()=> 'prompt',providerFail=false}={}) {
   let calls=0,offers=[];
-  const capability=applicationCapability({description:'Echo synthetic data',input:echo,output:echo,effect:{kind:'read',resource:scope},checkScope:async()=>{},invoke:async(call,input)=>{calls++;return {value:input.value.toUpperCase()};}});
+  const capability=applicationCapability({description:'Echo synthetic data',input:echo,output:echo,effect:{kind:'read',resource:scope},checkScope:async()=>scopeClaim(()=>undefined),invoke:async(call,input)=>{calls++;return {value:input.value.toUpperCase()};}});
   const app=startInstance(':memory:',0,{env:{},codeModeLab:{capabilities:{'fixture.read':capability},policy},providerFactory:async()=>({name:'synthetic-code-mode',capabilities:{toolCalls:true,incrementalText:false,transport:'demo'},async complete(messages,tools){
     offers.push(tools.map(tool=>tool.function.name));
     const last=messages.at(-1);

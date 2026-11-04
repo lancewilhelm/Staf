@@ -21,7 +21,7 @@ export const workerMessage = z.union([
 ]);
 export type WorkerMessage = z.infer<typeof workerMessage>;
 export const hostMessage = z.discriminatedUnion('type', [
-  z.strictObject({type: z.literal('start'), source: z.string(), names: z.array(z.string()), guestMs: z.number().positive().finite()}),
+  z.strictObject({type: z.literal('start'), source: z.string(), names: z.array(z.string()), guestMs: z.number().positive().finite(), heapBytes: z.number().int().positive().max(limits.heapBytes), stackBytes: z.number().int().positive().max(limits.stackBytes)}),
   z.strictObject({type: z.literal('response'), seq, result: z.discriminatedUnion('ok', [z.strictObject({ok: z.literal(true), value: jsonValue}), z.strictObject({ok: z.literal(false), error: z.string()})])}),
 ]);
 export type HostMessage = z.infer<typeof hostMessage>;

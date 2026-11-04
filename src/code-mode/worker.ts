@@ -42,14 +42,14 @@ function pump(): void {
     else if (pending.size === 0) end('error');
   } catch { end('error'); }
 }
-async function start(source: string, names: string[], budget: number): Promise<void> {
+async function start(source: string, names: string[], budget: number, heapBytes: number, stackBytes: number): Promise<void> {
   if (started) { end('error'); return; }
   started = true; allowance = budget;
   const module = await getQuickJS();
   if (ended) return;
   const runtime = module.newRuntime();
-  runtime.setMemoryLimit(limits.heapBytes);
-  runtime.setMaxStackSize(limits.stackBytes);
+  runtime.setMemoryLimit(heapBytes);
+  runtime.setMaxStackSize(stackBytes);
   runtime.setInterruptHandler(() => guestMs + performance.now() - segmentStart >= allowance);
   const vm = runtime.newContext(); context = vm;
   const bridge = vm.newFunction('__bridge', handle => {
@@ -77,6 +77,7 @@ async function start(source: string, names: string[], budget: number): Promise<v
         if (typeof v !== 'object' || seen.has(v)) throw Error('Expected JSON data');
         const proto = Object.getPrototypeOf(v);
         if (proto !== Object.prototype && proto !== null && !Array.isArray(v)) throw Error('Expected plain JSON');
+        if (Object.hasOwn(v, '__proto__')) throw Error('Unsupported JSON property');
         if (Object.getOwnPropertySymbols(v).length) throw Error('Expected JSON properties');
         if (Array.isArray(v) && (Object.keys(v).length !== v.length || Object.keys(v).some((key, index) => key !== String(index)))) throw Error('Expected dense JSON array');
         seen.add(v);
@@ -126,7 +127,7 @@ process.stdin.on('data', (chunk: Buffer) => {
     try {
       const raw: unknown = JSON.parse(line.toString('utf8'));
       const message = hostMessage.parse(raw);
-      if (message.type === 'start') void start(message.source, message.names, message.guestMs).catch(() => end('error'));
+      if (message.type === 'start') void start(message.source, message.names, message.guestMs, message.heapBytes, message.stackBytes).catch(() => end('error'));
       else {
         const promise = pending.get(message.seq);
         if (!promise || !context) {end('error'); return;}
