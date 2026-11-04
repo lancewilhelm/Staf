@@ -1,20 +1,8 @@
 import { createHash } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { isRecord } from './validation.js';
-
-export type WorkspaceReference =
-  | {kind: 'session-message'; sessionId: string; messageId: string}
-  | {kind: 'document-excerpt'; documentId: string; excerptId: string}
-  | {kind: 'artifact-revision'; artifactId: string; revision: number};
-
-export type ResolvedReference = {
-  reference: WorkspaceReference;
-  title: string;
-  location: string;
-  sourceDigest: string;
-  contentDigest: string;
-  content: string;
-};
+import type { ResolvedReference, WorkspaceReference } from './workspace-reference-types.js';
+export type { ResolvedReference, WorkspaceReference } from './workspace-reference-types.js';
 
 export const referenceLimits = {count: 8, excerptCharacters: 6000, totalCharacters: 24000};
 export const workspaceReferenceSchema = `CREATE TABLE IF NOT EXISTS command_references (

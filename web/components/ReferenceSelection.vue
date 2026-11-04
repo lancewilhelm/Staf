@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { WorkspaceReference } from '../../src/workspace-references';
+import type { WorkspaceReference } from '../../src/workspace-reference-types';
 
 defineProps<{sources: Array<{reference: WorkspaceReference; title: string; location: string}>; disabled?: boolean}>();
 const emit = defineEmits<{remove: [index: number]}>();
