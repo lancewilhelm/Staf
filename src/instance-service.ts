@@ -18,8 +18,9 @@ import { prepareDirectLogin, completeDirectLogin, loadDirectCredential, directAu
 import { createServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { randomBytes } from 'node:crypto';
-import { BotConflict, Instance } from './instance.js';
+import { assertDatasetAvailable, BotConflict, Instance } from './instance.js';
 import { AgentConfigConflict, AgentConfigInvalid, AgentConfigUncertain } from './agent-config.js';
+import {agentImageBodyType,agentImageBodyLimit,parseAgentImageInput} from './agent-image.js';
 import { MemoryConflict, type MemoryScope } from './memory.js';
 import { selectProvider } from './registry.js';
 import { runTurn } from './runtime.js';
@@ -39,7 +40,8 @@ import { resolveSettings } from './settings.js';
 import { usageText } from './usage.js';
 import { loadOpenRouterKey, saveOpenRouterKey, disconnectOpenRouter } from './openrouter-credential.js';
 
-export function startInstance(path: string, port = 0, options: {codeModeLab?: {capabilities: ApplicationCapabilities; policy: CodeModeOptions['policy']}; dataDir?: string; env?: Environment; enableCollaboration?: boolean; enableReusableApprovals?: boolean; localBootstrapToken?: string; authNow?:()=>number; authLifetimeMs?:number; webDependencies?:WebDependencies; searchTransport?:SearchTransport; shellExecutor?:typeof executeShellSandbox; modelRequest?:typeof fetch; authHooks?: {prepare:typeof prepareDirectLogin; complete:typeof completeDirectLogin; authorizationUrl?:typeof authorizationUrl}; providerFactory?: (profile: {provider:string; model:string | null; reasoning:string | null; instructions:string; chatId:string}, instructions:string) => Promise<Provider>} = {}) {
+export function startInstance(path: string, port = 0, options: {codeModeLab?: {capabilities: ApplicationCapabilities; policy: CodeModeOptions['policy']}; dataDir?: string; publicOrigin?: string; maintenanceToken?:string; env?: Environment; enableCollaboration?: boolean; enableReusableApprovals?: boolean; localBootstrapToken?: string; authNow?:()=>number; authLifetimeMs?:number; webDependencies?:WebDependencies; searchTransport?:SearchTransport; shellExecutor?:typeof executeShellSandbox; modelRequest?:typeof fetch; authHooks?: {prepare:typeof prepareDirectLogin; complete:typeof completeDirectLogin; authorizationUrl?:typeof authorizationUrl}; providerFactory?: (profile: {provider:string; model:string | null; reasoning:string | null; instructions:string; chatId:string}, instructions:string) => Promise<Provider>} = {}) {
+  assertDatasetAvailable(path,options.maintenanceToken);
   if (options.codeModeLab && !options.providerFactory) throw Error('Code Mode lab requires an injected synthetic provider');
   const codeApprovals = new CodeApprovals(codeLimits.approvalMs);
   const codeWorks = new Set<CodeModeWork>();
@@ -52,7 +54,7 @@ export function startInstance(path: string, port = 0, options: {codeModeLab?: {c
   const redactProgress=streamingRedactor(env,()=>[...knownKeys]);
   const redact = (text:string) => [...knownKeys].reduce((result,key)=>redactor({OPENROUTER_API_KEY:key})(result),redactEnv(text));
   const providerEnv = (provider:string) => ({...env,STAF_MODEL:undefined,...(provider==='openrouter'?{OPENROUTER_API_KEY:loadOpenRouterKey(dataDir)}:{})});
-  const instance = new Instance(path,redact);
+  const instance = new Instance(path,redact,options.maintenanceToken);
   if (options.localBootstrapToken) instance.bootstrapLocal(options.localBootstrapToken);
   const active = new Set<AbortController>();
   const responseControllers = new Map<string,AbortController>();
@@ -268,13 +270,16 @@ export function startInstance(path: string, port = 0, options: {codeModeLab?: {c
   let scheduleTimer: ReturnType<typeof setInterval> | undefined;
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     res.setHeader('Cache-Control', 'no-store'); res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Staf-Dataset', instance.datasetIdentity());
     const json = (status: number, value: unknown) => { res.writeHead(status, {'Content-Type':'application/json'}); res.end(JSON.stringify(value)); };
     try {
       const address = server.address(); if (!address || typeof address === 'string') throw Error('Not listening');
-      const origin = `http://127.0.0.1:${address.port}`;
-      if (req.headers.host !== `127.0.0.1:${address.port}` || (req.headers.origin && req.headers.origin !== origin)) return json(403,{error:'Invalid origin'});
+      const origin = options.publicOrigin ?? `http://127.0.0.1:${address.port}`;
+      if (req.headers.host !== new URL(origin).host || (req.headers.origin && req.headers.origin !== origin)) return json(403,{error:'Invalid origin'});
+      if (req.method === 'GET' && req.url === '/api/dataset') return json(200,{id:instance.datasetIdentity()});
+      if (req.headers['x-staf-dataset'] && req.headers['x-staf-dataset'] !== instance.datasetIdentity()) return json(409,{error:'Dataset changed. Refresh before retrying.'});
       if ((req.url ?? '').startsWith('/auth/callback')) {const result=await authFor(origin).accept(req.method ?? '',req.url ?? '');res.setHeader('Referrer-Policy','no-referrer');res.writeHead(result === 'accepted' ? 200 : 400,{'Content-Type':'text/plain; charset=utf-8'});return res.end(result === 'accepted' ? 'Sign-in completed. Return to Staf.' : 'Sign-in could not be completed. Return to Staf.');}
-      const csp="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'";
+      const csp="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'";
       if (req.method === 'GET' && (req.url === '/' || /^\/assets\/[\w.-]+\.(js|css)$/.test(req.url ?? ''))) {
         const webDir=fileURLToPath(new URL('./web/',import.meta.url));
         const index=readFileSync(resolve(webDir,'index.html'),'utf8');
@@ -283,21 +288,36 @@ export function startInstance(path: string, port = 0, options: {codeModeLab?: {c
         res.writeHead(200,{'Content-Type':req.url?.endsWith('.css') ? 'text/css; charset=utf-8' : 'text/javascript; charset=utf-8','Cache-Control':'public, max-age=31536000, immutable'});return res.end(readFileSync(resolve(webDir,'.'+req.url)));
       }
       let body: unknown = {};
+      const imageBody=req.headers['content-type']?.split(';')[0]===agentImageBodyType;
+      const rejectBody=(status:number,error:string)=>{res.setHeader('Connection','close');req.resume();json(status,{error});};
       if (req.method === 'POST') {
-        if (!req.headers['content-type']?.startsWith('application/json')) return json(415,{error:'JSON required'});
-        const bodyLimit=(req.url === '/api/skills' || /^\/api\/skills\/[\w-]+\/update$/.test(req.url ?? '')) ? 1600000 : 65536;
+        if (imageBody) {
+          if (req.url!=='/api/bots' && !/^\/api\/bots\/[\w-]+\/profile$/.test(req.url??'')) return rejectBody(415,'Image bodies are only accepted by agent create and profile saves');
+          const credential=req.headers.authorization?.match(/^Bearer ([A-Za-z0-9_-]+)$/)?.[1];
+          if(!credential || !instance.authorized(credential))return rejectBody(401,'Unauthorized');
+        } else if (!req.headers['content-type']?.startsWith('application/json')) return rejectBody(415,'JSON required');
+        const bodyLimit=imageBody ? agentImageBodyLimit : (req.url === '/api/skills' || /^\/api\/skills\/[\w-]+\/update$/.test(req.url ?? '')) ? 1600000 : 65536;
         const chunks:Buffer[]=[];let size=0;
-        for await (const chunk of req) { const bytes=Buffer.isBuffer(chunk)?chunk:Buffer.from(chunk);size+=bytes.length;if(size>bodyLimit)return json(413,{error:'Body too large'});chunks.push(bytes); }
+        for await (const chunk of req) { const bytes=Buffer.isBuffer(chunk)?chunk:Buffer.from(chunk);size+=bytes.length;if(size>bodyLimit)chunks.length=0;else chunks.push(bytes); }
+        if(size>bodyLimit)return rejectBody(413,'Body too large');
         body = JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(Buffer.concat(chunks)));
       }
       if (!isRecord(body)) return json(400,{error:'Invalid body'});
       const value = body;
+      if (imageBody && (!isRecord(value.image) || value.image.kind!=='upload-data')) return json(400,{error:'An image body requires an uploaded PNG crop'});
+      if (!imageBody && isRecord(value.image) && value.image.kind==='upload-data') return json(415,{error:'Use the agent image content type for uploaded crops'});
       if (req.method === 'POST' && req.url === '/api/pair') {
         if (!code || value.code !== code) return json(403,{error:'Invalid pairing code'});
         code = undefined; const token = randomBytes(32).toString('base64url'); instance.authorize(token); return json(200,{token});
       }
       const token = req.headers.authorization?.match(/^Bearer ([A-Za-z0-9_-]+)$/)?.[1];
       if (!token || !instance.authorized(token)) return json(401,{error:'Unauthorized'});
+      const imageMatch=req.url?.match(/^\/api\/agent-images\/([a-f0-9]{64})$/);
+      if(req.method==='GET' && imageMatch?.[1]) {
+        const bytes=instance.agentImage(imageMatch[1]);
+        if(!bytes)return json(404,{error:'Image unavailable. Choose another image or use initials.'});
+        res.writeHead(200,{'Content-Type':'image/png','Content-Length':bytes.length});return res.end(bytes);
+      }
       if(req.method==='POST' && (req.url==='/api/bots' || req.url==='/api/creation-defaults' || req.url==='/api/provider-defaults' || /^\/api\/bots\/[\w-]+\/selection$/.test(req.url??'') || /^\/api\/bots\/[\w-]+\/profile$/.test(req.url ?? '')) && JSON.stringify(redactValue(value,redact))!==JSON.stringify(value)) return json(400,{error:'Agent configuration cannot contain a credential'});
       if(req.url==='/api/openrouter-connection') {
         if(req.method==='GET') return json(200,{saved:!!loadOpenRouterKey(dataDir)});
@@ -476,7 +496,7 @@ export function startInstance(path: string, port = 0, options: {codeModeLab?: {c
       if (req.method === 'POST' && req.url === '/api/bots') {
         if (typeof value.name !== 'string' || !value.name.trim() || value.name.length > 200 || (value.instructions !== undefined && (typeof value.instructions !== 'string' || value.instructions.length > 30000))) return json(400,{error:'Invalid name or instructions'});
         if ((value.reasoning!==undefined&&value.reasoning!==null&&typeof value.reasoning!=='string') || (value.operationId !== undefined && (typeof value.operationId !== 'string' || !/^[\w-]{1,100}$/.test(value.operationId))) || (value.provider !== undefined && (typeof value.provider !== 'string' || !['demo','codex','openrouter','lmstudio','live'].includes(value.provider))) || (value.model !== undefined && value.model !== null && (typeof value.model !== 'string' || value.model.length > 200))) return json(400,{error:'Invalid creation operation'});
-        return json(201,instance.createBot({name:value.name,instructions:typeof value.instructions === 'string' ? value.instructions : '',...(typeof value.operationId === 'string' ? {operationId:value.operationId} : {}),...(typeof value.provider === 'string' ? {provider:value.provider} : {}),...(typeof value.model === 'string' ? {model:value.model} : {}),...(typeof value.reasoning==='string'?{reasoning:value.reasoning}:{})},typeof value.provider==='string'?selectionCatalogs.get(value.provider)?.defaultModel:undefined));
+        return json(201,instance.createBot({name:value.name,instructions:typeof value.instructions === 'string' ? value.instructions : '',...(typeof value.operationId === 'string' ? {operationId:value.operationId} : {}),...(typeof value.provider === 'string' ? {provider:value.provider} : {}),...(typeof value.model === 'string' ? {model:value.model} : {}),...(typeof value.reasoning==='string'?{reasoning:value.reasoning}:{}),image:parseAgentImageInput(value.image)},typeof value.provider==='string'?selectionCatalogs.get(value.provider)?.defaultModel:undefined));
       }
       const creationMatch=req.url?.match(/^\/api\/bot-creations\/([\w-]+)$/);
       if(req.method==='GET' && creationMatch?.[1]) {const bot=instance.creationOperation(creationMatch[1]);return bot ? json(200,bot) : json(404,{error:'Creation operation not found'});}
@@ -490,7 +510,7 @@ export function startInstance(path: string, port = 0, options: {codeModeLab?: {c
         }
         if (req.method === 'POST' && action === 'profile') {
           if ('soul' in value || typeof value.revision !== 'string' || !/^[a-f0-9]{64}$/.test(value.revision) || typeof value.name !== 'string' || !value.name.trim() || value.name.length > 200 || (value.description !== undefined && (typeof value.description !== 'string' || Buffer.byteLength(value.description,'utf8') > 4096)) || typeof value.instructions !== 'string' || value.instructions.length > 30000 || typeof value.provider !== 'string' || !['demo','codex','openrouter','lmstudio','live'].includes(value.provider) || !(value.model === null || typeof value.model === 'string' && value.model.length <= 200) || !(value.reasoning === null || typeof value.reasoning === 'string' && value.reasoning.length <= 100)) return json(400,{error:'Invalid profile'});
-          return json(200,instance.editBot(id,{revision:value.revision,name:value.name,...(typeof value.description === 'string' ? {description:value.description} : {}),instructions:value.instructions,provider:value.provider,model:value.model,reasoning:value.reasoning}));
+          return json(200,instance.editBot(id,{revision:value.revision,name:value.name,...(typeof value.description === 'string' ? {description:value.description} : {}),instructions:value.instructions,provider:value.provider,model:value.model,reasoning:value.reasoning,...(value.image===undefined?{}:{image:parseAgentImageInput(value.image)})}));
         }
       }
       const terminalInfoMatch=req.url?.match(/^\/api\/bots\/([\w-]+)\/(usage|context|models)$/);
@@ -634,5 +654,5 @@ export function startInstance(path: string, port = 0, options: {codeModeLab?: {c
       return json(404,{error:'Not found'});
     } catch (error) { if(error instanceof AgentConfigInvalid)return json(422,{error:error.message,code:'invalid_agent_configuration'});if(error instanceof AgentConfigUncertain)return json(503,{error:error.message,code:'configuration_save_uncertain'});return json((error instanceof BotConflict || error instanceof AgentConfigConflict || error instanceof MemoryConflict || error instanceof SkillConflict || error instanceof ScheduleConflict) ? 409 : 400,{error:error instanceof Error ? error.message : 'Request failed'}); }
   });
-  return { server, code, migrationBackup: instance.migrationBackup, issueCode: () => (code = randomBytes(18).toString('base64url')), close: () => new Promise<void>((resolve,reject)=>{closing=true; instanceAuth?.shutdown(); if(scheduleTimer) clearInterval(scheduleTimer); for(const subscriber of responseSubscribers)subscriber.response.end();for(const controller of active) controller.abort(); server.close(error=>{void Promise.allSettled([...codeWorks].map(work => work.dispose())).then(() => {instance.close(); if(error)reject(error);else resolve();});});}), listen: () => new Promise<number>((resolve,reject)=>{server.once('error',reject);server.listen(port,'127.0.0.1',()=>{const a=server.address();if(a && typeof a !== 'string') { tickSchedules(); scheduleTimer=setInterval(tickSchedules,30000); resolve(a.port); }else reject(Error('Listen failed'));});}) };
+  return { server, code, migrationBackup: instance.migrationBackup, finishUpgrade: (token:string)=>instance.finishUpgrade(token), issueCode: () => (code = randomBytes(18).toString('base64url')), close: () => new Promise<void>((resolve,reject)=>{closing=true; instanceAuth?.shutdown(); if(scheduleTimer) clearInterval(scheduleTimer); for(const subscriber of responseSubscribers)subscriber.response.end();for(const controller of active) controller.abort(); server.close(error=>{void Promise.allSettled([...codeWorks].map(work => work.dispose())).then(() => {instance.close(); if(error)reject(error);else resolve();});});}), listen: () => new Promise<number>((resolve,reject)=>{server.once('error',reject);server.listen(port,'127.0.0.1',()=>{const a=server.address();if(a && typeof a !== 'string') { tickSchedules(); scheduleTimer=setInterval(tickSchedules,30000); resolve(a.port); }else reject(Error('Listen failed'));});}) };
 }

@@ -1,5 +1,38 @@
 # Staf runtime and provider boundary
 
+The local development launcher runs Vite and the shared instance as separate
+processes. Vite serves the workspace and forwards same-origin service requests
+to the loopback backend; source changes rebuild and restart that backend. The
+service remains authoritative for connections and shared data. See the
+[development workflow](development.md#run-the-development-workspace).
+
+Development reset builds the seed through `Instance` in a separate directory.
+The launcher and maintenance commands share a data-directory owner port, and
+maintenance also takes the SQLite exclusive lock. Before publishing a database
+and agent-file replacement, maintenance saves both and writes a durable marker.
+Instance startup checks that marker before initialization and again after taking
+the database lock. Maintenance fences the original and replacement SQLite files
+with an unsupported schema version until the database and agent files are durable,
+so an older checkout cannot open a partially published dataset even after a crash.
+Maintenance reopens SQLite at the published path before further writes so its
+rollback journal stays beside the active database.
+Recovery retains the unchanged original before replacement begins, restores the
+prior copy after replacement starts, and finalizes a committed dataset without
+discarding later writes. Development startup
+also saves a complete copy and fences the database before schema migration.
+Provider connection files stay outside the replacement set. Explicit restoration
+clears client authorizations and assigns a new browser dataset identity.
+
+The shared service derives an opaque dataset identity from an instance secret and
+returns it to the browser. Browser creation and draft records use that identity,
+and the service rejects requests that carry a different identity. A legacy unscoped
+draft is adopted only when its agent, command ID and command text match durable
+server data; a legacy creation requires a matching recorded operation. Web Locks
+protect adoption from an active older tab. Other unscoped records remain available
+for explicit read-only copy-out, without assigning them to a dataset. The identity
+survives an ordinary restart and changes on reset or explicit restore. Recovery
+does not replay work.
+
 A shared instance owns bot profiles, conversations, task attempts, permissions,
 and provider execution. The browser and terminal are paired clients of the same
 loopback service. The automatic terminal instance stores its SQLite database and
@@ -138,6 +171,14 @@ Database version 8 adds the immutable skill catalog, per-bot availability, task 
 
 ### Shared-instance memory
 
+The browser exposes read-only agent and shared user memory through the existing
+authenticated scoped list APIs. It validates each response against the requested
+audience and paginates the complete snapshot locally in groups of 20. Leaving a
+memory page aborts its request; later responses cannot repopulate another page.
+Pairing loss unmounts settings and memory views. Archived agents remain
+inspectable without restoration. No memory mutation or provider call is added.
+
+
 Version 6 adds scoped memory in the instance database transaction after a protected migration backup. The store enforces bot and user scopes and optimistic versions. Provider calls receive bounded keyword-matched memories as untrusted request-only data. The session retains ordinary messages rather than the injected memory. Main-chat saves use only directly recognized owner input; provider output cannot invoke a memory mutation. Version 7 adds durable, bot-bound shared-memory proposals. A separate explicit owner confirmation atomically saves the proposed text once, and cancellation clears the pending proposal text without creating memory. The original text and proposal response remain in chat history and may be sent in future model requests or task context; cancellation does not erase backups or already-sent data. This is an offline-tested preview and not a general intent interpreter.
 
 ### Shared-instance clock dispatch
@@ -212,6 +253,32 @@ local saved credentials still do not establish provider or model access.
 ### Inline main-chat execution
 
 The workspace reads service-owned command progress and persisted tool records through `/api/bots/{id}/chat-work`; it associates records and exact pending approvals with the command user message. Snapshot replacement avoids duplicate delivery. Tool outcomes remain stored independently of later provider success or failure. Database version 30 adds bounded result detail to command runtime events after a protected migration backup. The CLI summary contract remains unchanged. Ordinary chat no longer receives the background-task creation adapter; unsolicited calls fail without starting work. The task engine and explicit API/CLI remain intact. Synthetic checks do not prove live provider behavior.
+
+### Shared agent images
+
+The shared agent-image contract owns the catalog, palette, descriptor validation,
+regular polygon rendering, and configuration encoding. Both the server and Vue
+use it. The descriptor is a top-level `image` string in the authoritative agent
+configuration; it is not a browser appearance preference. Omitting it preserves
+legacy initials, and profile edits from older clients retain the saved choice.
+
+The image asset store accepts only bounded, normalized PNG crops during Create
+or Save. It decodes them, discards ancillary source content by re-encoding, and
+writes private immutable assets under the backed-up agents directory before the
+configuration can reference them. Existing configuration revision checks and
+retry-safe creation identity include image choices. There is no separate upload
+session that can publish an image before the form is saved. Completed assets
+are retained for history and uncertain-save recovery; temporary files are
+cleaned separately.
+
+One Vue renderer supplies the existing badges. Uploaded images use authenticated
+fetch and revocable Blob URLs, with initials on load failure. A shared chooser
+owns local crop previews, independent shape/color selection, and keyboard crop
+sliders. Normal state refresh delivers saved descriptors to other clients;
+unchanged asset identities do not recreate image URLs on every poll. No image
+metadata or bytes are added to model prompts. See the
+[image reference](reference.md#agent-image-configuration-and-api) for limits and
+transport details, and [usage](usage.md#agent-images) for owner controls.
 
 ## Code Mode experiment
 

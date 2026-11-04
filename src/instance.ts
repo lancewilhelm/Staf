@@ -3,10 +3,12 @@ import {contextIds, type CapabilityContextInput} from './code-mode/contract.js';
 import {ProviderDefaultsStore} from './provider-choices.js';
 import { DatabaseSync } from 'node:sqlite';
 import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
-import { closeSync, openSync, mkdtempSync, rmSync } from 'node:fs';
+import { closeSync, existsSync, openSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { AgentConfigStore, AgentConfigUncertain } from './agent-config.js';
+import {AgentImageAssets} from './agent-image-assets.js';
+import {imageSetting,type AgentImage,type AgentImageInput} from './agent-image.js';
 import { hasCode } from './validation.js';
 import type { Session, Message } from './types.js';
 import { validSession } from './validation.js';
@@ -26,10 +28,28 @@ import { ApprovalGrants, approvalGrantSchema, type GrantBoundary } from './appro
 const clockAction: Action = { capability:'clock', operation:'read', resource:'utc', effect:'read', limits:{}, risk:'safe' };
 const clockBoundary = { enabledCapabilities:['clock'], actions:[clockAction] };
 const modes: ApprovalMode[] = ['ask-every-time','ask-for-risky-actions','never-ask'];
+export const INSTANCE_SCHEMA_VERSION = 30;
+const MAINTENANCE_VERSION = 2147483647;
 
 export const starterSoul = "You are an assistant working for the owner. Be clear and candid. Distinguish observations from assumptions. Follow the owner's role instructions and work within the permissions and task scope granted to you.";
-export type BotEdit = { revision: string; name: string; description?: string; instructions: string; provider: string; model: string | null; reasoning: string | null };
+export type BotEdit = { revision: string; name: string; description?: string; instructions: string; provider: string; model: string | null; reasoning: string | null;image?:AgentImageInput };
 export class BotConflict extends Error {}
+
+export function assertDatasetAvailable(path: string, maintenanceToken?:string) {
+  if (path !== ':memory:' && existsSync(`${path}.maintenance.json`)) {
+    if (maintenanceToken) {
+      try {const marker:unknown=JSON.parse(readFileSync(`${path}.maintenance.json`,'utf8'));if(marker && typeof marker==='object' && 'token' in marker && marker.token===maintenanceToken)return;} catch {}
+    }
+    throw Error('Dataset maintenance was interrupted. Run pnpm dev:recover before starting Staf.');
+  }
+}
+
+function upgradeVersion(path:string, token:string|undefined):number|undefined {
+  if (!token) return undefined;
+  const marker:unknown=JSON.parse(readFileSync(`${path}.maintenance.json`,'utf8'));
+  if (!marker || typeof marker!=='object' || !('phase' in marker) || marker.phase!=='upgrading' || !('token' in marker) || marker.token!==token || !('schemaVersion' in marker) || typeof marker.schemaVersion!=='number' || !Number.isSafeInteger(marker.schemaVersion) || marker.schemaVersion<0 || marker.schemaVersion>=INSTANCE_SCHEMA_VERSION) throw Error('Invalid upgrade maintenance marker.');
+  return marker.schemaVersion;
+}
 
 /** Instance-owned records. Callers supply execution; no provider runs during creation. */
 export class Instance {
@@ -37,11 +57,15 @@ export class Instance {
   private readonly codeModeStores = new Set<CodeModeStore>();
   private readonly codeModeCommands = new Set<string>();
   private readonly configs: AgentConfigStore;
+  private images:AgentImageAssets|undefined;
   private readonly temporaryConfigRoot: string | undefined;
   private readonly fingerprintKey: Uint8Array;
+  private readonly datasetKey: Uint8Array;
+  private maintenanceToken: string | undefined;
   private readonly grantControllers = new Map<string,Set<AbortController>>();
   readonly migrationBackup: string | undefined;
-  constructor(path: string, private readonly redactSkill: (text:string) => string = text => text) {
+  constructor(path: string, private readonly redactSkill: (text:string) => string = text => text, maintenanceToken?:string) {
+    assertDatasetAvailable(path,maintenanceToken);
     this.temporaryConfigRoot = path === ':memory:' ? mkdtempSync(join(tmpdir(),'staf-config-')) : undefined;
     this.configs = new AgentConfigStore(this.temporaryConfigRoot ?? join(dirname(resolve(path)),'agents'));
     if (path !== ':memory:') {
@@ -51,15 +75,23 @@ export class Instance {
     this.db = new DatabaseSync(path);
     try {
     this.db.exec('PRAGMA locking_mode=EXCLUSIVE; BEGIN EXCLUSIVE; COMMIT;');
+    assertDatasetAvailable(path,maintenanceToken);
     const hasBots = this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='bots'").get();
     const hasProfiles = this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='bot_profiles'").get();
     const versionRow = this.db.prepare('PRAGMA user_version').get();
-    const version = Number(versionRow?.user_version ?? 0);
-    if (version > 30) throw new Error('Database version is newer than this Staf');
-    if (hasBots && version < 30 && path !== ':memory:') {
+    const storedVersion = Number(versionRow?.user_version ?? 0);
+    const originalVersion=upgradeVersion(path,maintenanceToken);
+    if (originalVersion!==undefined && storedVersion!==MAINTENANCE_VERSION) throw Error('Upgrade database is not fenced.');
+    const version = originalVersion ?? storedVersion;
+    this.maintenanceToken=maintenanceToken;
+    if (version > INSTANCE_SCHEMA_VERSION) throw new Error(`Database version ${version} is newer than this Staf (maximum ${INSTANCE_SCHEMA_VERSION}). Use a compatible checkout or select another data directory; the database was not reset.`);
+    if (hasBots && version < INSTANCE_SCHEMA_VERSION && path !== ':memory:') {
       this.migrationBackup = `${path}.before-${version < 2 ? 'profiles' : version < 3 ? 'tasks' : version < 4 ? 'approvals' : version < 5 ? 'task-inbox' : version < 6 ? 'memory' : version < 7 ? 'memory-confirmation' : version < 8 ? 'skills' : version < 9 ? 'schedules' : version < 10 ? 'schedule-retries' : version < 11 ? 'schedule-lineage' : version < 12 ? 'bot-description' : version < 13 ? 'delegation-scope' : version < 14 ? 'collaboration' : version < 15 ? 'disclosure' : version < 16 ? 'chat-tasks' : version < 17 ? 'creation-defaults' : version < 18 ? 'web-actions' : version < 19 ? 'search-actions' : version < 20 ? 'scratch-shell' : version < 21 ? 'approval-grants' : version < 22 ? 'schedule-web-scope' : version < 23 ? 'schedule-search-scope' : version < 24 ? 'schedule-shell-scope' : version < 25 ? 'main-bot' : version < 26 ? 'command-events' : version < 27 ? 'bot-creation' : version < 28 ? 'response-progress' : 'response-stop'}-${randomUUID()}.sqlite`;
       const previousUmask = process.umask(0o077);
-      try { this.db.prepare('VACUUM INTO ?').run(this.migrationBackup); }
+      try {
+        this.db.prepare('VACUUM INTO ?').run(this.migrationBackup);
+        if(originalVersion!==undefined){const backup=new DatabaseSync(this.migrationBackup);try{backup.exec(`PRAGMA user_version=${version}`)}finally{backup.close()}}
+      }
       finally { process.umask(previousUmask); }
     }
     this.db.exec(`PRAGMA foreign_keys=ON; BEGIN IMMEDIATE;
@@ -130,7 +162,7 @@ export class Instance {
     if(version < 29)this.db.exec("CREATE TABLE IF NOT EXISTS response_stops (command_id TEXT PRIMARY KEY REFERENCES commands(id))");
     if(version < 30 && !this.db.prepare("SELECT 1 FROM pragma_table_info('command_runtime_events') WHERE name='detail'").get())this.db.exec('ALTER TABLE command_runtime_events ADD COLUMN detail TEXT');
     this.db.exec('CREATE INDEX IF NOT EXISTS command_runtime_events_command ON command_runtime_events(command_id,seq)');
-    this.db.exec('PRAGMA user_version=30');
+    if (!maintenanceToken) this.db.exec(`PRAGMA user_version=${INSTANCE_SCHEMA_VERSION}`);
     for (const row of this.db.prepare("SELECT id,bot_id FROM task_attempts WHERE state IN ('queued','running','stopping','waiting') ORDER BY rowid").all()) {
       if (typeof row.id !== 'string' || typeof row.bot_id !== 'string') throw Error('Invalid interrupted task');
       this.cancelTaskInputs(row.id);
@@ -144,6 +176,9 @@ export class Instance {
     const key = this.db.prepare("SELECT value FROM instance_secrets WHERE name='command-fingerprint'").get()?.value;
     if (!(key instanceof Uint8Array) || key.length !== 32) throw Error('Invalid instance fingerprint key');
     this.fingerprintKey = key;
+    const datasetKey=this.db.prepare("SELECT value FROM instance_secrets WHERE name='dataset-identity'").get()?.value;
+    if(datasetKey!==undefined && (!(datasetKey instanceof Uint8Array)||datasetKey.length!==32))throw Error('Invalid dataset identity key');
+    this.datasetKey=datasetKey ?? key;
     this.db.exec('COMMIT');
     // Seal valid pre-existing file configurations before accepting clients.
     this.bots();
@@ -154,6 +189,7 @@ export class Instance {
       FROM schedules s JOIN schedule_occurrences o ON o.schedule_id=s.id
       WHERE o.task_id=? OR EXISTS (SELECT 1 FROM schedule_task_retries r WHERE r.attempt_id=? AND r.schedule_id=o.schedule_id AND r.due_at=o.due_at)`).get(attemptId,attemptId);
   }
+  datasetIdentity() { return createHmac('sha256',this.datasetKey).update('staf-dataset-identity-v1').digest('hex'); }
   scheduleClockAllowed(attemptId:string) {
     const row=this.scheduleOrigin(attemptId);
     if (!row) return true;
@@ -312,6 +348,10 @@ export class Instance {
       }
     }
     return false;
+  }
+  finishUpgrade(token:string) {
+    if (!this.maintenanceToken || this.maintenanceToken!==token) throw Error('Invalid upgrade maintenance token.');
+    this.db.exec(`PRAGMA user_version=${INSTANCE_SCHEMA_VERSION}`);this.maintenanceToken=undefined;
   }
   close() { for (const store of this.codeModeStores) store.close(); this.codeModeStores.clear(); this.db.close(); if(this.temporaryConfigRoot)rmSync(this.temporaryConfigRoot,{recursive:true,force:true}); }
   shellConfig() {const row=this.db.prepare('SELECT revision,docker_binary AS dockerBinary,docker_socket AS dockerSocket,image_id AS imageId FROM shell_config WHERE id=1').get();if(!row || typeof row.revision!=='number' || !(row.dockerBinary===null || typeof row.dockerBinary==='string') || !(row.dockerSocket===null || typeof row.dockerSocket==='string') || !(row.imageId===null || typeof row.imageId==='string'))throw Error('Invalid shell configuration');return {revision:row.revision,dockerBinary:row.dockerBinary,dockerSocket:row.dockerSocket,imageId:row.imageId};}
@@ -484,18 +524,26 @@ export class Instance {
     const result=this.db.prepare('UPDATE creation_defaults SET revision=revision+1,provider=?,model=?,reasoning=? WHERE id=1 AND revision=?').run(input.provider,input.model,input.reasoning,input.revision);
     if(!result.changes)throw new BotConflict('Creation defaults changed. Refresh before editing.');return this.creationDefaults();
   }
-  createBot(input: {name: string; instructions: string; provider?: string; model?: string; reasoning?: string; operationId?: string}, advertisedModel?:string) {
+  private imageAssets() {return this.images??=new AgentImageAssets(join(dirname(dirname(this.configs.location('placeholder'))),'.images'));}
+  agentImage(assetId:string) {return this.imageAssets().read(assetId);}
+  private requireStoredImage(image:AgentImage,previous?:AgentImage) {
+    if(image.kind==='upload' && !(previous?.kind==='upload' && previous.assetId===image.assetId) && !this.imageAssets().read(image.assetId)) throw Error('The selected image is unavailable. Upload it again or choose another image.');
+  }
+  createBot(input: {name: string; instructions: string; provider?: string; model?: string; reasoning?: string; operationId?: string;image?:AgentImageInput}, advertisedModel?:string) {
     if (!input.name.trim() || (input.provider !== undefined && !input.provider.trim())) throw new Error('Name and provider are required');
     const id = randomUUID(), chatId = randomUUID();
     this.db.exec('BEGIN IMMEDIATE');
     try {
-      const digest=input.operationId ? createHmac('sha256',this.fingerprintKey).update(JSON.stringify([input.name,input.instructions,input.provider ?? null,input.model ?? null,input.reasoning ?? null])).digest('hex') : null;
+      const image:AgentImage=input.image?.kind==='upload-data'?this.imageAssets().accept(input.image):input.image??{kind:'initials'};
+      const savedImage=imageSetting(image);
+      const digest=input.operationId ? createHmac('sha256',this.fingerprintKey).update(JSON.stringify([input.name,input.instructions,input.provider ?? null,input.model ?? null,input.reasoning ?? null,...(savedImage===null?[]:[savedImage])])).digest('hex') : null;
       if(input.operationId) { const existing=this.db.prepare('SELECT digest,bot_id FROM bot_creation_operations WHERE id=?').get(input.operationId); if(existing) { if(existing.digest!==digest || typeof existing.bot_id!=='string') throw new BotConflict('Creation operation ID conflict'); const bot=this.bot(existing.bot_id); this.db.exec('COMMIT'); return bot; } }
+      this.requireStoredImage(image);
       const defaults=this.creationDefaults();const provider=input.provider ?? defaults.provider;
       const first=this.providerDefaults().read().providers[provider];
       const chosenModel=input.model ?? (input.provider===undefined?defaults.model:first?.model??advertisedModel??null);
       const chosenReasoning=input.reasoning ?? (input.provider===undefined?defaults.reasoning:first?.reasoning??null);
-      this.configs.publish(id,{name:input.name,description:'',provider,model:chosenModel,reasoning:chosenReasoning,instructions:input.instructions,providerChoices:{[provider]:{model:chosenModel,reasoning:chosenReasoning}}},false);
+      this.configs.publish(id,{name:input.name,description:'',provider,model:chosenModel,reasoning:chosenReasoning,instructions:input.instructions,providerChoices:{[provider]:{model:chosenModel,reasoning:chosenReasoning}},image},false);
       this.db.prepare('INSERT INTO bots VALUES (?, ?, ?, ?, ?, ?, ?)').run(id, chatId, '', '', 'demo', null, null);
       this.db.prepare('INSERT INTO bot_profiles (bot_id,revision,soul,archived) VALUES (?, 1, ?, 0)').run(id, '');
       if(input.operationId && digest) this.db.prepare('INSERT INTO bot_creation_operations VALUES (?,?,?)').run(input.operationId,digest,id);
@@ -529,7 +577,9 @@ export class Instance {
       if (!current) throw new Error('Agent not found');
       if (current.revision !== edit.revision) throw new BotConflict('Profile changed. Refresh before editing.');
       const providerChoices={...current.providerChoices,[current.provider]:{model:current.model,reasoning:current.reasoning},[edit.provider]:{model:edit.model,reasoning:edit.reasoning}};
-      const config=this.configs.publish(id,{name:edit.name,description:edit.description ?? current.description,instructions:edit.instructions,provider:edit.provider,model:edit.model,reasoning:edit.reasoning,providerChoices},current.archived,edit.revision);
+      const image=edit.image?.kind==='upload-data'?this.imageAssets().accept(edit.image):edit.image??current.image;
+      this.requireStoredImage(image,current.image);
+      const config=this.configs.publish(id,{name:edit.name,description:edit.description ?? current.description,instructions:edit.instructions,provider:edit.provider,model:edit.model,reasoning:edit.reasoning,providerChoices,image},current.archived,edit.revision);
       try { this.db.exec('COMMIT'); } catch { throw new AgentConfigUncertain('Configuration save may have taken effect. Inspect the current configuration before retrying.'); }
       return {...current,...config};
     } catch (error) { try { this.db.exec('ROLLBACK'); } catch {} throw error; }

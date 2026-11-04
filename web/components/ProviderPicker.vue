@@ -4,7 +4,7 @@ import type { BotProfile } from '../controller';
 import { useWorkspace } from '../workspace';
 import ChoiceFields from './ChoiceFields.vue';
 const props = withDefaults(defineProps<{id: string; disabled?: boolean; compact?: boolean}>(), {disabled: false});
-const emit = defineEmits<{profile: [profile: BotProfile]; selected: []; ready: []}>();
+const emit = defineEmits<{profile: [profile: BotProfile, baseRevision: string | null]; selected: []; ready: []}>();
 const { app, state } = useWorkspace();
 const profile = shallowRef<BotProfile | null>(null);
 const model = ref('');
@@ -47,7 +47,7 @@ async function commit(field: 'provider' | 'model' | 'reasoning', value: string) 
     const saved = await app.selectProvider(previous, field === 'provider' ? value : previous.provider, field === 'provider' ? {} : {[field]: value === 'default' || !value ? null : value});
     profile.value = saved;
     model.value = saved.model ?? '';
-    emit('profile', saved);
+    emit('profile', saved, previous.revision);
     notice.value = field === 'model' && previous.reasoning && previous.reasoning !== saved.reasoning ? 'Reasoning changed to Provider default for this model.' : 'Saved. Applies to the next message.';
     if (props.compact) { app.notify(notice.value, 'success'); if (field === 'model') emit('selected'); }
   } catch (reason) { error.value = 'Save failed or is uncertain. Your edits are retained. ' + String(reason); }
@@ -61,7 +61,7 @@ async function compare() {
     const current = await app.botProfile(props.id);
     profile.value = current;
     error.value = 'Current saved model: ' + (current.model ?? '(unset)') + '. Review retained model text before retrying.';
-    emit('profile', current);
+    emit('profile', current, null);
   } catch (reason) { error.value = String(reason); }
 }
 </script>

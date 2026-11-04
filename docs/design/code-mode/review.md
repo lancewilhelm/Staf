@@ -42,3 +42,17 @@ The parent made these corrections and ran their focused checks. No second
 independent review is claimed. Hard native isolation, the total process ceiling,
 Docker enforcement and named live models remain adoption gates, as both reviews
 recognized.
+
+## Current-main integration
+
+Main advanced to `d8d5efd143bd6f083cd0dc3576142d2ffaa93574` during delivery.
+The parent merged its memory settings, persistent development-data workflow and
+agent-image changes, preserving both sides of the documentation, dependency and
+service conflicts. Maintenance checks, `finishUpgrade`, public-origin options
+and agent-image behavior remain present.
+
+The combined branch passed type checking and the full suite on 2026-11-04:
+515 tests, 512 passed and three Docker skips because the daemon was unavailable.
+The served GUI and agent-image smoke journeys also passed with synthetic
+fixtures and no live provider requests. This integration check does not change
+the uncompleted adoption gates.

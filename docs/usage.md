@@ -1,5 +1,8 @@
 # Use Staf
 
+For the persistent, hot-reloading local browser workspace and a terminal paired
+to the same development instance, see [Run the development workspace](development.md#run-the-development-workspace). For a synthetic seed and explicit reset or recovery, see [Reset and recover development data](development.md#reset-and-recover-development-data).
+
 ## Start the shared terminal
 
 Build and link the CLI once, then start it from your working directory:
@@ -48,6 +51,50 @@ A stale descriptor may name a different process; only stop the confirmed daemon.
 Start `staf` again with the desired environment.
 
 For provider setup and a live chat test, follow [Configure a provider](#configure-a-provider).
+
+## Agent images
+
+New and existing agents use initials until you choose an image. In **New agent**
+or agent Settings, open **Change image** and select **Initials**, **Built-in
+avatar**, or **Uploaded image**. This choice belongs to the agent and is shared
+with every paired client.
+
+The built-in gallery contains a circle, rounded square, capsule, equilateral
+triangle, regular pentagon, and regular hexagon. Every character has a solid
+body color and two black circular eyes. Choose any of the eight colors
+independently of shape. Different agents can use the same combination.
+
+Uploads accept PNG, JPEG, and WebP source files up to 10 MiB, 8192 pixels on
+either side, and 24 megapixels in total. Drag the square crop to reposition it,
+or use the **Horizontal position** and **Vertical position** sliders. **Zoom**
+ranges from 1× to 3×. The chooser shows a larger preview and the actual 24, 28,
+and 30 pixel badge sizes. The saved crop is a static 256 × 256 PNG; the original
+full-size source is not sent to the instance.
+
+Browsing shapes, colors, and crops changes only the form preview. **Create
+agent** or **Save settings** commits the selection. Closing the chooser does
+not save it. **Cancel** preserves the current image. Failed or conflicting
+saves keep your edits available for comparison and retry.
+After a conflict, select **Compare latest settings** to review the saved choice.
+**Use latest image** adopts that image while retaining your name and instruction
+edits. Review the draft before saving again.
+
+The saved image appears in the agent list, Focus rail, chat header, and agent
+messages. Names and duplicate-name suffixes still identify agents. If an upload
+cannot be displayed, Staf shows initials and explains the problem in the image
+control. Choose another image or select **Initials** to replace it.
+
+Image choices live in the agent's editable configuration. Accepted upload bytes
+live under `agents/.images` beside the instance's agent directories and are
+included when that directory is backed up. Uploaded images require a paired
+client to read them. Returning to initials or replacing a photo retains prior
+accepted image files for configuration history and uncertain-save recovery.
+Include the entire agents directory when copying or backing up an instance.
+
+The paired CLI's existing profile inspect/edit workflow can read or change the
+image descriptor. Ordinary profile edits that omit `image` preserve it. See
+[the image configuration and API reference](reference.md#agent-image-configuration-and-api).
+Image selection does not require a provider connection or a model request.
 
 The automatic instance does not adopt an existing project `.staf/instance.sqlite` database.
 For scripts, `staf instance help` lists the existing one-shot commands. To connect
@@ -261,7 +308,11 @@ If a retry finds the agent busy while the original request may still arrive,
 the message cannot be dismissed and any retry keeps the original ID.
 Obsolete pre-journal browser records are deleted without importing them. Current
 journal records, including records owned by other open tabs and recoverable closed-tab
-drafts, are retained; there is no manual earlier-record picker. An unfinished agent
+drafts, are retained. Older records without a dataset identity recover automatically
+when a stored command or creation operation verifies their origin. Otherwise, open
+**Earlier browser records** to inspect and copy the saved text and operation details;
+these records are not submitted or assigned to the current dataset automatically.
+An unfinished agent
 creation is restored automatically after refresh or reopening a tab, with the same
 operation ID for Check creation or Retry same creation. A live tab keeps ownership
 of its creation record. Clearing browser storage removes locally saved drafts,
@@ -407,9 +458,20 @@ The shared instance also supports separately permitted web reading, local search
 
 ### Scoped memory in the shared instance
 
+In the workspace, open **Agent settings → View agent memory** to inspect that
+agent's saved entries. Open **Settings → User → View user memory** for the
+shared list, or follow **View shared user memory** from an agent's memory page.
+Under **Archived agents** in the sidebar, **View memory** inspects retained
+entries without restoring the agent. Audience labels distinguish each scope.
+The read-only lists show all saved entries in pages of 20, with updated times
+and expandable IDs, versions, created times, and origin information. Existing
+entries have no recorded origin. Use **Refresh memory** to fetch a current
+snapshot; loading and errors are distinct from an empty list. These lists are
+separate from the up to five matches selected for a provider request.
+
 Each agent has separate memory. User memory is shared across agents. In main chat, explicit phrases such as “Remember that I like tea” save to the addressed agent. “Remember for all agents: I like tea” proposes shared user memory. The response shows the exact text and warns that all agents can retrieve it. Send `Confirm shared memory PROPOSAL_ID` to save that exact proposal, or `Cancel shared memory PROPOSAL_ID` to cancel it without saving memory. Cancellation removes the text from the active proposal, but the original message and proposal response remain in chat history and may be included in later model requests or task context. Cancellation does not erase backups or data already sent to a provider. The proposal is bound to the addressed agent and survives restart. Repeating confirmation cannot duplicate it. The acknowledgment names the scope. Ambiguous scope or missing content prompts a clarification without saving. Other supported save forms include “Please keep in mind that …”, “Save this for later: …”, and the prefixes “for this agent” or “in shared memory”. For inspection say “List memories in shared memory” or “List memories in this agent memory”. For a specific entry say “Correct memory MEMORY_ID version VERSION in this agent memory to NEW TEXT” or “Forget memory MEMORY_ID version VERSION in shared memory”. Edits and deletions require the exact ID, last observed version, and scope. Scoped save phrases require a colon after the scope; partial agent scopes and recognizable conflicting restrictions require clarification. Phrase recognition is deterministic and cannot reliably infer every implied restriction; review the scope before using shared memory. “Forget that …” asks for an ID and scope rather than guessing which entry to delete. Descriptive requests such as “What do you remember about tea?”, “Forget the memory about tea” and “Correct my memory about tea to coffee” show up to ten matching candidates with IDs and versions; they do not change memory. Unspecified scope means this agent. Add “in shared memory” to preview shared entries. Ambiguous, excluded or other-agent scopes require clarification. A preview does not select an entry or authorize mutation; use the exact ID, current version, scope and replacement text in a separate command. Other natural-language phrasing is not reliably recognized, and task directions and model responses cannot change memory. The earlier “bot” wording remains accepted in these chat phrases. CLI scope values such as `bot:BOT_ID` are unchanged.
 
-Memory management controls are not yet available in the workspace. The CLI uses explicit scopes. Use `memory-list URL CREDENTIAL_FILE user`, `memory-add URL CREDENTIAL_FILE bot:BOT_ID TEXT`, `memory-edit URL CREDENTIAL_FILE bot:BOT_ID MEMORY_ID VERSION TEXT`, and `memory-delete URL CREDENTIAL_FILE bot:BOT_ID MEMORY_ID VERSION`. Use `user` instead of `bot:BOT_ID` for shared user memory. Refresh after a conflict before editing or deleting. All paired clients act for the same owner.
+The workspace memory views are read-only. Use chat commands or the CLI to add, edit, or delete entries. The CLI uses explicit scopes. Use `memory-list URL CREDENTIAL_FILE user`, `memory-add URL CREDENTIAL_FILE bot:BOT_ID TEXT`, `memory-edit URL CREDENTIAL_FILE bot:BOT_ID MEMORY_ID VERSION TEXT`, and `memory-delete URL CREDENTIAL_FILE bot:BOT_ID MEMORY_ID VERSION`. Use `user` instead of `bot:BOT_ID` for shared user memory. Refresh after a conflict before editing or deleting. All paired clients act for the same owner.
 
 Up to five keyword-matched entries from shared user memory and the addressed bot are included as untrusted data in each provider request. The matching is simple and may miss relevant memories. Injected entries are not added to saved conversation messages. Deleting an entry removes it from active memory and future retrieval; it does not erase prior transcripts, backups, or provider requests already sent or in flight. A memory saved or listed in chat remains in that transcript and can be sent again as ordinary conversation history after deletion. Memory is stored in the instance database and shares its access protections. A migration backup is created before upgrading an existing database. Offline integration tests cover this preview; live providers have not been verified for memory.
 

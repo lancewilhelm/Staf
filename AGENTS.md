@@ -6,6 +6,9 @@ loaded into conversations by Staf's runtime or provider adapters.
 For setup, verification commands, and the delivery workflow, see
 [development](docs/development.md).
 
+Before writing manual test steps for an implementation handoff or PR, read
+[manual test handoffs](docs/development.md#write-manual-test-steps).
+
 When changing a provider, authentication flow, configuration option, default or
 precedence, CLI command, or supported capability:
 

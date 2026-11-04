@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
+import type { Memory, MemoryScope } from './memory-types.js';
+export type { Memory, MemoryScope } from './memory-types.js';
 
-export type MemoryScope = { kind: 'user' } | { kind: 'bot'; botId: string };
-export type Memory = { id: string; scope: MemoryScope; text: string; version: number; createdAt: string; updatedAt: string };
 export class MemoryConflict extends Error {}
 
 export const memorySchema = `

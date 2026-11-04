@@ -492,6 +492,7 @@ try{
  await browserCdp('Target.closeTarget',{targetId:approvalCopy.id});
  await until(()=>evaluate("!![...document.querySelectorAll('.submission button')].find(b=>b.textContent==='Dismiss')"),'failed request has explicit recovery');
  await evaluate("[...document.querySelectorAll('.submission button')].find(b=>b.textContent==='Dismiss').click()");
+ await until(()=>evaluate("document.querySelector('.composer-control')?.getAttribute('aria-label')==='Send' && !document.querySelector('.composer-control').disabled"),'denied response settles after stream recovery');
 
  await act("testInput('[aria-label=Message]','Start synthetic background work');testClick('Send')","document.querySelector('.messages').innerText.includes('Background tasks are deferred')",'unsolicited background creation rejected');
  assert.equal(await evaluate("[...document.querySelectorAll('.side button')].some(b=>b.textContent.includes('Updates'))"),false,'task update navigation absent');
@@ -620,7 +621,7 @@ try{
  await act("document.querySelector('button[aria-label=\"Open agent settings\"]').click()","document.body.innerText.includes('AGENT SETTINGS')",'header opens name-only settings');await until(()=>evaluate("!!document.querySelector('.setup textarea')"),'name-only settings loaded');
  await evaluate("window.confirm=()=>true;testClick('Archive agent')");await until(()=>evaluate("![...document.querySelectorAll('.side nav button')].some(b=>b.textContent.includes('Name only'))"),'archived agent removed from sidebar');
  await act("document.querySelector('.archived-agents summary').click()","!!document.querySelector('.archived-agents[open]')",'archived agents available in sidebar');
- await evaluate("[...document.querySelectorAll('.archived-agents .provider')].find(e=>e.textContent.includes('Name only')).querySelector('button').click()");await until(()=>evaluate("[...document.querySelectorAll('.side button')].some(b=>b.textContent.includes('Name only'))"),'restored agent returns');
+ await evaluate("[...document.querySelectorAll('.archived-agents .provider')].find(e=>e.textContent.includes('Name only')).querySelector('button[aria-label^=\"Restore agent\"]').click()");await until(()=>evaluate("[...document.querySelectorAll('.side button')].some(b=>b.textContent.includes('Name only'))"),'restored agent returns');
  const restored=await evaluate(`(async()=>{const t=localStorage.getItem('staf-token');return await (await fetch('/api/bots/${nameOnly.id}',{headers:{Authorization:'Bearer '+t}})).json()})()`);assert.equal(restored.chatId,nameOnly.chatId);assert.equal(restored.configDir,nameOnly.configDir);assert.equal(restored.archived,false);console.log('PASS name-only creation, archive, and restore');
  assert.equal(await evaluate("document.documentElement.scrollWidth<=innerWidth"),true,'narrow agent management fits viewport');
  await cdp('Emulation.clearDeviceMetricsOverride');

@@ -29,6 +29,131 @@ an extracted package installs production dependencies from its manifest with
 which must use `--frozen-lockfile`. Package installs follow manifest ranges and
 do not provide the repository lockfile's exact dependency selection.
 
+## Run the development workspace
+
+After the pinned-toolchain setup above, run:
+
+```sh
+corepack pnpm dev
+```
+
+Open `http://127.0.0.1:3210/` and enter the one-time pairing code printed by
+the launcher. The launcher identifies the checkout, data directory, URL, and
+backend status. It uses `~/.staf/development` by default, outside worktrees and
+separate from `~/.staf/terminal-instance`. It keeps the database, agent files,
+provider credentials, and ChatGPT registration identity there across launches
+and checkout changes. It does not import another tool's sign-in.
+
+To use connections from an existing **Staf** instance while keeping development
+conversations separate, stop the existing instance and set
+`STAF_DEV_CONNECTION_DIR` to its data directory before launching. The launcher
+reports the selected connection directory and uses the same Staf credential and
+registration files. Do not run both instances against that connection store at
+the same time. Connection changes, logout, and token refresh affect the shared
+store. Nothing is copied or imported from another tool. Unset the variable to use the
+development instance's own connection store. Avoid copying a live rotating
+credential into two independent stores.
+
+`STAF_DEV_DATA_DIR` explicitly selects another development data directory
+outside the active checkout. If it points to an existing Staf instance, stop its
+owner first: this selects the entire instance and its conversations, not a copy.
+Unset it to return to the separate default development instance.
+`STAF_DEV_PORT` changes the loopback workspace port when necessary; use the same
+port to retain that browser origin's paired state and drafts.
+
+Frontend edits hot reload. Edits under `src/` and `tsconfig.json` compile and
+restart the backend; a compilation error leaves the previous backend running
+and is reported in the launcher. A restart interrupts unfinished work under the
+existing recovery rules: it does not replay uncertain provider or tool actions.
+Browser clients reconnect and retain their local drafts. Only one development
+launcher may own a data directory; it reports the active checkout on contention.
+A conflicting workspace port also reports the checkout when another Staf
+development launcher owns it. The SQLite lock still protects against other
+instance launch paths. Stop the launcher with Ctrl+C; its Vite server and backend
+stop with it. It does not stop other instances.
+
+For an interactive terminal connected to this same instance, press Enter in
+the launcher for a fresh pairing code, then in another terminal run:
+
+```sh
+mkdir -p "$HOME/.staf/dev-client"
+node dist/cli.js instance pair http://127.0.0.1:3210 "$HOME/.staf/dev-client/client.json" PAIRING_CODE
+node dist/cli.js --data-dir "$HOME/.staf/dev-client" --instance http://127.0.0.1:3210 --credential "$HOME/.staf/dev-client/client.json"
+```
+
+Replace `PAIRING_CODE` with the newly printed code. The launcher compiles the
+CLI on startup. The terminal keeps its pending-command recovery files in the
+separate `dev-client` directory. Pair once; reuse the client file on later launches. Use the
+selected port in both commands if changed. The terminal opens the shared main
+chat; other agents are accessible through `node dist/cli.js instance help`.
+
+## Reset and recover development data
+
+Stop `corepack pnpm dev` and any other instance using the selected data directory.
+To build the synthetic seed for the current checkout, run:
+
+```sh
+corepack pnpm dev:reset
+corepack pnpm dev
+```
+
+The reset prints a complete backup directory and creates new agent IDs. The seed
+contains Demo agents, short and long conversations, memories, an empty chat, and
+a synthetic failed request. It does not authenticate or call a provider. Normal
+starts retain edits and never run the reset. Reset leaves the `auth` directory
+and any selected `STAF_DEV_CONNECTION_DIR` intact. Use the same environment
+variables for reset, recovery, and startup.
+
+Reset removes paired client authorizations. Pair browsers and CLI clients again
+with a new launcher code. Browser drafts and pending creations are scoped to a
+dataset; records from a prior dataset stay separate. On an ordinary upgrade,
+older unscoped drafts with a matching stored command and agent, and creations
+with a matching stored operation, can recover automatically. Other unscoped
+records remain in browser storage. Open **Earlier browser records** to inspect
+and copy their text and operation IDs; Staf cannot establish their origin or
+submit them automatically. Copy needed text before resetting. Normal backend
+restarts keep the dataset identity and recover current records.
+
+Staf writes a backup under the development data directory before reset and before
+a supported schema upgrade. It includes SQLite and authoritative agent files,
+but not provider credentials. Protect the backup like the original conversations.
+If startup reports interrupted maintenance, stop all instances and run:
+
+```sh
+corepack pnpm dev:recover
+corepack pnpm dev
+```
+
+Recovery keeps the original dataset if replacement had not begun, or restores
+the complete prior copy if replacement was interrupted. If publication had
+already completed, recovery finalizes it instead of rolling it back. The marker
+remains until recovery succeeds, including after another interruption.
+Recovery does not resume requests. If a schema is newer than the checkout, select
+a compatible checkout, or explicitly reset the seed. To restore an earlier backup,
+stop the instance and pass a backup directory printed by Staf:
+
+```sh
+corepack pnpm dev:restore BACKUP_DIRECTORY
+```
+
+Restore saves the current dataset first. It retains current provider connections,
+clears restored client authorizations, and assigns a fresh browser dataset identity.
+When the backup predates the first database, restore leaves an empty SQLite database
+ready for initialization, so the database path remains protected during publication.
+Use code compatible with the restored schema. The command does not automatically
+start Staf. If restore is interrupted, `dev:recover` restores the state from before
+that restore. Keep backups until you have checked the restored content. An abrupt
+process termination can leave private staging directories in the data directory.
+
+For a disposable offline check, run `node --test test/dev-launch.test.js` and
+`node test/browser/dev-smoke.mjs` and `node test/browser/dataset-smoke.mjs` after installing dependencies. The latter
+requires the Chrome executable described below. These checks use synthetic
+credentials and demo responses; they do not prove live sign-in, token refresh,
+provider access, or inference.
+With commit `d2ab6fc` available in local Git history, `node test/manual/older-writer-probe.mjs`
+also runs its actual older constructor against a paused replacement and after a
+forced interruption. It requires a prior build and uses a disposable data directory.
+
 ## Verify a change
 
 The browser interface uses Vue single-file components with Composition API and
@@ -59,6 +184,17 @@ For a workspace change, run the served GUI smoke journey after building:
 ```sh
 node test/browser/gui-smoke.mjs
 ```
+
+For memory settings changes, also run the focused read-only browser journey:
+
+```sh
+node test/browser/memory-smoke.mjs
+```
+
+It uses a disposable SQLite instance and rejects provider calls. It covers
+complete scope lists, pagination, archived agents, keyboard and narrow layouts,
+retained settings drafts, failed loads, repeated/interrupted navigation, and
+revoked access. Screenshots are saved under `test-results/memory/`.
 
 The script uses a local Chrome or cached Chromium on macOS. Set `CHROME_PATH`
 to an executable when neither default path exists. It starts a disposable local
@@ -123,6 +259,13 @@ registration remains unverified by the offline checks. See
   Expect readable messages and a visible circular action without page overflow.
   Inline chat approval controls should remain available; Activity and Updates navigation are absent.
 
+For inline tool review in the same fixture, send `What time is it in UTC?`.
+To require a decision first, enter `ask-clock` in the fixture terminal and wait
+for **Clock approvals enabled**. Expect a clock request below that message,
+exact-action Approve once/Deny controls, and a retained tool outcome. Refresh or
+use another paired client to decide; the original conversation updates on its
+next poll.
+
 To finish a held response normally, enter `stream-next` twice in the fixture
 terminal. Stop the fixture with Ctrl+C when finished.
 
@@ -136,8 +279,88 @@ terminal. Stop the fixture with Ctrl+C when finished.
    acceptance criteria. Report the checks performed and any gaps.
 4. Commit only the work authorized for that delivery. Do not include unrelated
    working-tree changes.
+5. Finish with [manual test steps](#write-manual-test-steps) for the changed
+   behavior, with prerequisites and expected results.
 
-For inline tool review in the same fixture, send `What time is it in UTC?`. To require a decision first, enter `ask-clock` in the fixture terminal and wait for **Clock approvals enabled**. Expect a clock request below that message, exact-action Approve once/Deny controls, and a retained tool outcome. Refresh or use another paired client to decide; the original conversation updates on its next poll.
+## Write manual test steps
+
+For browser or shared-instance changes, use the persistent development workspace
+as the default handoff. Name the branch or PR to test. State the prerequisites:
+Node.js 22.16 or later, Corepack, and the locked dependencies installed. Include
+installation commands only when setup is needed.
+
+Start with the normal command, then add the feature-specific actions and their
+expected visible results:
+
+```sh
+corepack pnpm dev
+```
+
+Open `http://127.0.0.1:3210/`, or the explicitly selected development port.
+Keep the existing `STAF_DEV_DATA_DIR`, `STAF_DEV_CONNECTION_DIR`, and
+`STAF_DEV_PORT` choices. When switching worktrees, stop the previous launcher
+before starting the new checkout against that same data. For CLI changes,
+use the paired CLI connection in [the development workflow](#run-the-development-workspace)
+so the browser and CLI test the same instance.
+
+Reuse the existing paired browser profile at the same address and port. Normal
+restarts and worktree changes retain its authorization. A newly printed code
+is for additional clients. Include pairing only for a new browser or origin,
+cleared browser storage, revoked access, or a reset/restore that cleared client
+authorization. Provider sign-in is separate: reuse the existing Staf connections
+and include live setup only when the changed feature requires that journey.
+
+When a test needs the representative starting dataset, make
+`corepack pnpm dev:reset` an explicit optional preparation step with all writers
+stopped. Explain that it backs up and replaces development agents, settings, and
+conversations, retains provider connections, and requires fresh browser/CLI
+pairing. Normal handoffs keep the existing data. Link to
+[reset and recovery](#reset-and-recover-development-data) when schema recovery
+or a clean dataset is relevant.
+
+Label controlled fixture scripts as specialized offline checks and explain the
+behavior they control. Prefer normal development commands and existing setup
+over temporary directories or test-specific IDs in the user's manual steps.
+Separate checks already run from steps the user can perform. Report skips and
+distinguish synthetic coverage from live provider, VM, or Docker acceptance.
+For docs-only changes, report the relevant documentation checks instead of
+requiring an application launch.
+
+## Review agent images
+
+On the implementation branch, stop another development launcher using the same
+port/data directory, then run the normal workspace command:
+
+```sh
+corepack pnpm dev
+```
+
+Reuse the existing paired browser and provider connections. No provider request
+is needed for this feature. In New agent or an existing agent's Settings, open
+**Change image**. Pick a rounded shape or a regular polygon and change its color.
+Expect a local preview until Create or Save. Cancel and reopen to verify the
+previous choice remains. Save and check the sidebar, Focus rail, header, and
+agent messages; another paired browser must show the same saved image.
+
+Choose **Uploaded image**, select a PNG/JPEG/WebP file, and adjust zoom and crop
+position using the pointer and sliders. Expect square previews at 24, 28, and
+30 pixels. Save, reload, and restart the launcher normally: the accepted crop
+must remain. Select **Initials** and save to return to the original badge. Check
+both themes and a narrow viewport without resetting your existing data.
+
+For automated offline verification, build first and run:
+
+```sh
+corepack pnpm run build
+node --test test/agent-images.test.js
+node test/browser/agent-images-smoke.mjs
+```
+
+The image browser journey follows the existing disposable instance/Chrome
+fixture pattern. It uses generated JPEG input, two independently paired browser
+contexts, a real service restart, and blocked external networking. It proves
+cropping, saved identity, and supported UI interactions without a live provider.
+The broader workspace and memory browser journeys remain relevant regressions.
 
 ## Review the Code Mode experiment
 
@@ -150,7 +373,7 @@ corepack pnpm run build
 node scripts/code-mode-demo.mjs
 ```
 
-The demo uses a synthetic provider and two paired clients. It prints an exact
+This specialized offline check uses a synthetic provider and two paired clients. It prints an exact
 `demo.read` action with `{ "value": "hello" }`. Enter `approve`, `deny`, or `stop`.
 Approval returns partial `HELLO` and final `HELLO!` values. Denial runs no action.
 Stop leaves the command stopped and cancels the pending approval. The script

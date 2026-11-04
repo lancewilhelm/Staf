@@ -24,6 +24,11 @@ one-shot commands.
 
 ## Local shared instance preview
 
+For the persistent hot-reloading development workspace, run `corepack pnpm dev`
+after [toolchain setup](docs/development.md#develop-staf). See the
+[development guide](docs/development.md#run-the-development-workspace) for
+data selection, explicit seed reset, pairing, and recovery.
+
 Run `pnpm start instance serve .staf/instance.sqlite 3210` and open
 `http://127.0.0.1:3210/`. Enter the host's pairing code to open the chat workspace.
 **Settings** shows the instance-wide ChatGPT connection and offers sign-in when
@@ -32,7 +37,7 @@ tab; Continue sign-in is available if the browser blocks it. Workspace notices
 appear as dismissible toasts, with actionable errors retained beside controls. A saved sign-in does not
 verify account or model access. It also offers Light, Dark, and System appearance for this browser;
 Light is the default; System follows the device setting. Settings also offers
-Evergreen/Ink palettes, a Focus agent rail, font, text size, spacing, corners, and logo preferences. The persistent agent list switches between main chats; each agent has its own configuration, which you can edit from its chat. Submitted messages appear immediately, and per-agent drafts and uncertain submissions recover automatically after a reload or reopening a closed tab in the same browser. Unfinished agent creation also recovers automatically with its original operation ID. Obsolete browser records are deleted; no manual recovery picker is needed.
+Evergreen/Ink palettes, a Focus agent rail, font, text size, spacing, corners, and logo preferences. The persistent agent list switches between main chats; each agent has its own configuration, which you can edit from its chat. Submitted messages appear immediately, and per-agent drafts and uncertain submissions recover automatically after a reload or reopening a closed tab in the same browser. Unfinished agent creation also recovers with its original operation ID for the same dataset. Older records without a dataset identity recover when matching server records establish their origin; otherwise **Earlier browser records** lets you inspect and copy them.
 Instructions live in its `soul.md` file; settings live in `agent.toml`. You can
 [edit these files directly](docs/usage.md#agent-configuration-files) on the instance host.
 Connect an instance-wide OpenRouter key in global Settings or through the paired CLI; saved presence does not verify account or model access. New agent opens a modal; you can create an agent with just a name before connecting a provider. Agent settings
@@ -50,7 +55,12 @@ The loopback instance retains the background-task engine; its separate Activity 
 
 The shared instance supports owner-imported [skills](docs/usage.md#skills-in-the-shared-instance) as an offline-tested preview.
 
-The shared instance supports [scoped memory](docs/usage.md#scoped-memory-in-the-shared-instance) in an offline-tested preview.
+The shared instance supports [scoped memory](docs/usage.md#scoped-memory-in-the-shared-instance) in an offline-tested preview, with read-only agent and shared user memory pages in Settings.
+
+Agents can keep their initials, choose a geometric avatar with a separate color,
+or use a cropped uploaded image. Use **Change image** in New agent or agent
+Settings. Images are shared across paired clients and survive restarts. See
+[agent images](docs/usage.md#agent-images) for formats, limits, and storage.
 
 The shared instance supports per-action approval and permission controls for its clock tool. See [clock approvals](docs/usage.md#clock-approvals-in-the-shared-instance) for setup and current limits.
 
