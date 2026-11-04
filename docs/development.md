@@ -87,14 +87,59 @@ separate `dev-client` directory. Pair once; reuse the client file on later launc
 selected port in both commands if changed. The terminal opens the shared main
 chat; other agents are accessible through `node dist/cli.js instance help`.
 
-If startup reports that the database schema is newer than the checkout, stop
-and use a compatible checkout or explicitly select another data directory. The
-launcher never resets or downgrades the data. Seeded reset and complete schema
-recovery are not implemented by this workflow; retain the database, agent files,
-and credentials together when making a recoverable copy.
+## Reset and recover development data
+
+Stop `corepack pnpm dev` and any other instance using the selected data directory.
+To build the synthetic seed for the current checkout, run:
+
+```sh
+corepack pnpm dev:reset
+corepack pnpm dev
+```
+
+The reset prints a complete backup directory and creates new agent IDs. The seed
+contains Demo agents, short and long conversations, memories, an empty chat, and
+a synthetic failed request. It does not authenticate or call a provider. Normal
+starts retain edits and never run the reset. Reset leaves the `auth` directory
+and any selected `STAF_DEV_CONNECTION_DIR` intact. Use the same environment
+variables for reset, recovery, and startup.
+
+Reset removes paired client authorizations. Pair browsers and CLI clients again
+with a new launcher code. Browser drafts and pending creations are scoped to a
+dataset. Records for a prior dataset and older records without a dataset identity
+remain in browser storage but are not automatically submitted or displayed in
+the new dataset. Copy any needed text before resetting. Normal backend restarts
+keep the dataset identity and recover current records.
+
+Staf writes a backup under the development data directory before reset and before
+a supported schema upgrade. It includes SQLite and authoritative agent files,
+but not provider credentials. Protect the backup like the original conversations.
+If startup reports interrupted maintenance, stop all instances and run:
+
+```sh
+corepack pnpm dev:recover
+corepack pnpm dev
+```
+
+Recovery restores the complete copy that preceded the interrupted operation.
+The marker remains until recovery succeeds, including after another interruption.
+Recovery does not resume requests. If a schema is newer than the checkout, select
+a compatible checkout, or explicitly reset the seed. To restore an earlier backup,
+stop the instance and pass a backup directory printed by Staf:
+
+```sh
+corepack pnpm dev:restore BACKUP_DIRECTORY
+```
+
+Restore saves the current dataset first. It retains current provider connections,
+clears restored client authorizations, and assigns a fresh browser dataset identity.
+Use code compatible with the restored schema. The command does not automatically
+start Staf. If restore is interrupted, `dev:recover` restores the state from before
+that restore. Keep backups until you have checked the restored content. An abrupt
+process termination can leave private staging directories in the data directory.
 
 For a disposable offline check, run `node --test test/dev-launch.test.js` and
-`node test/browser/dev-smoke.mjs` after installing dependencies. The latter
+`node test/browser/dev-smoke.mjs` and `node test/browser/dataset-smoke.mjs` after installing dependencies. The latter
 requires the Chrome executable described below. These checks use synthetic
 credentials and demo responses; they do not prove live sign-in, token refresh,
 provider access, or inference.

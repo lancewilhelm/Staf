@@ -1,9 +1,12 @@
 import { startInstance } from '../dist/instance-service.js';
 import { join } from 'node:path';
+import { prepareUpgrade, finishUpgrade } from './dev-upgrade.mjs';
 
 let app;
 try {
-  app = startInstance(join(process.argv[2], 'instance.sqlite'), 0, {dataDir:process.argv[4], publicOrigin:process.argv[3]});
+  const upgrade=prepareUpgrade(process.argv[2]);
+  app = startInstance(join(process.argv[2], 'instance.sqlite'), 0, {dataDir:process.argv[4], publicOrigin:process.argv[3], ...(upgrade ? {maintenanceToken:upgrade.token} : {})});
+  if(upgrade) {finishUpgrade(process.argv[2]);console.log(`Complete pre-upgrade backup: ${upgrade.backup}`);}
   const port = await app.listen();
   process.send?.({kind:'ready', port, code:app.code, backup:app.migrationBackup});
   process.on('message', message => {

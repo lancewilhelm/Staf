@@ -21,8 +21,10 @@ export function seed(root) {
   try {
     for (const definition of agents) {
       const bot=instance.createBot({name:definition.name,instructions:definition.instructions,provider:'demo'});
+      if(definition.name==='Project guide')instance.memories.create({scope:{kind:'bot',botId:bot.id},text:'The project starts with a small shared notes workspace.'});
       for (const [content,answer] of definition.turns) {const id=randomUUID();instance.claim({id,botId:bot.id,content});instance.complete(id,answer);}
       if(definition.failure){const id=randomUUID();instance.claim({id,botId:bot.id,content:'Show a recoverable error.'});instance.fail(id,definition.failure);}
     }
+    instance.memories.create({scope:{kind:'user'},text:'The owner prefers concise checklists.'});
   } finally {instance.close();}
 }

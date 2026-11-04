@@ -1,7 +1,7 @@
 import {ProviderDefaultsStore} from './provider-choices.js';
 import { DatabaseSync } from 'node:sqlite';
 import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
-import { closeSync, existsSync, openSync, mkdtempSync, rmSync } from 'node:fs';
+import { closeSync, existsSync, openSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { AgentConfigStore, AgentConfigUncertain } from './agent-config.js';
@@ -24,13 +24,17 @@ import { ApprovalGrants, approvalGrantSchema, type GrantBoundary } from './appro
 const clockAction: Action = { capability:'clock', operation:'read', resource:'utc', effect:'read', limits:{}, risk:'safe' };
 const clockBoundary = { enabledCapabilities:['clock'], actions:[clockAction] };
 const modes: ApprovalMode[] = ['ask-every-time','ask-for-risky-actions','never-ask'];
+export const INSTANCE_SCHEMA_VERSION = 30;
 
 export const starterSoul = "You are an assistant working for the owner. Be clear and candid. Distinguish observations from assumptions. Follow the owner's role instructions and work within the permissions and task scope granted to you.";
 export type BotEdit = { revision: string; name: string; description?: string; instructions: string; provider: string; model: string | null; reasoning: string | null };
 export class BotConflict extends Error {}
 
-export function assertDatasetAvailable(path: string) {
+export function assertDatasetAvailable(path: string, maintenanceToken?:string) {
   if (path !== ':memory:' && existsSync(`${path}.maintenance.json`)) {
+    if (maintenanceToken) {
+      try {const marker:unknown=JSON.parse(readFileSync(`${path}.maintenance.json`,'utf8'));if(marker && typeof marker==='object' && 'token' in marker && marker.token===maintenanceToken)return;} catch {}
+    }
     throw Error('Dataset maintenance was interrupted. Run pnpm dev:recover before starting Staf.');
   }
 }
@@ -41,10 +45,11 @@ export class Instance {
   private readonly configs: AgentConfigStore;
   private readonly temporaryConfigRoot: string | undefined;
   private readonly fingerprintKey: Uint8Array;
+  private readonly datasetKey: Uint8Array;
   private readonly grantControllers = new Map<string,Set<AbortController>>();
   readonly migrationBackup: string | undefined;
-  constructor(path: string, private readonly redactSkill: (text:string) => string = text => text) {
-    assertDatasetAvailable(path);
+  constructor(path: string, private readonly redactSkill: (text:string) => string = text => text, maintenanceToken?:string) {
+    assertDatasetAvailable(path,maintenanceToken);
     this.temporaryConfigRoot = path === ':memory:' ? mkdtempSync(join(tmpdir(),'staf-config-')) : undefined;
     this.configs = new AgentConfigStore(this.temporaryConfigRoot ?? join(dirname(resolve(path)),'agents'));
     if (path !== ':memory:') {
@@ -54,13 +59,13 @@ export class Instance {
     this.db = new DatabaseSync(path);
     try {
     this.db.exec('PRAGMA locking_mode=EXCLUSIVE; BEGIN EXCLUSIVE; COMMIT;');
-    assertDatasetAvailable(path);
+    assertDatasetAvailable(path,maintenanceToken);
     const hasBots = this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='bots'").get();
     const hasProfiles = this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='bot_profiles'").get();
     const versionRow = this.db.prepare('PRAGMA user_version').get();
     const version = Number(versionRow?.user_version ?? 0);
-    if (version > 30) throw new Error(`Database version ${version} is newer than this Staf (maximum 30). Use a compatible checkout or select another data directory; the database was not reset.`);
-    if (hasBots && version < 30 && path !== ':memory:') {
+    if (version > INSTANCE_SCHEMA_VERSION) throw new Error(`Database version ${version} is newer than this Staf (maximum ${INSTANCE_SCHEMA_VERSION}). Use a compatible checkout or select another data directory; the database was not reset.`);
+    if (hasBots && version < INSTANCE_SCHEMA_VERSION && path !== ':memory:') {
       this.migrationBackup = `${path}.before-${version < 2 ? 'profiles' : version < 3 ? 'tasks' : version < 4 ? 'approvals' : version < 5 ? 'task-inbox' : version < 6 ? 'memory' : version < 7 ? 'memory-confirmation' : version < 8 ? 'skills' : version < 9 ? 'schedules' : version < 10 ? 'schedule-retries' : version < 11 ? 'schedule-lineage' : version < 12 ? 'bot-description' : version < 13 ? 'delegation-scope' : version < 14 ? 'collaboration' : version < 15 ? 'disclosure' : version < 16 ? 'chat-tasks' : version < 17 ? 'creation-defaults' : version < 18 ? 'web-actions' : version < 19 ? 'search-actions' : version < 20 ? 'scratch-shell' : version < 21 ? 'approval-grants' : version < 22 ? 'schedule-web-scope' : version < 23 ? 'schedule-search-scope' : version < 24 ? 'schedule-shell-scope' : version < 25 ? 'main-bot' : version < 26 ? 'command-events' : version < 27 ? 'bot-creation' : version < 28 ? 'response-progress' : 'response-stop'}-${randomUUID()}.sqlite`;
       const previousUmask = process.umask(0o077);
       try { this.db.prepare('VACUUM INTO ?').run(this.migrationBackup); }
@@ -134,7 +139,7 @@ export class Instance {
     if(version < 29)this.db.exec("CREATE TABLE IF NOT EXISTS response_stops (command_id TEXT PRIMARY KEY REFERENCES commands(id))");
     if(version < 30 && !this.db.prepare("SELECT 1 FROM pragma_table_info('command_runtime_events') WHERE name='detail'").get())this.db.exec('ALTER TABLE command_runtime_events ADD COLUMN detail TEXT');
     this.db.exec('CREATE INDEX IF NOT EXISTS command_runtime_events_command ON command_runtime_events(command_id,seq)');
-    this.db.exec('PRAGMA user_version=30');
+    this.db.exec(`PRAGMA user_version=${INSTANCE_SCHEMA_VERSION}`);
     for (const row of this.db.prepare("SELECT id,bot_id FROM task_attempts WHERE state IN ('queued','running','stopping','waiting') ORDER BY rowid").all()) {
       if (typeof row.id !== 'string' || typeof row.bot_id !== 'string') throw Error('Invalid interrupted task');
       this.cancelTaskInputs(row.id);
@@ -148,6 +153,9 @@ export class Instance {
     const key = this.db.prepare("SELECT value FROM instance_secrets WHERE name='command-fingerprint'").get()?.value;
     if (!(key instanceof Uint8Array) || key.length !== 32) throw Error('Invalid instance fingerprint key');
     this.fingerprintKey = key;
+    const datasetKey=this.db.prepare("SELECT value FROM instance_secrets WHERE name='dataset-identity'").get()?.value;
+    if(datasetKey!==undefined && (!(datasetKey instanceof Uint8Array)||datasetKey.length!==32))throw Error('Invalid dataset identity key');
+    this.datasetKey=datasetKey ?? key;
     this.db.exec('COMMIT');
     // Seal valid pre-existing file configurations before accepting clients.
     this.bots();
@@ -158,6 +166,7 @@ export class Instance {
       FROM schedules s JOIN schedule_occurrences o ON o.schedule_id=s.id
       WHERE o.task_id=? OR EXISTS (SELECT 1 FROM schedule_task_retries r WHERE r.attempt_id=? AND r.schedule_id=o.schedule_id AND r.due_at=o.due_at)`).get(attemptId,attemptId);
   }
+  datasetIdentity() { return createHmac('sha256',this.datasetKey).update('staf-dataset-identity-v1').digest('hex'); }
   scheduleClockAllowed(attemptId:string) {
     const row=this.scheduleOrigin(attemptId);
     if (!row) return true;
