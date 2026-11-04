@@ -10,6 +10,7 @@
     "pnpm": ">=12.16.1"
   },
   "scripts": {
+    "prototype:avatars": "node web/prototype/build-agent-avatars.mjs",
     "build": "vite build && tsc -p tsconfig.json",
     "start": "corepack pnpm run build && node dist/cli.js",
     "test": "corepack pnpm run build && node --test test/*.test.js",

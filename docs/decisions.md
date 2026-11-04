@@ -390,3 +390,14 @@ interaction authority for all menus and pages, with existing production features
 adapted into that style. Use grouped model menu rows, the New agent modal,
 provider cards and the Edit defaults disclosure. Keep manual entry, reasoning,
 connection recovery and agent lifecycle controls within those components.
+
+## Optional agent images
+
+Accepted on 2026-11-03 during the agent-avatar design interview. Each agent can
+use initials, an uploaded image, or an original built-in character. The selected
+image belongs to shared agent identity. Built-in characters use simple vector
+art with solid colors and separate shape and color choices.
+
+The [agent avatar prototype brief](agent-avatar-prototype-brief.md) records the
+confirmed scope and three visual families to compare in the approved workspace.
+These are design choices for a future prototype, not implemented capabilities.

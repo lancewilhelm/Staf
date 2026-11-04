@@ -18,6 +18,11 @@ The owner-maintained identity, soul, and provider and model choices that govern
 an agent's behavior.
 _Avoid_: Conversation history, provider credentials
 
+**Built-in avatar**:
+A simple vector character with an owner-chosen geometric shape and color that
+visually represents an agent.
+_Avoid_: Uploaded image, soul
+
 **Soul**:
 An agent's standing instructions, including its role, personality, values,
 communication style, and approach to its work.
