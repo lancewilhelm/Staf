@@ -56,8 +56,12 @@ test('development command serves one persistent instance and releases its owners
     const cli = await run(process.execPath,['dist/cli.js','instance','bots',url,client],{cwd:checkout,env});
     assert.ok(JSON.parse(cli.stdout).some(item => item.id === bot.id));
     await stop(child);
+    const old=new DatabaseSync(join(dir,'instance.sqlite'));old.exec('PRAGMA user_version=29');old.close();
     output = ''; child = launch({},nextCheckout); await until(() => output.includes('Pairing code:'), 'restart in another checkout');
     assert.ok(output.includes(nextCheckout));
+    const backup=output.match(/Complete pre-upgrade backup: (.+)/)?.[1];assert.ok(backup);
+    assert.equal(await readFile(join(backup,'agents',bot.id,'current','soul.md'),'utf8'),await readFile(join(dir,'agents',bot.id,'current','soul.md'),'utf8'));
+    const saved=new DatabaseSync(join(backup,'instance.sqlite'),{readOnly:true});assert.equal(saved.prepare('PRAGMA user_version').get().user_version,29);saved.close();
     assert.equal((await call('/api/bots', token))[1].find(item => item.id === bot.id).name, 'Development agent');
     assert.equal((await call('/api/commands/development-command', token))[1].state, 'completed');
     for (const [name, value] of [['codex-direct.json', direct], ['codex-host.json', host], ['openrouter.json', router]]) assert.equal(await readFile(join(connections,'auth',name),'utf8'),value);
