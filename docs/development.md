@@ -368,3 +368,39 @@ Separate checks already run from steps the user can perform. Report skips and
 distinguish synthetic coverage from live provider, VM, or Docker acceptance.
 For docs-only changes, report the relevant documentation checks instead of
 requiring an application launch.
+
+## Review agent images
+
+On the implementation branch, stop another development launcher using the same
+port/data directory, then run the normal workspace command:
+
+```sh
+corepack pnpm dev
+```
+
+Reuse the existing paired browser and provider connections. No provider request
+is needed for this feature. In New agent or an existing agent's Settings, open
+**Change image**. Pick a rounded shape or a regular polygon and change its color.
+Expect a local preview until Create or Save. Cancel and reopen to verify the
+previous choice remains. Save and check the sidebar, Focus rail, header, and
+agent messages; another paired browser must show the same saved image.
+
+Choose **Uploaded image**, select a PNG/JPEG/WebP file, and adjust zoom and crop
+position using the pointer and sliders. Expect square previews at 24, 28, and
+30 pixels. Save, reload, and restart the launcher normally: the accepted crop
+must remain. Select **Initials** and save to return to the original badge. Check
+both themes and a narrow viewport without resetting your existing data.
+
+For automated offline verification, build first and run:
+
+```sh
+corepack pnpm run build
+node --test test/agent-images.test.js
+node test/browser/agent-images-smoke.mjs
+```
+
+The image browser journey follows the existing disposable instance/Chrome
+fixture pattern. It uses generated JPEG input, two independently paired browser
+contexts, a real service restart, and blocked external networking. It proves
+cropping, saved identity, and supported UI interactions without a live provider.
+The broader workspace and memory browser journeys remain relevant regressions.

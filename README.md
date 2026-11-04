@@ -57,6 +57,11 @@ The shared instance supports owner-imported [skills](docs/usage.md#skills-in-the
 
 The shared instance supports [scoped memory](docs/usage.md#scoped-memory-in-the-shared-instance) in an offline-tested preview, with read-only agent and shared user memory pages in Settings.
 
+Agents can keep their initials, choose a geometric avatar with a separate color,
+or use a cropped uploaded image. Use **Change image** in New agent or agent
+Settings. Images are shared across paired clients and survive restarts. See
+[agent images](docs/usage.md#agent-images) for formats, limits, and storage.
+
 The shared instance supports per-action approval and permission controls for its clock tool. See [clock approvals](docs/usage.md#clock-approvals-in-the-shared-instance) for setup and current limits.
 
 The shared instance includes a provisional daily and weekly schedule preview for UTC clock reads, one exact separately approved public web read, one exact separately approved search, or one exact separately approved scratch command per occurrence. See [recurring schedules](docs/usage.md#recurring-schedules-preview) for authorization, recovery, and availability limits.

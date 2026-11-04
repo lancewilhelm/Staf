@@ -25,6 +25,10 @@ test('fresh sessions reference original history, documents, and artifact revisio
     assert.doesNotMatch(JSON.stringify(requests.at(-1)),/history-only-fact/);
     assert.equal(requests.at(-1).filter(message=>message.role==='user').length,1);
     const doc=(await call(root+'/documents',token,{operationId:'source-file',name:'facts.txt',base64:Buffer.from('document-only-fact\nA retained original.').toString('base64')}))[1];
+    const largeDocument=await call(root+'/documents',token,{operationId:'large-source',name:'large.txt',base64:Buffer.from('a'.repeat(70000)).toString('base64')});
+    assert.equal(largeDocument[0],201,'document uploads retain their dedicated body limit');
+    const wrongMedia=await fetch(`http://127.0.0.1:${port}${root}/documents`,{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/vnd.staf.agent-image+json'},body:JSON.stringify({image:{kind:'upload-data',png:'AA=='}})});
+    assert.equal(wrongMedia.status,415,'image media type cannot be used on a document route');
     const response=(await call(root+'/messages',token))[1].find(message=>message.role==='assistant');
     const artifact=(await call(root+'/artifacts',token,{operationId:'source-artifact',name:'Draft findings',format:'markdown',content:'artifact-only-fact',source:{sessionId:fresh.id,messageId:response.id}}))[1];
     const references=[{kind:'session-message',sessionId:bot.chatId,messageId:older[0].id},{kind:'document-excerpt',documentId:doc.id,excerptId:'1'},{kind:'artifact-revision',artifactId:artifact.id,revision:1}];

@@ -197,7 +197,11 @@ arguments with spaces. Each option takes one argument and can appear once.
 The CLI prints the generated operation ID before submission; callers can reuse
 it with unchanged arguments. A direct API creation without an operation ID is
 not retry-safe. The server stores
-SHA-256 token hashes in SQLite and limits JSON request bodies to 64 KiB, except skill import and update requests, which are limited to 1,600,000 bytes. Newly created databases have owner-only permissions, independent of a permissive umask. Existing file permissions are not changed. Restrict the containing directory and any existing database separately. On the tested platform, SQLite rollback journals inherit the owner-only database mode.
+SHA-256 token hashes in SQLite and limits ordinary JSON request bodies to 64 KiB.
+Skill import and update requests are limited to 1,600,000 bytes. Authenticated
+agent create/profile requests using the dedicated image media type have a
+1 MiB limit; see [agent image configuration and API](#agent-image-configuration-and-api).
+Newly created databases have owner-only permissions, independent of a permissive umask. Existing file permissions are not changed. Restrict the containing directory and any existing database separately. On the tested platform, SQLite rollback journals inherit the owner-only database mode.
 The host issues a one-time code at startup and on each terminal Enter. Browser
 requests with an Origin must match the exact server origin; JSON and bearer
 credentials are required for protected writes. No network transport beyond
@@ -215,9 +219,9 @@ An optional profile description is directory metadata visible to other bots. A p
 `GET /api/bots/ID` returns `configDir`, `instructions`, and the current
 configuration `revision`. `POST /api/bots/ID/profile` accepts `revision`,
 `name`, optional `description`, `instructions`, `provider`, `model`, and
-`reasoning`. `instructions` is the content of `soul.md`; `soul` is not a
+`reasoning`, and optional `image`. `instructions` is the content of `soul.md`; `soul` is not a
 separate editable field. `agent.toml` accepts only `name`, `description`,
-`provider`, optional `model` and `reasoning`, and optional `providerChoices` tables. Direct edits are validated on
+`provider`, optional `model`, `reasoning`, and `image`, and optional `providerChoices` tables. Direct edits are validated on
 read and valid changes apply to subsequent work. Invalid content and late edits to a previous revision return
 HTTP 422 with `code` `invalid_agent_configuration` and block new work without
 changing the files. Agent settings and credentials have separate storage.
@@ -369,3 +373,71 @@ or advertised default, the model remains unset and chatting requires a choice.
 ### Chat work records
 
 Paired `GET /api/bots/{id}/chat-work` returns `messages` (excluding background-task notices) and ordered `requests`. Each request contains its command `id`, service-owned response `progress`, and ordered `events` with stable numeric `id`, `type`, `name`, nullable numeric `success`, nullable `detail`, and its `command_id`. Tool-result detail is redacted and capped at 16,000 characters. Re-fetch replaces the snapshot; clients must not append duplicate events. Pending chat approvals come from `/api/inbox` and are matched by bot and command ID. Existing exact-ID approval decision endpoints and permission enforcement are unchanged. Background tasks remain available through explicit task endpoints and CLI operations, but are not offered to ordinary chat providers.
+
+## Agent image configuration and API
+
+The `image` field in agent list/profile responses is one of:
+
+- `{"kind":"initials"}`.
+- `{"kind":"avatar","shape":"pentagon","color":"lilac"}`.
+- `{"kind":"upload","assetId":"…"}`, with a lowercase 64-character SHA-256 ID.
+
+Shape IDs are `circle`, `rounded-square`, `capsule`, `triangle`, `pentagon`, and
+`hexagon`. Color IDs are `apricot`, `coral`, `marigold`, `sage`, `lagoon`, `sky`,
+`lilac`, and `rose`. Unknown IDs and extra descriptor fields are rejected.
+
+`agent.toml` represents this descriptor as an optional top-level string, before
+any tables. For example:
+
+```toml
+image = "avatar:pentagon:lilac"
+```
+
+`image = "upload:ASSET_ID"` selects a stored upload. An absent field or
+`image = "initials"` uses the current initial badge. Direct file changes use the
+existing validation, observed-history, and revision-conflict rules. An invalid
+image setting follows the normal invalid-configuration behavior. A valid
+reference whose image file is unavailable instead displays initials.
+
+Agent create/profile JSON requests accept the descriptor above. Missing `image`
+during creation means initials. Missing `image` during a profile edit preserves
+the current image, including when an older client changes another field.
+Explicit `{"kind":"initials"}` clears the selected image. Existing CLI profile
+inspection and JSON editing carry the same descriptor. Newly selected upload
+references must identify available stored bytes. An unchanged missing reference
+can survive unrelated edits, and an accepted creation retry keeps its original
+result if the image later becomes unavailable.
+
+To submit a new crop, use `Content-Type: application/vnd.staf.agent-image+json`
+with the ordinary agent-create or profile-edit body and
+`image: {"kind":"upload-data","png":"BASE64"}`. This media type is accepted only
+by paired `POST /api/bots` and `POST /api/bots/ID/profile` requests, up to 1 MiB.
+The crop must be a valid non-interlaced 8-bit RGB or RGBA PNG, exactly 256 × 256
+pixels, up to 512 KiB before base64 encoding. The service verifies checksums,
+decodes and re-encodes the PNG, and publishes only its asset reference. Crop
+bytes are never stored in the agent configuration or returned as profile data.
+Ordinary agent create and profile JSON retains its 64 KiB limit. Document imports
+and artifact mutations have separate limits described above. The GUI accepts PNG/JPEG/WebP sources up
+to 10 MiB, 8192 pixels per side, and 24,000,000 pixels before cropping.
+
+`GET /api/agent-images/ASSET_ID` requires the same bearer authorization, origin,
+and optional dataset-header checks as other protected reads. It returns
+`image/png` with `Cache-Control: no-store` or 404 when the accepted bytes are
+unavailable or damaged. The browser fetches with authentication and uses a
+short-lived Blob URL; credentials are not placed in image URLs. The CSP permits
+Blob images without permitting executable uploaded markup.
+
+Accepted files are private, immutable, content-addressed PNGs under
+`agents/.images`, included in development dataset backups. The service fsyncs
+the asset and containing directory entries before publishing its configuration
+reference. Partial temporary files
+are removed after processing and when the image store next opens. Completed
+assets remain available for retained configurations and uncertain saves; clearing
+an image does not garbage-collect them. Cancelled browser previews send no image
+bytes. Stale profile saves are rejected before storing their crop. Retried
+creation includes the canonical image identity in its operation fingerprint.
+
+This extension needs no database schema migration. Older checkouts do not
+recognize the new configuration field: remove `image` fields or restore a
+compatible backup before running one. Retain accepted assets if you intend to
+use those images again.

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AgentImage from './components/AgentImage.vue';
 import { computed, nextTick, reactive, ref, watch } from 'vue';
 import { provideWorkspace } from './workspace';
 import { readAppearance, applyAppearance } from './appearance';
@@ -93,8 +94,8 @@ function legacyContent(raw: string) {
     <main class="main">
       <header class="top">
         <PanelToggle :disabled="agentSaving" v-if="design.sidebar === 'focus'" />
-        <button v-if="selected && view === 'chat' && s.setup.kind === 'closed'" class="avatar" aria-label="Open agent settings" title="Open agent settings" :disabled="agentSaving" @click="openAgentSettings(selected.id)">{{ selected.name[0]?.toUpperCase() || '✳' }}</button>
-        <div v-else class="avatar"><template v-if="headerAgent && view !== 'user-memory'">{{ headerAgent.name[0]?.toUpperCase() }}</template><BrandMark v-else /></div>
+        <button v-if="selected && view === 'chat' && s.setup.kind === 'closed'" class="header-agent-image" aria-label="Open agent settings" title="Open agent settings" :disabled="agentSaving" @click="openAgentSettings(selected.id)"><AgentImage :image="selected.image" :name="selected.name" /></button>
+        <div v-else :class="headerAgent && view !== 'user-memory' ? 'header-agent-image' : 'avatar'"><AgentImage v-if="headerAgent && view !== 'user-memory'" :image="headerAgent.image" :name="headerAgent.name" /><BrandMark v-else /></div>
         <div>
           <div class="title"><template v-if="view === 'settings'">Settings</template><template v-else-if="view === 'user-memory'">User memory</template><AgentLabel v-else-if="headerAgent" :agent="headerAgent" /><template v-else>Welcome to Staf</template></div>
         </div>

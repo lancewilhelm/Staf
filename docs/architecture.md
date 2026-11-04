@@ -303,3 +303,29 @@ local saved credentials still do not establish provider or model access.
 ### Inline main-chat execution
 
 The workspace reads service-owned command progress and persisted tool records through `/api/bots/{id}/chat-work`; it associates records and exact pending approvals with the command user message. Snapshot replacement avoids duplicate delivery. Tool outcomes remain stored independently of later provider success or failure. Database version 30 adds bounded result detail to command runtime events after a protected migration backup. The CLI summary contract remains unchanged. Ordinary chat no longer receives the background-task creation adapter; unsolicited calls fail without starting work. The task engine and explicit API/CLI remain intact. Synthetic checks do not prove live provider behavior.
+
+### Shared agent images
+
+The shared agent-image contract owns the catalog, palette, descriptor validation,
+regular polygon rendering, and configuration encoding. Both the server and Vue
+use it. The descriptor is a top-level `image` string in the authoritative agent
+configuration; it is not a browser appearance preference. Omitting it preserves
+legacy initials, and profile edits from older clients retain the saved choice.
+
+The image asset store accepts only bounded, normalized PNG crops during Create
+or Save. It decodes them, discards ancillary source content by re-encoding, and
+writes private immutable assets under the backed-up agents directory before the
+configuration can reference them. Existing configuration revision checks and
+retry-safe creation identity include image choices. There is no separate upload
+session that can publish an image before the form is saved. Completed assets
+are retained for history and uncertain-save recovery; temporary files are
+cleaned separately.
+
+One Vue renderer supplies the existing badges. Uploaded images use authenticated
+fetch and revocable Blob URLs, with initials on load failure. A shared chooser
+owns local crop previews, independent shape/color selection, and keyboard crop
+sliders. Normal state refresh delivers saved descriptors to other clients;
+unchanged asset identities do not recreate image URLs on every poll. No image
+metadata or bytes are added to model prompts. See the
+[image reference](reference.md#agent-image-configuration-and-api) for limits and
+transport details, and [usage](usage.md#agent-images) for owner controls.

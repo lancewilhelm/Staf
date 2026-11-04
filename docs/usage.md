@@ -52,6 +52,50 @@ Start `staf` again with the desired environment.
 
 For provider setup and a live chat test, follow [Configure a provider](#configure-a-provider).
 
+## Agent images
+
+New and existing agents use initials until you choose an image. In **New agent**
+or agent Settings, open **Change image** and select **Initials**, **Built-in
+avatar**, or **Uploaded image**. This choice belongs to the agent and is shared
+with every paired client.
+
+The built-in gallery contains a circle, rounded square, capsule, equilateral
+triangle, regular pentagon, and regular hexagon. Every character has a solid
+body color and two black circular eyes. Choose any of the eight colors
+independently of shape. Different agents can use the same combination.
+
+Uploads accept PNG, JPEG, and WebP source files up to 10 MiB, 8192 pixels on
+either side, and 24 megapixels in total. Drag the square crop to reposition it,
+or use the **Horizontal position** and **Vertical position** sliders. **Zoom**
+ranges from 1× to 3×. The chooser shows a larger preview and the actual 24, 28,
+and 30 pixel badge sizes. The saved crop is a static 256 × 256 PNG; the original
+full-size source is not sent to the instance.
+
+Browsing shapes, colors, and crops changes only the form preview. **Create
+agent** or **Save settings** commits the selection. Closing the chooser does
+not save it. **Cancel** preserves the current image. Failed or conflicting
+saves keep your edits available for comparison and retry.
+After a conflict, select **Compare latest settings** to review the saved choice.
+**Use latest image** adopts that image while retaining your name and instruction
+edits. Review the draft before saving again.
+
+The saved image appears in the agent list, Focus rail, chat header, and agent
+messages. Names and duplicate-name suffixes still identify agents. If an upload
+cannot be displayed, Staf shows initials and explains the problem in the image
+control. Choose another image or select **Initials** to replace it.
+
+Image choices live in the agent's editable configuration. Accepted upload bytes
+live under `agents/.images` beside the instance's agent directories and are
+included when that directory is backed up. Uploaded images require a paired
+client to read them. Returning to initials or replacing a photo retains prior
+accepted image files for configuration history and uncertain-save recovery.
+Include the entire agents directory when copying or backing up an instance.
+
+The paired CLI's existing profile inspect/edit workflow can read or change the
+image descriptor. Ordinary profile edits that omit `image` preserve it. See
+[the image configuration and API reference](reference.md#agent-image-configuration-and-api).
+Image selection does not require a provider connection or a model request.
+
 The automatic instance does not adopt an existing project `.staf/instance.sqlite` database.
 For scripts, `staf instance help` lists the existing one-shot commands. To connect
 an already paired loopback client, use `staf --instance URL --credential FILE`.

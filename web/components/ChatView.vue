@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AgentImage from './AgentImage.vue';
 import { computed, nextTick, ref, watch } from 'vue';
 import { useWorkspace } from '../workspace';
 import ResponseText from './ResponseText.vue';
@@ -54,7 +55,7 @@ function scroll(event: Event) {
         <template v-if="s.messages.length">
           <div v-for="(message,index) in s.messages" :key="message.id" class="message" :class="{'user-message': message.role === 'user'}">
             <div v-if="message.role === 'user'" class="user-bubble"><div class="who">YOU</div><div class="bubble">{{ message.content }}</div></div>
-            <template v-else><div class="who"><span class="avatar">{{ selected.name[0]?.toUpperCase() }}</span>{{ selected.name }}{{ message.role === 'assistant_stopped' ? ' · stopped' : '' }}</div><ResponseText :text="message.content" /></template>
+            <template v-else><div class="who"><AgentImage :image="selected.image" :name="selected.name" />{{ selected.name }}{{ message.role === 'assistant_stopped' ? ' · stopped' : '' }}</div><ResponseText :text="message.content" /></template>
             <button v-if="message.role==='assistant'" class="quiet save-artifact" @click="saveArtifact(message)">Save artifact</button>
             <details v-if="messageSources(message,index).length" class="message-sources"><summary>Selected sources</summary><button v-for="source in messageSources(message,index)" :key="JSON.stringify(source.reference)" class="quiet" @click="inspectSource(source.reference)">{{ source.title }} · {{ source.location }}</button></details>
             <SubmissionStatus v-if="submission && message.id === 'command-user-' + submission.id" />
