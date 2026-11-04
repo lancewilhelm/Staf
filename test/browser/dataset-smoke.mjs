@@ -29,7 +29,9 @@ try {
  await pair(app.code);await until(()=>evaluate("!![...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('New agent'))"),'paired');
  await evaluate("[...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('New agent')).click()");
  await until(()=>evaluate("!!document.querySelector('.setup input')"),'creation form');
- await evaluate("{const el=document.querySelector('.setup input');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(el,'Delayed creation');el.dispatchEvent(new Event('input',{bubbles:true}));window.originalFetch=window.fetch;window.fetch=async(...args)=>{const response=await window.originalFetch(...args);if(args[0]==='/api/bots'&&args[1]?.method==='POST'){window.held=true;await new Promise(resolve=>window.release=resolve)}return response};[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Create agent').click()}");
+ await evaluate("{const el=document.querySelector('.setup input');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(el,'Delayed creation');el.dispatchEvent(new Event('input',{bubbles:true}));window.originalFetch=window.fetch;window.fetch=async(...args)=>{const response=await window.originalFetch(...args);if(args[0]==='/api/bots'&&args[1]?.method==='POST'){window.held=true;await new Promise(resolve=>window.release=resolve)}return response}}");
+ await evaluate("new Promise(resolve=>requestAnimationFrame(resolve))");
+ await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Create agent').click()");
  await until(()=>evaluate('window.held'),'creation response held');
  const oldRecord=await evaluate("Object.entries(localStorage).find(([k])=>k.startsWith('staf-workspace-v1:creation:'))[0]");
  await app.close();app=null;
