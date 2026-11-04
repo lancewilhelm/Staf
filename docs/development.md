@@ -138,3 +138,38 @@ terminal. Stop the fixture with Ctrl+C when finished.
    working-tree changes.
 
 For inline tool review in the same fixture, send `What time is it in UTC?`. To require a decision first, enter `ask-clock` in the fixture terminal and wait for **Clock approvals enabled**. Expect a clock request below that message, exact-action Approve once/Deny controls, and a retained tool outcome. Refresh or use another paired client to decide; the original conversation updates on its next poll.
+
+## Review the Code Mode experiment
+
+Use Node 22.16 or later and the pinned Corepack pnpm. From a repository checkout,
+install dependencies and build:
+
+```sh
+corepack pnpm install --frozen-lockfile
+corepack pnpm run build
+node scripts/code-mode-demo.mjs
+```
+
+The demo uses a synthetic provider and two paired clients. It prints an exact
+`demo.read` action with `{ "value": "hello" }`. Enter `approve`, `deny`, or `stop`.
+Approval returns partial `HELLO` and final `HELLO!` values. Denial runs no action.
+Stop leaves the command stopped and cancels the pending approval. The script
+closes the local service and saves source and history under
+`.staf/code-mode-review/history.json`. Repeating the command creates another
+isolated review agent in that review database. No real credentials are used.
+For an unattended repeat, pass `--approve`, `--deny`, or `--stop`.
+
+Run the focused behavioral checks and required repository checks:
+
+```sh
+node --test test/code-mode.test.js test/code-mode-service.test.js
+corepack pnpm run check
+corepack pnpm test
+```
+
+Expect all focused checks to pass. They start real QuickJS workers, simulate
+approval expiry, kill a disposable service, and exercise cross-client Stop.
+They do not demonstrate a total process memory ceiling, OS isolation, Docker
+execution, or live connection/model compatibility. Read the
+[experiment evidence](design/code-mode/experiment.md#limits-and-evidence) before
+interpreting these checks as adoption evidence.

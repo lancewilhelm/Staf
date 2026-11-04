@@ -390,3 +390,61 @@ interaction authority for all menus and pages, with existing production features
 adapted into that style. Use grouped model menu rows, the New agent modal,
 provider cards and the Edit defaults disclosure. Keep manual entry, reasoning,
 connection recovery and agent lifecycle controls within those components.
+
+## Code Mode for agent tool work
+
+On 2026-11-03 the owner accepted Code Mode as the target for agent tool use after
+a bounded execution experiment passes. Migrate the existing main-chat clock,
+web search, page reading, scratch commands, and skill loading through the shared
+service, then retire equivalent direct model tools. Each execution starts with
+fresh variables, may wait for approval, and becomes interrupted on a Staf restart
+without automatic replay. Conversation history and actual action outcomes remain
+recorded.
+
+Keep all current AI connections. Explain plainly that a connection can offer
+many models and that testing one model does not establish that all models work
+with Code Mode. Documentation must name the models actually checked and identify
+untested combinations. The [Code Mode decision](adr/0005-service-owned-code-mode.md)
+records these accepted choices and the remaining technical decisions.
+
+In the next round, the owner confirmed that denying an action ends its script
+without a workaround. Invalid code can receive a bounded number of corrections
+before any action runs, using the selected model. Partial failures retain
+successful results, retry only failed reads within current limits, and require
+checking uncertain effects before retrying them. Normal chat shows progress,
+approvals, and results, with generated code collapsed into inspectable details.
+
+The owner subsequently accepted approval waits of up to 24 hours while Staf
+stays running. Expiry ends the script and retains completed results without
+granting approval. Independent reads may run in limited parallel work, approval
+requests appear one at a time per agent, and actions that change things run in
+order within a script. Retain generated code, action history, and returned
+results with the conversation, and discard unused temporary data when execution
+ends. On 2026-11-03 the owner confirmed the consolidated agreement and completed
+the design interview. Runtime selection and resource limits were left for
+`/architect with checkpoint` before implementation.
+
+Owner-authorized feature coordination requires Code Mode calls to use the
+immutable agent, session, command, and cancellation context captured when work
+was accepted. Session, document, and artifact services provide their own typed
+methods through the same host bridge, without a second direct-model-tool path.
+Fresh sessions must not silently summarize, truncate, compact, or replay older
+sessions. The [coordination record](design/code-mode/coordination.md) identifies
+the local integration contract and the separately owned feature scope.
+
+The owner approved the architecture checkpoint on 2026-11-03 as the basis for
+the bounded execution experiment: a fresh local JavaScript QuickJS/Wasm guest,
+the shared host capability contract, and the starting limits in the
+[detailed design](design/code-mode/design.md). Temporary successful-read results
+may span fresh script invocations within the same accepted request and are
+discarded when it ends; selected returned outputs are durable. Each presented
+approval has its own 24-hour window, so several approvals can extend total
+request time beyond 24 hours. This approval does not establish isolation,
+resource enforcement, model reliability, or production readiness.
+These are future product decisions, not implemented runtime behavior.
+
+The first execution experiment is implemented under [issue #74](https://github.com/lancewilhelm/Staf/issues/74).
+It is available only to an internal synthetic-provider lab. The [experiment record](design/code-mode/experiment.md)
+distinguishes working host lifecycle behavior from the unproven total-process
+ceiling, platform isolation and live-model gates. Production tool migration
+remains deferred until those gates pass.

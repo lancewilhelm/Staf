@@ -299,3 +299,11 @@ or advertised default, the model remains unset and chatting requires a choice.
 ### Chat work records
 
 Paired `GET /api/bots/{id}/chat-work` returns `messages` (excluding background-task notices) and ordered `requests`. Each request contains its command `id`, service-owned response `progress`, and ordered `events` with stable numeric `id`, `type`, `name`, nullable numeric `success`, nullable `detail`, and its `command_id`. Tool-result detail is redacted and capped at 16,000 characters. Re-fetch replaces the snapshot; clients must not append duplicate events. Pending chat approvals come from `/api/inbox` and are matched by bot and command ID. Existing exact-ID approval decision endpoints and permission enforcement are unchanged. Background tasks remain available through explicit task endpoints and CLI operations, but are not offered to ordinary chat providers.
+
+## Code Mode experiment
+
+The opt-in developer experiment runs generated JavaScript through a scoped host
+capability registry and retains its actual action outcomes. Normal chat keeps
+its current tool interface. See the [experiment status and integration contract](design/code-mode/experiment.md)
+for implemented behavior, repeatable synthetic checks, and the hard-isolation
+and live-model gates that still block adoption.

@@ -45,3 +45,13 @@ The browser bundles DM Sans in `web/assets/dm-sans.woff2` from the approved
 prototype. Copyright 2014 The DM Sans Project Authors
 (https://github.com/googlefonts/dm-fonts). See [the bundled font license](web/assets/DMSans-OFL.txt) for the
 full copyright and license notice.
+
+## Code Mode experiment dependencies (MIT)
+
+The experiment uses quickjs-emscripten 0.32.0 and Zod 4.6.7. Their packages
+include their MIT licenses. QuickJS/Wasm variants also retain their engine
+licenses. These licenses remain in the installed dependencies when Staf is
+distributed.
+
+- [quickjs-emscripten license](https://github.com/justjake/quickjs-emscripten/blob/v0.32.0/LICENSE)
+- [Zod license](https://github.com/colinhacks/zod/blob/v4.6.7/LICENSE)

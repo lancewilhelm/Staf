@@ -1,3 +1,5 @@
+import {CodeModeStore, readCodeModeHistory} from './code-mode/store.js';
+import {contextIds, type CapabilityContextInput} from './code-mode/contract.js';
 import {ProviderDefaultsStore} from './provider-choices.js';
 import { DatabaseSync } from 'node:sqlite';
 import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
@@ -32,6 +34,8 @@ export class BotConflict extends Error {}
 /** Instance-owned records. Callers supply execution; no provider runs during creation. */
 export class Instance {
   private readonly db: DatabaseSync;
+  private readonly codeModeStores = new Set<CodeModeStore>();
+  private readonly codeModeCommands = new Set<string>();
   private readonly configs: AgentConfigStore;
   private readonly temporaryConfigRoot: string | undefined;
   private readonly fingerprintKey: Uint8Array;
@@ -309,7 +313,7 @@ export class Instance {
     }
     return false;
   }
-  close() { this.db.close(); if(this.temporaryConfigRoot)rmSync(this.temporaryConfigRoot,{recursive:true,force:true}); }
+  close() { for (const store of this.codeModeStores) store.close(); this.codeModeStores.clear(); this.db.close(); if(this.temporaryConfigRoot)rmSync(this.temporaryConfigRoot,{recursive:true,force:true}); }
   shellConfig() {const row=this.db.prepare('SELECT revision,docker_binary AS dockerBinary,docker_socket AS dockerSocket,image_id AS imageId FROM shell_config WHERE id=1').get();if(!row || typeof row.revision!=='number' || !(row.dockerBinary===null || typeof row.dockerBinary==='string') || !(row.dockerSocket===null || typeof row.dockerSocket==='string') || !(row.imageId===null || typeof row.imageId==='string'))throw Error('Invalid shell configuration');return {revision:row.revision,dockerBinary:row.dockerBinary,dockerSocket:row.dockerSocket,imageId:row.imageId};}
   shellUnresolved() {return this.db.prepare("SELECT a.id,a.state,a.summary,c.docker_binary AS dockerBinary,c.docker_socket AS dockerSocket,c.image_id AS imageId FROM action_journal a LEFT JOIN shell_action_configs c ON c.action_id=a.id WHERE a.summary='Run scratch command' AND a.state='uncertain' AND NOT EXISTS (SELECT 1 FROM shell_reviews r WHERE r.action_id=a.id) ORDER BY a.rowid").all();}
   shellBusy() {return !!this.db.prepare("SELECT 1 FROM action_journal a WHERE a.summary='Run scratch command' AND (a.state='started' OR (a.state='uncertain' AND NOT EXISTS (SELECT 1 FROM shell_reviews r WHERE r.action_id=a.id))) LIMIT 1").get() || !!this.db.prepare('SELECT 1 FROM shell_lock').get();}
@@ -446,6 +450,25 @@ export class Instance {
     this.#approvalGrants.edit(id,revision,scope,lifetime);for(const controller of this.grantControllers.get(id)??[])controller.abort();
   }
   revokeApprovalGrant(id:string,revision:number) {this.#approvalGrants.revoke(id,revision);for(const controller of this.grantControllers.get(id)??[])controller.abort();}
+  codeModeHistory(commandId: string) { return readCodeModeHistory(this.db, commandId); }
+  /** Experimental internal service seam. The caller binds accepted work once. */
+  codeModeStore(input: CapabilityContextInput): CodeModeStore {
+    const context = Object.freeze({...contextIds.parse({botId: input.botId, sessionId: input.sessionId, commandId: input.commandId}), signal: input.signal});
+    const accepted = this.execution(context.commandId);
+    if (accepted.command.botId !== context.botId || accepted.profile.chatId !== context.sessionId) throw Error('Code context does not match accepted work');
+    if (this.codeModeCommands.has(context.commandId)) throw Error('Code work already owned');
+    const revision = this.db.prepare("SELECT json_extract(profile,'$.revision') AS revision FROM command_profiles WHERE command_id=?").get(context.commandId)?.revision;
+    if (typeof revision !== 'string') throw Error('Invalid accepted profile revision');
+    const store = new CodeModeStore(this.db, context, () => {
+      const command = this.command(context.commandId);
+      if (command?.state !== 'pending' || command.botId !== context.botId || this.responseStopping(context.commandId)) throw Error('Code work is no longer active');
+      const bot = this.bot(context.botId);
+      if (!bot || bot.archived || bot.revision !== revision) throw Error('Code authority changed');
+    });
+    this.codeModeStores.add(store);
+    this.codeModeCommands.add(context.commandId);
+    return store;
+  }
   webJournal() {return new ActionJournal(this.db);}
   recordWebDecision(actionId:string,fingerprint:string,decision:'approve'|'deny') {this.db.prepare('INSERT INTO web_action_decisions VALUES (?,?,?)').run(actionId,fingerprint,decision);}
   webActions(work:WorkRef) {return this.db.prepare(`SELECT id,state,summary,result FROM action_journal WHERE ${work.kind==='task' ? 'task_attempt_id' : 'command_id'}=? AND summary='Read public web page' ORDER BY rowid`).all(work.id);}
@@ -874,10 +897,10 @@ export class Instance {
     this.db.prepare('INSERT INTO command_runtime_events (command_id,type,name,success,detail) VALUES (?,?,?,?,?)').run(id,event.type,event.name,event.success === undefined ? null : Number(event.success),detail);
   }
   commandRuntimeEvents(id:string) {
-    return this.db.prepare('SELECT type,name,success FROM command_runtime_events WHERE command_id=? ORDER BY seq').all(id).map(row=>row.type === 'tool_result' ? {type:'tool_result' as const,name:String(row.name),success:row.success === 1} : {type:'tool_start' as const,name:String(row.name)});
+    return this.db.prepare('SELECT type,name,success FROM command_runtime_events WHERE command_id=? AND name<>\'code_mode_record\' ORDER BY seq').all(id).map(row=>row.type === 'tool_result' ? {type:'tool_result' as const,name:String(row.name),success:row.success === 1} : {type:'tool_start' as const,name:String(row.name)});
   }
   chatWork(botId:string) {
-    const events=this.db.prepare('SELECT e.command_id,e.seq AS id,e.type,e.name,e.success,e.detail FROM command_runtime_events e JOIN commands c ON c.id=e.command_id WHERE c.bot_id=? ORDER BY e.seq').all(botId);
+    const events=this.db.prepare('SELECT e.command_id,e.seq AS id,e.type,e.name,e.success,e.detail FROM command_runtime_events e JOIN commands c ON c.id=e.command_id WHERE c.bot_id=? AND e.name<>\'code_mode_record\' ORDER BY e.seq').all(botId);
     const byCommand=new Map<string,typeof events>();
     for(const event of events){const id=String(event.command_id);const group=byCommand.get(id) ?? [];group.push(event);byCommand.set(id,group);}
     const requests=this.db.prepare('SELECT id FROM commands WHERE bot_id=? ORDER BY rowid').all(botId).map(row=>{

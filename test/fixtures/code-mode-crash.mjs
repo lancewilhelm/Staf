@@ -1,0 +1,13 @@
+import {Instance} from '../../dist/instance.js';
+import {CodeModeWork} from '../../dist/code-mode/host.js';
+import {CodeApprovals} from '../../dist/code-mode/approvals.js';
+import {CapabilityRegistry,applicationCapability,dataSchema,resourceScope} from '../../dist/code-mode/contract.js';
+import {limits} from '../../dist/code-mode/protocol.js';
+import {z} from 'zod';
+const instance=new Instance(process.argv[2]);
+const bot=instance.createBot({name:'Crash fixture',instructions:'Synthetic only'});
+instance.claim({id:'crash-command',botId:bot.id,content:'Crash test'});
+const schema=dataSchema(z.strictObject({value:z.string()}));
+const capability=applicationCapability({description:'Synthetic held change',input:schema,output:schema,effect:{kind:'change',resource:call=>resourceScope({family:'synthetic',owner:call.context.botId,key:call.context.sessionId})},checkScope:async()=>{},invoke:async()=>{process.stdout.write('effect-started\n');return new Promise(()=>{});}});
+const work=new CodeModeWork({store:instance.codeModeStore({botId:bot.id,sessionId:bot.chatId,commandId:'crash-command',signal:new AbortController().signal}),registry:new CapabilityRegistry({'fixture.change':capability}),approvals:new CodeApprovals(limits.approvalMs),policy:()=> 'allow',redact:s=>s});
+await work.execute({providerCallId:'crash-call',source:'await staf.emit({partial:"kept"}); return await capabilities["fixture.change"]({value:"held"});'});

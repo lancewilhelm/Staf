@@ -535,3 +535,11 @@ agent and review the warning before adding `--confirm-provider-change`. Without
 the flag the provider stays unchanged. Use the revision from inspect; conflicts
 preserve the current configuration. The
 interactive terminal keeps its existing provider-change confirmation.
+
+## Code Mode experiment
+
+The opt-in developer experiment runs generated JavaScript through a scoped host
+capability registry and retains its actual action outcomes. Normal chat keeps
+its current tool interface. See the [experiment status and integration contract](design/code-mode/experiment.md)
+for implemented behavior, repeatable synthetic checks, and the hard-isolation
+and live-model gates that still block adoption.

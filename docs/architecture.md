@@ -212,3 +212,11 @@ local saved credentials still do not establish provider or model access.
 ### Inline main-chat execution
 
 The workspace reads service-owned command progress and persisted tool records through `/api/bots/{id}/chat-work`; it associates records and exact pending approvals with the command user message. Snapshot replacement avoids duplicate delivery. Tool outcomes remain stored independently of later provider success or failure. Database version 30 adds bounded result detail to command runtime events after a protected migration backup. The CLI summary contract remains unchanged. Ordinary chat no longer receives the background-task creation adapter; unsolicited calls fail without starting work. The task engine and explicit API/CLI remain intact. Synthetic checks do not prove live provider behavior.
+
+## Code Mode experiment
+
+The opt-in developer experiment runs generated JavaScript through a scoped host
+capability registry and retains its actual action outcomes. Normal chat keeps
+its current tool interface. See the [experiment status and integration contract](design/code-mode/experiment.md)
+for implemented behavior, repeatable synthetic checks, and the hard-isolation
+and live-model gates that still block adoption.

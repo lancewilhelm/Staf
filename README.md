@@ -119,3 +119,11 @@ MIT notice in [Third-party notices](THIRD_PARTY_NOTICES.md).
 Agent provider choices are shared across clients. The composer opens a provider,
 model and reasoning picker; selections save for the next message. Global Settings
 holds per-provider first-use defaults. See [usage](docs/usage.md).
+
+## Code Mode experiment
+
+The opt-in developer experiment runs generated JavaScript through a scoped host
+capability registry and retains its actual action outcomes. Normal chat keeps
+its current tool interface. See the [experiment status and integration contract](docs/design/code-mode/experiment.md)
+for implemented behavior, repeatable synthetic checks, and the hard-isolation
+and live-model gates that still block adoption.
