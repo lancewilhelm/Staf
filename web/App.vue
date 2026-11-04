@@ -83,6 +83,11 @@ function openChat(id: string) { settingsAgentId.value = null; app.closeSetup(); 
         <button v-else-if="view !== 'chat'" class="header-action" :disabled="agentSaving" aria-label="Back to chat" @click="closeAgentSettings"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="m6 6 12 12M6 18 18 6"/></svg></button>
       </header>
       <Toasts />
+      <details v-if="s.connection.kind === 'ready' && s.legacyRecords.length" class="connection-recovery">
+        <summary>Earlier browser records</summary>
+        <p>These saved records have no dataset identity. Their origin cannot be verified; copy any needed text or operation details before continuing. They will not be submitted automatically.</p>
+        <div v-for="record in s.legacyRecords" :key="record.key"><p>{{ record.key }}</p><pre style="white-space: pre-wrap; overflow-wrap: anywhere">{{ record.value }}</pre></div>
+      </details>
       <div v-if="s.connection.kind === 'offline'" class="connection-recovery" role="alert">{{ s.connection.message }} {{ s.freshness }}</div>
       <div v-if="settingsAgentId && s.connection.kind !== 'pairing'" :style="{display: view === 'agent' ? 'contents' : 'none'}">
         <AgentSettings :key="settingsAgentId" :id="settingsAgentId" v-model:saving="agentSaving" @providers="openSettings" @memory="openAgentMemory(settingsAgentId)" @close="closeAgentSettings" />

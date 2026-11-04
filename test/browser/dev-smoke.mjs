@@ -42,6 +42,38 @@ try {
  await call('/api/commands',{id:'smoke-command',botId:bot.id,content:'offline smoke'});
  await until(async()=>(await call('/api/commands/smoke-command')).state==='completed','demo response');
  await until(()=>evaluate("document.body.innerText.includes('offline smoke')"),'browser sees shared chat');
+ // Pre-dataset journals from an older browser: a durable command proves this
+ // draft belongs to this agent, while the creation operation proves its origin.
+ const legacyDraft=`staf-workspace-v1:old-writer:${bot.id}`;
+ const legacyCreation='staf-workspace-v1:creation:smoke-agent';
+ const unverifiedDraft=`staf-workspace-v1:unknown-writer:${bot.id}`;
+ const unverifiedCreation='staf-workspace-v1:creation:unknown-operation';
+ await evaluate(`for(const key of Object.keys(localStorage))if(key.startsWith('staf-workspace-v1:')&&key.endsWith(':'+${JSON.stringify(bot.id)}))localStorage.removeItem(key);localStorage.setItem(${JSON.stringify(legacyDraft)},${JSON.stringify(JSON.stringify({text:'legacy next draft',submission:{id:'smoke-command',text:'offline smoke',kind:'pending'}}))});localStorage.setItem(${JSON.stringify(legacyCreation)},${JSON.stringify(JSON.stringify({kind:'create',operationId:'smoke-agent',name:'Smoke agent',instructions:'',provider:'demo',model:'',status:''}))});localStorage.setItem(${JSON.stringify(unverifiedDraft)},${JSON.stringify(JSON.stringify({text:'unverified saved text',submission:null}))});localStorage.setItem(${JSON.stringify(unverifiedCreation)},${JSON.stringify(JSON.stringify({kind:'create',operationId:'unknown-operation',name:'Unverified agent',instructions:'unverified instructions',provider:'demo',model:'',status:''}))})`);
+ await cdp('Page.reload');
+ await until(()=>evaluate("document.body.innerText.includes('Recovered creation. Check status')"),'verified legacy creation recovered');
+ await evaluate("[...document.querySelectorAll('dialog button')].find(b=>b.textContent==='Check creation').click()");
+ await until(()=>evaluate("!document.querySelector('dialog')"),'verified creation status resolved');
+ await until(()=>evaluate("document.querySelector('textarea[aria-label=Message]')?.value==='legacy next draft'"),'verified legacy draft recovered');
+ await until(()=>evaluate("document.body.innerText.includes('Earlier browser records')"),'unverified records available');
+ assert.equal(await evaluate("document.body.innerText.includes('unverified saved text')"),false,'unverified text is not displayed automatically');
+ await evaluate("[...document.querySelectorAll('summary')].find(e=>e.textContent.includes('Earlier browser records')).click()");
+ assert.equal(await evaluate("document.body.innerText.includes('unverified saved text') && document.body.innerText.includes('unknown-operation') && document.body.innerText.includes('unverified instructions')"),true,'unverified text and operation are available to copy');
+ await evaluate("[...document.querySelectorAll('summary')].find(e=>e.textContent.includes('Earlier browser records')).click()");
+ await evaluate(`{const el=document.querySelector('textarea[aria-label=Message]');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(el,'draft survives restart');el.dispatchEvent(new Event('input',{bubbles:true}))}`);
+ const otherBot=await call('/api/bots',{operationId:'legacy-lock-agent',name:'Legacy lock agent',provider:'demo'});
+ await call('/api/commands',{id:'legacy-lock-command',botId:otherBot.id,content:'locked command'});
+ await until(async()=>(await call('/api/commands/legacy-lock-command')).state==='completed','locked command persisted');
+ const lockedKey=`staf-workspace-v1:older-tab:${otherBot.id}`;
+ await evaluate(`localStorage.setItem(${JSON.stringify(lockedKey)},${JSON.stringify(JSON.stringify({text:'draft from older tab',submission:{id:'legacy-lock-command',text:'locked command',kind:'pending'}}))});void navigator.locks.request('staf-draft:'+${JSON.stringify(lockedKey)},async()=>{window.legacyLockHeld=true;await new Promise(resolve=>window.releaseLegacyLock=resolve)})`);
+ await until(()=>evaluate('window.legacyLockHeld'),'older tab owns its draft');
+ await until(()=>evaluate("[...document.querySelectorAll('.side button')].some(b=>b.textContent.includes('Legacy lock agent'))"),'second agent shown');
+ await evaluate("[...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('Legacy lock agent')).click()");
+ await until(()=>evaluate("document.querySelector('textarea[aria-label=Message]') && !document.querySelector('textarea[aria-label=Message]').disabled"),'second draft loaded');
+ assert.equal(await evaluate("document.querySelector('textarea[aria-label=Message]').value"),'','active older tab keeps its record');
+ await evaluate('window.releaseLegacyLock()');
+ await until(()=>evaluate("document.querySelector('textarea[aria-label=Message]')?.value==='draft from older tab'"),'legacy record recovers after its owner closes');
+ await evaluate("[...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('Smoke agent')).click()");
+ await until(()=>evaluate("document.querySelector('textarea[aria-label=Message]')?.value==='draft survives restart'"),'first draft restored');
  await appendFile(join(checkout,'web/style.css'),'\n:root { --staf-dev-smoke: reloaded; }\n');
  await until(()=>evaluate("getComputedStyle(document.documentElement).getPropertyValue('--staf-dev-smoke').trim()==='reloaded'"),'frontend hot reload');
  assert.equal(await evaluate("document.querySelector('textarea').value"),'draft survives restart');
@@ -75,6 +107,8 @@ try {
  assert.equal(await evaluate("document.body.innerText.includes('Retained creation')"),false);
  await evaluate(`{const el=document.querySelector('input');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(el,${JSON.stringify(newCode)});el.dispatchEvent(new Event('input',{bubbles:true}));[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Pair').click()}`);
  await until(()=>evaluate("!!localStorage.getItem('staf-token') && document.body.innerText.includes('Project guide')"),'pair new dataset');
+ assert.equal(await evaluate("document.body.innerText.includes('unverified saved text') || document.body.innerText.includes('Unverified agent')"),false,'unverified old content stays behind explicit recovery after reset');
+ assert.equal(await evaluate(`localStorage.getItem(${JSON.stringify(unverifiedDraft)})!==null && localStorage.getItem(${JSON.stringify(unverifiedCreation)})!==null`),true);
  await evaluate("if(typeof window.releaseCreation==='function')window.releaseCreation()");
  await sleep(200);
  assert.equal(await evaluate("document.body.innerText.includes('Retained creation')"),false,'old creation is not shown after reset');

@@ -18,7 +18,7 @@ export type Submission=SubmissionIdentity & (
 export type Draft={text:string;submission:Submission|null};
 export type Connection={kind:'connecting'}|{kind:'pairing';message:string}|{kind:'ready'}|{kind:'offline';message:string};
 export type Setup={kind:'closed'}|{kind:'create';name:string;instructions:string;provider:string;model:string;reasoning?:string;operationId:string|null;status:string};
-export type Workspace={connection:Connection;setup:Setup;bots:Bot[];selected:string|null;messages:Message[];work:ChatWork[];response:ResponseProgress|null;responseConnection:'connecting'|'connected'|'reconnecting';inbox:InboxItem[];credential:'signed-in'|'signed-out'|'unknown';openrouter:'saved'|'missing'|'unknown'|'error';authAttempt:{id:string;phase:string}|null;authUrl:string;authUrlAttemptId:string;freshness:string;notice:string;notices:ToastNotice[];authStarting:boolean;authStatus:string;actionError:string;draft:Draft;draftReady:boolean};
+export type Workspace={connection:Connection;setup:Setup;bots:Bot[];selected:string|null;messages:Message[];work:ChatWork[];response:ResponseProgress|null;responseConnection:'connecting'|'connected'|'reconnecting';inbox:InboxItem[];credential:'signed-in'|'signed-out'|'unknown';openrouter:'saved'|'missing'|'unknown'|'error';authAttempt:{id:string;phase:string}|null;authUrl:string;authUrlAttemptId:string;freshness:string;notice:string;notices:ToastNotice[];authStarting:boolean;authStatus:string;actionError:string;draft:Draft;draftReady:boolean;legacyRecords:Array<{key:string;value:string}>};
 class ApiError extends Error {constructor(message:string,readonly status:number){super(message);}}
 const isRecord=(value:unknown):value is Record<string,unknown>=>typeof value==='object'&&value!==null&&!Array.isArray(value);
 type ProviderDefaults={revision:string;providers:Record<string,{model:string|null;reasoning:string|null}>};
@@ -56,7 +56,7 @@ function normalizeDraft(draft:Draft):Draft {
 }
 export class Controller {
   private dataset:string|null=null; private writer=crypto.randomUUID(); private checking=false; private listeners=new Set<()=>void>(); private generation=0; private token=localStorage.getItem('staf-token')||''; private currentKey=''; private timer:number; private responseStream:{botId:string;controller:AbortController}|null=null;
-  state:Workspace={connection:{kind:'connecting'},setup:{kind:'closed'},bots:[],selected:null,messages:[],work:[],response:null,responseConnection:'connecting',inbox:[],credential:'unknown',openrouter:'unknown',authAttempt:null,authUrl:'',authUrlAttemptId:'',freshness:'',notice:'',notices:[],authStarting:false,authStatus:'',actionError:'',draft:{text:'',submission:null},draftReady:false};
+  state:Workspace={connection:{kind:'connecting'},setup:{kind:'closed'},bots:[],selected:null,messages:[],work:[],response:null,responseConnection:'connecting',inbox:[],credential:'unknown',openrouter:'unknown',authAttempt:null,authUrl:'',authUrlAttemptId:'',freshness:'',notice:'',notices:[],authStarting:false,authStatus:'',actionError:'',draft:{text:'',submission:null},draftReady:false,legacyRecords:[]};
   constructor(){this.timer=window.setInterval(()=>{if(document.visibilityState==='visible')void this.refresh()},1000);window.addEventListener('online',()=>void this.refresh());document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')void this.refresh()});void this.removeObsoleteRecords();void this.refresh()}
   subscribe=(fn:()=>void)=>{this.listeners.add(fn);return()=>this.listeners.delete(fn)};
   snapshot=()=>this.state;
@@ -104,7 +104,7 @@ export class Controller {
     }})();
   }
   async pair(code:string){try{const gen=++this.generation;if(!await this.syncDataset(gen))return;const result=await this.api<{token:string}>('/api/pair',{code});localStorage.setItem('staf-token',result.token);this.token=result.token;await this.refresh()}catch(e){this.update({connection:{kind:'pairing',message:String(e)}})}}
-  async refresh(){const gen=++this.generation;try{if(!await this.syncDataset(gen))return;if(!this.token){this.update({connection:{kind:'pairing',message:''}});return}const [bots,allInbox,credential,current,openrouter]=await Promise.all([this.api<Bot[]>('/api/bots'),this.api<InboxItem[]>('/api/inbox'),this.api<{signedIn:boolean}>('/api/codex-auth/credential'),this.api<{attempt:{id:string;phase:string}|null}>('/api/codex-auth/current'),this.api<{saved:boolean}>('/api/openrouter-connection').catch(()=>({saved:null}))]);const inbox=allInbox.filter(item=>item.kind==='approval'&&item.work.kind==='command');const preferred=this.state.selected||sessionStorage.getItem('staf-selected-agent');const selected=preferred && bots.some(b=>b.id===preferred&&!b.archived)?preferred:bots.find(b=>!b.archived)?.id??null;const chat=selected?await this.api<{messages:Message[];requests:ChatWork[]}>('/api/bots/'+selected+'/chat-work'):{messages:[],requests:[]};const {messages,requests:work}=chat;if(gen!==this.generation)return;const changed=selected!==this.state.selected;if(changed){await this.loadDraft(selected,gen);if(gen!==this.generation)return;}this.reconcileAuth(current.attempt);this.update({connection:{kind:'ready'},bots,selected,messages,...(changed?{response:null}:{}),work,inbox,credential:credential.signedIn?'signed-in':'signed-out',openrouter:openrouter.saved===null?'error':openrouter.saved?'saved':'missing',authAttempt:current.attempt,freshness:''});this.watchResponse(selected);if(this.state.draft.submission && (['pending','unknown'].includes(this.state.draft.submission.kind)||this.state.draft.submission.kind==='uncertain-busy'))void this.checkSubmission()}catch(e){if(gen!==this.generation)return;if(e instanceof ApiError&&e.status===401){this.token='';this.watchResponse(null);localStorage.removeItem('staf-token');this.update({connection:{kind:'pairing',message:'Pairing expired or was revoked.'}})}else this.update({connection:{kind:'offline',message:'Connection unavailable. Showing the last successful update.'},freshness:String(e)})}}
+  async refresh(){const gen=++this.generation;try{if(!await this.syncDataset(gen))return;if(!this.token){this.update({connection:{kind:'pairing',message:''}});return}const [bots,allInbox,credential,current,openrouter]=await Promise.all([this.api<Bot[]>('/api/bots'),this.api<InboxItem[]>('/api/inbox'),this.api<{signedIn:boolean}>('/api/codex-auth/credential'),this.api<{attempt:{id:string;phase:string}|null}>('/api/codex-auth/current'),this.api<{saved:boolean}>('/api/openrouter-connection').catch(()=>({saved:null}))]);const inbox=allInbox.filter(item=>item.kind==='approval'&&item.work.kind==='command');const preferred=this.state.selected||sessionStorage.getItem('staf-selected-agent');const selected=preferred && bots.some(b=>b.id===preferred&&!b.archived)?preferred:bots.find(b=>!b.archived)?.id??null;const chat=selected?await this.api<{messages:Message[];requests:ChatWork[]}>('/api/bots/'+selected+'/chat-work'):{messages:[],requests:[]};const {messages,requests:work}=chat;if(gen!==this.generation)return;const changed=selected!==this.state.selected;if(changed){await this.loadDraft(selected,gen);if(gen!==this.generation)return;}this.reconcileAuth(current.attempt);this.update({connection:{kind:'ready'},bots,selected,messages,...(changed?{response:null}:{}),work,inbox,credential:credential.signedIn?'signed-in':'signed-out',openrouter:openrouter.saved===null?'error':openrouter.saved?'saved':'missing',authAttempt:current.attempt,freshness:''});this.watchResponse(selected);void this.recoverLegacy();if(!this.state.draft.text&&!this.state.draft.submission)void this.recoverNext();if(this.state.draft.submission && (['pending','unknown'].includes(this.state.draft.submission.kind)||this.state.draft.submission.kind==='uncertain-busy'))void this.checkSubmission()}catch(e){if(gen!==this.generation)return;if(e instanceof ApiError&&e.status===401){this.token='';this.watchResponse(null);localStorage.removeItem('staf-token');this.update({connection:{kind:'pairing',message:'Pairing expired or was revoked.'}})}else this.update({connection:{kind:'offline',message:'Connection unavailable. Showing the last successful update.'},freshness:String(e)})}}
   async select(id:string){
     if(id===this.state.selected)return;
     sessionStorage.setItem('staf-selected-agent',id);this.generation++;
@@ -137,6 +137,7 @@ export class Controller {
           if(!isRecord(parsed)||typeof parsed.text!=='string'||(!parsed.text && !parsed.submission))continue;
           if(await this.claim(candidate)){key=candidate;break;}
         }
+        if(key===own)await this.recoverLegacyDraft(id,own,()=>load===this.draftLoad&&(expectedGeneration===undefined||expectedGeneration===this.generation));
         if(!await this.claim(key))throw Error('Draft is in use');
         if(load!==this.draftLoad || (expectedGeneration!==undefined && expectedGeneration!==this.generation))return;
         this.currentKey=key;
@@ -145,6 +146,24 @@ export class Controller {
       }
     }catch{if(load===this.draftLoad && (expectedGeneration===undefined || expectedGeneration===this.generation)){this.currentKey='';this.update({actionError:'Browser storage or locking is unavailable. Sending is blocked.'});this.notify('Browser storage or locking is unavailable. Sending is blocked.','error')}}
     if(load===this.draftLoad && (expectedGeneration===undefined || expectedGeneration===this.generation))this.update({draft,draftReady:!!this.currentKey});
+  }
+  private async recoverLegacyDraft(id:string, target:string, valid:()=>boolean):Promise<Draft|null>{
+    const dataset=this.dataset;
+    const keys=Array.from({length:localStorage.length},(_,i)=>localStorage.key(i)).filter((key):key is string=>!!key&&key.startsWith(prefix)&&key.slice(prefix.length).split(':').length===2&&key.endsWith(':'+id)&&!key.startsWith(prefix+'creation:'));
+    for(const key of keys){
+      const raw=localStorage.getItem(key);if(!raw)continue;
+      let saved:unknown;try{saved=JSON.parse(raw)}catch{continue}
+      if(!isRecord(saved)||typeof saved.text!=='string'||!isRecord(saved.submission)||typeof saved.submission.id!=='string'||typeof saved.submission.text!=='string'||typeof saved.submission.kind!=='string'||!['submitting','submitting-uncertain','pending','unknown','uncertain-busy','busy','rejected','failed','interrupted'].includes(saved.submission.kind))continue;
+      try{
+        const command=await this.api<{botId:string;content:string}>('/api/commands/'+encodeURIComponent(saved.submission.id));
+        if(command.botId!==id||command.content!==saved.submission.text||this.dataset!==dataset||!valid()||localStorage.getItem(key)!==raw)continue;
+        if(!await this.claim(key))continue;
+        if(!await this.claim(target))continue;
+        if(!valid()||this.dataset!==dataset||localStorage.getItem(key)!==raw)continue;
+        localStorage.setItem(target,raw);localStorage.removeItem(key);return normalizeDraft(JSON.parse(raw));
+      }catch{/* An unverified record stays available for copy-out. */}
+    }
+    return null;
   }
   private async recoverNext(){
     const id=this.state.selected,current=this.currentKey;
@@ -161,6 +180,8 @@ export class Controller {
         const draft=normalizeDraft(JSON.parse(latest));if(typeof draft.text!=='string'||(!draft.text&&!draft.submission))continue;
         this.currentKey=key;this.update({draft});void this.refresh();return;
       }
+    const draft=await this.recoverLegacyDraft(id,current,()=>this.currentKey===current&&this.state.selected===id&&!this.state.draft.text&&!this.state.draft.submission);
+    if(draft){this.update({draft});void this.refresh();}
     }catch{this.update({actionError:'Could not recover another saved draft.'});this.notify('Could not recover another saved draft.','error')}finally{this.recovering=false}
   }
   private save(draft:Draft):boolean{try{if(!this.currentKey)return false;localStorage.setItem(this.currentKey,JSON.stringify(draft));this.update({draft});if(!draft.text&&!draft.submission)void this.recoverNext();return true}catch{this.update({actionError:'Browser storage is unavailable. Sending is blocked; copy your text before leaving.'});this.notify('Browser storage is unavailable. Sending is blocked; copy your text before leaving.','error');return false}}
@@ -171,6 +192,32 @@ export class Controller {
     try{for(const key of ['staf-draft','staf-pending'])await navigator.locks.request('staf-draft:'+key,{ifAvailable:true},lock=>{if(lock)localStorage.removeItem(key)})}catch{}
   }
   private retainedCreation:Extract<Setup,{kind:'create'}>|null=null;
+  private legacyChecking=false;
+  private async recoverLegacy(){
+    if(this.legacyChecking||!this.dataset||!this.token)return;
+    this.legacyChecking=true;const dataset=this.dataset;
+    try{
+      const keys=Array.from({length:localStorage.length},(_,i)=>localStorage.key(i)).filter((key):key is string=>!!key&&key.startsWith(prefix)&&key.slice(prefix.length).split(':').length===2);
+      for(const key of keys.filter(key=>key.startsWith(prefix+'creation:'))){
+        const raw=localStorage.getItem(key);if(!raw)continue;
+        let saved:unknown;try{saved=JSON.parse(raw)}catch{continue}
+        if(!isRecord(saved)||saved.kind!=='create'||typeof saved.operationId!=='string'||key!==prefix+'creation:'+saved.operationId||typeof saved.name!=='string')continue;
+        try{
+          const bot=await this.api<Bot>('/api/bot-creations/'+encodeURIComponent(saved.operationId));
+          if(this.dataset!==dataset||bot.name!==saved.name||localStorage.getItem(key)!==raw)continue;
+          if(!await this.claim(key))continue;
+          const target=prefix+'creation:'+dataset+':'+saved.operationId;
+          if(localStorage.getItem(target)!==null||!await this.claim(target))continue;
+          localStorage.setItem(target,raw);localStorage.removeItem(key);
+          await this.restoreCreation(dataset);
+        }catch{/* Missing or unavailable status cannot establish the dataset. */}
+      }
+      if(this.dataset===dataset){
+        const records=keys.flatMap(key=>{const value=localStorage.getItem(key);return value===null?[]:[{key,value}]});
+        if(JSON.stringify(records)!==JSON.stringify(this.state.legacyRecords))this.update({legacyRecords:records});
+      }
+    }finally{this.legacyChecking=false}
+  }
   private async restoreCreation(dataset:string){
     try{
       const keys=Array.from({length:localStorage.length},(_,i)=>localStorage.key(i)).filter((key):key is string=>!!key&&key.startsWith(prefix+'creation:'+dataset+':'));
