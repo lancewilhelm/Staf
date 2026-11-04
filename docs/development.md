@@ -137,6 +137,8 @@ corepack pnpm dev:restore BACKUP_DIRECTORY
 
 Restore saves the current dataset first. It retains current provider connections,
 clears restored client authorizations, and assigns a fresh browser dataset identity.
+When the backup predates the first database, restore leaves an empty SQLite database
+ready for initialization, so the database path remains protected during publication.
 Use code compatible with the restored schema. The command does not automatically
 start Staf. If restore is interrupted, `dev:recover` restores the state from before
 that restore. Keep backups until you have checked the restored content. An abrupt
@@ -147,6 +149,9 @@ For a disposable offline check, run `node --test test/dev-launch.test.js` and
 requires the Chrome executable described below. These checks use synthetic
 credentials and demo responses; they do not prove live sign-in, token refresh,
 provider access, or inference.
+With commit `d2ab6fc` available in local Git history, `node test/manual/older-writer-probe.mjs`
+also runs its actual older constructor against a paused replacement and after a
+forced interruption. It requires a prior build and uses a disposable data directory.
 
 ## Verify a change
 
