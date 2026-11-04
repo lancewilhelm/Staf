@@ -65,6 +65,12 @@ async function closeUserMemory() {
   document.querySelector<HTMLElement>(view.value === 'agent-memory' ? '.shared-memory-link' : '.user-memory-link')?.focus();
 }
 function openChat(id: string) { settingsAgentId.value = null; app.closeSetup(); view.value = 'chat'; void app.select(id); }
+const earlierStatus = ref<Record<string,string>>({});
+async function checkEarlier(key: string) {
+  try {const command = await app.checkEarlierSubmission(key);earlierStatus.value = {...earlierStatus.value,[key]:`Original command: ${command.state}${command.error ? ' — '+command.error : ''}`};}
+  catch(error) {earlierStatus.value = {...earlierStatus.value,[key]:`Status unavailable: ${String(error)}. The record remains saved.`};}
+}
+function hasEarlierSubmission(raw:string) {try {const value:unknown=JSON.parse(raw);return !!value && typeof value==='object' && 'submission' in value && !!value.submission;}catch{return false}}
 function legacyContent(raw: string) {
   try {
     const value: unknown = JSON.parse(raw);
@@ -99,8 +105,8 @@ function legacyContent(raw: string) {
       <Toasts />
       <details v-if="s.connection.kind === 'ready' && s.legacyRecords.length" class="connection-recovery">
         <summary>Earlier browser records</summary>
-        <p>These saved records have no dataset identity. Their origin cannot be verified; copy any needed text or operation details before continuing. They will not be submitted automatically.</p>
-        <div v-for="record in s.legacyRecords" :key="record.key"><p>{{ record.key }}</p><pre style="white-space: pre-wrap; overflow-wrap: anywhere">{{ legacyContent(record.value) }}</pre></div>
+        <p>These earlier drafts and operations remain saved separately. Copy any needed text or operation details; they will not be submitted automatically to the current session.</p>
+        <div v-for="record in s.legacyRecords" :key="record.key"><p>{{ record.key }}</p><pre style="white-space: pre-wrap; overflow-wrap: anywhere">{{ legacyContent(record.value) }}</pre><button v-if="hasEarlierSubmission(record.value)" @click="checkEarlier(record.key)">Check original submission</button><p v-if="earlierStatus[record.key]" role="status">{{ earlierStatus[record.key] }}</p></div>
       </details>
       <div v-if="s.connection.kind === 'offline'" class="connection-recovery" role="alert">{{ s.connection.message }} {{ s.freshness }}</div>
       <div v-if="settingsAgentId && s.connection.kind !== 'pairing'" :style="{display: view === 'agent' ? 'contents' : 'none'}">

@@ -548,6 +548,16 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
         if (claim.kind === 'accepted') executeTask(id);
         return json(200,claim);
       }
+      const sessionCollection=req.url?.match(/^\/api\/bots\/([\w-]+)\/sessions(?:\?(.+))?$/);
+      if(sessionCollection?.[1] && req.method==='GET'){const params=new URLSearchParams(sessionCollection[2]);return json(200,{current:instance.currentSession(sessionCollection[1]),sessions:instance.listSessions(sessionCollection[1],Number(params.get('offset') ?? 0),Number(params.get('limit') ?? 100))});}
+      if(sessionCollection?.[1] && req.method==='POST') {
+        if(typeof value.operationId!=='string'||typeof value.expectedSessionId!=='string'||(value.name!==undefined && typeof value.name!=='string'))return json(400,{error:'Invalid session creation'});
+        return json(200,instance.createSession({botId:sessionCollection[1],operationId:value.operationId,expectedSessionId:value.expectedSessionId,...(typeof value.name==='string'?{name:value.name}:{})}));
+      }
+      const sessionSearch=req.url?.match(/^\/api\/bots\/([\w-]+)\/session-search\?(.+)$/);
+      if(sessionSearch?.[1] && req.method==='GET')return json(200,instance.searchSessions(sessionSearch[1],new URLSearchParams(sessionSearch[2]).get('q') ?? ''));
+      const sessionRead=req.url?.match(/^\/api\/bots\/([\w-]+)\/sessions\/([\w-]+)(?:\?(.+))?$/);
+      if(sessionRead?.[1] && sessionRead[2] && req.method==='GET') {const params=new URLSearchParams(sessionRead[3]);return json(200,instance.readSession(sessionRead[1],sessionRead[2],Number(params.get('offset') ?? 0),Number(params.get('limit') ?? 100)));}
       const messageMatch = req.url?.match(/^\/api\/bots\/([\w-]+)\/messages$/);
       if (req.method === 'GET' && messageMatch?.[1]) return json(200,instance.messages(messageMatch[1]));
       const responseMatch = req.url?.match(/^\/api\/bots\/([\w-]+)\/response$/);
@@ -578,9 +588,9 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
       if (req.method === 'GET' && commandMatch?.[1]) { const command=instance.command(commandMatch[1]); return command ? json(200,{...command,responseProgress:instance.responseProgress(commandMatch[1]),runtimeEvents:instance.commandRuntimeEvents(commandMatch[1]),skillActivity:instance.commandSkills(commandMatch[1]),webActions:instance.webActions({kind:'command',id:commandMatch[1]}),searchActions:instance.searchActions({kind:'command',id:commandMatch[1]}),shellActions:instance.shellActions({kind:'command',id:commandMatch[1]})}) : json(404,{error:'Command not found'}); }
       if (req.method === 'POST' && req.url === '/api/commands') {
         if(loggingOut)return json(409,{error:'Sign-out in progress'});
-        if (typeof value.id !== 'string' || !/^[\w-]{1,100}$/.test(value.id) || typeof value.botId !== 'string' || typeof value.content !== 'string' || value.content.length > 30000) return json(400,{error:'Invalid command'});
+        if (typeof value.id !== 'string' || !/^[\w-]{1,100}$/.test(value.id) || typeof value.botId !== 'string' || typeof value.content !== 'string' || value.content.length > 30000 || (value.sessionId!==undefined && (typeof value.sessionId!=='string'||!/^[\w-]{1,100}$/.test(value.sessionId)))) return json(400,{error:'Invalid command'});
         if(containsUnsafeWebUrl(value.content))return json(400,{error:'URLs with credentials or query strings are not supported in shared chat'});
-        const {id,botId} = value; const content=redact(value.content); const claim=instance.claim({id,botId,content:value.content},content);
+        const {id,botId} = value; const content=redact(value.content); const claim=instance.claim({id,botId,content:value.content,...(typeof value.sessionId==='string'?{sessionId:value.sessionId}:{})},content);
         if (claim.kind === 'accepted') {
           publishResponse(botId);
           const rawContent=value.content;
