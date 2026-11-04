@@ -259,6 +259,13 @@ registration remains unverified by the offline checks. See
   Expect readable messages and a visible circular action without page overflow.
   Inline chat approval controls should remain available; Activity and Updates navigation are absent.
 
+For inline tool review in the same fixture, send `What time is it in UTC?`.
+To require a decision first, enter `ask-clock` in the fixture terminal and wait
+for **Clock approvals enabled**. Expect a clock request below that message,
+exact-action Approve once/Deny controls, and a retained tool outcome. Refresh or
+use another paired client to decide; the original conversation updates on its
+next poll.
+
 To finish a held response normally, enter `stream-next` twice in the fixture
 terminal. Stop the fixture with Ctrl+C when finished.
 
@@ -272,5 +279,49 @@ terminal. Stop the fixture with Ctrl+C when finished.
    acceptance criteria. Report the checks performed and any gaps.
 4. Commit only the work authorized for that delivery. Do not include unrelated
    working-tree changes.
+5. Finish with [manual test steps](#write-manual-test-steps) for the changed
+   behavior, with prerequisites and expected results.
 
-For inline tool review in the same fixture, send `What time is it in UTC?`. To require a decision first, enter `ask-clock` in the fixture terminal and wait for **Clock approvals enabled**. Expect a clock request below that message, exact-action Approve once/Deny controls, and a retained tool outcome. Refresh or use another paired client to decide; the original conversation updates on its next poll.
+## Write manual test steps
+
+For browser or shared-instance changes, use the persistent development workspace
+as the default handoff. Name the branch or PR to test. State the prerequisites:
+Node.js 22.16 or later, Corepack, and the locked dependencies installed. Include
+installation commands only when setup is needed.
+
+Start with the normal command, then add the feature-specific actions and their
+expected visible results:
+
+```sh
+corepack pnpm dev
+```
+
+Open `http://127.0.0.1:3210/`, or the explicitly selected development port.
+Keep the existing `STAF_DEV_DATA_DIR`, `STAF_DEV_CONNECTION_DIR`, and
+`STAF_DEV_PORT` choices. When switching worktrees, stop the previous launcher
+before starting the new checkout against that same data. For CLI changes,
+use the paired CLI connection in [the development workflow](#run-the-development-workspace)
+so the browser and CLI test the same instance.
+
+Reuse the existing paired browser profile at the same address and port. Normal
+restarts and worktree changes retain its authorization. A newly printed code
+is for additional clients. Include pairing only for a new browser or origin,
+cleared browser storage, revoked access, or a reset/restore that cleared client
+authorization. Provider sign-in is separate: reuse the existing Staf connections
+and include live setup only when the changed feature requires that journey.
+
+When a test needs the representative starting dataset, make
+`corepack pnpm dev:reset` an explicit optional preparation step with all writers
+stopped. Explain that it backs up and replaces development agents, settings, and
+conversations, retains provider connections, and requires fresh browser/CLI
+pairing. Normal handoffs keep the existing data. Link to
+[reset and recovery](#reset-and-recover-development-data) when schema recovery
+or a clean dataset is relevant.
+
+Label controlled fixture scripts as specialized offline checks and explain the
+behavior they control. Prefer normal development commands and existing setup
+over temporary directories or test-specific IDs in the user's manual steps.
+Separate checks already run from steps the user can perform. Report skips and
+distinguish synthetic coverage from live provider, VM, or Docker acceptance.
+For docs-only changes, report the relevant documentation checks instead of
+requiring an application launch.
