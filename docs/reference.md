@@ -397,5 +397,7 @@ use those images again.
 The opt-in developer experiment runs generated JavaScript through a scoped host
 capability registry and retains its actual action outcomes. Normal chat keeps
 its current tool interface. See the [experiment status and integration contract](design/code-mode/experiment.md)
-for implemented behavior, repeatable synthetic checks, and the hard-isolation
-and live-model gates that still block adoption.
+for implemented behavior, repeatable synthetic checks, and unverified limits.
+The owner-selected [Direct, Hybrid, and Code Mode choices](design/code-mode/tool-modes.md)
+are the revised product direction. Their setting and production integration are
+proposed; additional platform isolation is deferred.

@@ -409,6 +409,26 @@ configuration history and uncertain-save recovery. See
 
 ## Code Mode for agent tool work
 
+### Revision: selectable tool modes
+
+On 2026-11-04 the owner replaced the mandatory code-only direction with Direct,
+Hybrid, and Code Mode choices. Hybrid offers individual tools plus `code_mode`.
+Direct offers individual tools. Code Mode offers only the execution tool, whose
+scripts can call the same permitted capabilities. Both calling styles use the
+same service-owned implementations, accepted session context, permissions, and
+action records. This supersedes the earlier prohibition on a direct model path
+and the plan to retire individual tools.
+
+The owner prioritizes simplicity and has deferred additional container or OS
+isolation work. Mode selection does not itself add a host terminal or file
+editing. The existing runner's actual limits remain documented. The
+[revised architecture checkpoint](design/code-mode/tool-modes.md) proposes
+defaults, settings scope, and the production integration. These are not current
+settings or verified runtime behavior. The remaining text records the prior
+decision and the bounded experiment built from it.
+
+### Earlier decision and experiment
+
 On 2026-11-03 the owner accepted Code Mode as the target for agent tool use after
 a bounded execution experiment passes. Migrate the existing main-chat clock,
 web search, page reading, scratch commands, and skill loading through the shared

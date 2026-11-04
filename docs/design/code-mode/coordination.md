@@ -1,5 +1,10 @@
 # Coordination with the overnight feature work
 
+On 2026-11-04 the owner chose [selectable tool modes](tool-modes.md). The earlier
+prohibition on a direct model calling style below is superseded. Direct tools
+and script calls must use the same feature-owned service implementations and
+accepted context. The feature ownership and session rules remain in force.
+
 Owner-authorized coordination received during the architecture checkpoint on 2026-11-03. These are integration constraints. Code Mode does not implement the coordinated features in this scope.
 
 The concrete contract was read from local commit

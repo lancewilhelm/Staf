@@ -1,5 +1,11 @@
 # Code Mode execution experiment
 
+The owner subsequently chose [Direct, Hybrid, and Code Mode](tool-modes.md).
+That revised architecture checkpoint replaces the mandatory code-only product
+direction. It also defers new container or OS isolation work. The experiment
+still uses `execute_code` and synthetic providers; it does not implement the
+proposed `code_mode` tool, setting, or production adapters.
+
 Issue [#74](https://github.com/lancewilhelm/Staf/issues/74) implements the first
 local experiment from the approved [architecture checkpoint](rationale.md).
 Normal Staf chat still uses its existing tools. There is no Code Mode setting,
@@ -109,8 +115,9 @@ elapsed time has its own cumulative budget; it is not measured CPU time.
 
 The lab sets QuickJS heap and stack limits and a Node old-generation heap limit.
 **It does not enforce the proposed 128 MiB total process ceiling.** It does not
-apply OS filesystem or network restrictions to Node. These are adoption blockers,
-not limits that this experiment silently relaxes for production.
+apply OS filesystem or network restrictions to Node. The owner has deferred that
+additional isolation work. These limits remain unimplemented and must not be
+described as a sandbox guarantee.
 
 The focused tests use the real worker, disposable SQLite instances, synthetic
 application methods and synthetic providers. They cover dependent reads, selected
@@ -125,13 +132,15 @@ Named live connection/model combinations, provider cost and reliability,
 Docker enforcement, native hard isolation, installation upgrades on both supported
 platforms, selected-skill propagation through the new registry, and arbitration
 with legacy task approvals remain unverified. Existing clock, search, web, shell
-and skill adapters are not migrated by this issue. Their migration requires these
-gates and their capability-specific permission, URL, redirect, grant and skill
-checks. A passing local fixture does not authorize adoption.
+and skill adapters are not migrated by this issue. Their migration follows the
+revised checkpoint and retains their capability-specific permission, URL,
+redirect, grant, and skill checks. A passing local fixture does not establish
+production integration or live-model reliability.
 
 See [development](../../development.md#review-the-code-mode-experiment) to repeat
 the demo and checks. The [original verification plan](verification.md) remains the
-complete adoption checklist, including the uncompleted gates above.
+original checklist. The selectable-modes checkpoint identifies the current scope
+and the checks that were deferred rather than completed.
 
 ## Review record
 

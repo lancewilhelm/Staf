@@ -1,5 +1,11 @@
 # Code Mode architecture checkpoint
 
+The owner revised the model interface on 2026-11-04. The
+[selectable tool modes checkpoint](tool-modes.md) supersedes this document's
+code-only target, prohibition on equivalent direct tools, and requirement to
+add platform isolation before adoption. This file preserves the earlier design;
+the experiment's unverified isolation checks have not passed by implication.
+
 The [execution experiment](experiment.md) records current implementation and remaining gates. This document preserves the approved target design.
 
 Approved by the owner on 2026-11-03 as the basis for the bounded execution experiment, including the current-request recovery-cache lifetime and proposed starting limits. This is not implemented behavior or approval to adopt an unverified production executor. [Full design and limits](design.md).

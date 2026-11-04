@@ -1,5 +1,23 @@
 # Use Code Mode for agent tool work
 
+## Revision: selectable tool modes
+
+On 2026-11-04 the owner chose Direct, Hybrid, and Code Mode. Hybrid includes
+`code_mode` alongside individual tools. Direct exposes individual tools, and
+Code Mode exposes only the execution tool. These calling styles share the
+service-owned capabilities, permissions, accepted work context, and outcomes.
+This replaces the earlier requirement to retire direct tools and prohibit a
+second model-facing calling style.
+
+The [revised architecture checkpoint](../design/code-mode/tool-modes.md) proposes
+the setting, defaults, and production migration. It awaits architecture review;
+the current implementation remains a synthetic developer experiment. New
+container or OS isolation is deferred at the owner's direction. The earlier
+requirements below remain a historical record, not evidence that those checks
+passed or that the mode setting exists.
+
+## Earlier decision
+
 Accepted and confirmed by the owner on 2026-11-03. The Code Mode design interview
 is complete. These decisions describe future behavior, not implemented or
 verified capabilities.

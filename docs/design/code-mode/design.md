@@ -1,5 +1,11 @@
 # Proposed Code Mode architecture
 
+This is the earlier code-only design. The owner-selected Direct, Hybrid, and
+Code Mode choices and their [revised architecture checkpoint](tool-modes.md)
+supersede exclusivity and platform-isolation adoption requirements here. The
+existing experiment retains its actual limitations. New settings and production
+capability migration remain proposed.
+
 The [execution experiment](experiment.md) records current implementation and remaining gates. This document preserves the approved target design.
 
 Status: the owner approved the architecture checkpoint on 2026-11-03 as the basis

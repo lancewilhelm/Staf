@@ -1,5 +1,11 @@
 # Code Mode verification plan
 
+The [selectable tool modes checkpoint](tool-modes.md) revises the tool-offer and
+integration checks for the owner's 2026-11-04 direction. Add parity across direct
+and scripted calls, mode capture, and denial across both routes. Platform
+isolation work is deferred rather than counted as verified. This file preserves
+the original experiment checklist.
+
 This is the adoption verification plan from the architecture checkpoint. The [execution experiment](experiment.md) records the implemented subset and its evidence limits. The owner-confirmed [product decisions](../../adr/0005-service-owned-code-mode.md) are the acceptance boundary. Numeric limits in the design are proposed defaults until the local experiment measures their cost.
 
 ## First end-to-end slice
