@@ -1,5 +1,8 @@
 # Use Staf
 
+For the persistent, hot-reloading local browser workspace and a terminal paired
+to the same development instance, see [Run the development workspace](development.md#run-the-development-workspace). For a synthetic seed and explicit reset or recovery, see [Reset and recover development data](development.md#reset-and-recover-development-data).
+
 ## Start the shared terminal
 
 Build and link the CLI once, then start it from your working directory:
@@ -261,7 +264,11 @@ If a retry finds the agent busy while the original request may still arrive,
 the message cannot be dismissed and any retry keeps the original ID.
 Obsolete pre-journal browser records are deleted without importing them. Current
 journal records, including records owned by other open tabs and recoverable closed-tab
-drafts, are retained; there is no manual earlier-record picker. An unfinished agent
+drafts, are retained. Older records without a dataset identity recover automatically
+when a stored command or creation operation verifies their origin. Otherwise, open
+**Earlier browser records** to inspect and copy the saved text and operation details;
+these records are not submitted or assigned to the current dataset automatically.
+An unfinished agent
 creation is restored automatically after refresh or reopening a tab, with the same
 operation ID for Check creation or Retry same creation. A live tab keeps ownership
 of its creation record. Clearing browser storage removes locally saved drafts,

@@ -13,7 +13,7 @@ import { prepareDirectLogin, completeDirectLogin, loadDirectCredential, directAu
 import { createServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { randomBytes } from 'node:crypto';
-import { BotConflict, Instance } from './instance.js';
+import { assertDatasetAvailable, BotConflict, Instance } from './instance.js';
 import { AgentConfigConflict, AgentConfigInvalid, AgentConfigUncertain } from './agent-config.js';
 import { MemoryConflict, type MemoryScope } from './memory.js';
 import { selectProvider } from './registry.js';
@@ -34,7 +34,8 @@ import { resolveSettings } from './settings.js';
 import { usageText } from './usage.js';
 import { loadOpenRouterKey, saveOpenRouterKey, disconnectOpenRouter } from './openrouter-credential.js';
 
-export function startInstance(path: string, port = 0, options: {dataDir?: string; env?: Environment; enableCollaboration?: boolean; enableReusableApprovals?: boolean; localBootstrapToken?: string; authNow?:()=>number; authLifetimeMs?:number; webDependencies?:WebDependencies; searchTransport?:SearchTransport; shellExecutor?:typeof executeShellSandbox; modelRequest?:typeof fetch; authHooks?: {prepare:typeof prepareDirectLogin; complete:typeof completeDirectLogin; authorizationUrl?:typeof authorizationUrl}; providerFactory?: (profile: {provider:string; model:string | null; reasoning:string | null; instructions:string; chatId:string}, instructions:string) => Promise<Provider>} = {}) {
+export function startInstance(path: string, port = 0, options: {dataDir?: string; publicOrigin?: string; maintenanceToken?:string; env?: Environment; enableCollaboration?: boolean; enableReusableApprovals?: boolean; localBootstrapToken?: string; authNow?:()=>number; authLifetimeMs?:number; webDependencies?:WebDependencies; searchTransport?:SearchTransport; shellExecutor?:typeof executeShellSandbox; modelRequest?:typeof fetch; authHooks?: {prepare:typeof prepareDirectLogin; complete:typeof completeDirectLogin; authorizationUrl?:typeof authorizationUrl}; providerFactory?: (profile: {provider:string; model:string | null; reasoning:string | null; instructions:string; chatId:string}, instructions:string) => Promise<Provider>} = {}) {
+  assertDatasetAvailable(path,options.maintenanceToken);
   const selectionCatalogs=new Map<string,ModelCatalog>();
   const env = options.env ?? process.env;
   const dataDir = options.dataDir ?? resolve(dirname(path));
@@ -44,7 +45,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
   const redactProgress=streamingRedactor(env,()=>[...knownKeys]);
   const redact = (text:string) => [...knownKeys].reduce((result,key)=>redactor({OPENROUTER_API_KEY:key})(result),redactEnv(text));
   const providerEnv = (provider:string) => ({...env,STAF_MODEL:undefined,...(provider==='openrouter'?{OPENROUTER_API_KEY:loadOpenRouterKey(dataDir)}:{})});
-  const instance = new Instance(path,redact);
+  const instance = new Instance(path,redact,options.maintenanceToken);
   if (options.localBootstrapToken) instance.bootstrapLocal(options.localBootstrapToken);
   const active = new Set<AbortController>();
   const responseControllers = new Map<string,AbortController>();
@@ -260,11 +261,14 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
   let scheduleTimer: ReturnType<typeof setInterval> | undefined;
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     res.setHeader('Cache-Control', 'no-store'); res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Staf-Dataset', instance.datasetIdentity());
     const json = (status: number, value: unknown) => { res.writeHead(status, {'Content-Type':'application/json'}); res.end(JSON.stringify(value)); };
     try {
       const address = server.address(); if (!address || typeof address === 'string') throw Error('Not listening');
-      const origin = `http://127.0.0.1:${address.port}`;
-      if (req.headers.host !== `127.0.0.1:${address.port}` || (req.headers.origin && req.headers.origin !== origin)) return json(403,{error:'Invalid origin'});
+      const origin = options.publicOrigin ?? `http://127.0.0.1:${address.port}`;
+      if (req.headers.host !== new URL(origin).host || (req.headers.origin && req.headers.origin !== origin)) return json(403,{error:'Invalid origin'});
+      if (req.method === 'GET' && req.url === '/api/dataset') return json(200,{id:instance.datasetIdentity()});
+      if (req.headers['x-staf-dataset'] && req.headers['x-staf-dataset'] !== instance.datasetIdentity()) return json(409,{error:'Dataset changed. Refresh before retrying.'});
       if ((req.url ?? '').startsWith('/auth/callback')) {const result=await authFor(origin).accept(req.method ?? '',req.url ?? '');res.setHeader('Referrer-Policy','no-referrer');res.writeHead(result === 'accepted' ? 200 : 400,{'Content-Type':'text/plain; charset=utf-8'});return res.end(result === 'accepted' ? 'Sign-in completed. Return to Staf.' : 'Sign-in could not be completed. Return to Staf.');}
       const csp="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'";
       if (req.method === 'GET' && (req.url === '/' || /^\/assets\/[\w.-]+\.(js|css)$/.test(req.url ?? ''))) {
@@ -610,5 +614,5 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
       return json(404,{error:'Not found'});
     } catch (error) { if(error instanceof AgentConfigInvalid)return json(422,{error:error.message,code:'invalid_agent_configuration'});if(error instanceof AgentConfigUncertain)return json(503,{error:error.message,code:'configuration_save_uncertain'});return json((error instanceof BotConflict || error instanceof AgentConfigConflict || error instanceof MemoryConflict || error instanceof SkillConflict || error instanceof ScheduleConflict) ? 409 : 400,{error:error instanceof Error ? error.message : 'Request failed'}); }
   });
-  return { server, code, migrationBackup: instance.migrationBackup, issueCode: () => (code = randomBytes(18).toString('base64url')), close: () => new Promise<void>((resolve,reject)=>{closing=true; instanceAuth?.shutdown(); if(scheduleTimer) clearInterval(scheduleTimer); for(const subscriber of responseSubscribers)subscriber.response.end();for(const controller of active) controller.abort(); server.close(error=>{instance.close(); if(error)reject(error);else resolve();});}), listen: () => new Promise<number>((resolve,reject)=>{server.once('error',reject);server.listen(port,'127.0.0.1',()=>{const a=server.address();if(a && typeof a !== 'string') { tickSchedules(); scheduleTimer=setInterval(tickSchedules,30000); resolve(a.port); }else reject(Error('Listen failed'));});}) };
+  return { server, code, migrationBackup: instance.migrationBackup, finishUpgrade: (token:string)=>instance.finishUpgrade(token), issueCode: () => (code = randomBytes(18).toString('base64url')), close: () => new Promise<void>((resolve,reject)=>{closing=true; instanceAuth?.shutdown(); if(scheduleTimer) clearInterval(scheduleTimer); for(const subscriber of responseSubscribers)subscriber.response.end();for(const controller of active) controller.abort(); server.close(error=>{instance.close(); if(error)reject(error);else resolve();});}), listen: () => new Promise<number>((resolve,reject)=>{server.once('error',reject);server.listen(port,'127.0.0.1',()=>{const a=server.address();if(a && typeof a !== 'string') { tickSchedules(); scheduleTimer=setInterval(tickSchedules,30000); resolve(a.port); }else reject(Error('Listen failed'));});}) };
 }

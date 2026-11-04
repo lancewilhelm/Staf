@@ -1,5 +1,15 @@
 # Configuration reference
 
+## Development workspace
+
+`corepack pnpm dev` serves the loopback workspace at `http://127.0.0.1:3210`
+and stores development state in `~/.staf/development`. `STAF_DEV_DATA_DIR`
+explicitly selects another Staf instance directory outside the checkout;
+`STAF_DEV_CONNECTION_DIR` selects the connection store of an existing Staf
+instance without copying it; `STAF_DEV_PORT` selects another loopback port. The service inherits its launch
+environment. See [development](development.md#run-the-development-workspace)
+for ownership, pairing, reset, and schema recovery.
+
 ## Shared terminal
 
 `staf` starts or connects to a detached, loopback-only shared instance and opens
@@ -74,6 +84,10 @@ connection presence.
 
 | Command | Effect |
 | --- | --- |
+| `pnpm dev` | Start the persistent local development workspace and watch frontend and backend sources. |
+| `pnpm dev:reset` | Back up and replace development content with the current synthetic seed. |
+| `pnpm dev:recover` | Restore an incomplete operation's complete backup, or finalize a committed publication. |
+| `pnpm dev:restore BACKUP_DIRECTORY` | Restore a selected development backup after saving the current dataset. |
 | `pnpm run build` | Build the Vue/Vite browser workspace and compile server source to `dist/`. |
 | `pnpm run check` | Check server and browser TypeScript without emitting output. |
 | `pnpm test` | Build and run JavaScript tests against compiled output. |
@@ -167,7 +181,9 @@ creation defaults into the new bot. The version 27 migration adds the creation
 journal after a database backup. These operations do not change existing bots.
 The workspace automatically restores an unfinished creation using its original
 operation ID, guarded by a browser Web Lock. Check creation and Retry same creation
-use that ID. Manual earlier-record pickers are removed. Only the obsolete
+use that ID. Unscoped legacy records are adopted only with matching durable command
+or creation evidence; other records can be inspected and copied through **Earlier
+browser records**, without automatic execution. Only the obsolete
 `staf-draft` and `staf-pending` browser keys are deleted; the current
 `staf-workspace-v1:` automatic recovery journal remains intact.
 
