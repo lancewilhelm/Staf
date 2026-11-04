@@ -16,8 +16,7 @@ export function prepareUpgrade(dataRoot) {
     if(existsSync(marker))throw Error('Dataset maintenance was interrupted. Run pnpm dev:recover.');
     const version=Number(db.prepare('PRAGMA user_version').get().user_version);
     if(version>INSTANCE_SCHEMA_VERSION)throw Error(`Database version ${version} is newer than this Staf (maximum ${INSTANCE_SCHEMA_VERSION}). Use a compatible checkout, restore a matching backup, or explicitly reset the development dataset; the database was not reset. You may select another data directory.`);
-    const hasBots=db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='bots'").get();
-    if(!hasBots||version===INSTANCE_SCHEMA_VERSION)return undefined;
+    if(version===INSTANCE_SCHEMA_VERSION)return undefined;
     const backup=saveBackup({dataRoot,db,existed:true,reason:`upgrade-${version}`}),token=randomUUID();
     writeMarker({dataRoot,backup,token});return {backup,token};
   } finally {db.close();}

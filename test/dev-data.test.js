@@ -80,6 +80,16 @@ test('an interrupted upgrade restores the complete pre-upgrade dataset', () => {
     instance=new Instance(path);assert.equal(instance.bot(bot.id).instructions,'Original instructions');instance.close();
   } finally {rmSync(root,{recursive:true,force:true});}
 });
+test('development upgrade protects an existing dataset with no agents', () => {
+  const root=mkdtempSync(join(tmpdir(),'staf-dev-empty-upgrade-')),path=join(root,'instance.sqlite');
+  try {
+    const instance=new Instance(path);instance.memories.create({scope:{kind:'user'},text:'Retain this memory'});instance.close();
+    const db=new DatabaseSync(path);db.exec('PRAGMA user_version=29');db.close();
+    const upgrade=prepareUpgrade(root);assert.ok(upgrade);
+    const backup=new DatabaseSync(join(upgrade.backup,'instance.sqlite'),{readOnly:true});assert.equal(backup.prepare('SELECT text FROM memories').get().text,'Retain this memory');backup.close();
+    const result=command(root,'recover');assert.equal(result.status,0,result.stderr);
+  } finally {rmSync(root,{recursive:true,force:true});}
+});
 
 test('reset preserves synthetic connections but requires new pairing and does not resurrect revoked clients', async () => {
   const root=mkdtempSync(join(tmpdir(),'staf-dev-auth-')),path=join(root,'instance.sqlite');
