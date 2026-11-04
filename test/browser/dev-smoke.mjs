@@ -128,9 +128,10 @@ try {
  assert.equal(await evaluate("document.body.innerText.includes('Retained creation')"),false,'old creation is not shown after reset');
  assert.equal(await evaluate(`localStorage.getItem(${JSON.stringify(creationKey)})!==null && localStorage.getItem(${JSON.stringify(oldKey)})!==null`),true,'old records remain quarantined');
  assert.equal(await evaluate("document.body.innerText.includes('Recovered creation. Check status')"),false);
- await cdp('Page.reload');await until(()=>evaluate("document.body.innerText.includes('Project guide')"),'new dataset reload');
- assert.equal(await evaluate("document.body.innerText.includes('Retained creation') || document.body.innerText.includes('Legacy creation')"),false);
- const newToken=await evaluate("localStorage.getItem('staf-token')");
+ await cdp('Page.reload');
+ const reloaded=await until(()=>evaluate("document.readyState==='complete' && document.body?.innerText.includes('Project guide') && localStorage.getItem('staf-token') ? {text:document.body.innerText,token:localStorage.getItem('staf-token')} : null"),'new dataset reload');
+ assert.equal(reloaded.text.includes('Retained creation') || reloaded.text.includes('Legacy creation'),false);
+ const newToken=reloaded.token;
  const stale=await fetch(url+'/api/bots',{method:'POST',headers:{Authorization:`Bearer ${newToken}`,'Content-Type':'application/json','X-Staf-Dataset':dataset},body:JSON.stringify({operationId:'retained-operation',name:'Retained creation'})});assert.equal(stale.status,409);
  assert.equal((await (await fetch(url+'/api/bots',{headers:{Authorization:`Bearer ${newToken}`}})).json()).some(item=>item.name==='Retained creation'),false);
  process.kill(-launcher.pid,'SIGINT');await new Promise(resolveExit=>launcher.once('exit',resolveExit));
