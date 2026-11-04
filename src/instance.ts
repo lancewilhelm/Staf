@@ -1,3 +1,4 @@
+import { DocumentStore, documentSchema, documentCapabilities, type DocumentImport } from './document-sources.js';
 import {ProviderDefaultsStore} from './provider-choices.js';
 import { DatabaseSync } from 'node:sqlite';
 import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
@@ -24,7 +25,7 @@ import { ApprovalGrants, approvalGrantSchema, type GrantBoundary } from './appro
 const clockAction: Action = { capability:'clock', operation:'read', resource:'utc', effect:'read', limits:{}, risk:'safe' };
 const clockBoundary = { enabledCapabilities:['clock'], actions:[clockAction] };
 const modes: ApprovalMode[] = ['ask-every-time','ask-for-risky-actions','never-ask'];
-export const INSTANCE_SCHEMA_VERSION = 30;
+export const INSTANCE_SCHEMA_VERSION = 32;
 const MAINTENANCE_VERSION = 2147483647;
 
 export const starterSoul = "You are an assistant working for the owner. Be clear and candid. Distinguish observations from assumptions. Follow the owner's role instructions and work within the permissions and task scope granted to you.";
@@ -155,6 +156,7 @@ export class Instance {
     if(version < 29)this.db.exec("CREATE TABLE IF NOT EXISTS response_stops (command_id TEXT PRIMARY KEY REFERENCES commands(id))");
     if(version < 30 && !this.db.prepare("SELECT 1 FROM pragma_table_info('command_runtime_events') WHERE name='detail'").get())this.db.exec('ALTER TABLE command_runtime_events ADD COLUMN detail TEXT');
     this.db.exec('CREATE INDEX IF NOT EXISTS command_runtime_events_command ON command_runtime_events(command_id,seq)');
+    if(version < 32) this.db.exec(documentSchema);
     if (!maintenanceToken) this.db.exec(`PRAGMA user_version=${INSTANCE_SCHEMA_VERSION}`);
     for (const row of this.db.prepare("SELECT id,bot_id FROM task_attempts WHERE state IN ('queued','running','stopping','waiting') ORDER BY rowid").all()) {
       if (typeof row.id !== 'string' || typeof row.bot_id !== 'string') throw Error('Invalid interrupted task');
@@ -325,6 +327,16 @@ export class Instance {
       const bot=this.bot(id); this.db.exec('COMMIT'); return bot;
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
   }
+  private documentStore() { return new DocumentStore(this.db); }
+  private documentAgent(botId:string) { const bot=this.bot(botId); if(!bot || bot.archived)throw Error('Agent unavailable'); }
+  documents(botId:string,offset=0) { this.documentAgent(botId); return this.documentStore().list(botId,offset); }
+  documentImport(input:DocumentImport, signal:AbortSignal, check:()=>void) { const authorize=()=>{check();this.documentAgent(input.botId);};return this.documentStore().import(input,signal,authorize); }
+  documentRead(botId:string,id:string,offset=0) {this.documentAgent(botId);return {document:this.documentStore().read(botId,id),excerpts:this.documentStore().excerpts(botId,id,offset)};}
+  documentOriginal(botId:string,id:string) {this.documentAgent(botId);return this.documentStore().original(botId,id);}
+  documentSearch(botId:string,query:string) {this.documentAgent(botId);return this.documentStore().search(botId,query);}
+  documentRetire(botId:string,id:string) {this.documentAgent(botId);return this.documentStore().retire(botId,id);}
+  documentResolve(botId:string,id:string,excerptId:string) {this.documentAgent(botId);return this.documentStore().resolve(botId,id,excerptId);}
+  documentCapabilities(scope:{botId:string;sessionId:string;commandId:string;signal:AbortSignal;check:()=>void}) {return documentCapabilities(this.documentStore(),{...scope,check:()=>{scope.check();this.documentAgent(scope.botId);}});}
   authorize(token: string) { this.db.prepare('INSERT INTO clients VALUES (?)').run(createHash('sha256').update(token).digest('hex')); }
   authorized(token: string) { return !!this.db.prepare('SELECT 1 FROM clients WHERE token_hash=?').get(createHash('sha256').update(token).digest('hex')); }
   clients(token: string) {

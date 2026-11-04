@@ -45,3 +45,9 @@ The browser bundles DM Sans in `web/assets/dm-sans.woff2` from the approved
 prototype. Copyright 2014 The DM Sans Project Authors
 (https://github.com/googlefonts/dm-fonts). See [the bundled font license](web/assets/DMSans-OFL.txt) for the
 full copyright and license notice.
+
+## Mozilla PDF.js (Apache License 2.0)
+
+Document text extraction uses `pdfjs-dist`, Copyright Mozilla Foundation and
+contributors, distributed under the Apache License 2.0. The package includes
+its license and notices; source: https://github.com/mozilla/pdf.js.

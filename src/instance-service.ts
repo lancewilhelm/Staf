@@ -1,3 +1,4 @@
+import { DOCUMENT_MAX_BYTES } from './document-sources.js';
 import {providerLabel} from './provider-label.js';
 import { parseMemoryLanguage } from './memory-language.js';
 import { previewMemoryCandidates } from './memory-candidates.js';
@@ -71,6 +72,8 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
     }
   }
   const taskControllers = new Map<string,AbortController>();
+  let documentUploads = 0;
+  const documentControllers = new Map<AbortController,string>();
   let closing = false;
   let loggingOut = false;
   let instanceAuth:InstanceAuth | undefined;
@@ -278,10 +281,12 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
         if(!index.includes('"'+req.url+'"')) return json(404,{error:'Asset not found'});
         res.writeHead(200,{'Content-Type':req.url?.endsWith('.css') ? 'text/css; charset=utf-8' : 'text/javascript; charset=utf-8','Cache-Control':'public, max-age=31536000, immutable'});return res.end(readFileSync(resolve(webDir,'.'+req.url)));
       }
+      const uploadRoute = req.method === 'POST' && /^\/api\/bots\/[\w-]+\/documents$/.test(req.url ?? '');
+      if(uploadRoute) {const uploadToken=req.headers.authorization?.match(/^Bearer ([A-Za-z0-9_-]+)$/)?.[1];if(!uploadToken || !instance.authorized(uploadToken))return json(401,{error:'Unauthorized'});if(documentUploads>=4)return json(503,{error:'Too many document uploads; try again'});documentUploads++;res.once('close',()=>{documentUploads--;});}
       let body: unknown = {};
       if (req.method === 'POST') {
         if (!req.headers['content-type']?.startsWith('application/json')) return json(415,{error:'JSON required'});
-        const bodyLimit=(req.url === '/api/skills' || /^\/api\/skills\/[\w-]+\/update$/.test(req.url ?? '')) ? 1600000 : 65536;
+        const bodyLimit=uploadRoute ? Math.ceil(DOCUMENT_MAX_BYTES / 3) * 4 + 4096 : (req.url === '/api/skills' || /^\/api\/skills\/[\w-]+\/update$/.test(req.url ?? '')) ? 1600000 : 65536;
         const chunks:Buffer[]=[];let size=0;
         for await (const chunk of req) { const bytes=Buffer.isBuffer(chunk)?chunk:Buffer.from(chunk);size+=bytes.length;if(size>bodyLimit)return json(413,{error:'Body too large'});chunks.push(bytes); }
         body = JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(Buffer.concat(chunks)));
@@ -294,6 +299,27 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
       }
       const token = req.headers.authorization?.match(/^Bearer ([A-Za-z0-9_-]+)$/)?.[1];
       if (!token || !instance.authorized(token)) return json(401,{error:'Unauthorized'});
+      const documentPage=req.url?.match(/^\/api\/bots\/([\w-]+)\/documents\/pages\/(\d+)$/);
+      if(req.method==='GET' && documentPage?.[1] && documentPage[2])return json(200,instance.documents(documentPage[1],Number(documentPage[2])));
+      const documentRoute=req.url?.match(/^\/api\/bots\/([\w-]+)\/documents(?:\/([\w-]+))?(?:\/(original|retire|excerpts)(?:\/(\d+))?)?$/);
+      if(documentRoute?.[1]) {
+        const botId=documentRoute[1],id=documentRoute[2],action=documentRoute[3];
+        if(req.method==='GET' && !id)return json(200,instance.documents(botId));
+        if(req.method==='POST' && !id) {
+          if(typeof value.operationId!=='string' || typeof value.name!=='string' || typeof value.base64!=='string' || value.base64.length % 4 !== 0 || /[^A-Za-z0-9+/=]/.test(value.base64))return json(400,{error:'Invalid document upload'});
+          const bytes=Buffer.from(value.base64,'base64');
+          if(bytes.toString('base64')!==value.base64)return json(400,{error:'Invalid base64'});
+          const controller=new AbortController();active.add(controller);documentControllers.set(controller,token);
+          const disconnected=()=>{if(!res.writableEnded)controller.abort();};res.on('close',disconnected);if(res.destroyed)controller.abort();
+          try {const result=await instance.documentImport({botId,operationId:value.operationId,name:value.name,bytes},controller.signal,()=>{if(closing || !instance.authorized(token))throw Error('Client authorization revoked');});return json(201,result);}
+          finally {res.off('close',disconnected);active.delete(controller);documentControllers.delete(controller);}
+        }
+        if(req.method==='POST' && id==='search' && !action && typeof value.query==='string')return json(200,instance.documentSearch(botId,value.query));
+        if(id && req.method==='GET' && !action)return json(200,instance.documentRead(botId,id));
+        if(id && req.method==='GET' && action==='excerpts' && documentRoute[4])return json(200,instance.documentRead(botId,id,Number(documentRoute[4])));
+        if(id && req.method==='GET' && action==='original') {const original=instance.documentOriginal(botId,id);res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':`attachment; filename="document"; filename*=UTF-8''${encodeURIComponent(original.document.name).replace(/['()*]/g,c=>'%'+c.charCodeAt(0).toString(16).toUpperCase())}`});return res.end(original.bytes);}
+        if(id && req.method==='POST' && action==='retire')return json(200,instance.documentRetire(botId,id));
+      }
       if(req.method==='POST' && (req.url==='/api/bots' || req.url==='/api/creation-defaults' || req.url==='/api/provider-defaults' || /^\/api\/bots\/[\w-]+\/selection$/.test(req.url??'') || /^\/api\/bots\/[\w-]+\/profile$/.test(req.url ?? '')) && JSON.stringify(redactValue(value,redact))!==JSON.stringify(value)) return json(400,{error:'Agent configuration cannot contain a credential'});
       if(req.url==='/api/openrouter-connection') {
         if(req.method==='GET') return json(200,{saved:!!loadOpenRouterKey(dataDir)});
@@ -426,7 +452,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
       }
       if (req.method === 'GET' && req.url === '/api/clients') return json(200,instance.clients(token));
       const clientMatch = req.url?.match(/^\/api\/clients\/([a-f0-9]{64})\/revoke$/);
-      if (req.method === 'POST' && clientMatch?.[1]) {const revoked=instance.revokeClient(clientMatch[1]);if(revoked && activeLogin?.clientId===clientMatch[1])instanceAuth?.cancel(activeLogin.token,activeLogin.id);if(revoked)for(const subscriber of responseSubscribers)if(!instance.authorized(subscriber.token))subscriber.response.end();return revoked ? json(200,{revoked:true}) : json(404,{error:'Client not found'});}
+      if (req.method === 'POST' && clientMatch?.[1]) {const revoked=instance.revokeClient(clientMatch[1]);if(revoked && activeLogin?.clientId===clientMatch[1])instanceAuth?.cancel(activeLogin.token,activeLogin.id);if(revoked)for(const [controller,owner] of documentControllers)if(!instance.authorized(owner))controller.abort();if(revoked)for(const subscriber of responseSubscribers)if(!instance.authorized(subscriber.token))subscriber.response.end();return revoked ? json(200,{revoked:true}) : json(404,{error:'Client not found'});}
       if (req.method === 'POST' && req.url === '/api/bot-discovery') {
         if (typeof value.requesterId !== 'string' || typeof value.query !== 'string' || Buffer.byteLength(value.query,'utf8') > 1024) return json(400,{error:'Invalid discovery request'});
         if (!instance.bot(value.requesterId) || instance.bot(value.requesterId)?.archived) return json(404,{error:'Requesting agent not found'});
