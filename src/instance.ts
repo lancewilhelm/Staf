@@ -503,6 +503,9 @@ export class Instance {
   }
   private imageAssets() {return this.images??=new AgentImageAssets(join(dirname(dirname(this.configs.location('placeholder'))),'.images'));}
   agentImage(assetId:string) {return this.imageAssets().read(assetId);}
+  private requireStoredImage(image:AgentImage,previous?:AgentImage) {
+    if(image.kind==='upload' && !(previous?.kind==='upload' && previous.assetId===image.assetId) && !this.imageAssets().read(image.assetId)) throw Error('The selected image is unavailable. Upload it again or choose another image.');
+  }
   createBot(input: {name: string; instructions: string; provider?: string; model?: string; reasoning?: string; operationId?: string;image?:AgentImageInput}, advertisedModel?:string) {
     if (!input.name.trim() || (input.provider !== undefined && !input.provider.trim())) throw new Error('Name and provider are required');
     const id = randomUUID(), chatId = randomUUID();
@@ -512,6 +515,7 @@ export class Instance {
       const savedImage=imageSetting(image);
       const digest=input.operationId ? createHmac('sha256',this.fingerprintKey).update(JSON.stringify([input.name,input.instructions,input.provider ?? null,input.model ?? null,input.reasoning ?? null,...(savedImage===null?[]:[savedImage])])).digest('hex') : null;
       if(input.operationId) { const existing=this.db.prepare('SELECT digest,bot_id FROM bot_creation_operations WHERE id=?').get(input.operationId); if(existing) { if(existing.digest!==digest || typeof existing.bot_id!=='string') throw new BotConflict('Creation operation ID conflict'); const bot=this.bot(existing.bot_id); this.db.exec('COMMIT'); return bot; } }
+      this.requireStoredImage(image);
       const defaults=this.creationDefaults();const provider=input.provider ?? defaults.provider;
       const first=this.providerDefaults().read().providers[provider];
       const chosenModel=input.model ?? (input.provider===undefined?defaults.model:first?.model??advertisedModel??null);
@@ -551,6 +555,7 @@ export class Instance {
       if (current.revision !== edit.revision) throw new BotConflict('Profile changed. Refresh before editing.');
       const providerChoices={...current.providerChoices,[current.provider]:{model:current.model,reasoning:current.reasoning},[edit.provider]:{model:edit.model,reasoning:edit.reasoning}};
       const image=edit.image?.kind==='upload-data'?this.imageAssets().accept(edit.image):edit.image??current.image;
+      this.requireStoredImage(image,current.image);
       const config=this.configs.publish(id,{name:edit.name,description:edit.description ?? current.description,instructions:edit.instructions,provider:edit.provider,model:edit.model,reasoning:edit.reasoning,providerChoices,image},current.archived,edit.revision);
       try { this.db.exec('COMMIT'); } catch { throw new AgentConfigUncertain('Configuration save may have taken effect. Inspect the current configuration before retrying.'); }
       return {...current,...config};

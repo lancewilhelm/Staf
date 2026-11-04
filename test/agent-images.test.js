@@ -1,6 +1,8 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtemp, rm, readFile, writeFile} from 'node:fs/promises';
+import fs from 'node:fs';
+import {syncBuiltinESMExports} from 'node:module';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {startInstance} from '../dist/instance-service.js';
@@ -9,6 +11,7 @@ import {randomFillSync,randomUUID} from 'node:crypto';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {agentImageBodyType,avatarSvg,agentImageColors,agentImageShapes} from '../dist/agent-image.js';
+import {AgentImageAssets} from '../dist/agent-image-assets.js';
 
 async function fixture(run) {
   const dir=await mkdtemp(join(tmpdir(),'staf-images-')), path=join(dir,'instance.sqlite');
@@ -23,6 +26,24 @@ async function fixture(run) {
   try {await run({call,restart,dir,issueCode:()=>app.issueCode(),get port(){return port;},get token(){return token;}});}
   finally {await app.close();await rm(dir,{recursive:true,force:true});}
 }
+
+test('first upload directory publication must succeed before accepting crop bytes',async()=>{
+  const dir=await mkdtemp(join(tmpdir(),'staf-image-durability-')),root=join(dir,'agents','.images');
+  const sync=fs.fsyncSync;
+  try {
+    fs.fsyncSync=fd=>{
+      if(fs.fstatSync(fd).ino===fs.statSync(join(dir,'agents')).ino)throw Error('synthetic parent directory sync failure');
+      return sync(fd);
+    };syncBuiltinESMExports();
+    assert.throws(()=>new AgentImageAssets(root),/parent directory sync failure/);
+    assert.deepEqual(fs.readdirSync(root),[],'no crop can be accepted before directory publication succeeds');
+  } finally {fs.fsyncSync=sync;syncBuiltinESMExports();}
+  try {
+    const store=new AgentImageAssets(root),crop=new PNG({width:256,height:256});crop.data.fill(120);
+    const accepted=store.accept({kind:'upload-data',png:PNG.sync.write(crop).toString('base64')});
+    assert.ok(store.read(accepted.assetId),'retry publishes a readable crop');
+  } finally {await rm(dir,{recursive:true,force:true});}
+});
 
 test('legacy agents use initials and image edits preserve identity through clients and restart',()=>fixture(async({call,restart})=>{
   const created=(await call('/api/bots',{name:'Ada',instructions:'Keep these instructions',provider:'demo'})).body;
@@ -106,6 +127,25 @@ test('the paired CLI edits and preserves shared image descriptors',()=>fixture(a
   await writeFile(profileFile,JSON.stringify({...oldClient,name:'Renamed by old CLI'}));
   assert.deepEqual((await cli('edit',origin,credential,agent.id,profileFile)).image,image);
   assert.deepEqual((await ctx.call(`/api/bots/${agent.id}`)).body.image,image);
+}));
+
+test('new upload references require stored bytes while unchanged missing images remain editable',()=>fixture(async(ctx)=>{
+  const missing={kind:'upload',assetId:'a'.repeat(64)};
+  assert.equal((await ctx.call('/api/bots',{name:'Missing',provider:'demo',image:missing})).status,400);
+  assert.equal((await ctx.call('/api/bots')).body.length,0);
+  const crop=new PNG({width:256,height:256});crop.data.fill(90);
+  const created=(await ctx.call('/api/bots',{name:'Stored',provider:'demo',image:{kind:'upload-data',png:PNG.sync.write(crop).toString('base64')}},ctx.token,agentImageBodyType)).body;
+  assert.equal((await ctx.call(`/api/bots/${created.id}/profile`,{...created,image:missing})).status,400);
+  assert.deepEqual((await ctx.call(`/api/bots/${created.id}`)).body.image,created.image);
+  const request={name:'Reuse',provider:'demo',operationId:'reuse-upload',image:created.image};
+  const reused=await ctx.call('/api/bots',request);assert.equal(reused.status,201);
+  await rm(join(ctx.dir,'agents','.images',created.image.assetId+'.png'));
+  assert.equal((await ctx.call('/api/bots',request)).body.id,reused.body.id,'accepted creation retry survives unavailable bytes');
+  const renamed=await ctx.call(`/api/bots/${created.id}/profile`,{...created,name:'Keep missing image'});
+  assert.equal(renamed.status,200);assert.deepEqual(renamed.body.image,created.image);
+  const {image,...legacy}=renamed.body;
+  assert.equal((await ctx.call(`/api/bots/${created.id}/profile`,{...legacy,instructions:'Still editable'})).status,200);
+  assert.equal((await ctx.call('/api/bots',{name:'New missing reference',provider:'demo',image})).status,400);
 }));
 
 test('bad crops and stale image saves do not change the current image or weaken other body limits',()=>fixture(async(ctx)=>{

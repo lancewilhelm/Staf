@@ -75,6 +75,9 @@ Browsing shapes, colors, and crops changes only the form preview. **Create
 agent** or **Save settings** commits the selection. Closing the chooser does
 not save it. **Cancel** preserves the current image. Failed or conflicting
 saves keep your edits available for comparison and retry.
+After a conflict, select **Compare latest settings** to review the saved choice.
+**Use latest image** adopts that image while retaining your name and instruction
+edits. Review the draft before saving again.
 
 The saved image appears in the agent list, Focus rail, chat header, and agent
 messages. Names and duplicate-name suffixes still identify agents. If an upload

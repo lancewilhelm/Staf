@@ -354,7 +354,10 @@ Agent create/profile JSON requests accept the descriptor above. Missing `image`
 during creation means initials. Missing `image` during a profile edit preserves
 the current image, including when an older client changes another field.
 Explicit `{"kind":"initials"}` clears the selected image. Existing CLI profile
-inspection and JSON editing carry the same descriptor.
+inspection and JSON editing carry the same descriptor. Newly selected upload
+references must identify available stored bytes. An unchanged missing reference
+can survive unrelated edits, and an accepted creation retry keeps its original
+result if the image later becomes unavailable.
 
 To submit a new crop, use `Content-Type: application/vnd.staf.agent-image+json`
 with the ordinary agent-create or profile-edit body and
@@ -376,7 +379,8 @@ Blob images without permitting executable uploaded markup.
 
 Accepted files are private, immutable, content-addressed PNGs under
 `agents/.images`, included in development dataset backups. The service fsyncs
-the asset before publishing its configuration reference. Partial temporary files
+the asset and containing directory entries before publishing its configuration
+reference. Partial temporary files
 are removed after processing and when the image store next opens. Completed
 assets remain available for retained configurations and uncertain saves; clearing
 an image does not garbage-collect them. Cancelled browser previews send no image

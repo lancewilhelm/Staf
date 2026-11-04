@@ -1,6 +1,6 @@
 import {createHash,randomUUID} from 'node:crypto';
 import {closeSync,constants,existsSync,fstatSync,fsyncSync,mkdirSync,openSync,readFileSync,readdirSync,renameSync,unlinkSync,writeFileSync} from 'node:fs';
-import {join} from 'node:path';
+import {dirname,join} from 'node:path';
 import {PNG} from 'pngjs';
 import {agentImageByteLimit,agentImageSize,isAgentImageAssetId,type AgentImage,type AgentImageInput} from './agent-image.js';
 
@@ -8,6 +8,10 @@ import {agentImageByteLimit,agentImageSize,isAgentImageAssetId,type AgentImage,t
 export class AgentImageAssets {
   constructor(private readonly root:string) {
     mkdirSync(root,{recursive:true,mode:0o700});
+    // Publish .images and its possibly new agents parent before any profile can reference a crop.
+    for (const path of [dirname(root),dirname(dirname(root))]) {
+      const directory=openSync(path,'r');try {fsyncSync(directory);} finally {closeSync(directory);}
+    }
     for (const entry of readdirSync(root,{withFileTypes:true})) {
       if (entry.isFile() && /^\.upload-[a-f0-9-]{36}$/.test(entry.name)) unlinkSync(join(root,entry.name));
     }

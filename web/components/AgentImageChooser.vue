@@ -20,6 +20,10 @@ let generation=0;
 let drag:{pointer:number;clientX:number;clientY:number;x:number;y:number;size:number}|null=null;
 watch([pending,busy],()=>emit('valid',!pending.value&&!busy.value),{immediate:true});
 watch(()=>props.modelValue,value=>{if(value.kind==='avatar')lastAvatar.value=value;unavailable.value=false;});
+watch(()=>props.modelValue.kind,kind=>{
+  mode.value=kind==='upload-data'?'upload':kind;
+  if(kind!=='upload-data'){source.value?.close();source.value=null;}
+});
 onUnmounted(()=>{generation++;source.value?.close();});
 function selectMode(value:Mode){
   if(props.disabled||busy.value)return;

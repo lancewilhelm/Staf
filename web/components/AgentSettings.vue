@@ -51,6 +51,13 @@ async function compare() {
   } catch (error) { status.value = 'Could not load the current settings. Your edits are retained. ' + String(error); }
   finally { emit('update:saving', false); }
 }
+function providerSaved(value:BotProfile,baseRevision:string|null) {
+  if(profile.value?.revision===baseRevision) profile.value=value;
+  else {
+    compareAvailable.value=true;
+    status.value='Settings changed while you were editing. Your draft is retained. Compare latest settings before saving.';
+  }
+}
 async function archive() {
   if (!profile.value || !window.confirm('Archive this agent? Its configuration and conversation will be retained.')) return;
   emit('update:saving', true);
@@ -70,7 +77,7 @@ async function archive() {
       <label>Name<input v-model="name" :disabled="saving" /></label>
       <AgentImageChooser v-model="image" :name="name" :disabled="saving" @valid="value=>imageValid=value" />
       <label>Instructions<textarea v-model="instructions" :disabled="saving" /></label><InstructionsHelp />
-      <ProviderPicker :id="id" :disabled="saving" @profile="value => profile = value" />
+      <ProviderPicker :id="id" :disabled="saving" @profile="providerSaved" />
       <button :disabled="saving" class="quiet" @click="emit('providers')">Open provider settings</button>
       <p class="meta">Configuration: <code>{{ profile.configDir }}</code></p>
       <div class="row"><button :disabled="saving||!imageValid" @click="save">Save settings</button><button :disabled="saving" class="quiet" @click="emit('close')">Cancel</button></div>
@@ -79,7 +86,7 @@ async function archive() {
     <p role="status">{{ saving ? 'Loading or saving…' : status }}</p>
     <button v-if="compareAvailable" :disabled="saving" class="quiet" @click="compare">Compare latest settings</button>
     <section v-if="latest" class="saved-settings" aria-label="Current saved settings">
-      <h3>Current saved settings</h3><AgentImage :image="latest.image" :name="latest.name" /><p>Name: {{ latest.name }}</p><p>Provider: {{ providerLabel(latest.provider) }}</p><p>Model: {{ latest.model || '(none)' }}</p><p>Instructions:</p><pre>{{ latest.instructions }}</pre>
+      <h3>Current saved settings</h3><AgentImage :image="latest.image" :name="latest.name" /><button :disabled="saving||!imageValid" class="quiet" @click="image=latest.image">Use latest image</button><p>Name: {{ latest.name }}</p><p>Provider: {{ providerLabel(latest.provider) }}</p><p>Model: {{ latest.model || '(none)' }}</p><p>Instructions:</p><pre>{{ latest.instructions }}</pre>
     </section>
   </div></div>
 </template>
