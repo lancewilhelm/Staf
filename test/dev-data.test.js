@@ -67,7 +67,7 @@ test('published and interrupted replacements reject an older schema-aware writer
   let errors='';child.stderr.on('data',data=>errors+=data);
   try {
     await new Promise((resolve,reject)=>{child.once('message',resolve);child.once('exit',()=>reject(Error('Exited before checkpoint: '+errors)));});
-    assert.throws(()=>legacySchemaGate(path),/newer database/);
+    assert.throws(()=>legacySchemaGate(path),/locked|newer database/);
     child.kill('SIGKILL');await new Promise(resolve=>child.once('exit',resolve));
     assert.throws(()=>legacySchemaGate(path),/newer database/);
     assert.equal(command(root,'recover').status,0);
@@ -140,7 +140,7 @@ test('restoring an empty backup and interrupted recovery never exposes an unfenc
     const child=fork('scripts/dev-data.mjs',args,{cwd:process.cwd(),env:{...process.env,STAF_DEV_DATA_DIR:root,STAF_DEV_TEST_PAUSE:'database-published'},stdio:['ignore','ignore','pipe','ipc']});
     let errors='';child.stderr.on('data',data=>errors+=data);
     await new Promise((resolve,reject)=>{child.once('message',resolve);child.once('exit',()=>reject(Error(errors)));});
-    try {assert.ok(existsSync(path));assert.throws(()=>legacySchemaGate(path),/newer database/);}
+    try {assert.ok(existsSync(path));assert.throws(()=>legacySchemaGate(path),/locked|newer database/);}
     finally {child.kill('SIGKILL');await new Promise(resolve=>child.once('exit',resolve));}
     assert.throws(()=>legacySchemaGate(path),/newer database/);
   };

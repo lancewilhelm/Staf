@@ -213,6 +213,7 @@ export class Controller {
         }catch{/* Missing or unavailable status cannot establish the dataset. */}
       }
       if(this.dataset===dataset){
+        if(this.state.setup.kind==='closed'&&!this.retainedCreation)await this.restoreCreation(dataset);
         const records=keys.flatMap(key=>{const value=localStorage.getItem(key);return value===null?[]:[{key,value}]});
         if(JSON.stringify(records)!==JSON.stringify(this.state.legacyRecords))this.update({legacyRecords:records});
       }
