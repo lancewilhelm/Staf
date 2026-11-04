@@ -23,6 +23,13 @@ running. The next launch displays the saved conversation. A stopped instance
 starts again when you launch the terminal; unfinished requests are marked
 interrupted when the instance restarts.
 
+The terminal captures its session and dataset when it connects. Saved busy and
+next-message drafts retain those identities through edits, restarts, and retries.
+If another client starts a fresh session, the terminal keeps your draft in its
+original session and asks you to reopen the terminal. Copy the text explicitly
+if you want it in the new session. Older drafts without verifiable session and
+dataset identities remain available for copying and discarding.
+
 The initial provider is an offline demo that echoes messages. It is not a
 language model. Type `show settings`, `set provider to demo`, `set model to NAME`,
 or `set reasoning to LEVEL` to inspect or change the current bot profile. Use
@@ -431,7 +438,8 @@ not a LAN deployment.
 Open an agent and select **History**, then enter an optional session name and
 select **Start fresh session**. The composer and chat start empty. The agent
 retains its soul, configuration, and existing memory behavior. Earlier drafts
-remain under **Earlier browser records** for inspection and copying. Starting a
+remain under **Earlier browser records** for inspection and copying, including
+drafts that contain only selected sources. Starting a
 session while a chat command or background task is active reports a conflict.
 
 Search history or open an earlier session to inspect its original messages.

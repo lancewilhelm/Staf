@@ -919,7 +919,7 @@ export class Instance {
   private taskContext(botId:string) { return this.db.prepare('SELECT m.id,m.role,m.content,EXISTS(SELECT 1 FROM task_notices n WHERE n.message_id=m.id) AS isNotice FROM messages m JOIN conversation_message_sessions x ON x.message_id=m.id WHERE m.bot_id=? AND x.session_id=? ORDER BY m.seq').all(botId,this.currentSession(botId).id); }
   currentSession(botId:string) {return new ConversationSessions(this.db).current(botId);}
   listSessions(botId:string,offset=0,limit=100) {return new ConversationSessions(this.db).list(botId,offset,limit);}
-  readSession(botId:string,sessionId:string,offset=0,limit=100) {return new ConversationSessions(this.db).read(botId,sessionId,offset,limit);}
+  readSession(botId:string,sessionId:string,offset=0,limit=100,messageId?:string) {return new ConversationSessions(this.db).read(botId,sessionId,offset,limit,messageId);}
   searchSessions(botId:string,query:string) {return new ConversationSessions(this.db).search(botId,query);}
   resolveSessionMessage(botId:string,ref:SessionMessageReference) {return new ConversationSessions(this.db).resolve(botId,ref);}
   commandSession(id:string) {const row=this.db.prepare('SELECT session_id FROM conversation_command_sessions WHERE command_id=?').get(id);return typeof row?.session_id==='string'?row.session_id:undefined;}

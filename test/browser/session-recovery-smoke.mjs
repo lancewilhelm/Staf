@@ -32,7 +32,12 @@ try {
   const wrong={text:'Do not adopt this draft',submission:{kind:'unknown',id:'foreign-command',text:'Other agent request'}};
   await evaluate(`localStorage.setItem(${JSON.stringify(foreign)},${JSON.stringify(JSON.stringify(wrong))});testInput('textarea[aria-label=Message]','')`);
   await new Promise(resolve=>setTimeout(resolve,1200));assert.equal(await evaluate("document.querySelector('textarea[aria-label=Message]').value"),'');assert.notEqual(await evaluate(`localStorage.getItem(${JSON.stringify(foreign)})`),null);
+  await evaluate("testClick('History')");await until(()=>evaluate("document.querySelector('.session-history')?.open"),'history for a source-only draft');
+  await evaluate("testInput('.session-history input[required]','Accepted before upgrade');testClick('Search','.session-history')");await until(()=>evaluate("[...document.querySelectorAll('.session-history li')].some(item=>item.innerText.includes('Accepted before upgrade'))"),'original source found');
+  await evaluate("testClick('Select reference','.session-history')");await until(()=>evaluate("!!document.querySelector('.reference-selection')"),'source-only draft selected');
   const fresh=await api('bots/'+bot.id+'/sessions',{operationId:'after-upgrade',expectedSessionId:bot.chatId});
+  await until(()=>evaluate("!document.querySelector('.reference-selection') && document.querySelector('textarea[aria-label=Message]')?.disabled===false"),'fresh empty draft after source selection');
+  await until(()=>evaluate("document.querySelector('.connection-recovery')?.textContent.includes('Initial session')"),'reference-only earlier draft remains available');
   await evaluate(`localStorage.setItem(${JSON.stringify(unscoped)},${JSON.stringify(JSON.stringify(draft('Old-session draft stays separate')))});location.reload()`);
   await until(()=>evaluate("document.querySelector('textarea[aria-label=Message]')?.disabled===false"),'new session ready');await new Promise(resolve=>setTimeout(resolve,1200));
   assert.equal(await evaluate("document.querySelector('textarea[aria-label=Message]').value"),'');assert.notEqual(await evaluate(`localStorage.getItem(${JSON.stringify(unscoped)})`),null);assert.equal((await api('bots/'+bot.id+'/sessions')).current.id,fresh.id);assert.equal(calls,2);

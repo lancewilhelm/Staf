@@ -1,8 +1,9 @@
 # Fresh sessions, document sources, and artifacts
 
-Status: implementation and offline verification are in progress in
-[PR #72](https://github.com/lancewilhelm/Staf/pull/72). The acceptance criteria
-remain the review contract. Code Mode host registration is a separate integration.
+Status: implemented and verified offline in
+[PR #72](https://github.com/lancewilhelm/Staf/pull/72), left open for review. The
+acceptance criteria remain the review contract. Code Mode host registration is a
+separate integration.
 
 ## Problem statement
 

@@ -30,12 +30,18 @@ export class ConversationSessions {
   this.current(botId);if(!Number.isSafeInteger(offset)||offset<0||!Number.isSafeInteger(limit)||limit<1||limit>200)throw Error('Invalid session page');
   return this.db.prepare('SELECT id,name,created_at AS createdAt,active FROM conversation_sessions WHERE bot_id=? ORDER BY created_at DESC,rowid DESC LIMIT ? OFFSET ?').all(botId,limit,offset).map(row=>({id:String(row.id),name:String(row.name),createdAt:Number(row.createdAt),active:Number(row.active)} satisfies ConversationSession));
  }
- read(botId:string,sessionId:string,offset=0,limit=100) {
+ read(botId:string,sessionId:string,offset=0,limit=100,messageId?:string) {
   if(!Number.isSafeInteger(offset)||offset<0||!Number.isSafeInteger(limit)||limit<1||limit>200)throw Error('Invalid history page');
   const session=this.db.prepare('SELECT id,name,created_at AS createdAt,active FROM conversation_sessions WHERE bot_id=? AND id=?').get(botId,sessionId);
   if(!session)throw Error('Session not found');
+  if(messageId!==undefined){
+    const target=this.db.prepare('SELECT m.seq FROM messages m JOIN conversation_message_sessions x ON x.message_id=m.id WHERE m.bot_id=? AND x.session_id=? AND m.id=?').get(botId,sessionId,messageId);
+    if(!target||typeof target.seq!=='number')throw Error('Session message not found');
+    const before=this.db.prepare('SELECT COUNT(*) AS count FROM messages m JOIN conversation_message_sessions x ON x.message_id=m.id WHERE m.bot_id=? AND x.session_id=? AND m.seq<?').get(botId,sessionId,target.seq);
+    offset=Math.floor(Number(before?.count??0)/limit)*limit;
+  }
   const messages=this.db.prepare('SELECT m.id,m.role,m.content FROM messages m JOIN conversation_message_sessions x ON x.message_id=m.id WHERE m.bot_id=? AND x.session_id=? ORDER BY m.seq LIMIT ? OFFSET ?').all(botId,sessionId,limit,offset);
-  return {session:{id:String(session.id),name:String(session.name),createdAt:Number(session.createdAt),active:Number(session.active)} satisfies ConversationSession,messages:messages.map(row=>({id:String(row.id),role:String(row.role),content:String(row.content)} satisfies SessionHistoryMessage))};
+  return {session:{id:String(session.id),name:String(session.name),createdAt:Number(session.createdAt),active:Number(session.active)} satisfies ConversationSession,offset,messages:messages.map(row=>({id:String(row.id),role:String(row.role),content:String(row.content)} satisfies SessionHistoryMessage))};
  }
  search(botId:string,query:string) {
   this.current(botId);if(!query.trim()||query.length>200)throw Error('Search must contain 1 to 200 characters');

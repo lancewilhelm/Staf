@@ -317,13 +317,17 @@ For the controlled offline journey after building, run:
 
 ```sh
 node test/browser/workspace-smoke.mjs
+node test/browser/history-navigation-smoke.mjs
+node test/browser/session-recovery-smoke.mjs
 ```
 
 It uses disposable SQLite, synthetic providers, real browser uploads/downloads,
 and blocked external browser networking. It checks session isolation, source
 selection, revisions, restart, revocation, and narrow Light/Dark layouts. It saves
 screenshots under `test-results/workspace/`. It does not prove live-provider or
-Docker behavior.
+Docker behavior. The additional journeys verify exact-message navigation beyond
+the first history page and recovery of older browser records, including
+source-only drafts.
 
 ### Preserve the existing development setup
 

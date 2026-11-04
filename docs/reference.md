@@ -50,6 +50,11 @@ settled state. Browser draft recovery uses local storage and Web Locks to keep
 concurrent tabs separate. The browser also requires secure random UUID support;
 the composer waits for the selected draft to load.
 
+Terminal drafts retain the captured session and dataset across `/edit`, `/retry`,
+and client restarts. An active-session change rejects submission without
+retargeting the draft. Reopen the terminal to join the new session. Older
+unaccepted drafts without these identities are copy-only.
+
 The instance inherits its host environment at startup. It does not load `.env`.
 Changing the environment of a later terminal does not change a running instance.
 Models and reasoning belong to the bot profile, not environment variables.
@@ -253,7 +258,7 @@ identifiers. All source operations are scoped to the agent in the route.
 | --- | --- |
 | `GET /api/bots/:botId/sessions?offset=0&limit=100` | Current session and paged session list. Limit 1–200. |
 | `POST /api/bots/:botId/sessions` | Create a fresh session with `operationId`, `expectedSessionId`, and optional `name`. |
-| `GET /api/bots/:botId/sessions/:sessionId?offset=0&limit=100` | Original visible messages without private provider replay. |
+| `GET /api/bots/:botId/sessions/:sessionId?offset=0&limit=100` | Original visible messages without private provider replay. Optional `messageId` locates the page containing that exact same-session message; the response includes its `offset`. |
 | `GET /api/bots/:botId/session-search?q=TEXT` | Up to 100 literal matches with a bounded excerpt and its character start. |
 | `POST /api/bots/:botId/references/preview` | Resolve one `reference`; optional `inspect: true` allows inspecting an already retired document. |
 | `GET /api/bots/:botId/documents` | Up to 500 sources, with optional `offset`. |
@@ -268,8 +273,8 @@ identifiers. All source operations are scoped to the agent in the route.
 | `GET /api/bots/:botId/artifacts/:id/revisions/:revision` | Exact saved revision. |
 | `GET /api/bots/:botId/artifacts/:id/revisions/:revision/download` | Protected UTF-8 attachment download. |
 
-Commands accept an optional `sessionId` and `references` array. The browser always
-sends its captured session ID. Legacy callers that omit it capture the active
+Commands accept an optional `sessionId` and `references` array. The browser and
+interactive terminal always send their captured session ID. Legacy callers that omit it capture the active
 session at acceptance. Stale explicit submissions fail. Exact retries check their
 original captured session and source identities even after the active session
 changes or a source is retired.

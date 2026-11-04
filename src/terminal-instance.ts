@@ -71,11 +71,15 @@ async function localConnection(root:string) {
   if (!url) throw Error(`Could not start the local instance. Check ${paths(root).log}.`);
   return {url,token};
 }
-type Connection = {url:string;token:string};
+type Connection = {url:string;token:string;datasetId?:string};
+type TerminalDraft = {content:string;sessionId:string|null;datasetId:string|null};
+class TerminalRequestError extends Error {
+  constructor(readonly status:number, readonly reason:unknown) {super(status===401 ? 'Client authorization was revoked. Pair a new client explicitly.' : `Instance request failed (${status}): ${JSON.stringify(reason)}`);}
+}
 async function request(connection:Connection,path:string,body?:object) {
-  const response=await fetch(new URL(path,connection.url),{method:body?'POST':'GET',headers:{Authorization:`Bearer ${connection.token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined,redirect:'error',signal:AbortSignal.timeout(10000)});
+  const response=await fetch(new URL(path,connection.url),{method:body?'POST':'GET',headers:{Authorization:`Bearer ${connection.token}`,...(connection.datasetId?{'X-Staf-Dataset':connection.datasetId}:{}),...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined,redirect:'error',signal:AbortSignal.timeout(10000)});
   const result:unknown=await response.json();
-  if (!response.ok) throw Error(response.status===401 ? 'Client authorization was revoked. Pair a new client explicitly.' : `Instance request failed (${response.status}): ${JSON.stringify(result)}`);
+  if (!response.ok) throw new TerminalRequestError(response.status,result);
   return result;
 }
 function record(value:unknown) {if(!isRecord(value))throw Error('Invalid response from instance');return value;}
@@ -102,17 +106,19 @@ export async function terminalClient(args:string[]) {
     const url=new URL(remote);if(url.protocol!=='http:' || url.hostname!=='127.0.0.1' || url.username || url.password || url.pathname!=='/' || url.search || url.hash)throw Error('Instance URL must be a loopback HTTP origin');
     const saved:unknown=JSON.parse(await readFile(credentialPath,'utf8'));if(!isRecord(saved) || typeof saved.token!=='string')throw Error('Invalid client credential');connection={url:url.origin,token:saved.token};
   } else connection=await localConnection(root);
+  const dataset=record(await request(connection,'/api/dataset'));if(typeof dataset.id!=='string'||!/^[a-f0-9]{64}$/.test(dataset.id))throw Error('Invalid dataset identity');connection.datasetId=dataset.id;
   const bot=record(await request(connection,'/api/main-bot',{}));if(typeof bot.id!=='string')throw Error('Invalid main bot');const botId=bot.id;
+  const sessionList=record(await request(connection,`/api/bots/${botId}/sessions`));if(!isRecord(sessionList.current)||typeof sessionList.current.id!=='string')throw Error('Invalid conversation session');const clientSessionId=sessionList.current.id;
   const view=new TerminalView(!!process.stdout.isTTY), errors=new TerminalView(!!process.stderr.isTTY);
   const pendingDir=join(root,'terminal-pending'); await mkdir(pendingDir,{recursive:true,mode:0o700});
   const pendingPath=(id:string)=>join(pendingDir,`${id}.json`);
   let providerChange: {value:string; profile:Record<string,unknown>} | undefined;
-  const drafts=new Map<string,string>();
+  const drafts=new Map<string,TerminalDraft>();
   const unresolved=new Set<string>(), watched=new Set<string>(), shown=new Set<string>(), eventCounts=new Map<string,number>(), provisional=new Map<string,string>(), reconciled=new Set<string>();
   let ownMessage:string|undefined;
   let input:ChatInput|undefined, closed=false, menuActive=false;
   function display(action:()=>void) {if(input)input.display(action);else action();}
-  async function loadHistory() {const messages=await request(connection,`/api/bots/${botId}/messages`);if(!Array.isArray(messages))throw Error('Invalid conversation');return messages;}
+  async function loadHistory() {const messages:unknown[]=[];for(;;){const page=record(await request(connection,`/api/bots/${botId}/sessions/${clientSessionId}?offset=${messages.length}&limit=200`));if(!Array.isArray(page.messages))throw Error('Invalid conversation');messages.push(...page.messages);if(page.messages.length<200)return messages;}}
   function showHistory(messages:unknown[]) {let submitted=ownMessage;ownMessage=undefined;for(const message of messages){if(!isRecord(message) || typeof message.id!=='string' || typeof message.content!=='string' || typeof message.role!=='string' || shown.has(message.id))continue;shown.add(message.id);if(message.role==='user' && message.content===submitted){submitted=undefined;continue;}const label=message.role==='assistant'?'staf':message.role==='assistant_stopped'?'staf (stopped)':message.role;let content=message.content,reconciledResponse=false;if(message.role==='assistant'||message.role==='assistant_stopped'){for(const [id,text] of provisional){if(text && !reconciled.has(id) && content.startsWith(text)){content=content.slice(text.length);reconciledResponse=true;reconciled.add(id);break;}}}console.log(`${view.style(`${label}>`,message.role==='assistant'?'heading':'dim')} ${content||!reconciledResponse?cleanText(content):message.role==='assistant_stopped'?'Response stopped.':'Response completed.'}\n`);}}
   async function history() {const messages=await loadHistory();showHistory(messages);}
   let statusQueue:Promise<void>=Promise.resolve();
@@ -153,13 +159,26 @@ export async function terminalClient(args:string[]) {
     console.log(await (defaults?setDefault(key,value):setProfile(key,value,confirmProviderChange)));return;
   }
   console.log(view.style(`\nStaf | shared main chat ${botId}`,'heading'));console.log(view.style((await showSettings()).slice(0,3).join(' | '),'context'));console.log(view.style('Commands: /settings  /auth  /usage  /context  /help  /quit','dim')+'\n');await history();
-  const pending=await readdir(pendingDir);for(const file of pending){if(!/^[a-f0-9-]{36}\.json$/.test(file))continue;const saved:unknown=JSON.parse(await readFile(join(pendingDir,file),'utf8'));if(isRecord(saved) && saved.botId===botId && saved.scope===connectionScope && typeof saved.content==='string'){const id=file.slice(0,-5);if(saved.draft===true){drafts.set(id,saved.content);console.log(view.style(`Unsent draft ${id}: ${cleanText(saved.content)}\nUse /retry ${id} or /discard ${id}.`,'status'));}else{unresolved.add(id);console.log(view.style(`Unresolved command ${id}. Draft: ${saved.content}\nUse /status ${id} before sending another message.`,'status'));}}}
+  const pending=await readdir(pendingDir);for(const file of pending){if(!/^[a-f0-9-]{36}\.json$/.test(file))continue;const saved:unknown=JSON.parse(await readFile(join(pendingDir,file),'utf8'));if(isRecord(saved) && saved.botId===botId && saved.scope===connectionScope && typeof saved.content==='string'){const id=file.slice(0,-5);if(saved.draft===true){drafts.set(id,{content:saved.content,sessionId:typeof saved.sessionId==='string'?saved.sessionId:null,datasetId:typeof saved.datasetId==='string'?saved.datasetId:null});console.log(view.style(`Unsent draft ${id}: ${cleanText(saved.content)}\nUse /retry ${id} or /discard ${id}.`,'status'));}else{unresolved.add(id);console.log(view.style(`Unresolved command ${id}. Draft: ${saved.content}\nUse /status ${id} before sending another message.`,'status'));}}}
   for(const id of unresolved){try{await status(id);}catch{/* Keep uncertain submissions for explicit recovery. */}}
   input=new ChatInput(view.style('you> ','heading'));input.prompt();for(const id of unresolved)watch(id);
-  async function submit(id:string,content:string) {
-    await writeFile(pendingPath(id),JSON.stringify({scope:connectionScope,botId,content}),{mode:0o600});drafts.delete(id);unresolved.add(id);await history();
-    let claim:Record<string,unknown>;try{claim=record(await request(connection,'/api/commands',{id,botId,content}));}catch(error){console.log(view.style(`Submission uncertain. Use /status ${id} before retrying. ${String(error)}`,'error'));return;}
-    if(claim.kind==='busy'){await writeFile(pendingPath(id),JSON.stringify({scope:connectionScope,botId,content,draft:true}),{mode:0o600});unresolved.delete(id);drafts.set(id,content);console.log(view.style(`The bot is busy. Unsent draft ${id}: ${cleanText(content)}\nUse /retry ${id} or /discard ${id}.`,'status'));return;}
+  async function saveDraft(id:string,draft:TerminalDraft) {
+    await writeFile(pendingPath(id),JSON.stringify({scope:connectionScope,botId,...draft,draft:true}),{mode:0o600});drafts.set(id,draft);unresolved.delete(id);
+  }
+  async function submit(id:string,content:string,sessionId:string|null=clientSessionId,datasetId:string|null=connection.datasetId??null) {
+    const draft={content,sessionId,datasetId};
+    await saveDraft(id,draft);
+    if(!sessionId||!datasetId)throw Error('This older draft has no verifiable original session and dataset. Copy its text, then /discard it; it cannot be retried automatically.');
+    if(datasetId!==connection.datasetId||sessionId!==clientSessionId)throw Error('This draft belongs to an earlier session or dataset. Its original session is preserved. Copy its text before discarding it if you want to send a new message.');
+    const sessions=record(await request(connection,`/api/bots/${botId}/sessions`));
+    if(!isRecord(sessions.current)||sessions.current.id!==sessionId)throw Error('The active conversation changed. Your draft remains in its original session. Reopen the terminal to join the new session; copy this draft explicitly if needed.');
+    await history();
+    await writeFile(pendingPath(id),JSON.stringify({scope:connectionScope,botId,...draft}),{mode:0o600});drafts.delete(id);unresolved.add(id);
+    let claim:Record<string,unknown>;try{claim=record(await request(connection,'/api/commands',{id,botId,content,sessionId}));}catch(error){
+      if(error instanceof TerminalRequestError&&error.status===409&&isRecord(error.reason)&&error.reason.error==='Active session changed'){await saveDraft(id,draft);throw Error('The active conversation changed. Your unsent draft remains in its original session. Reopen the terminal to join the new session.');}
+      console.log(view.style(`Submission uncertain. Use /status ${id} before retrying. ${String(error)}`,'error'));return;
+    }
+    if(claim.kind==='busy'){await saveDraft(id,draft);console.log(view.style(`The bot is busy. Unsent draft ${id}: ${cleanText(content)}\nUse /retry ${id} or /discard ${id}.`,'status'));return;}
     ownMessage=content;let state:unknown;for(let i=0;i<20;i++){await pause(100);state=await status(id,false);if(state!=='pending')break;}if(state==='pending'){console.log(view.style(`Command ID: ${id}\nStill running. Use /status ${id} or /approvals; the message will not be sent again automatically.`,'status'));watch(id);}else if(state!=='completed')await status(id);
   }
   try {for await(const raw of input) {const line=raw.trim();if(!line){input.prompt();continue;}if(['/quit','/exit'].includes(line))break;
@@ -181,12 +200,12 @@ export async function terminalClient(args:string[]) {
       else if(/^\/(approve|deny)\s+[\w-]+$/.test(line)){const [action,id]=line.split(/\s+/);console.log(cleanText(JSON.stringify(await request(connection,`/api/approvals/${id}/${action?.slice(1)}`,{}))));}
       else if(line==='/stop') {const progress=await request(connection,`/api/bots/${botId}/response`);if(!isRecord(progress) || typeof progress.id!=='string')console.log('No response to stop.');else {const result=record(await request(connection,`/api/commands/${encodeURIComponent(progress.id)}/stop`,{}));console.log(view.style(`Response ${String(result.state)}.`, 'status'));watch(progress.id);}}
       else if(line.startsWith('/status '))await status(line.slice(8).trim());
-      else if(line.startsWith('/edit ')) {const match=raw.match(/^\/edit\s+([\w-]+)\s+([\s\S]+)$/);if(!match?.[1] || !match[2]?.trim() || !drafts.has(match[1]))throw Error('Use /edit ID TEXT for a saved unsent draft');const id=match[1],content=match[2];await writeFile(pendingPath(id),JSON.stringify({scope:connectionScope,botId,content,draft:true}),{mode:0o600});drafts.set(id,content);console.log(view.style(`Updated unsent draft ${id}.`,'status'));}
-      else if(line.startsWith('/retry ')) {const id=line.slice(7).trim(), content=drafts.get(id);if(content===undefined)throw Error('No saved unsent draft with that ID');if(unresolved.size)throw Error('Resolve pending commands with /status before retrying');await submit(id,content);}
+      else if(line.startsWith('/edit ')) {const match=raw.match(/^\/edit\s+([\w-]+)\s+([\s\S]+)$/);if(!match?.[1] || !match[2]?.trim() || !drafts.has(match[1]))throw Error('Use /edit ID TEXT for a saved unsent draft');const id=match[1],content=match[2],draft=drafts.get(id);if(!draft)throw Error('No saved unsent draft');await saveDraft(id,{...draft,content});console.log(view.style(`Updated unsent draft ${id}.`,'status'));}
+      else if(line.startsWith('/retry ')) {const id=line.slice(7).trim(), draft=drafts.get(id);if(draft===undefined)throw Error('No saved unsent draft with that ID');if(unresolved.size)throw Error('Resolve pending commands with /status before retrying');await submit(id,draft.content,draft.sessionId,draft.datasetId);}
       else if(line.startsWith('/discard ')) {const id=line.slice(9).trim();if(!unresolved.has(id) && !drafts.has(id))throw Error('No local pending draft with that ID');await unlink(pendingPath(id));unresolved.delete(id);drafts.delete(id);console.log(view.style(`Discarded local pending draft ${id}. This does not cancel a command that reached the instance; check its status before retrying to avoid duplicate work.`,'status'));}
       else if(line.startsWith('/'))console.log('Unknown command. Use /help.');
-      else if(unresolved.size){const id=randomUUID();await writeFile(pendingPath(id),JSON.stringify({scope:connectionScope,botId,content:raw,draft:true}),{mode:0o600,flag:'wx'});drafts.set(id,raw);console.log(view.style(`Previous submission unresolved. Unsent draft ${id}: ${cleanText(raw)}\nUse /edit ${id} TEXT, /retry ${id} after it settles, or /discard ${id}.`,'status'));}
-      else {const id=randomUUID();await writeFile(pendingPath(id),JSON.stringify({scope:connectionScope,botId,content:raw}),{mode:0o600,flag:'wx'});await submit(id,raw);}
+      else if(unresolved.size){const id=randomUUID();await writeFile(pendingPath(id),JSON.stringify({scope:connectionScope,botId,content:raw,sessionId:clientSessionId,datasetId:connection.datasetId,draft:true}),{mode:0o600,flag:'wx'});drafts.set(id,{content:raw,sessionId:clientSessionId,datasetId:connection.datasetId??null});console.log(view.style(`Previous submission unresolved. Unsent draft ${id}: ${cleanText(raw)}\nUse /edit ${id} TEXT, /retry ${id} after it settles, or /discard ${id}.`,'status'));}
+      else {const id=randomUUID();await writeFile(pendingPath(id),JSON.stringify({scope:connectionScope,botId,content:raw,sessionId:clientSessionId,datasetId:connection.datasetId,draft:true}),{mode:0o600,flag:'wx'});await submit(id,raw);}
     } catch(error) {console.error(errors.style(`Staf: ${error instanceof Error?error.message:String(error)}`,'error'));}
     input.prompt();
   }} finally {closed=true;input.close();}

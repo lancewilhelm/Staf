@@ -95,6 +95,46 @@ test('busy messages remain saved across restarts and retry only when requested',
 });
 
 
+test('terminal drafts retain their original session when another client starts fresh',async()=>{
+ const root=mkdtempSync(join(tmpdir(),'staf-terminal-session-'));
+ try {
+  let result=cli(root,'/quit\n');assert.equal(result.status,0,result.stderr);
+  const bot=(await request(root,'/api/main-bot',{})).body,initial=(await request(root,`/api/bots/${bot.id}/sessions`)).body.current.id;
+  await request(root,'/api/approval-settings/instance',{mode:'ask-every-time',clockEnabled:true});
+  await request(root,'/api/commands',{id:'held-session',botId:bot.id,sessionId:initial,content:'what time is it?'});
+  for(let i=0;i<50;i++){if((await request(root,'/api/approvals')).body.some(item=>item.workId==='held-session'&&item.state==='pending'))break;await pause(30);}
+  result=cli(root,'Keep this in its original session\n/quit\n');assert.equal(result.status,0,result.stderr);
+  const id=result.stdout.match(/Unsent draft ([\w-]+): Keep this/)?.[1];assert.ok(id,result.stdout);
+  const approval=(await request(root,'/api/approvals')).body.find(item=>item.workId==='held-session'&&item.state==='pending');assert.ok(approval);
+  await request(root,`/api/approvals/${approval.id}/approve`,{});
+  for(let i=0;i<50;i++){if((await request(root,'/api/commands/held-session')).body.state==='completed')break;await pause(30);}
+  assert.equal((await request(root,`/api/bots/${bot.id}/sessions`,{operationId:'fresh-terminal',expectedSessionId:initial})).status,200);
+  result=cli(root,`/retry ${id}\n/quit\n`);assert.equal(result.status,0,result.stderr);
+  assert.ok(!(await request(root,`/api/bots/${bot.id}/messages`)).body.some(message=>message.content==='Keep this in its original session'));
+  assert.equal((await request(root,`/api/commands/${id}`)).status,404);
+  const saved=JSON.parse(readFileSync(join(root,'terminal-pending',id+'.json'),'utf8'));assert.equal(saved.sessionId,initial);assert.equal(saved.draft,true);assert.match(result.stdout+result.stderr,/earlier session|original session/i);
+ } finally {await stop(root);rmSync(root,{recursive:true,force:true});}
+});
+
+test('a running terminal does not retarget new input after another client starts fresh',async()=>{
+ const root=mkdtempSync(join(tmpdir(),'staf-terminal-stale-'));let child;
+ try {
+  assert.equal(cli(root,'/quit\n').status,0);const bot=(await request(root,'/api/main-bot',{})).body;
+  const original=(await request(root,`/api/bots/${bot.id}/sessions`)).body.current.id;
+  child=spawn(process.execPath,['dist/cli.js','--data-dir',root],{stdio:['pipe','pipe','pipe']});let output='',errors='';child.stdout.on('data',chunk=>output+=chunk);child.stderr.on('data',chunk=>errors+=chunk);
+  for(let i=0;i<100&&!output.includes('Commands:');i++)await pause(20);assert.match(output,/Commands:/,errors);
+  assert.equal((await request(root,`/api/bots/${bot.id}/sessions`,{operationId:'fresh-running-terminal',expectedSessionId:original})).status,200);
+  child.stdin.write('Preserve the session where I typed\n');
+  for(let i=0;i<100&&!errors.includes('original session');i++)await pause(20);assert.match(errors,/original session/);
+  child.stdin.end('/quit\n');await new Promise(resolve=>child.once('exit',resolve));child=undefined;
+  assert.equal((await request(root,`/api/bots/${bot.id}/messages`)).body.length,0);
+  const {readdirSync}=await import('node:fs');const files=readdirSync(join(root,'terminal-pending'));assert.equal(files.length,1);
+  const saved=JSON.parse(readFileSync(join(root,'terminal-pending',files[0]),'utf8'));assert.equal(saved.sessionId,original);assert.equal(saved.draft,true);assert.match(saved.datasetId,/^[a-f0-9]{64}$/);
+  const id=files[0].slice(0,-5);delete saved.sessionId;delete saved.datasetId;writeFileSync(join(root,'terminal-pending',files[0]),JSON.stringify(saved));
+  const result=cli(root,`/edit ${id} Older text stays copy-only\n/retry ${id}\n/quit\n`);assert.equal(result.status,0,result.stderr);assert.match(result.stderr,/no verifiable original session/);assert.equal((await request(root,`/api/commands/${id}`)).status,404);
+ } finally {child?.kill();await stop(root);rmSync(root,{recursive:true,force:true});}
+});
+
 test('a slow accepted response appears without a status command while chat remains usable',async()=>{
  const root=mkdtempSync(join(tmpdir(),'staf-terminal-watch-'));let child;
  try{

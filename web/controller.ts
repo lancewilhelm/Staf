@@ -239,7 +239,7 @@ export class Controller {
       }
       if(this.dataset===dataset){
         if(this.state.setup.kind==='closed'&&!this.retainedCreation)await this.restoreCreation(dataset);
-        const oldDrafts=Array.from({length:localStorage.length},(_,i)=>localStorage.key(i)).filter((key):key is string=>{if(!key||!key.startsWith(prefix+dataset+':'))return false;const parts=key.slice(prefix.length).split(':');if(parts[2]!==this.state.selected || (parts.length!==3 && !(parts.length===4 && parts[3]!==this.state.sessionId)))return false;try{const raw=localStorage.getItem(key);const value:unknown=raw?JSON.parse(raw):null;return isRecord(value)&&((typeof value.text==='string'&&!!value.text)||!!value.submission)}catch{return false}});
+        const oldDrafts=Array.from({length:localStorage.length},(_,i)=>localStorage.key(i)).filter((key):key is string=>{if(!key||!key.startsWith(prefix+dataset+':'))return false;const parts=key.slice(prefix.length).split(':');if(parts[2]!==this.state.selected || (parts.length!==3 && !(parts.length===4 && parts[3]!==this.state.sessionId)))return false;try{const raw=localStorage.getItem(key);const value:unknown=raw?JSON.parse(raw):null;return isRecord(value)&&((typeof value.text==='string'&&!!value.text)||!!value.submission||(Array.isArray(value.references)&&value.references.length>0))}catch{return false}});
         const records=[...keys,...oldDrafts].flatMap(key=>{const value=localStorage.getItem(key);return value===null?[]:[{key,value}]});
         if(JSON.stringify(records)!==JSON.stringify(this.state.legacyRecords))this.update({legacyRecords:records});
       }
@@ -330,7 +330,7 @@ export class Controller {
   }
   removeReference(index:number) {this.save({...this.state.draft,references:(this.state.draft.references??[]).filter((_,i)=>i!==index)});}
   async sessionList(botId:string,offset=0) {return this.api<{current:{id:string;name:string};sessions:Array<{id:string;name:string;createdAt:number;active:number}>}>('/api/bots/'+encodeURIComponent(botId)+'/sessions?offset='+offset);}
-  async sessionRead(botId:string,sessionId:string,offset=0) {return this.api<{messages:Message[]}>('/api/bots/'+encodeURIComponent(botId)+'/sessions/'+encodeURIComponent(sessionId)+'?offset='+offset);}
+  async sessionRead(botId:string,sessionId:string,offset=0,messageId?:string) {return this.api<{messages:Message[];offset:number}>('/api/bots/'+encodeURIComponent(botId)+'/sessions/'+encodeURIComponent(sessionId)+'?offset='+offset+(messageId?'&messageId='+encodeURIComponent(messageId):''));}
   async sessionSearch(botId:string,query:string) {return this.api<Array<{sessionId:string;messageId:string;role:string;content:string;start:number}>>('/api/bots/'+encodeURIComponent(botId)+'/session-search?q='+encodeURIComponent(query));}
   async startSession(botId:string,name:string) {
     const sessionId=this.state.sessionId,dataset=this.dataset;if(!sessionId||!dataset||this.state.selected!==botId)throw Error('Current session unavailable');

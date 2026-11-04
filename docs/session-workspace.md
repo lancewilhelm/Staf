@@ -16,7 +16,8 @@ retry of an existing command checks the original command and session first.
 Stop remains agent-wide for the active command.
 
 Browser drafts are stored per dataset, agent, session and tab. Drafts from an
-earlier session remain in **Earlier browser records** for copying. Older
+earlier session remain in **Earlier browser records** for copying, including
+drafts containing selected sources without text. Older
 pre-session keys recover automatically only when a stored command proves the
 agent, current session, submitted text, and any saved source identities. Other
 records remain separate and are not automatically submitted. Use **Check original
@@ -24,13 +25,22 @@ submission** to inspect a verifiable original command without retargeting it.
 A selection in
 history adds a stable session-message reference to the next draft. Search
 results select an excerpt around the matching text, including a character
-position for long messages. The source selection is visible before sending.
+position for long messages. Opening a search result or cited source loads the
+page containing its exact message and focuses it. The source selection is
+visible before sending.
 
 The paired API exposes `GET/POST /api/bots/:botId/sessions`,
 `GET /api/bots/:botId/sessions/:sessionId?offset=0&limit=100`, and
 `GET /api/bots/:botId/session-search?q=...`. Reads are paged to at most 200
-messages, searches return at most 100 matches and a bounded excerpt. Session listing is paged to at most 200 sessions. Public history uses visible message
+messages. Optional `messageId` opens the page containing that same-session
+message and returns the page `offset`. Searches return at most 100 matches and a bounded excerpt. Session listing is paged to at most 200 sessions. Public history uses visible message
 records; private provider replay and encrypted reasoning are not returned.
+The terminal captures a session and dataset at connection time. Unsent drafts
+keep that identity through edits and retries. If the active session changes,
+the terminal retains the draft and asks you to reopen; copying its text into a
+new session is an explicit owner action. Older drafts with no verifiable
+identity remain copy-only.
+
 The internal `Instance` methods `currentSession`, `commandSession`,
 `listSessions`, `readSession`, `searchSessions`, and `resolveSessionMessage`
 provide the integration seam. `sessionCapabilities` scopes reads to a pending

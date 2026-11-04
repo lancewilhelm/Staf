@@ -90,6 +90,18 @@ test('a history search selects the matching part of a long original message',()=
   } finally {instance.close();}
 });
 
+test('a history page can open the exact matching message beyond the first page',()=>{
+  const instance=new Instance(':memory:');
+  try {
+    const bot=instance.createBot({name:'Long history',instructions:''});
+    for(let i=0;i<130;i++){instance.claim({id:'page-'+i,botId:bot.id,content:'Original message '+i});instance.complete('page-'+i,'Answer '+i);}
+    const page=instance.readSession(bot.id,bot.chatId,0,100,'command-user-page-115');
+    assert.ok(page.messages.some(message=>message.id==='command-user-page-115'));assert.equal(page.offset,200);
+    assert.equal(instance.currentSession(bot.id).id,bot.chatId);
+    const other=instance.createBot({name:'Other',instructions:''});assert.throws(()=>instance.readSession(other.id,bot.chatId,0,100,'command-user-page-115'));
+  } finally {instance.close();}
+});
+
 test('older background work settles before a fresh session can start',()=>{
   const instance=new Instance(':memory:');
   try {

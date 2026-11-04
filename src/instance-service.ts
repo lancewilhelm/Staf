@@ -606,7 +606,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
       const sessionSearch=req.url?.match(/^\/api\/bots\/([\w-]+)\/session-search\?(.+)$/);
       if(sessionSearch?.[1] && req.method==='GET')return json(200,instance.searchSessions(sessionSearch[1],new URLSearchParams(sessionSearch[2]).get('q') ?? ''));
       const sessionRead=req.url?.match(/^\/api\/bots\/([\w-]+)\/sessions\/([\w-]+)(?:\?(.+))?$/);
-      if(sessionRead?.[1] && sessionRead[2] && req.method==='GET') {const params=new URLSearchParams(sessionRead[3]);return json(200,instance.readSession(sessionRead[1],sessionRead[2],Number(params.get('offset') ?? 0),Number(params.get('limit') ?? 100)));}
+      if(sessionRead?.[1] && sessionRead[2] && req.method==='GET') {const params=new URLSearchParams(sessionRead[3]);return json(200,instance.readSession(sessionRead[1],sessionRead[2],Number(params.get('offset') ?? 0),Number(params.get('limit') ?? 100),params.get('messageId')??undefined));}
       const messageMatch = req.url?.match(/^\/api\/bots\/([\w-]+)\/messages$/);
       if (req.method === 'GET' && messageMatch?.[1]) return json(200,instance.messages(messageMatch[1]));
       const responseMatch = req.url?.match(/^\/api\/bots\/([\w-]+)\/response$/);
