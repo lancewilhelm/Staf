@@ -20,6 +20,11 @@ documents, and 33 for artifacts. Each branch may set its own maximum version;
 integration sets 33 and retains all three guarded schema additions. Put each
 feature's table definitions in its own module. Preserve protected backups.
 
+The final integration additionally reserves migration 34 for captured command
+references and schema reconciliation. It sets the final maximum to 34 and
+installs any missing feature schemas from isolated development branches after
+the protected upgrade backup. Isolated feature version numbers are not releases.
+
 ## Conversation sessions
 
 The sessions implementer owns session binding of visible messages, commands,
