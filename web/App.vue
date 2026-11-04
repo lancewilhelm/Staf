@@ -65,6 +65,20 @@ async function closeUserMemory() {
   document.querySelector<HTMLElement>(view.value === 'agent-memory' ? '.shared-memory-link' : '.user-memory-link')?.focus();
 }
 function openChat(id: string) { settingsAgentId.value = null; app.closeSetup(); view.value = 'chat'; void app.select(id); }
+function legacyContent(raw: string) {
+  try {
+    const value: unknown = JSON.parse(raw);
+    if (!value || typeof value !== 'object') return raw;
+    const fields: string[] = [];
+    for (const [name, text] of Object.entries(value)) {
+      if (typeof text === 'string') fields.push(`${name}:\n${text}`);
+      if (name === 'submission' && text && typeof text === 'object') {
+        for (const [part, saved] of Object.entries(text)) if (typeof saved === 'string') fields.push(`submission ${part}:\n${saved}`);
+      }
+    }
+    return [...fields, `Original saved record:\n${raw}`].join('\n\n');
+  } catch { return raw; }
+}
 </script>
 
 <template>
@@ -83,6 +97,11 @@ function openChat(id: string) { settingsAgentId.value = null; app.closeSetup(); 
         <button v-else-if="view !== 'chat'" class="header-action" :disabled="agentSaving" aria-label="Back to chat" @click="closeAgentSettings"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="m6 6 12 12M6 18 18 6"/></svg></button>
       </header>
       <Toasts />
+      <details v-if="s.connection.kind === 'ready' && s.legacyRecords.length" class="connection-recovery">
+        <summary>Earlier browser records</summary>
+        <p>These saved records have no dataset identity. Their origin cannot be verified; copy any needed text or operation details before continuing. They will not be submitted automatically.</p>
+        <div v-for="record in s.legacyRecords" :key="record.key"><p>{{ record.key }}</p><pre style="white-space: pre-wrap; overflow-wrap: anywhere">{{ legacyContent(record.value) }}</pre></div>
+      </details>
       <div v-if="s.connection.kind === 'offline'" class="connection-recovery" role="alert">{{ s.connection.message }} {{ s.freshness }}</div>
       <div v-if="settingsAgentId && s.connection.kind !== 'pairing'" :style="{display: view === 'agent' ? 'contents' : 'none'}">
         <AgentSettings :key="settingsAgentId" :id="settingsAgentId" v-model:saving="agentSaving" @providers="openSettings" @memory="openAgentMemory(settingsAgentId)" @close="closeAgentSettings" />

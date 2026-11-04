@@ -4,7 +4,7 @@ import { cpSync, existsSync, mkdtempSync, readFileSync, renameSync, rmSync } fro
 import { join, relative, isAbsolute, resolve } from 'node:path';
 import { acquireOwner, devContext } from './dev-context.mjs';
 import { seed } from './dev-seed.mjs';
-import { copyAgents, saveBackup, sync, syncTree, writeMarker } from './dev-storage.mjs';
+import { copyAgents, MAINTENANCE_VERSION, saveBackup, sync, syncTree, writeMarker } from './dev-storage.mjs';
 
 async function main() {
 const action=process.argv[2];
@@ -20,7 +20,7 @@ async function testCheckpoint(name) {
   await new Promise(resolve=>process.once('message',resolve));
 }
 const owner=await acquireOwner(context);
-let lock, stage;
+let lock, publishedLock, stage;
 try {
   if(action==='reset') {
     interrupted();
@@ -30,10 +30,24 @@ try {
   const existed=existsSync(path);
   lock=new DatabaseSync(path);
   lock.exec('PRAGMA locking_mode=EXCLUSIVE; BEGIN EXCLUSIVE; COMMIT;');
+  if(action==='recover') {
+    const record=JSON.parse(readFileSync(marker,'utf8'));
+    if(record.version!==1||typeof record.backup!=='string'||(record.phase!==undefined&&!['prepared','replacing','upgrading','published'].includes(record.phase)))throw Error('Invalid maintenance marker; inspect it before manual recovery.');
+    if(record.phase==='published'||record.phase==='prepared') {
+      const version=record.phase==='published'?record.publishedVersion:record.previousVersion;
+      if(!Number.isSafeInteger(version)||version<0||version>=MAINTENANCE_VERSION)throw Error('Invalid maintenance schema version.');
+      const actual=Number(lock.prepare('PRAGMA user_version').get().user_version);
+      if(actual===MAINTENANCE_VERSION){lock.exec(`PRAGMA user_version=${version}`);sync(path);}
+      else if(!Number.isSafeInteger(actual)||actual<version||actual>=MAINTENANCE_VERSION)throw Error('Unexpected published schema version.');
+      rmSync(marker);sync(dataRoot);console.log(record.phase==='published'?'Committed publication finalized.':'Original dataset retained.');return;
+    }
+  }
   if(action==='reset') {
     interrupted();
     const backup=saveBackup({dataRoot,db:lock,existed,reason:'reset'});
-    writeMarker({dataRoot,backup});
+    const previousVersion=Number(lock.prepare('PRAGMA user_version').get().user_version);
+    if(!Number.isSafeInteger(previousVersion)||previousVersion<0||previousVersion>=MAINTENANCE_VERSION)throw Error('Invalid original schema version.');
+    writeMarker({dataRoot,backup,phase:'prepared',previousVersion});
     console.log(`Backup: ${backup}`);
   } else {
     let target;
@@ -63,19 +77,39 @@ try {
       } finally {restored.close();}
     }
     syncTree(stage);
-    if(action==='restore') {const backup=saveBackup({dataRoot,db:lock,existed,reason:'restore'});writeMarker({dataRoot,backup});console.log(`Backup: ${backup}`);}
+    if(action==='restore') {const backup=saveBackup({dataRoot,db:lock,existed,reason:'restore'});const previousVersion=Number(lock.prepare('PRAGMA user_version').get().user_version);if(!Number.isSafeInteger(previousVersion)||previousVersion<0||previousVersion>=MAINTENANCE_VERSION)throw Error('Invalid original schema version.');writeMarker({dataRoot,backup,phase:'prepared',previousVersion});console.log(`Backup: ${backup}`);}
     console.log(`Restoring backup: ${target}`);
   }
+  await testCheckpoint('backup-saved');
+  // Fence both inodes: a lock on the original does not protect a renamed replacement.
+  lock.exec(`PRAGMA user_version=${MAINTENANCE_VERSION}`);sync(path);
+  await testCheckpoint('original-fenced');
+  const stagedPath=join(stage,'instance.sqlite');
+  publishedLock=new DatabaseSync(stagedPath);
+  publishedLock.exec('PRAGMA locking_mode=EXCLUSIVE; BEGIN EXCLUSIVE; COMMIT;');
+  const targetVersion=Number(publishedLock.prepare('PRAGMA user_version').get().user_version);
+  if(!Number.isSafeInteger(targetVersion)||targetVersion<0||targetVersion>=MAINTENANCE_VERSION)throw Error('Invalid backup schema version.');
+  publishedLock.exec(`PRAGMA user_version=${MAINTENANCE_VERSION}`);sync(stagedPath);sync(stage);
+  const active=JSON.parse(readFileSync(marker,'utf8'));
+  if(active.version!==1||typeof active.backup!=='string')throw Error('Invalid maintenance marker.');
+  writeMarker({dataRoot,backup:active.backup,phase:'replacing'});
   // The durable marker remains in place through every destructive publication step.
   for(const suffix of ['-wal','-shm','-journal'])rmSync(path+suffix,{force:true});
-  if(existsSync(join(stage,'instance.sqlite')))renameSync(join(stage,'instance.sqlite'),path);else rmSync(path,{force:true});
+  renameSync(stagedPath,path);sync(dataRoot);
   await testCheckpoint('database-published');
   rmSync(agentRoot,{recursive:true,force:true});
   if(existsSync(join(stage,'agents')))renameSync(join(stage,'agents'),agentRoot);
-  sync(dataRoot);rmSync(marker);sync(dataRoot);
+  sync(dataRoot);
+  const record=JSON.parse(readFileSync(marker,'utf8'));
+  if(record.version!==1||typeof record.backup!=='string')throw Error('Invalid maintenance marker.');
+  writeMarker({dataRoot,backup:record.backup,publishedVersion:targetVersion});
+  await testCheckpoint('publication-committed');
+  publishedLock.exec(`PRAGMA user_version=${targetVersion}`);sync(path);
+  await testCheckpoint('fence-released');
+  rmSync(marker);sync(dataRoot);
   console.log(action==='reset'?'Development dataset reset. Pair clients again.':'Recovery complete.');
 } finally {
-  lock?.close();if(stage)rmSync(stage,{recursive:true,force:true});
+  publishedLock?.close();lock?.close();if(stage)rmSync(stage,{recursive:true,force:true});
   await new Promise(resolve=>owner.close(resolve));
 }
 

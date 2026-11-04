@@ -11,17 +11,25 @@ The launcher and maintenance commands share a data-directory owner port, and
 maintenance also takes the SQLite exclusive lock. Before publishing a database
 and agent-file replacement, maintenance saves both and writes a durable marker.
 Instance startup checks that marker before initialization and again after taking
-the database lock. Explicit recovery restores the prior copy. Development startup
-also saves a complete copy and installs the marker before schema migration.
+the database lock. Maintenance fences the original and replacement SQLite files
+with an unsupported schema version until the database and agent files are durable,
+so an older checkout cannot open a partially published dataset even after a crash.
+Recovery retains the unchanged original before replacement begins, restores the
+prior copy after replacement starts, and finalizes a committed dataset without
+discarding later writes. Development startup
+also saves a complete copy and fences the database before schema migration.
 Provider connection files stay outside the replacement set. Explicit restoration
 clears client authorizations and assigns a new browser dataset identity.
 
 The shared service derives an opaque dataset identity from an instance secret and
 returns it to the browser. Browser creation and draft records use that identity,
-and the service rejects requests that carry a different identity. Old unscoped
-records stay in storage without automatic recovery. The identity survives an
-ordinary restart and changes on reset or explicit restore. Interrupted maintenance
-recovery restores the pre-operation identity and does not replay work.
+and the service rejects requests that carry a different identity. A legacy unscoped
+draft is adopted only when its agent, command ID and command text match durable
+server data; a legacy creation requires a matching recorded operation. Web Locks
+protect adoption from an active older tab. Other unscoped records remain available
+for explicit read-only copy-out, without assigning them to a dataset. The identity
+survives an ordinary restart and changes on reset or explicit restore. Recovery
+does not replay work.
 
 A shared instance owns bot profiles, conversations, task attempts, permissions,
 and provider execution. The browser and terminal are paired clients of the same
