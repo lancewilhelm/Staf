@@ -68,6 +68,13 @@ existing clock denial into that error. Feature code must keep `summary`,
 `resource`, and `visibleResult` safe for inspection. Inputs and private results
 remain in instance-owned records and are not part of the inspection manifest.
 
+The instance also supplies its input redactor to the coordinator. Both raw and
+parsed JSON are checked before any invocation, request or journal row is written.
+Input that would change under redaction is rejected without substitution, even
+when a feature later rejects an invalid ID. This check applies to every registered
+capability, so a new adapter cannot omit it. Standalone coordinator fixtures use
+the default identity redactor unless they explicitly supply configured secrets.
+
 Authorization and execution receive the same frozen, coordinator-created
 `ActionIdentity` (`id` and `fingerprint`). Existing two-argument callbacks remain
 valid. An authorizer can return an `AuthorityClaim` whose synchronous `start`

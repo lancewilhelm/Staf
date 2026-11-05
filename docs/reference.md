@@ -250,6 +250,11 @@ Authenticated clients use `GET` and `POST /api/skills` to list or import. Import
 
 ### Model memory action contract
 
+Every registered model capability shares an input-fidelity check: the instance
+redactor must leave both raw and parsed JSON unchanged before private invocation
+or journal persistence. Rejected input is never executed with substituted text.
+This includes invalid identifiers and normalized inputs, not only memory writes.
+
 The shared action registry exports `memory_search`, `memory_read`, `memory_remember`, `memory_update`, `memory_forget`, and `memory_proposal_status`. Both individual calls and QuickJS child calls use these registrations. Scope is `{ "kind": "agent" }` or `{ "kind": "user" }`; agent identity comes only from accepted work. Search accepts `query` and an optional cursor and returns at most 20 matching items and `nextCursor`. Read returns an item with its ID, stored scope and version. Update and forget require the ID, scope and version. A stale or wrong-scope mutation is a definite failed action. Text requiring current instance credential redaction is rejected during input parsing, before invocation inputs, action records, creation, proposal or update, so confirmation cannot save hidden text that differs from the review. Shared remember returns a pending, agent-bound proposal ID, never an active shared memory; only the owner chat confirmation or cancellation can resolve it. Proposal status is readable by the originating agent. Helpers are ineligible. These adapters use the common command/task context. The Code Mode description includes the eligible registered names and input schemas.
 
 ### Shared-instance memory API

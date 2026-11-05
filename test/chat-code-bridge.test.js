@@ -39,6 +39,15 @@ async function fixture(respond,env={},options={}) {
   return {app,call,seen,until,submit,wait,token};
 }
 
+test('all capability inputs are checked before private journaling, including an invalid skill ID',async()=>{
+  const {mkdtempSync,rmSync}=await import('node:fs'),{tmpdir}=await import('node:os'),{join}=await import('node:path'),{DatabaseSync}=await import('node:sqlite');
+  const directory=mkdtempSync(join(tmpdir(),'staf-capability-input-')),path=join(directory,'db'),parts=['synthetic','skill','credential'],secret=parts.join('-');
+  const f=await fixture((messages,_tools,profile)=>messages.at(-1).role==='tool'?{role:'assistant',content:'done'}:profile.toolMode==='direct'?tool('select_skill',{id:secret,revision:1}):tool('code_mode',{source:`return await capabilities.select_skill({id:${JSON.stringify(parts)}.join('-'),revision:1});`}),{OPENROUTER_API_KEY:secret},{path});let closed=false;
+  try{const skill=await f.call('/api/skills',{name:'Privacy fixture',description:'fixture',provenance:'owner',body:'Safe fixture content'});for(const mode of ['direct','hybrid','code']){const bot=await f.call('/api/bots',{name:mode,toolMode:mode});await f.call(`/api/skills/${skill.id}/availability`,{botId:bot.id,available:true});await f.submit('input-'+mode,bot.id);assert.equal((await f.wait('input-'+mode)).state,'completed');}
+    await f.app.close();closed=true;const db=new DatabaseSync(path,{readOnly:true});try{assert.equal(db.prepare('SELECT count(*) AS count FROM work_action_invocations WHERE instr(input,?)>0').get(secret).count,0);}finally{db.close();}
+  }finally{if(!closed)await f.app.close();rmSync(directory,{recursive:true,force:true});}
+});
+
 test('direct, hybrid and code offers are captured and unoffered calls cannot dispatch',async()=>{
   const f=await fixture((messages)=>{const user=messages.findLast(x=>x.role==='user').content;if(messages.at(-1).role==='tool')return {role:'assistant',content:'done'};return user==='plain'?{role:'assistant',content:'text'}:user==='forged'?tool('clock'):tool(user==='direct'?'clock':'code_mode',user==='direct'?{}:{source:'return (await capabilities.clock({})).value;'});});
   try {

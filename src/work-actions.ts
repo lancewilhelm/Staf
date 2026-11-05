@@ -79,7 +79,7 @@ export class WorkActionService {
   private readonly closures=new Map<string,{controller:AbortController;refs:number}>();
   constructor(private readonly db:DatabaseSync, private readonly key:Uint8Array,
     private readonly context:(work:WorkRef,signal:AbortSignal)=>WorkContext,
-    private readonly active:(work:WorkRef)=>void, private readonly budget=32, private readonly deferred:(work:WorkRef)=>boolean=()=>false) {
+    private readonly active:(work:WorkRef)=>void, private readonly budget=32, private readonly deferred:(work:WorkRef)=>boolean=()=>false,private readonly inputRedactor:(value:string)=>string=value=>value) {
     this.journal=new ActionJournal(db);
   }
   register<I,O>(capability:Capability<I,O>):void {
@@ -183,11 +183,13 @@ export class WorkActionService {
     if(!cap.eligible(context)) {this.close(context,'authority');throw Error('Capability is no longer authorized');}
     const source=sourceKey(request.source),rawInput=jsonValue.parse(request.input),raw=encoded(rawInput);
     if(Buffer.byteLength(source)>2048 || Buffer.byteLength(raw)>256*1024)throw Error('Invocation input exceeds the limit');
+    if(this.inputRedactor(raw)!==raw)return {kind:'blocked',reason:'Tool input cannot be retained faithfully under the instance redaction rules.'};
     let input:Json;
     try {input=cap.parse(rawInput);}
     catch(error){if(error instanceof ActionFailed)return {kind:'blocked',reason:error.safeResult.slice(0,16000)};throw error;}
     const canonical=encoded(input);
     if(Buffer.byteLength(canonical)>256*1024)throw Error('Parsed input exceeds the limit');
+    if(this.inputRedactor(canonical)!==canonical)return {kind:'blocked',reason:'Tool input cannot be retained faithfully under the instance redaction rules.'};
     const digest=this.digest(encoded([request.name,rawInput,request.intent]));
     const pending=this.db.prepare('SELECT digest,challenge,reason FROM work_action_requests WHERE kind=? AND work_id=? AND source=?').get(context.work.kind,context.work.id,source);
     if(pending) {
