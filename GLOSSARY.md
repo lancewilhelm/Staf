@@ -77,6 +77,11 @@ _Avoid_: Hidden reasoning, invented agent dialogue
 The authority an agent has to use tools and access resources while carrying out work.
 _Avoid_: Approval mode, task scope
 
+**Tool mode**:
+The owner's choice of how an agent calls tools: individually, through a program,
+or with both approaches available.
+_Avoid_: Approval mode, permissions, execution environment
+
 **Task scope**:
 The objective and bounds of the work authorized for a task.
 _Avoid_: Agent permissions, approval mode
