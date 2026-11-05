@@ -614,12 +614,16 @@ The terminal supports `staf settings set toolMode hybrid` and
 set `toolMode` in the existing agent profile JSON, or pass `--tool-mode` at
 creation. The paired defaults command accepts a final mode argument.
 
-In ordinary chat, Direct offers the eligible clock and memory tools, Hybrid offers those individual tools and `code_mode`, and Code Mode offers `code_mode` with the same registered clock and memory capabilities inside it. The code tool description lists eligible registered capability names and input schemas. Existing web, search, scratch and skill tools keep their current individual
+In ordinary chat, Direct offers the eligible clock, memory and host file tools, Hybrid offers those individual tools and `code_mode`, and Code Mode offers `code_mode` with the same registered clock, memory and file capabilities inside it. The code tool description lists eligible registered capability names and input schemas. Existing web, search, scratch and skill tools keep their current individual
 behavior in Direct and Hybrid until their adapters are migrated. They are not
 offered in Code Mode yet, and fabricated individual calls are rejected.
 Background tasks do not yet use the selected mode. Plain text does not start a guest. A mode or other ordinary
 settings edit applies to new work; an accepted command and its exact retry keep
 its captured profile. Clock permissions and applicable approvals remain live.
+
+File actions use the agent's stable `work` directory for relative paths. Absolute paths use the Staf service account's normal host access; the working directory is not a sandbox. `file_write` creates or replaces a UTF-8 file, and `file_read` returns base64 bytes, their offset, the file size, a `nextOffset` when more remains, and a SHA-256 for files up to 1 MiB. Use that hash with `file_edit` to replace exactly one matching UTF-8 string; changed hashes, missing matches and multiple matches fail. `file_search` finds literal UTF-8 bytes in a file or matching names in one directory. Follow `nextOffset` to continue. Directory search is not recursive. These actions do not create parent directories.
+
+An external writer can still race the hash check and write; it is not an atomic filesystem compare-and-swap. Failed effects that cannot be determined are recorded as uncertain and require reconciliation, not automatic replay. The paired action records and CLI status expose outcomes. Inputs that cannot be retained under the instance redaction rules are rejected rather than substituted. Unknown secrets and secrets split across file pages may still appear in output or retained history.
 
 The code tool runs a bounded QuickJS program. For example,
 `return (await capabilities.clock({})).value;` returns the UTC time. Child calls

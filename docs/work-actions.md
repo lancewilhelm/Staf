@@ -5,7 +5,7 @@ chat opens it once per accepted command; direct and QuickJS clock and memory cal
 same registrations and authorization. Task runtime and other existing tools
 remain on their earlier paths pending their adapters. In ordinary chat, those
 other individual tools are available in Direct and Hybrid only; Code Mode offers
-only `code_mode`, with clock and scoped memory as guest capabilities. Dispatch rejects
+only `code_mode`, with clock, scoped memory and host file actions as guest capabilities. Dispatch rejects
 individual calls that were not offered.
 
 ## Open accepted work
@@ -159,3 +159,7 @@ Observed host stack, CPU, bridge and output limit events, shared budget exhausti
 Stop and live restrictions close admission. Hybrid can use direct calls after
 ordinary failures; Code Mode remains selected. These are QuickJS and protocol
 bounds, not OS/container isolation or a total host RSS limit.
+
+## Host files
+
+`src/file-actions.ts` registers the same four host operations for direct calls and guest calls. Relative paths resolve against captured `workingDirectory`; absolute paths retain service-account access. Read and search return bounded pages and continuation offsets. The edit hash is checked in the effect, not in the replay authorization check, so a resume returns the original outcome. External filesystem writers can race the check and write; this is not atomic compare-and-swap. The action journal records uncertain I/O outcomes without replay. See [host file actions](reference.md#host-file-actions) for limits.

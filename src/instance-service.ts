@@ -186,7 +186,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
 
   const workActions=instance.workActions();
   workActions.register(clockCapability(instance, work=>authorizeClock(work.botId,work.work.kind,work.work.id,work.signal)));
-  const files=fileCapabilities(redact);
+  const files=fileCapabilities(redact,work=>instance.fileActionsAllowed(work.work));
   workActions.register(files.read);workActions.register(files.write);workActions.register(files.edit);workActions.register(files.search);
   registerMemoryCapabilities(instance,workActions,redact);
 

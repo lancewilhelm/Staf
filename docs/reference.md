@@ -415,7 +415,7 @@ profiles use the existing task attempt identity, without a synthetic command ID.
 Version 31 adds `creation_defaults.tool_mode` after the existing migration backup.
 
 Ordinary chat opens the captured command's `WorkActions` and applies its mode
-to clock, scoped memory, and `code_mode`; background tasks and other existing tool adapters
+to clock, scoped memory, host files, and `code_mode`; background tasks and other existing tool adapters
 remain on their previous paths. `GET /api/commands/ID` returns `codeExecutions`
 (source, SHA-256 source identity, outcome, selected result, and linked action
 IDs) and `workActions` journal records. Chat-work returns code execution details
@@ -424,3 +424,9 @@ guest catalog and schemas; child capability progress uses the registered name.
 Version 33 adds execution records and marks running records
 interrupted on restart without replay. See the [action service](work-actions.md)
 for limits, recovery and adapter entry points.
+
+## Host file actions
+
+`file_read({path, offset?, limit?})` reads at most 32,768 bytes (default 8,192) and returns base64 data, byte offset, size, next offset and, for files up to 1 MiB, a SHA-256. `file_write({path, content})` writes UTF-8. `file_edit({path, expectedHash, oldText, newText})` requires valid UTF-8, a file at most 1 MiB, the current hash and one exact match. `file_search({path, query, offset?, limit?})` returns byte offsets in a file, scanning up to 65,536 bytes per page, or matching names in a single directory. A page has at most 100 matches; a directory over 10,000 entries is rejected. Follow `nextOffset` until null. Concurrent host changes can invalidate a page or race an edit; the hash check is not an atomic compare-and-swap.
+
+Paths resolve against the captured working directory unless absolute and use ordinary host permissions. Inputs changed by redaction are rejected before journal preparation. Shared action admission, Stop, recovery, and uncertain-effect handling apply. Helper and scheduled task restrictions remain in force; task-mode integration remains pending.

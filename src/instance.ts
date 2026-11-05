@@ -246,6 +246,7 @@ export class Instance {
       WHERE o.task_id=? OR EXISTS (SELECT 1 FROM schedule_task_retries r WHERE r.attempt_id=? AND r.schedule_id=o.schedule_id AND r.due_at=o.due_at)`).get(attemptId,attemptId);
   }
   datasetIdentity() { return createHmac('sha256',this.datasetKey).update('staf-dataset-identity-v1').digest('hex'); }
+  fileActionsAllowed(work:WorkRef) {return work.kind!=='task' || (!this.isHelperAttempt(work.id) && !this.scheduleOrigin(work.id));}
   scheduleClockAllowed(attemptId:string) {
     const row=this.scheduleOrigin(attemptId);
     if (!row) return true;

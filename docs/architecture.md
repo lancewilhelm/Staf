@@ -299,3 +299,7 @@ script errors create a recovery epoch and return the manifest to the same
 provider loop. Task and helper runtime and the web, search, scratch and skill
 adapters remain later slices; they do not yet follow this chat mode. The worker's
 QuickJS limits do not establish OS/container isolation or a total host RSS cap.
+
+### Registered host files
+
+The host file capability registration supplies read, write, exact-match edit and bounded search to the existing work-action coordinator. Both chat calling styles use the accepted working directory and the same invocation identity and journal. Hash checks run within the edit effect so a completed-action resume returns its recorded result. An external writer may still race the check and the filesystem write; Staf does not claim atomic compare-and-swap. Effects with unknown outcomes remain uncertain rather than being automatically retried. File data uses service-account filesystem access, not QuickJS isolation.
