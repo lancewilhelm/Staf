@@ -41,6 +41,40 @@ function fixture() {
   const instance=new Instance(':memory:');const bot=instance.createBot({name:'Test',instructions:'',toolMode:'hybrid'});instance.claim({id:'c',botId:bot.id,content:'hello'});const controller=new AbortController();return {instance,bot,controller,actions:instance.workActions().open({kind:'command',id:'c'},controller.signal)};
 }
 
+test('authority claim starts inside the journal transaction and releases after the effect',async()=>{
+  const {instance,actions}=fixture();try {
+    let authorized,executed,releases=0,starts=0;
+    instance.workActions().register(localChange({
+      authorize:async (_input,_work,identity)=>{authorized=identity;return {start:()=>{starts++;assert.equal(instance.db.isTransaction,true);assert.equal(instance.db.prepare('SELECT state FROM action_journal WHERE id=?').get(identity.id).state,'prepared');},release:()=>{releases++;}};},
+      execute:async (_input,_work,identity)=>{executed=identity;assert.equal(releases,0);return 'done';},
+    }));
+    const first=await invoke(actions,source('claim'),'local_change',{value:'x'});
+    assert.equal(first.kind,'completed');assert.equal(authorized.id,first.actionId);assert.ok(authorized.fingerprint);assert.ok(Object.isFrozen(authorized));assert.deepEqual(executed,authorized);assert.equal(starts,1);assert.equal(releases,1);
+    assert.deepEqual(await invoke(actions,source('claim'),'local_change',{value:'x'}),first);assert.equal(starts,1);assert.equal(releases,1);
+  }finally{instance.close();}
+});
+
+test('a rejected authority start rolls back and releases without executing',async()=>{
+  const {instance,actions}=fixture();try {
+    let effects=0,releases=0;instance.db.exec('CREATE TABLE claim_fixture (value TEXT)');
+    instance.workActions().register(localChange({authorize:async()=>({start:()=>{instance.db.prepare('INSERT INTO claim_fixture VALUES (?)').run('claimed');throw Error('revoked');},release:()=>{releases++;}}),execute:async()=>{effects++;return 'done';}}));
+    const result=await invoke(actions,source('claim-revoked'),'local_change',{value:'x'});
+    assert.equal(result.kind,'blocked');assert.equal(effects,0);assert.equal(releases,1);assert.equal(instance.db.prepare('SELECT state FROM action_journal').get().state,'cancelled');assert.equal(instance.db.prepare('SELECT count(*) AS n FROM claim_fixture').get().n,0);
+  }finally{instance.close();}
+});
+
+test('authority claim releases when work stops after authorization and when execution fails',async()=>{
+  for(const scenario of ['stop','failure']) {
+    const {instance,controller,actions}=fixture();try {
+      let releases=0,effects=0;
+      instance.workActions().register(localChange({authorize:async()=>{if(scenario==='stop')controller.abort();return {start:()=>{},release:()=>{releases++;}};},execute:async()=>{effects++;throw Error('unknown');}}));
+      const result=await invoke(actions,source(scenario),'local_change',{value:'x'});
+      assert.equal(result.kind,scenario==='stop'?'blocked':'status');assert.equal(effects,scenario==='stop'?0:1);assert.equal(releases,1);
+      assert.equal(instance.db.prepare('SELECT state FROM action_journal').get().state,scenario==='stop'?'cancelled':'uncertain');
+    }finally{instance.close();}
+  }
+});
+
 test('clock uses existing authorization once and invocation identity is durable',async()=>{
   const {instance,actions}=fixture();try {
     let approvals=0;instance.setApprovalSettings('instance','ask-every-time',true);instance.workActions().register(clockCapability(instance,async work=>{approvals++;const id=instance.requestClockApproval(work.botId,work.work.kind,work.work.id);assert.equal(instance.decideApproval(id,'approved'),'approved');}));

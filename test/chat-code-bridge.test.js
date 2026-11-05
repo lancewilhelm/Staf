@@ -27,16 +27,16 @@ test('paired chat offers each captured mode and runs the real guest clock', asyn
 
 const memoryOffers=['memory_search','memory_read','memory_remember','memory_update','memory_forget','memory_proposal_status'];
 const tool=(name,args={},id='call')=>({role:'assistant',content:null,tool_calls:[{id,type:'function',function:{name,arguments:JSON.stringify(args)}}]});
-async function fixture(respond,env={}) {
+async function fixture(respond,env={},options={}) {
   const seen=[];
-  const app=startInstance(':memory:',0,{env,providerFactory:async profile=>({name:'controlled',capabilities:{toolCalls:true},async complete(messages,tools){seen.push({profile,messages:structuredClone(messages),offers:tools.map(x=>x.function.name)});return respond(messages,tools,profile);}})});
+  const app=startInstance(options.path ?? ':memory:',0,{...options,env,providerFactory:async profile=>({name:'controlled',capabilities:{toolCalls:true},async complete(messages,tools){seen.push({profile,messages:structuredClone(messages),offers:tools.map(x=>x.function.name)});return respond(messages,tools,profile);}})});
   const port=await app.listen();let token;
   const call=async(path,body)=>{const r=await fetch(`http://127.0.0.1:${port}${path}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});const v=await r.json();assert.ok(r.ok,`${path} ${r.status}: ${JSON.stringify(v)}`);return v;};
   token=(await call('/api/pair',{code:app.code})).token;
   const until=async fn=>{for(let i=0;i<2000;i++){const value=await fn();if(value)return value;await new Promise(resolve=>setTimeout(resolve,10));}throw Error('timed out');};
   const submit=async(id,botId,content='test')=>call('/api/commands',{id,botId,content});
   const wait=async id=>until(async()=>{const c=await call('/api/commands/'+id);return c.state!=='pending' && c;});
-  return {app,call,seen,until,submit,wait};
+  return {app,call,seen,until,submit,wait,token};
 }
 
 test('direct, hybrid and code offers are captured and unoffered calls cannot dispatch',async()=>{
@@ -249,4 +249,68 @@ test('guest capability calls appear in paired command progress',async()=>{
     assert.ok(command.runtimeEvents.some(event=>event.type==='tool_start' && event.name==='clock'));
     assert.ok(command.runtimeEvents.some(event=>event.type==='tool_result' && event.name==='clock' && event.success));
   } finally {await f.app.close();}
+});
+
+test('configured search uses one paired action in every tool mode',async()=>{
+  const {createServer}=await import('node:http');const requests=[];
+  const server=createServer(async(req,res)=>{let body='';for await(const chunk of req)body+=chunk;requests.push(body);res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({results:[{title:'Fixture',url:'https://example.test/result',content:'local result'}]}));});
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const f=await fixture(messages=>{if(messages.at(-1).role==='tool')return {role:'assistant',content:'done'};const mode=messages.findLast(x=>x.role==='user').content;return mode==='direct'?tool('search_web',{query:'exact local query'}):tool('code_mode',{source:'return await capabilities.search_web({query:"exact local query"});'});});
+  try {
+    const config=await f.call('/api/search-config');await f.call('/api/search-config',{revision:config.revision,origin:`http://127.0.0.1:${server.address().port}`});await f.call('/api/search-permissions/instance',{enabled:true});
+    for(const mode of ['direct','hybrid','code']){
+      const bot=await f.call('/api/bots',{name:'search-'+mode,toolMode:mode});await f.call(`/api/search-permissions/bot:${bot.id}`,{enabled:true});
+      await f.submit('search-'+mode,bot.id,mode);
+      const pending=await f.until(async()=>{const command=await f.call('/api/commands/search-'+mode);const approvals=await f.call('/api/search-approvals');return approvals.find(x=>x.work.id==='search-'+mode) || (command.state!=='pending' && {unexpected:command});});
+      assert.ok(!pending.unexpected,`search did not request approval: ${JSON.stringify(pending.unexpected)}`);
+      assert.equal(requests.length,['direct','hybrid','code'].indexOf(mode));assert.equal(pending.query,'exact local query');
+      await f.call(`/api/search-approvals/${pending.id}/approve`,{});const command=await f.wait('search-'+mode);
+      assert.equal(command.state,'completed',command.error);assert.equal(command.workActions.length,1);assert.equal(command.workActions[0].state,'succeeded');
+      assert.deepEqual([...new URLSearchParams(requests.at(-1))],[['q','exact local query'],['format','json']]);
+      if(mode!=='direct')assert.deepEqual(command.codeExecutions[0].actions,[command.workActions[0].id]);
+    }
+  } finally {await f.app.close();await new Promise(resolve=>server.close(resolve));}
+});
+
+test('search recovery resumes the captured result without redispatch and rejects a changed backend',async()=>{
+  const {createServer}=await import('node:http');let requests=0;
+  const server=createServer(async(req,res)=>{for await(const _ of req){}requests++;res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({results:[{title:'Fixture',url:'https://example.test/result',content:'result'}]}));});await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  let f,change=false;
+  f=await fixture(async messages=>{const results=messages.filter(x=>x.role==='tool');if(!results.length)return tool('code_mode',{source:'await capabilities.search_web({query:"recover query"}); throw Error("recover");'},'script');if(results.length===1){if(change){const config=await f.call('/api/search-config');await f.call('/api/search-config',{revision:config.revision,origin:'http://127.0.0.1:9999'});}const id=JSON.parse(results[0].content).recovery.actions[0].id;return tool('search_web',{query:'recover query',_staf:{kind:'resume',actionId:id}},'resume');}return {role:'assistant',content:'done'};});
+  try {let config=await f.call('/api/search-config');config=await f.call('/api/search-config',{revision:config.revision,origin:`http://127.0.0.1:${server.address().port}`});await f.call('/api/search-permissions/instance',{enabled:true});
+    for(const changed of [false,true]) {change=changed;const id=changed?'changed-resume':'resume-search';const bot=await f.call('/api/bots',{name:id,toolMode:'hybrid'});await f.call(`/api/search-permissions/bot:${bot.id}`,{enabled:true});await f.submit(id,bot.id);const approval=await f.until(async()=>(await f.call('/api/search-approvals')).find(x=>x.work.id===id));await f.call(`/api/search-approvals/${approval.id}/approve`,{});const command=await f.wait(id);assert.equal(command.workActions.length,1);assert.equal(command.workActions[0].state,'succeeded');assert.equal(requests,changed?2:1);if(!changed)assert.match(f.seen.at(-1).messages.at(-1).content,/Untrusted search results/);else assert.doesNotMatch(f.seen.at(-1).messages.at(-1).content,/local result|Fixture/);}
+  }finally{await f.app.close();await new Promise(resolve=>server.close(resolve));}
+});
+
+test('stopping a scripted search during approval never contacts the backend',async()=>{
+  const {createServer}=await import('node:http');let requests=0;const server=createServer((_req,res)=>{requests++;res.end('{}');});await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const f=await fixture(()=>tool('code_mode',{source:'return await capabilities.search_web({query:"stop query"});'}));
+  try {const config=await f.call('/api/search-config');await f.call('/api/search-config',{revision:config.revision,origin:`http://127.0.0.1:${server.address().port}`});await f.call('/api/search-permissions/instance',{enabled:true});const bot=await f.call('/api/bots',{name:'stop-search',toolMode:'code'});await f.call(`/api/search-permissions/bot:${bot.id}`,{enabled:true});await f.submit('stop-search',bot.id);await f.until(async()=>(await f.call('/api/search-approvals')).find(x=>x.work.id==='stop-search'));await f.call('/api/commands/stop-search/stop',{});const command=await f.wait('stop-search');assert.equal(command.state,'stopped');assert.equal(command.workActions.length,1);assert.equal(command.workActions[0].state,'cancelled');assert.equal(requests,0);}
+  finally{await f.app.close();await new Promise(resolve=>server.close(resolve));}
+});
+
+test('scripted search reuses an exact grant and revocation aborts its in-flight request',async()=>{
+  const {createServer}=await import('node:http');let requests=0,entered;const started=new Promise(resolve=>entered=resolve);
+  const server=createServer(async(req,res)=>{for await(const _ of req){}requests++;if(requests===2){entered();return;}res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({results:[{title:'Fixture',url:'https://example.test/result',content:'result'}]}));});await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const f=await fixture(messages=>messages.at(-1).role==='tool'?{role:'assistant',content:'done'}:tool('code_mode',{source:'return await capabilities.search_web({query:"grant query"});'}),{}, {enableReusableApprovals:true});
+  try {const config=await f.call('/api/search-config');await f.call('/api/search-config',{revision:config.revision,origin:`http://127.0.0.1:${server.address().port}`});await f.call('/api/search-permissions/instance',{enabled:true});const bot=await f.call('/api/bots',{name:'grant-code',toolMode:'code'});await f.call(`/api/search-permissions/bot:${bot.id}`,{enabled:true});
+    await f.submit('grant-first',bot.id);const approval=await f.until(async()=>(await f.call('/api/search-approvals')).find(x=>x.work.id==='grant-first'));await f.call(`/api/search-approvals/${approval.id}/approve`,{grant:{scope:'bot',lifetime:'remembered',retentionAcknowledged:true}});assert.equal((await f.wait('grant-first')).workActions[0].state,'succeeded');const grant=(await f.call('/api/approval-grants'))[0];
+    await f.submit('grant-second',bot.id);await started;assert.equal((await f.call('/api/search-approvals')).length,0);await f.call(`/api/approval-grants/${grant.id}/revoke`,{revision:grant.revision});const command=await f.wait('grant-second');assert.equal(command.workActions.length,1);assert.equal(command.workActions[0].state,'uncertain');assert.equal(requests,2);
+  } finally {await f.app.close();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}
+});
+
+test('completed search binding survives instance restart without redispatch',async()=>{
+  const {createServer}=await import('node:http'),{mkdtempSync,rmSync}=await import('node:fs'),{tmpdir}=await import('node:os'),{join}=await import('node:path'),{DatabaseSync}=await import('node:sqlite');const dir=mkdtempSync(join(tmpdir(),'staf-search-restart-')),path=join(dir,'instance.sqlite');let requests=0;
+  const server=createServer(async(req,res)=>{for await(const _ of req){}requests++;res.writeHead(200,{'content-type':'application/json'});res.end('{"results":[]}');});await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const f=await fixture(messages=>messages.at(-1).role==='tool'?{role:'assistant',content:'done'}:tool('code_mode',{source:'return await capabilities.search_web({query:"restart query"});'}),{}, {path});let restarted,closed=false;
+  try {const config=await f.call('/api/search-config'),origin=`http://127.0.0.1:${server.address().port}`;const saved=await f.call('/api/search-config',{revision:config.revision,origin});await f.call('/api/search-permissions/instance',{enabled:true});const bot=await f.call('/api/bots',{name:'restart-search',toolMode:'code'});await f.call(`/api/search-permissions/bot:${bot.id}`,{enabled:true});await f.submit('restart-search',bot.id);const approval=await f.until(async()=>(await f.call('/api/search-approvals')).find(x=>x.work.id==='restart-search'));await f.call(`/api/search-approvals/${approval.id}/approve`,{});const before=await f.wait('restart-search');await f.app.close();closed=true;
+    const db=new DatabaseSync(path,{readOnly:true});const row=db.prepare('SELECT action_id,boundary FROM search_action_bindings').get();db.close();assert.equal(row.action_id,before.workActions[0].id);assert.deepEqual(JSON.parse(row.boundary),{kind:'search',query:'restart query',origin,revision:saved.revision,results:10,timeoutMs:10000});
+    restarted=startInstance(path,0,{env:{}});const port=await restarted.listen();const response=await fetch(`http://127.0.0.1:${port}/api/commands/restart-search`,{headers:{Authorization:`Bearer ${f.token}`}});assert.ok(response.ok);const after=await response.json();assert.equal(after.workActions[0].id,before.workActions[0].id);assert.equal(after.workActions[0].state,'succeeded');assert.equal(requests,1);
+  } finally {if(!closed)await f.app.close();if(restarted)await restarted.close();await new Promise(resolve=>server.close(resolve));rmSync(dir,{recursive:true,force:true});}
+});
+
+test('denied direct search closes admission for other queued tools',async()=>{
+  const f=await fixture(messages=>messages.at(-1).role==='tool'?{role:'assistant',content:'done'}:{role:'assistant',content:null,tool_calls:[{id:'search',type:'function',function:{name:'search_web',arguments:JSON.stringify({query:'deny query'})}},{id:'clock',type:'function',function:{name:'clock',arguments:'{}'}}]});
+  try {const config=await f.call('/api/search-config');await f.call('/api/search-config',{revision:config.revision,origin:'http://127.0.0.1:8888'});await f.call('/api/search-permissions/instance',{enabled:true});const bot=await f.call('/api/bots',{name:'deny-queue',toolMode:'direct'});await f.call(`/api/search-permissions/bot:${bot.id}`,{enabled:true});await f.submit('deny-queue',bot.id);const pending=await f.until(async()=>(await f.call('/api/search-approvals')).find(x=>x.work.id==='deny-queue'));await f.call(`/api/search-approvals/${pending.id}/deny`,{});const command=await f.wait('deny-queue');assert.equal(command.workActions.length,1);assert.equal(command.workActions[0].state,'cancelled');assert.ok(command.runtimeEvents.some(x=>x.type==='tool_result' && x.name==='clock' && !x.success));}
+  finally {await f.app.close();}
 });

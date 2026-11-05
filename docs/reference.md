@@ -450,3 +450,5 @@ deliberately transformed credentials or rewrite older stored output and backups.
 The process record identifies its originating agent, accepted work and action.
 `unknown` means the service lost observation; it does not mean the OS process
 exited, and Stop cannot signal a process without its live handle.
+
+The `search_web` registered action accepts only `{ "query": "..." }`. In ordinary chat, Direct, Hybrid and Code Mode share its configured backend, exact-query approval, action identity and result. Model input cannot select an origin, revision or identity. Completed-result release checks the captured backend and any reused grant again. Task execution retains its existing broker until the task action integration.
