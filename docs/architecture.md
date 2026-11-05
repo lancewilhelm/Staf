@@ -292,6 +292,8 @@ registration uses the existing clock authority callback. See the
 Ordinary `runTurn` opens that captured command and sends direct clock and memory calls and QuickJS child calls through the same registrations. `src/memory-actions.ts` binds agent scope to captured work and calls the existing store and proposal workflow; store updates and deletes enforce versions at the atomic effect. Version 33 retains source,
 source hash, execution outcome and selected results; child linkage joins the
 existing invocation journal, which remains authoritative if a guest disappears.
+The provider receives the eligible guest definitions as a catalog, and child
+calls publish their registered names and outcomes through command progress.
 On restart a running guest is marked interrupted and is not rerun. Ordinary
 script errors create a recovery epoch and return the manifest to the same
 provider loop. Task and helper runtime and the web, search, scratch and skill

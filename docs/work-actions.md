@@ -79,7 +79,7 @@ These guarantees do not make external effects exactly once.
 
 ## Memory adapter
 
-`registerMemoryCapabilities(instance, registry, redact)` registers search, read, remember, update, forget and proposal-status actions for accepted command or task contexts. Task runtime has not yet opened this boundary. The adapter rejects helper attempts and derives agent scope from the captured bot ID. Search is bounded to 20 items and exposes a continuation cursor. Store update and delete perform their version and scope checks at the effect, not in `check`: `check` also runs when releasing a completed retry. `MemoryConflict` becomes `ActionFailed`, so the journal records a definite failure. Shared creation inserts a pending proposal through the existing instance workflow; only the separate owner command confirms it. Reads return private results through the coordinator. The shared-proposal action record shows the proposed text and ID after the instance credential redactor runs, so inspection and recovery do not expose configured credentials. The generic code capability catalog remains a separate integration slice.
+`registerMemoryCapabilities(instance, registry, redact)` registers search, read, remember, update, forget and proposal-status actions for accepted command or task contexts. Task runtime has not yet opened this boundary. The adapter rejects helper attempts and derives agent scope from the captured bot ID. Search is bounded to 20 items and exposes a continuation cursor. Store update and delete perform their version and scope checks at the effect, not in `check`: `check` also runs when releasing a completed retry. `MemoryConflict` becomes `ActionFailed`, so the journal records a definite failure. Shared creation inserts a pending proposal through the existing instance workflow; only the separate owner command confirms it. Reads return private results through the coordinator. The shared-proposal action record shows the proposed text and ID after the instance credential redactor runs, so inspection and recovery do not expose configured credentials. The common runtime supplies the eligible memory catalog, progress and outcome reporting.
 
 ## Recovery
 
@@ -121,6 +121,13 @@ cached value, and `staf.emit(value)` selects visible output. The optional second
 argument to `capabilities.clock(input, intent)` carries `new`, `resume` or
 `repeat` intent. Direct calls use an optional `_staf` intent field outside the
 capability input. A recovery result contains the manifest and instructions.
+
+The `code_mode` tool description includes the currently eligible guest catalog,
+including each registered name, description and input schema. Guest calls emit
+capability start and result events in the existing command progress stream; their
+inspection records remain owned by the action coordinator. Direct action outcomes
+that are blocked, uncertain, failed, or require a repeat are reported as
+unsuccessful progress rather than completed calls.
 
 Before starting a worker, the service records exact safe source, SHA-256 identity,
 work and provider call. Child mapping and action preparation are committed by

@@ -419,6 +419,8 @@ to clock, scoped memory, and `code_mode`; background tasks and other existing to
 remain on their previous paths. `GET /api/commands/ID` returns `codeExecutions`
 (source, SHA-256 source identity, outcome, selected result, and linked action
 IDs) and `workActions` journal records. Chat-work returns code execution details
-for the owning agent. Version 33 adds execution records and marks running records
+for the owning agent. The `code_mode` definition includes the eligible registered
+guest catalog and schemas; child capability progress uses the registered name.
+Version 33 adds execution records and marks running records
 interrupted on restart without replay. See the [action service](work-actions.md)
 for limits, recovery and adapter entry points.
