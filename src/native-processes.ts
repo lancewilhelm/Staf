@@ -10,10 +10,10 @@ import {ptyBackend} from './native-pty.js';
 import type { Capability, WorkContext, ActionIdentity } from './work-actions.js';
 
 export const nativeProcessSchema = `
-CREATE TABLE IF NOT EXISTS native_processes (id TEXT PRIMARY KEY, bot_id TEXT NOT NULL, work_kind TEXT NOT NULL, work_id TEXT NOT NULL, action_id TEXT NOT NULL REFERENCES action_journal(id), cwd TEXT NOT NULL, mode TEXT NOT NULL, state TEXT NOT NULL, pid INTEGER, exit_code INTEGER, exit_signal TEXT, stop_requested INTEGER NOT NULL DEFAULT 0, output_complete INTEGER NOT NULL DEFAULT 0, next_cursor INTEGER NOT NULL DEFAULT 0, first_cursor INTEGER NOT NULL DEFAULT 0, created_ms INTEGER NOT NULL,retained INTEGER NOT NULL DEFAULT 0,input_closed INTEGER NOT NULL DEFAULT 0,cols INTEGER,rows INTEGER);
+CREATE TABLE IF NOT EXISTS native_processes (id TEXT PRIMARY KEY, bot_id TEXT NOT NULL, work_kind TEXT NOT NULL, work_id TEXT NOT NULL, action_id TEXT NOT NULL REFERENCES action_journal(id), cwd TEXT NOT NULL, mode TEXT NOT NULL, state TEXT NOT NULL, pid INTEGER, exit_code INTEGER, exit_signal TEXT, stop_requested INTEGER NOT NULL DEFAULT 0, output_complete INTEGER NOT NULL DEFAULT 0, next_cursor INTEGER NOT NULL DEFAULT 0, first_cursor INTEGER NOT NULL DEFAULT 0, created_ms INTEGER NOT NULL,retained INTEGER NOT NULL DEFAULT 0,input_closed INTEGER NOT NULL DEFAULT 0,input_bytes INTEGER NOT NULL DEFAULT 0,cols INTEGER,rows INTEGER);
 CREATE TABLE IF NOT EXISTS native_process_output (process_id TEXT NOT NULL REFERENCES native_processes(id), cursor INTEGER NOT NULL, stream TEXT NOT NULL, data BLOB NOT NULL, PRIMARY KEY(process_id,cursor));
 `;
-export const nativeProcessLimits = Object.freeze({active:16, outputBytes:128*1024, pageBytes:48*1024,inputBytes:16*1024,pendingInputs:8, settleMs:200, shutdownMs:3000});
+export const nativeProcessLimits = Object.freeze({active:16, outputBytes:128*1024, pageBytes:48*1024,inputBytes:16*1024,pendingInputs:8,ptyInputBytes:1024*1024, settleMs:200, shutdownMs:3000});
 export type ProcessObservers = {started:(pid:number|null)=>void;output:(stream:'stdout'|'stderr'|'terminal',data:Buffer)=>void;failed:()=>void;exited:(code:number|null,signal:string|null)=>void;closed:(code:number|null,signal:string|null)=>void;lost:()=>void};
 export type ProcessHandle = {terminate:(signal:NodeJS.Signals)=>void;detach:()=>void;write?:(data:Buffer)=>Promise<void>;end?:()=>Promise<void>;resize?:(cols:number,rows:number)=>void};
 /** Backends deliver observations asynchronously after launch returns. */
@@ -50,7 +50,7 @@ export class NativeProcesses {
   forWork(work:WorkContext['work']) {return this.db.prepare('SELECT id FROM native_processes WHERE work_kind=? AND work_id=? ORDER BY created_ms').all(work.kind,work.id).map(row=>this.get(String(row.id)));}
   get(id:string) {
     const row=this.db.prepare('SELECT * FROM native_processes WHERE id=?').get(id);if(!row)return null;
-    return {id:row.id,botId:row.bot_id,work:{kind:row.work_kind,id:row.work_id},actionId:row.action_id,cwd:row.cwd,mode:row.mode,retained:row.retained===1,inputClosed:row.input_closed===1,cols:row.cols,rows:row.rows,state:row.state,pid:row.pid,exitCode:row.exit_code,exitSignal:row.exit_signal,stopRequested:row.stop_requested===1,outputComplete:row.output_complete===1,firstCursor:row.first_cursor,nextCursor:row.next_cursor,limits:nativeProcessLimits};
+    return {id:row.id,botId:row.bot_id,work:{kind:row.work_kind,id:row.work_id},actionId:row.action_id,cwd:row.cwd,mode:row.mode,retained:row.retained===1,inputClosed:row.input_closed===1,inputBytes:row.input_bytes,cols:row.cols,rows:row.rows,state:row.state,pid:row.pid,exitCode:row.exit_code,exitSignal:row.exit_signal,stopRequested:row.stop_requested===1,outputComplete:row.output_complete===1,firstCursor:row.first_cursor,nextCursor:row.next_cursor,limits:nativeProcessLimits};
   }
   output(id:string,cursor=0) {
     const process=this.get(id);if(!process)throw Error('Process not found');
@@ -117,14 +117,16 @@ export class NativeProcesses {
   }
   /** Only a live in-memory handle is returned; stored PIDs are never handles. */
   handle(id:string):ProcessHandle | undefined {return this.live.get(id)?.handle;}
-  finishWork(work:WorkContext['work']) {for(const record of this.forWork(work))if(record && !record.retained)this.stop(String(record.id));}
+  stopAgent(botId:string) {for(const id of this.live.keys())if(this.get(id)?.botId===botId)this.stop(id);}
+  finishWork(work:WorkContext['work']) {if(this.closing)return;for(const record of this.forWork(work))if(record && !record.retained)this.stop(String(record.id));}
+  private reserveInput(id:string,mode:unknown,used:number,bytes:number) {if(mode==='pty' && used+bytes>nativeProcessLimits.ptyInputBytes)throw new ActionFailed('PTY cumulative input budget reached; output and Stop remain available.');this.db.prepare('UPDATE native_processes SET input_bytes=input_bytes+? WHERE id=?').run(bytes,id);}
   async interact(id:string,operation:ProcessInteraction) {
     const queue=this.interactions.get(id)??{tail:Promise.resolve(),pending:0};
     if(queue.pending>=nativeProcessLimits.pendingInputs)throw new ActionFailed('Process input queue is full');
     const previous=queue.tail;let release!:()=>void;queue.tail=new Promise<void>(resolve=>{release=resolve;});queue.pending++;this.interactions.set(id,queue);
     try {await previous;const record=this.get(id),handle=this.handle(id);if(!record || !handle || record.stopRequested || !['starting','running'].includes(String(record.state)))throw new ActionFailed('Process has no writable live handle');
-      if(operation.operation==='input'){if(record.inputClosed || !handle.write)throw new ActionFailed('Process input is closed');await handle.write(Buffer.from(operation.data));return {processId:id,bytesSubmitted:Buffer.byteLength(operation.data),notice:'Input submitted; application receipt is not guaranteed.'};}
-      if(operation.operation==='eof'){if(record.inputClosed || !handle.end)throw new ActionFailed('Process input is closed');await handle.end();if(record.mode==='pipe')this.db.prepare('UPDATE native_processes SET input_closed=1 WHERE id=?').run(id);return {processId:id,eofSent:true};}
+      if(operation.operation==='input'){if(record.inputClosed || !handle.write)throw new ActionFailed('Process input is closed');this.reserveInput(id,record.mode,Number(record.inputBytes),Buffer.byteLength(operation.data));await handle.write(Buffer.from(operation.data));return {processId:id,bytesSubmitted:Buffer.byteLength(operation.data),notice:'Input submitted; application receipt is not guaranteed.'};}
+      if(operation.operation==='eof'){if(record.inputClosed || !handle.end)throw new ActionFailed('Process input is closed');this.reserveInput(id,record.mode,Number(record.inputBytes),record.mode==='pty'?1:0);await handle.end();if(record.mode==='pipe')this.db.prepare('UPDATE native_processes SET input_closed=1 WHERE id=?').run(id);return {processId:id,eofSent:true};}
       if(!handle.resize || record.mode!=='pty')throw new ActionFailed('Resize requires a PTY');handle.resize(operation.cols,operation.rows);this.db.prepare('UPDATE native_processes SET cols=?,rows=? WHERE id=?').run(operation.cols,operation.rows,id);return {processId:id,cols:operation.cols,rows:operation.rows};
     }finally{release();if(--queue.pending===0)this.interactions.delete(id);}
   }

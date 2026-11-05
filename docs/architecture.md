@@ -318,10 +318,10 @@ retains bounded pipe output, records the shell exit status when observed, and re
 Work Stop requests process termination while the work remains active. Service
 shutdown requests termination and records an unobserved result as unknown;
 startup marks previously live observations unknown without replay or PID-based
-reattachment. The current pipe backend starts the shell under a Node supervisor that remains
+reattachment. Both backends start the shell under a Node supervisor that remains
 its process-group leader. After the shell exits, the supervisor waits for its
 pipes to close and uses `/bin/ps` to observe that no non-zombie group members
-remain. It accepts termination requests over its live IPC connection and signals
+remain. It accepts termination requests over live IPC (a private Unix socket for the PTY) and signals
 its own group, so the service never signals a stored process-group number. A
 failed process listing retains the handle rather than claiming completion. The
 record can show the shell's observed exit status while the resource is still
@@ -335,8 +335,15 @@ calling `ProcessBackend.launch(cwd, observers)`. Backends return a
 `ProcessHandle` for termination and detachment and deliver asynchronous started,
 output, failed, exited, closed and lost observations, including a combined
 `terminal` stream. The manager retains live handles through `handle(id)` and
-owns output, Stop, shutdown and restart accounting. Issue 85 can extend that
-handle for serialized input, EOF and resize, and register a PTY backend through
-the same manager. It must also separate actual work lifetime cancellation from
-guest admission cancellation for intentionally retained processes. Those
-interactions and retained workflows remain unimplemented.
+owns output, Stop, shutdown and restart accounting. Handles also implement input,
+EOF and optional PTY resize. `native-pty.ts` uses pinned node-pty with byte output,
+a live supervisor and a private control socket; it never signals a stored group ID.
+Interactions share a bounded per-process queue. Pipe writes await backpressure;
+PTY submission has a cumulative byte budget because node-pty exposes no write
+receipt or drain callback. A submitted receipt does not prove application consumption.
+
+`WorkContext.signal` fences action admission; `workSignal` is the original accepted
+work cancellation signal. The process lifetime listens to the latter, so closing a
+guest does not kill a retained process. Work completion stops nonretained processes;
+actual Stop, expiry, agent archive and shutdown request termination as applicable.
+Later work checks the recorded owning agent, not the selected chat pointer.

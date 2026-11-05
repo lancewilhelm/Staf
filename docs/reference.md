@@ -450,3 +450,13 @@ The process record identifies its originating agent, accepted work and action.
 exited, and Stop cannot signal a process without its live handle.
 
 The `search_web` registered action accepts only `{ "query": "..." }`. In chat and eligible tasks, Direct, Hybrid and Code Mode share its configured backend, exact-query approval, action identity and result. Model input cannot select an origin, revision or identity. Completed-result release checks the captured backend and any reused grant again. Task approvals pause the attempt timer.
+
+### Interactive process contract
+
+`terminal_run` additionally accepts optional `mode` (`pipe` or `pty`), `retain` (default false), and PTY `cols`/`rows` (defaults 80/24, each 1–1000). The process record exposes `retained`, `inputClosed`, `inputBytes`, `cols`, and `rows`. `terminal_write`, `terminal_eof` and `terminal_resize` are changing actions with normal invocation identity, completed-result recovery and uncertainty handling. They check the executing accepted agent against recorded process ownership. A completed input resume returns its receipt without resubmission.
+
+Paired owners can POST `/api/processes/ID/input` with `{ "data": "text\n" }`, `/api/processes/ID/eof` with `{}`, or `/api/processes/ID/resize` with `{ "cols": 80, "rows": 24 }`. These explicit owner resource controls use the same process manager as model actions and remain usable after the originating work ends. Secret-altered input is rejected before submission; model input is rejected before invocation persistence. Text is not stored in process metadata.
+
+`limits.inputBytes` is 16,384 per request, `pendingInputs` is eight per process, and `ptyInputBytes` is a cumulative 1,048,576 bytes per PTY lifetime. Input and resize requests are serialized per process. Stop closes interaction admission and interrupts queued input; it does not wait behind a blocked write. A receipt proves submission, not consumption. Pipe EOF closes input permanently; PTY EOF submits Ctrl-D. PTY output uses the `terminal` stream. Output bounds and redaction are shared with pipe mode.
+
+Schema 36 adds process retention, input counters/closure and PTY dimensions through the protected migration process, preserving combined native/search schema 35. Old records default to nonretained. Unknown handles cannot receive input, EOF, resize or signals after restart.

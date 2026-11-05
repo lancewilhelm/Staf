@@ -652,9 +652,7 @@ requests termination of an owned process. These operations run on the Staf
 host with the service account's environment and access. The captured agent work
 folder is the default; relative and absolute working paths are supported. They
 are offered directly in Direct and Hybrid and through Code Mode in Hybrid and
-Code. Existing scheduled and helper restrictions remain in force. This implementation uses pipes, not an interactive terminal. Interactive
-input, PTY and intentionally retained background workflows still require
-[issue 85](https://github.com/lancewilhelm/Staf/issues/85).
+Code. Existing scheduled and helper restrictions remain in force. Use `mode: "pty"` for a real terminal or the default `mode: "pipe"` for separate stdout/stderr. Set `retain: true` to keep a process after its accepted work completes; otherwise unfinished processes are stopped at work completion.
 
 A paired owner can use `instance processes URL CREDENTIAL_FILE`,
 `instance process URL CREDENTIAL_FILE PROCESS_ID`,
@@ -670,3 +668,15 @@ bytes are preserved. A possible credential prefix may wait for more output or
 stream closure. Unknown or transformed credentials are outside this filter.
 
 A live supervisor retains control of the owned process group after the shell exits. Stop requests group termination, but descendants that change group or detach may survive. A lost observation is reported as unknown; stored process IDs are not used to signal after restart.
+
+### Interactive and retained processes
+
+`terminal_run({command, mode: "pty", retain: true, cols: 80, rows: 24})` starts an interactive process with a real terminal. PTY output merges stdout/stderr into the `terminal` stream. Pipe mode preserves separate streams. Use `terminal_write({processId, data})` to submit exact UTF-8 input, `terminal_eof({processId})` to close a pipe or send terminal Ctrl-D, and `terminal_resize({processId, cols, rows})` for a PTY. Ctrl-D is an input character whose meaning depends on the program; it does not permanently close a PTY. Dimensions must be 1–1000. Input submission does not prove the application consumed it.
+
+Retained processes remain usable by later accepted work for the same agent, regardless of its selected calling style. Guest return, ordinary error and guest limits do not stop them. Active-work Stop terminates every process started by that work, including retained ones. Explicit process Stop, agent archive and instance shutdown also request termination. Restart retains records and output but cannot recover a lost live handle.
+
+Paired clients use the process `/input`, `/eof` and `/resize` endpoints. CLI commands are `instance process-input URL CREDENTIAL_FILE PROCESS_ID TEXT`, `instance process-eof URL CREDENTIAL_FILE PROCESS_ID`, and `instance process-resize URL CREDENTIAL_FILE PROCESS_ID COLS ROWS`. Input is exact: include a newline when the program expects Enter. Chat process details provide Send line, Close input/Send Ctrl-D, resize, output and Stop controls.
+
+Each input accepts at most 16 KiB of UTF-8 and each process admits at most eight pending interaction requests. PTYs accept a cumulative 1 MiB per process, including Ctrl-D bytes; this bounds node-pty's unacknowledged write queue. The budget does not reset when an application produces output. Exhaustion leaves output and Stop usable. Pipe input uses write backpressure and has no cumulative input budget. Output keeps the existing 128 KiB buffer and explicit expiry gaps.
+
+The pinned node-pty 1.2.0-beta.17 dependency ships native bindings; source installation permits that dependency's build scripts through the checked-in pnpm configuration. When a matching prebuild is absent, installation needs Python, a C/C++ toolchain and node-gyp. The supervised service targets Linux and macOS; real PTY and packed-install verification here is on macOS arm64. Linux runtime and Windows are not verified, and the service requires Unix signals, sockets and `/bin/ps`.

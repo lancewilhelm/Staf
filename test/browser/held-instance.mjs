@@ -15,9 +15,12 @@ return {
   name: 'controlled-offline',
   capabilities: { toolCalls: true, incrementalText: false, transport: 'demo' },
   async complete(messages, tools, options) {
+    if (options?.currentUserInput==='Interactive process fixture') {
+      return {role:'assistant',content:null,tool_calls:[{id:'interactive',type:'function',function:{name:'terminal_run',arguments:JSON.stringify({command:'printf "interactive ready\\n"; read answer; printf "answer:%s\\n" "$answer"; exec sleep 30',mode:'pty',retain:true})}}]};
+    }
     if (options?.currentUserInput==='Native process fixture') {
       if (messages.at(-1)?.role==='tool') return {role:'assistant',content:'Native fixture started.'};
-      return {role:'assistant',content:null,tool_calls:[{id:'native-fixture',type:'function',function:{name:'terminal_run',arguments:JSON.stringify({command:"printf 'native browser output'; exec sleep 30"})}}]};
+      return {role:'assistant',content:null,tool_calls:[{id:'native-fixture',type:'function',function:{name:'terminal_run',arguments:JSON.stringify({retain:true,command:"printf 'native browser output'; exec sleep 30"})}}]};
     }
     if (options?.currentUserInput==='Scripted clock fixture') {
       if (messages.at(-1)?.role==='tool') return {role:'assistant',content:'Scripted clock completed.'};

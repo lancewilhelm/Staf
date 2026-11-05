@@ -5,14 +5,14 @@ const socketPath=process.env.STAF_NATIVE_PTY_SOCKET,token=process.env.STAF_NATIV
 delete process.env.STAF_NATIVE_PTY_SOCKET;delete process.env.STAF_NATIVE_PTY_TOKEN;
 const channel=socketPath?connect(socketPath):undefined;
 const send=(value:object,done:()=>void=()=>{})=>{if(channel)channel.write(JSON.stringify(value)+'\n',done);else process.send?.(value,done);};
-if(channel){channel.once('connect',()=>send({type:'ready',token}));let pending='';channel.setEncoding('utf8');channel.on('data',text=>{pending+=text;if(pending.length>4096){channel.destroy();return;}for(let at=pending.indexOf('\n');at>=0;at=pending.indexOf('\n')){const line=pending.slice(0,at);pending=pending.slice(at+1);try{signal(JSON.parse(line));}catch{/* Ignore malformed internal control. */}}});channel.once('error',()=>{});channel.once('close',()=>{try{process.kill(-process.pid,'SIGTERM');}catch{}});}
+if(channel){channel.once('connect',()=>send({type:'ready',token}));let pending='';channel.setEncoding('utf8');channel.on('data',text=>{pending+=text;if(pending.length>4096){channel.destroy();return;}for(let at=pending.indexOf('\n');at>=0;at=pending.indexOf('\n')){const line=pending.slice(0,at);pending=pending.slice(at+1);try{signal(JSON.parse(line));}catch{/* Ignore malformed internal control. */}}});channel.once('error',()=>{});channel.once('close',()=>signal('SIGTERM'));for(const name of ['SIGINT','SIGQUIT','SIGHUP','SIGTSTP'])process.on(name,()=>{});}
 
 // This process is the group leader. Only it signals its own group while alive;
 // the service never sends a signal to a remembered numeric process group.
 process.on('SIGTERM',()=>{});
 function signal(message:unknown) {
   if(message==='SIGTERM' || message==='SIGKILL') {
-    try {process.kill(-process.pid,message);} catch {/* Exit observation remains authoritative. */}
+    try {process.kill(-process.pid,message);if(message==='SIGTERM')process.kill(-process.pid,'SIGCONT');} catch {/* Exit observation remains authoritative. */}
   }
 }
 process.on('message',signal);

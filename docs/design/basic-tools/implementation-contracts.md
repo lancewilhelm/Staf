@@ -58,3 +58,7 @@ needed. The current registered catalog includes clock, memory, host files, nativ
 ## Task lifecycle handoff
 
 The task caller opens the real attempt through `workActions.open` and installs attempt-keyed task-control callbacks for the lifetime of `runTurn`. Clock and configured-search registrations resolve that attempt's `taskTimers` pause/resume functions for approval. The existing `skillAccess` callback remains responsible for selected-skill validation; the shared adapter migration must preserve it and use the same attempt context and timer hooks for approval waits. Pending inbox input defers new action admission without closing recovery or discarding completed results.
+
+### Interactive process adoption
+
+The process registry now offers pipe/PTY mode, explicit retention, write/EOF/resize and existing read/Stop. `WorkContext.workSignal` is accepted-work cancellation; `signal` additionally fences admission. Keep them distinct in new adapters. Process input is a changing action with its own identity, byte budget and recovery receipt. `finishWork` releases nonretained processes; retained ownership remains bound to the originating agent/work/action. See the usage and process contract for limits and platform evidence.
