@@ -4,7 +4,7 @@ import {startInstance} from '../dist/instance-service.js';
 
 const tool=(name,args)=>({role:'assistant',content:null,tool_calls:[{id:'one',type:'function',function:{name,arguments:JSON.stringify(args)}}]});
 
-test('shared proposals that cannot be shown faithfully are rejected before confirmation',async()=>{
+test('shared proposals that cannot be shown faithfully are rejected before journaling',async()=>{
   const {mkdtempSync,rmSync}=await import('node:fs');
   const {tmpdir}=await import('node:os');const {join}=await import('node:path');
   const {DatabaseSync}=await import('node:sqlite');
@@ -24,20 +24,21 @@ test('shared proposals that cannot be shown faithfully are rejected before confi
       await call('/api/commands',{id,botId:bot.id,content:'Perform fixture operation.'});
       let command;for(let n=0;n<500;n++){command=await call('/api/commands/'+id);if(command.state!=='pending')break;await new Promise(resolve=>setTimeout(resolve,10));}
       assert.equal(command.state,'completed',command.error);
-      assert.equal(command.workActions.length,mode==='direct'?0:1);
+      assert.equal(command.workActions.length,0);
       assert.equal(JSON.stringify(command).includes(secret),false);
       assert.equal(JSON.stringify(seen).includes(secret),false);
       if(mode==='direct') assert.match(seen.at(-1).findLast(message=>message.role==='tool').content,/faithfully/);
       else {
         assert.equal(command.codeExecutions[0].outcome,'error');
-        assert.equal(command.workActions[0].state,'failed');
-        assert.match(command.workActions[0].result,/faithfully/);
       }
       assert.deepEqual(await call('/api/memories/user'),[]);
     }
     await app.close();closed=true;
     const db=new DatabaseSync(database);
-    try {assert.equal(db.prepare('SELECT count(*) AS count FROM memory_proposals').get().count,0);} finally {db.close();}
+    try {
+      assert.equal(db.prepare('SELECT count(*) AS count FROM memory_proposals').get().count,0);
+      assert.equal(db.prepare('SELECT count(*) AS count FROM work_action_invocations WHERE instr(input,?)>0').get(secret).count,0);
+    } finally {db.close();}
   } finally {if(!closed)await app.close();rmSync(directory,{recursive:true,force:true});}
 });
 
