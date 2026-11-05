@@ -641,3 +641,28 @@ source, returned time and action ID. Select Direct or Code Mode for later work
 and use a tool-capable provider to exercise the respective offer. This fixture
 uses synthetic provider responses and does not establish live-provider behavior.
 The broader basic-tools feature remains incomplete.
+
+### Native process slice
+
+Agents can call `terminal_run` with shell text and an optional `cwd`, and
+`terminal_read` with a process ID and optional output cursor. `terminal_stop`
+requests termination of an owned process. These operations run on the Staf
+host with the service account's environment and access. The captured agent work
+folder is the default; relative and absolute working paths are supported. They
+are offered directly in Direct and Hybrid and through Code Mode in Hybrid and
+Code. Existing scheduled and helper restrictions remain in force; task runtime
+binding is delivered by issue 86. This implementation uses pipes, not an interactive terminal. Interactive
+input, PTY and intentionally retained background workflows still require
+[issue 85](https://github.com/lancewilhelm/Staf/issues/85).
+
+A paired owner can use `instance processes URL CREDENTIAL_FILE`,
+`instance process URL CREDENTIAL_FILE PROCESS_ID`,
+`instance process-output URL CREDENTIAL_FILE PROCESS_ID [CURSOR]`, and
+`instance process-stop URL CREDENTIAL_FILE PROCESS_ID`. Output pages carry
+base64 chunks labeled stdout or stderr, a cursor, and a gap indicator. Chat
+shows processes alongside their originating work and offers output and Stop.
+Stop requests termination; only an observed exit establishes an exit result.
+
+The current #84 slice has a known Stop gap: a child can continue after its shell
+exits, even when its originating work is stopped. Full process-group lifetime
+control remains unfinished.

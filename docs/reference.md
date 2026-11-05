@@ -420,3 +420,15 @@ guest catalog and schemas; child capability progress uses the registered name.
 Version 33 adds execution records and marks running records
 interrupted on restart without replay. See the [action service](work-actions.md)
 for limits, recovery and adapter entry points.
+
+### Native process API
+
+Paired clients can list `GET /api/processes`, inspect `GET /api/processes/ID`,
+read `GET /api/processes/ID/output?cursor=N`, and request termination with
+`POST /api/processes/ID/stop`. Cursors count output chunks. Chunks contain
+base64-encoded bytes, optional UTF-8 text, and a stdout/stderr label; `gap` indicates that earlier
+chunks expired. `outputComplete` becomes true only after both output pipes close. Output retention is 128 KiB per process, pages are at most 48 KiB, with at most 16 live
+handles. The returned limits describe Staf's buffers, not OS memory limits.
+The process record identifies its originating agent, accepted work and action.
+`unknown` means the service lost observation; it does not mean the OS process
+exited, and Stop cannot signal a process without its live handle.

@@ -300,3 +300,30 @@ script errors create a recovery epoch and return the manifest to the same
 provider loop. Task and helper runtime and the web, search, scratch and skill
 adapters remain later slices; they do not yet follow this chat mode. The worker's
 QuickJS limits do not establish OS/container isolation or a total host RSS cap.
+
+### Native process slice
+
+`NativeProcesses` owns host child handles independently of the guest worker.
+The coordinator supplies the immutable action ID and fingerprint to capability
+`authorize` and `execute` callbacks; existing two-argument callbacks remain
+valid. The manager records `starting` and accepted-work ownership before spawn,
+retains bounded pipe output, and records exit only from the child close event.
+Work Stop requests process termination while the work remains active. Service
+shutdown requests termination and records an unobserved result as unknown;
+startup marks previously live observations unknown without replay or PID-based
+reattachment. The current backend is Node's shell/pipe backend. Its exported
+`startBackend(work, action, {cwd, mode, backend})` records ownership before calling
+`ProcessBackend.launch(cwd, observers)`. Backends return a `ProcessHandle` for
+termination and detachment and deliver asynchronous started, output, failed,
+exited and closed observations, including a combined `terminal` stream. The
+manager retains live handles through `handle(id)` and owns output, Stop,
+shutdown and restart accounting. Issue 85 can extend that handle for serialized
+input, EOF and resize, and register a PTY backend through the same manager.
+Those interactions and intentionally retained workflows remain unimplemented. Detached descendants are not guaranteed to
+terminate when an observed process exits.
+
+Known #84 gap: if the shell exits while a child from its process group keeps the
+pipes open, the shell exit is recorded but work Stop does not terminate that
+remaining child. A local paired fixture reproduced this. A safe group-lifetime
+owner is still needed before #84 can be considered complete; do not use a
+remembered PID as a substitute for a live verified handle.
