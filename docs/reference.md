@@ -32,15 +32,15 @@ as an operating-system service.
 `staf --help` lists launch options. `staf --data-dir PATH` selects the local
 instance directory. `staf --instance URL --credential FILE` connects to a paired
 loopback instance. `staf instance help` lists one-shot instance commands. `staf settings show`,
-`staf settings defaults`, `staf settings set provider|model|reasoning VALUE`,
-`staf settings set-default provider|model|reasoning VALUE`, and `staf auth chatgpt
+`staf settings defaults`, `staf settings set provider|model|reasoning|toolMode VALUE`,
+`staf settings set-default provider|model|reasoning|toolMode VALUE`, and `staf auth chatgpt
 login|status|cancel|logout` operate through the same shared instance. These
 commands accept the same trailing connection options. A one-shot provider change requires `--confirm-provider-change`, acknowledging that future requests may send conversation history to the new provider. Use `staf settings unset model|reasoning` or `staf settings unset-default model|reasoning` to clear saved values.
 
 The terminal supports `/help`, `/settings`, `/settings show`, `/settings models`, `/settings reasoning`, `/set provider
-NAME`, `/set model ID`, `/set reasoning LEVEL`, `/models`, `/auth chatgpt
+NAME`, `/set model ID`, `/set reasoning LEVEL`, `/set toolMode MODE`, `/models`, `/auth chatgpt
 login|status|cancel|logout`, `/usage [details|help]`, `/context [refresh|help]`,
-`/confirm-provider`, `/cancel-provider`, `/unset model|reasoning`, `/unset-default model|reasoning`, `/stop`, `/status ID`, `/edit ID TEXT`, `/retry ID`, `/discard ID`, `/defaults`, `/set-default provider|model|reasoning VALUE`, `/approvals`, `/approve ID`, `/deny ID`, and `/quit`. Settings
+`/confirm-provider`, `/cancel-provider`, `/unset model|reasoning`, `/unset-default model|reasoning`, `/stop`, `/status ID`, `/edit ID TEXT`, `/retry ID`, `/discard ID`, `/defaults`, `/set-default provider|model|reasoning|toolMode VALUE`, `/approvals`, `/approve ID`, `/deny ID`, and `/quit`. Settings
 commands edit the current bot profile; creation defaults are separate. See
 [settings](settings.md) for behavior and controls.
 
@@ -219,9 +219,9 @@ An optional profile description is directory metadata visible to other bots. A p
 `GET /api/bots/ID` returns `configDir`, `instructions`, and the current
 configuration `revision`. `POST /api/bots/ID/profile` accepts `revision`,
 `name`, optional `description`, `instructions`, `provider`, `model`, and
-`reasoning`, and optional `image`. `instructions` is the content of `soul.md`; `soul` is not a
+`reasoning`, and optional `image` and `toolMode`. `instructions` is the content of `soul.md`; `soul` is not a
 separate editable field. `agent.toml` accepts only `name`, `description`,
-`provider`, optional `model`, `reasoning`, and `image`, and optional `providerChoices` tables. Direct edits are validated on
+`provider`, optional `model`, `reasoning`, `image`, and `toolMode`, and optional `providerChoices` tables. Direct edits are validated on
 read and valid changes apply to subsequent work. Invalid content and late edits to a previous revision return
 HTTP 422 with `code` `invalid_agent_configuration` and block new work without
 changing the files. Agent settings and credentials have separate storage.
@@ -391,3 +391,25 @@ This extension needs no database schema migration. Older checkouts do not
 recognize the new configuration field: remove `image` fields or restore a
 compatible backup before running one. Retain accepted assets if you intend to
 use those images again.
+
+## Saved tool mode contract
+
+`src/tool-mode.ts` exports `ToolMode` (`direct`, `hybrid`, or `code`) and
+`parseToolMode(value: unknown)`. The parser returns `direct` for `undefined`
+and rejects other invalid values, including `null`. Agent create, agent profile,
+agent list, and creation-default API objects use the `toolMode` field. Omission
+on profile and defaults updates preserves the existing value. Omission at creation
+copies the creation default, initially `hybrid`; explicit input wins. A creation
+operation fingerprint includes an explicit mode and remains stable when defaults
+change. Agent TOML without the field reads as `direct`.
+
+Accepted chat and task profiles capture `toolMode` at acceptance. The command, chat-work request,
+and task snapshots expose it as `toolMode`, and `Instance.execution(id).profile`
+and `Instance.taskExecution(id).profile` return the validated value. A captured
+profile without the field reads as `direct`; invalid explicit values fail. Task
+profiles use the existing task attempt identity, without a synthetic command ID.
+Version 31 adds `creation_defaults.tool_mode` after the existing migration backup.
+
+The current runtime still uses its existing tool offers and dispatch regardless
+of the saved mode. No Code Mode guest or shared clock gateway is implemented by
+this configuration slice.

@@ -7,6 +7,8 @@ import ProviderPicker from './ProviderPicker.vue';
 import InstructionsHelp from './InstructionsHelp.vue';
 import AgentImageChooser from './AgentImageChooser.vue';
 import AgentImage from './AgentImage.vue';
+import type {ToolMode} from '../../src/tool-mode';
+import ToolModeSelect from './ToolModeSelect.vue';
 import type {AgentImageInput} from '../../src/agent-image';
 const image=ref<AgentImageInput>({kind:'initials'});
 const imageValid=ref(true);
@@ -16,6 +18,7 @@ const { app } = useWorkspace();
 const profile = shallowRef<BotProfile | null>(null);
 const name = ref('');
 const instructions = ref('');
+const toolMode = ref<ToolMode>('direct');
 const status = ref('');
 const compareAvailable = ref(false);
 const latest = shallowRef<BotProfile | null>(null);
@@ -23,7 +26,7 @@ watch(() => props.id, (id, _, onCleanup) => {
   let active = true;
   onCleanup(() => { active = false; });
   void app.botProfile(id).then(value => {
-    if (active) { profile.value = value; name.value = value.name; instructions.value = value.instructions; image.value=value.image; }
+    if (active) { profile.value = value; name.value = value.name; instructions.value = value.instructions; toolMode.value=value.toolMode; image.value=value.image; }
   }).catch(error => { if (active) status.value = 'Could not load agent settings. ' + String(error); });
 }, {immediate: true});
 async function save() {
@@ -33,7 +36,7 @@ async function save() {
   status.value = '';
   latest.value = null;
   try {
-    await app.saveBotProfile(profile.value, {name: name.value, provider: profile.value.provider, model: profile.value.model ?? '', instructions: instructions.value,image:image.value});
+    await app.saveBotProfile(profile.value, {name: name.value, provider: profile.value.provider, model: profile.value.model ?? '', instructions: instructions.value,toolMode:toolMode.value,image:image.value});
     emit('close');
   } catch (error) {
     compareAvailable.value = true;
@@ -77,6 +80,7 @@ async function archive() {
       <label>Name<input v-model="name" :disabled="saving" /></label>
       <AgentImageChooser v-model="image" :name="name" :disabled="saving" @valid="value=>imageValid=value" />
       <label>Instructions<textarea v-model="instructions" :disabled="saving" /></label><InstructionsHelp />
+      <ToolModeSelect v-model="toolMode" :disabled="saving" />
       <ProviderPicker :id="id" :disabled="saving" @profile="providerSaved" />
       <button :disabled="saving" class="quiet" @click="emit('providers')">Open provider settings</button>
       <p class="meta">Configuration: <code>{{ profile.configDir }}</code></p>
@@ -86,7 +90,7 @@ async function archive() {
     <p role="status">{{ saving ? 'Loading or saving…' : status }}</p>
     <button v-if="compareAvailable" :disabled="saving" class="quiet" @click="compare">Compare latest settings</button>
     <section v-if="latest" class="saved-settings" aria-label="Current saved settings">
-      <h3>Current saved settings</h3><AgentImage :image="latest.image" :name="latest.name" /><button :disabled="saving||!imageValid" class="quiet" @click="image=latest.image">Use latest image</button><p>Name: {{ latest.name }}</p><p>Provider: {{ providerLabel(latest.provider) }}</p><p>Model: {{ latest.model || '(none)' }}</p><p>Instructions:</p><pre>{{ latest.instructions }}</pre>
+      <h3>Current saved settings</h3><AgentImage :image="latest.image" :name="latest.name" /><button :disabled="saving||!imageValid" class="quiet" @click="image=latest.image">Use latest image</button><p>Name: {{ latest.name }}</p><p>Provider: {{ providerLabel(latest.provider) }}</p><p>Model: {{ latest.model || '(none)' }}</p><p>Tool mode: {{ latest.toolMode }}</p><p>Instructions:</p><pre>{{ latest.instructions }}</pre>
     </section>
   </div></div>
 </template>

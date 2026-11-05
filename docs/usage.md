@@ -363,7 +363,7 @@ files with `configDir`, apply the changes you want to the current files, and
 remove the old revision's `.retired` marker after review. The old files remain
 on disk.
 
-A later request after a provider change can send existing chat history to the new provider. Creation defaults set provider, model, and reasoning for future bots. The instance copies these settings at creation; changing defaults never changes existing bots. Revisions prevent stale clients from overwriting each other. In the CLI, use `instance defaults URL CREDENTIAL_FILE` and `instance defaults-set URL CREDENTIAL_FILE REVISION PROVIDER MODEL REASONING`; use `-` for an empty model or reasoning. Permission and approval settings remain separate. The description is owner-edited metadata visible to other bots; keep private instructions and memory out of it. New bots start with an empty description.
+A later request after a provider change can send existing chat history to the new provider. Creation defaults set provider, model, and reasoning for future bots. The instance copies these settings at creation; changing defaults never changes existing bots. Revisions prevent stale clients from overwriting each other. In the CLI, use `instance defaults URL CREDENTIAL_FILE` and `instance defaults-set URL CREDENTIAL_FILE REVISION PROVIDER MODEL REASONING [TOOL_MODE]`; use `-` for an empty model or reasoning. Permission and approval settings remain separate. The description is owner-edited metadata visible to other bots; keep private instructions and memory out of it. New bots start with an empty description.
 The deterministic demo provider does not follow the instructions. Select ChatGPT, OpenRouter, LM Studio, or live and an explicit model in the bot profile. OpenRouter uses the managed instance key described above; the instance command does not load the project `.env` file. ChatGPT uses the Staf grant under the directory containing the instance database. From a paired browser, use ChatGPT sign-in and open the provided link on the instance host. The initiating paired client can check or cancel that attempt, including after refreshing the page. The CLI provides `instance chatgpt-auth-start URL CREDENTIAL_FILE`, `chatgpt-auth-current URL CREDENTIAL_FILE`, `chatgpt-auth-status URL CREDENTIAL_FILE ATTEMPT_ID`, `chatgpt-auth-cancel URL CREDENTIAL_FILE ATTEMPT_ID`, `chatgpt-auth-credential URL CREDENTIAL_FILE`, and `chatgpt-auth-logout URL CREDENTIAL_FILE`. The callback listens on the same loopback origin. Revoking the initiating client prevents credential commit. These paths have been tested with synthetic auth only; live sign-in has not been verified. Provider failures do not fall back to another provider. Live provider execution has not been verified in this preview.
 
 CLI examples (use a fresh host code for each client):
@@ -391,7 +391,7 @@ node dist/cli.js instance response-stop http://127.0.0.1:3210 ~/.staf-client.jso
 
 The bot name can contain multiple arguments. Pass instructions as one quoted
 argument after `--instructions`; omit the option to use empty instructions.
-Use `--provider PROVIDER` and `--model MODEL` to override creation defaults.
+Use `--provider PROVIDER`, `--model MODEL`, and `--tool-mode direct|hybrid|code` to override creation defaults.
 The CLI prints a creation operation ID to standard error before submitting.
 If the result is uncertain, repeat the same command with `--operation-id ID`
 using that ID. Keep the other arguments unchanged. The browser retains its
@@ -598,3 +598,21 @@ agent and review the warning before adding `--confirm-provider-change`. Without
 the flag the provider stays unchanged. Use the revision from inspect; conflicts
 preserve the current configuration. The
 interactive terminal keeps its existing provider-change confirmation.
+
+## Save a tool mode
+
+In agent settings, select Direct, Hybrid, or Code Mode and save. The creation
+form can use the creation default or select a mode explicitly. In global Settings,
+edit the creation default for future agents. Existing agents keep their choice.
+New agents default to Hybrid. Existing agent files without `toolMode` mean Direct.
+
+The terminal supports `staf settings set toolMode hybrid` and
+`staf settings set-default toolMode code`. Interactive chat also accepts
+`/set toolMode hybrid` and `/set-default toolMode code`. The paired CLI can
+set `toolMode` in the existing agent profile JSON, or pass `--tool-mode` at
+creation. The paired defaults command accepts a final mode argument.
+
+These controls save the choice and capture it with newly accepted work. They do
+not yet alter tool offers or dispatch. The shared action gateway and Code Mode
+clock execution are separate unfinished work for issue 80. This intermediate
+configuration slice does not complete issue 80 or authorize release of issue 78.

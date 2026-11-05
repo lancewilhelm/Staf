@@ -1,3 +1,4 @@
+import {parseToolMode,type ToolMode} from './tool-mode.js';
 import {ProviderDefaultsStore} from './provider-choices.js';
 import { DatabaseSync } from 'node:sqlite';
 import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
@@ -26,12 +27,24 @@ import { ApprovalGrants, approvalGrantSchema, type GrantBoundary } from './appro
 const clockAction: Action = { capability:'clock', operation:'read', resource:'utc', effect:'read', limits:{}, risk:'safe' };
 const clockBoundary = { enabledCapabilities:['clock'], actions:[clockAction] };
 const modes: ApprovalMode[] = ['ask-every-time','ask-for-risky-actions','never-ask'];
-export const INSTANCE_SCHEMA_VERSION = 30;
+export const INSTANCE_SCHEMA_VERSION = 31;
 const MAINTENANCE_VERSION = 2147483647;
 
 export const starterSoul = "You are an assistant working for the owner. Be clear and candid. Distinguish observations from assumptions. Follow the owner's role instructions and work within the permissions and task scope granted to you.";
-export type BotEdit = { revision: string; name: string; description?: string; instructions: string; provider: string; model: string | null; reasoning: string | null;image?:AgentImageInput };
+export type BotEdit = { revision: string; name: string; description?: string; instructions: string; provider: string; model: string | null; reasoning: string | null;toolMode?:ToolMode;image?:AgentImageInput };
 export class BotConflict extends Error {}
+
+function parseToolModeFromProfile(raw:unknown) {
+  if(raw===null || raw===undefined)return parseToolMode(undefined);
+  if(typeof raw!=='string')throw Error('Invalid captured profile');
+  const profile:unknown=JSON.parse(raw);
+  if(!profile || typeof profile!=='object')throw Error('Invalid captured profile');
+  return parseToolMode('toolMode' in profile ? profile.toolMode : undefined);
+}
+function parseCapturedProfile(profile:unknown) {
+  if (!profile || typeof profile !== 'object' || !('provider' in profile) || typeof profile.provider !== 'string' || !('model' in profile) || !(profile.model === null || typeof profile.model === 'string') || !('reasoning' in profile) || !(profile.reasoning === null || typeof profile.reasoning === 'string') || !('instructions' in profile) || typeof profile.instructions !== 'string' || !('chatId' in profile) || typeof profile.chatId !== 'string') throw Error('Invalid captured profile');
+  return {provider:profile.provider,model:profile.model,reasoning:profile.reasoning,instructions:profile.instructions,chatId:profile.chatId,toolMode:parseToolMode('toolMode' in profile ? profile.toolMode : undefined)};
+}
 
 export function assertDatasetAvailable(path: string, maintenanceToken?:string) {
   if (path !== ':memory:' && existsSync(`${path}.maintenance.json`)) {
@@ -141,7 +154,7 @@ export class Instance {
     if (version < 15) this.db.exec(`CREATE TABLE IF NOT EXISTS disclosure_requests (id TEXT PRIMARY KEY, parent_attempt_id TEXT NOT NULL REFERENCES task_attempts(id), sender_bot_id TEXT NOT NULL REFERENCES bots(id), recipient_bot_id TEXT NOT NULL REFERENCES bots(id), kind TEXT NOT NULL CHECK(kind IN ('request','question','answer','result','failure')), content TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('pending','approved','denied','consumed','interrupted')), CHECK(sender_bot_id<>recipient_bot_id))`);
     this.db.exec("UPDATE disclosure_requests SET state='interrupted' WHERE state IN ('pending','approved')");
     if (version < 16) this.db.exec("CREATE TABLE IF NOT EXISTS command_task_starts (command_id TEXT PRIMARY KEY REFERENCES commands(id), call_id TEXT NOT NULL, digest TEXT NOT NULL, attempt_id TEXT REFERENCES task_attempts(id), outcome TEXT NOT NULL CHECK(outcome IN ('accepted','busy')))");
-    if (version < 17) this.db.exec("CREATE TABLE IF NOT EXISTS creation_defaults (id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL, provider TEXT NOT NULL, model TEXT, reasoning TEXT); INSERT OR IGNORE INTO creation_defaults VALUES (1,1,'demo',NULL,NULL)");
+    if (version < 17) this.db.exec("CREATE TABLE IF NOT EXISTS creation_defaults (id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL, provider TEXT NOT NULL, model TEXT, reasoning TEXT); INSERT OR IGNORE INTO creation_defaults (id,revision,provider,model,reasoning) VALUES (1,1,'demo',NULL,NULL)");
     if(version < 18){if(!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='action_journal'").get())this.db.exec(actionJournalSchema);this.db.exec("CREATE TABLE IF NOT EXISTS web_permissions (scope TEXT PRIMARY KEY, enabled INTEGER NOT NULL CHECK(enabled IN (0,1))); CREATE TABLE IF NOT EXISTS web_action_decisions (action_id TEXT PRIMARY KEY REFERENCES action_journal(id), fingerprint TEXT NOT NULL, decision TEXT NOT NULL CHECK(decision IN ('approve','deny')))");}
     this.db.exec("UPDATE action_journal SET state='uncertain',result=NULL WHERE state='started'; UPDATE action_journal SET state='cancelled',result=NULL WHERE state='prepared'");
     if(version < 19)this.db.exec("CREATE TABLE IF NOT EXISTS search_config (id INTEGER PRIMARY KEY CHECK(id=1),revision INTEGER NOT NULL,origin TEXT); INSERT OR IGNORE INTO search_config VALUES (1,1,NULL); CREATE TABLE IF NOT EXISTS search_permissions (scope TEXT PRIMARY KEY,enabled INTEGER NOT NULL CHECK(enabled IN (0,1))); CREATE TABLE IF NOT EXISTS search_action_decisions (action_id TEXT PRIMARY KEY REFERENCES action_journal(id),fingerprint TEXT NOT NULL,decision TEXT NOT NULL CHECK(decision IN ('approve','deny'))); CREATE TABLE IF NOT EXISTS search_dispatches (action_id TEXT PRIMARY KEY REFERENCES action_journal(id),started_ms INTEGER NOT NULL)");
@@ -156,6 +169,7 @@ export class Instance {
     if(version < 27)this.db.exec('CREATE TABLE IF NOT EXISTS bot_creation_operations (id TEXT PRIMARY KEY, digest TEXT NOT NULL, bot_id TEXT NOT NULL REFERENCES bots(id))');
     if(version < 28)this.db.exec("CREATE TABLE IF NOT EXISTS response_progress (command_id TEXT PRIMARY KEY REFERENCES commands(id), text TEXT NOT NULL DEFAULT '')");
     if(version < 29)this.db.exec("CREATE TABLE IF NOT EXISTS response_stops (command_id TEXT PRIMARY KEY REFERENCES commands(id))");
+    if(version < 31 && !this.db.prepare("SELECT 1 FROM pragma_table_info('creation_defaults') WHERE name='tool_mode'").get())this.db.exec("ALTER TABLE creation_defaults ADD COLUMN tool_mode TEXT NOT NULL DEFAULT 'hybrid'");
     if(version < 30 && !this.db.prepare("SELECT 1 FROM pragma_table_info('command_runtime_events') WHERE name='detail'").get())this.db.exec('ALTER TABLE command_runtime_events ADD COLUMN detail TEXT');
     this.db.exec('CREATE INDEX IF NOT EXISTS command_runtime_events_command ON command_runtime_events(command_id,seq)');
     if (!maintenanceToken) this.db.exec(`PRAGMA user_version=${INSTANCE_SCHEMA_VERSION}`);
@@ -321,7 +335,7 @@ export class Instance {
       const row=this.db.prepare('SELECT bot_id FROM main_bot WHERE id=1').get();
       if (row && typeof row.bot_id === 'string') { const bot=this.bots().find(item=>item.id===row.bot_id); if (!bot) throw Error('Main bot is missing'); this.db.exec('COMMIT'); return bot; }
       const id=randomUUID(), chatId=randomUUID(), defaults=this.creationDefaults();
-      this.configs.publish(id,{name:'Staf',description:'',provider:defaults.provider,model:defaults.model,reasoning:defaults.reasoning,instructions:starterSoul},false);
+      this.configs.publish(id,{name:'Staf',description:'',provider:defaults.provider,model:defaults.model,reasoning:defaults.reasoning,toolMode:defaults.toolMode,instructions:starterSoul},false);
       this.db.prepare('INSERT INTO bots VALUES (?, ?, ?, ?, ?, ?, ?)').run(id,chatId,'','','demo',null,null);
       this.db.prepare('INSERT INTO bot_profiles (bot_id,revision,soul,archived) VALUES (?, 1, ?, 0)').run(id,'');
       this.db.prepare('INSERT INTO main_bot VALUES (1,?)').run(id);
@@ -495,10 +509,11 @@ export class Instance {
     const pair=current.providerChoices?.[provider]??this.providerDefaults().read().providers[provider]??{model:null,reasoning:null};
     return this.editBot(id,{...current,revision,provider,model:model===undefined?pair.model:model,reasoning:reasoning===undefined?pair.reasoning:reasoning});
   }
-  creationDefaults() {const row=this.db.prepare('SELECT revision,provider,model,reasoning FROM creation_defaults WHERE id=1').get();if(!row || typeof row.revision !== 'number' || typeof row.provider !== 'string' || !(row.model === null || typeof row.model === 'string') || !(row.reasoning === null || typeof row.reasoning === 'string'))throw Error('Invalid creation defaults');return {revision:row.revision,provider:row.provider,model:row.model,reasoning:row.reasoning};}
-  setCreationDefaults(input:{revision:number;provider:string;model:string|null;reasoning:string|null}) {
+  creationDefaults() {const row=this.db.prepare('SELECT revision,provider,model,reasoning,tool_mode FROM creation_defaults WHERE id=1').get();if(!row || typeof row.revision !== 'number' || typeof row.provider !== 'string' || !(row.model === null || typeof row.model === 'string') || !(row.reasoning === null || typeof row.reasoning === 'string'))throw Error('Invalid creation defaults');return {revision:row.revision,provider:row.provider,model:row.model,reasoning:row.reasoning,toolMode:parseToolMode(row.tool_mode)};}
+  setCreationDefaults(input:{revision:number;provider:string;model:string|null;reasoning:string|null;toolMode?:ToolMode}) {
     if(!Number.isSafeInteger(input.revision) || input.revision<1 || !['demo','codex','openrouter','lmstudio','live'].includes(input.provider) || !(input.model === null || typeof input.model === 'string' && input.model.length <= 200) || !(input.reasoning === null || typeof input.reasoning === 'string' && input.reasoning.length <= 100))throw Error('Invalid creation defaults');
-    const result=this.db.prepare('UPDATE creation_defaults SET revision=revision+1,provider=?,model=?,reasoning=? WHERE id=1 AND revision=?').run(input.provider,input.model,input.reasoning,input.revision);
+    const toolMode=input.toolMode===undefined?this.creationDefaults().toolMode:parseToolMode(input.toolMode);
+    const result=this.db.prepare('UPDATE creation_defaults SET revision=revision+1,provider=?,model=?,reasoning=?,tool_mode=? WHERE id=1 AND revision=?').run(input.provider,input.model,input.reasoning,toolMode,input.revision);
     if(!result.changes)throw new BotConflict('Creation defaults changed. Refresh before editing.');return this.creationDefaults();
   }
   private imageAssets() {return this.images??=new AgentImageAssets(join(dirname(dirname(this.configs.location('placeholder'))),'.images'));}
@@ -506,21 +521,22 @@ export class Instance {
   private requireStoredImage(image:AgentImage,previous?:AgentImage) {
     if(image.kind==='upload' && !(previous?.kind==='upload' && previous.assetId===image.assetId) && !this.imageAssets().read(image.assetId)) throw Error('The selected image is unavailable. Upload it again or choose another image.');
   }
-  createBot(input: {name: string; instructions: string; provider?: string; model?: string; reasoning?: string; operationId?: string;image?:AgentImageInput}, advertisedModel?:string) {
+  createBot(input: {name: string; instructions: string; provider?: string; model?: string; reasoning?: string; operationId?: string;toolMode?:ToolMode;image?:AgentImageInput}, advertisedModel?:string) {
     if (!input.name.trim() || (input.provider !== undefined && !input.provider.trim())) throw new Error('Name and provider are required');
+    if(input.toolMode!==undefined)parseToolMode(input.toolMode);
     const id = randomUUID(), chatId = randomUUID();
     this.db.exec('BEGIN IMMEDIATE');
     try {
       const image:AgentImage=input.image?.kind==='upload-data'?this.imageAssets().accept(input.image):input.image??{kind:'initials'};
       const savedImage=imageSetting(image);
-      const digest=input.operationId ? createHmac('sha256',this.fingerprintKey).update(JSON.stringify([input.name,input.instructions,input.provider ?? null,input.model ?? null,input.reasoning ?? null,...(savedImage===null?[]:[savedImage])])).digest('hex') : null;
+      const digest=input.operationId ? createHmac('sha256',this.fingerprintKey).update(JSON.stringify([input.name,input.instructions,input.provider ?? null,input.model ?? null,input.reasoning ?? null,...(savedImage===null?[]:[savedImage]),...(input.toolMode===undefined?[]:['toolMode',input.toolMode])])).digest('hex') : null;
       if(input.operationId) { const existing=this.db.prepare('SELECT digest,bot_id FROM bot_creation_operations WHERE id=?').get(input.operationId); if(existing) { if(existing.digest!==digest || typeof existing.bot_id!=='string') throw new BotConflict('Creation operation ID conflict'); const bot=this.bot(existing.bot_id); this.db.exec('COMMIT'); return bot; } }
       this.requireStoredImage(image);
       const defaults=this.creationDefaults();const provider=input.provider ?? defaults.provider;
       const first=this.providerDefaults().read().providers[provider];
       const chosenModel=input.model ?? (input.provider===undefined?defaults.model:first?.model??advertisedModel??null);
       const chosenReasoning=input.reasoning ?? (input.provider===undefined?defaults.reasoning:first?.reasoning??null);
-      this.configs.publish(id,{name:input.name,description:'',provider,model:chosenModel,reasoning:chosenReasoning,instructions:input.instructions,providerChoices:{[provider]:{model:chosenModel,reasoning:chosenReasoning}},image},false);
+      this.configs.publish(id,{name:input.name,description:'',provider,model:chosenModel,reasoning:chosenReasoning,toolMode:input.toolMode??defaults.toolMode,instructions:input.instructions,providerChoices:{[provider]:{model:chosenModel,reasoning:chosenReasoning}},image},false);
       this.db.prepare('INSERT INTO bots VALUES (?, ?, ?, ?, ?, ?, ?)').run(id, chatId, '', '', 'demo', null, null);
       this.db.prepare('INSERT INTO bot_profiles (bot_id,revision,soul,archived) VALUES (?, 1, ?, 0)').run(id, '');
       if(input.operationId && digest) this.db.prepare('INSERT INTO bot_creation_operations VALUES (?,?,?)').run(input.operationId,digest,id);
@@ -556,7 +572,7 @@ export class Instance {
       const providerChoices={...current.providerChoices,[current.provider]:{model:current.model,reasoning:current.reasoning},[edit.provider]:{model:edit.model,reasoning:edit.reasoning}};
       const image=edit.image?.kind==='upload-data'?this.imageAssets().accept(edit.image):edit.image??current.image;
       this.requireStoredImage(image,current.image);
-      const config=this.configs.publish(id,{name:edit.name,description:edit.description ?? current.description,instructions:edit.instructions,provider:edit.provider,model:edit.model,reasoning:edit.reasoning,providerChoices,image},current.archived,edit.revision);
+      const config=this.configs.publish(id,{name:edit.name,description:edit.description ?? current.description,instructions:edit.instructions,provider:edit.provider,model:edit.model,reasoning:edit.reasoning,toolMode:edit.toolMode===undefined?current.toolMode:parseToolMode(edit.toolMode),providerChoices,image},current.archived,edit.revision);
       try { this.db.exec('COMMIT'); } catch { throw new AgentConfigUncertain('Configuration save may have taken effect. Inspect the current configuration before retrying.'); }
       return {...current,...config};
     } catch (error) { try { this.db.exec('ROLLBACK'); } catch {} throw error; }
@@ -582,12 +598,12 @@ export class Instance {
   }
   taskAttempts(botId: string) {
     return this.db.prepare(`SELECT a.id, a.task_id AS taskId, a.bot_id AS botId, t.objective, a.predecessor,
-      a.state, a.outcome, a.limit_ms AS limitMs, a.delegation_clock AS delegationClock, json_extract(a.profile,'$.revision') AS profileRevision
-      FROM task_attempts a JOIN tasks t ON t.id=a.task_id WHERE a.bot_id=? ORDER BY a.rowid DESC`).all(botId);
+      a.state, a.outcome, a.limit_ms AS limitMs, a.delegation_clock AS delegationClock, json_extract(a.profile,'$.revision') AS profileRevision, a.profile AS capturedProfile
+      FROM task_attempts a JOIN tasks t ON t.id=a.task_id WHERE a.bot_id=? ORDER BY a.rowid DESC`).all(botId).map(({capturedProfile,...row})=>({...row,state:row.state,toolMode:parseToolModeFromProfile(capturedProfile)}));
   }
   taskAttempt(id: string) {
     const row = this.db.prepare(`SELECT a.id, a.task_id AS taskId, a.bot_id AS botId, t.objective, a.predecessor,
-      a.state, a.outcome, a.limit_ms AS limitMs, a.delegation_clock AS delegationClock, json_extract(a.profile,'$.revision') AS profileRevision
+      a.state, a.outcome, a.limit_ms AS limitMs, a.delegation_clock AS delegationClock, json_extract(a.profile,'$.revision') AS profileRevision, a.profile AS capturedProfile
       FROM task_attempts a JOIN tasks t ON t.id=a.task_id WHERE a.id=?`).get(id);
     if (!row) return undefined;
     const attempt = row as {id:string; taskId:string; botId:string; objective:string; predecessor:string | null; state:string; outcome:string | null; limitMs:number; profileRevision:string};
@@ -595,7 +611,8 @@ export class Instance {
     const session: Session | undefined=typeof saved?.session === 'string' ? JSON.parse(saved.session) : undefined;
     const inbox = new TaskInbox(this.db).inspect({botId:attempt.botId,attemptId:id});
     const waitReason=attempt.state === 'waiting' ? 'replacement' : inbox.questions.some(question=>question.state === 'open') ? 'owner-input' : this.db.prepare("SELECT 1 FROM approval_requests WHERE work_kind='task' AND work_id=? AND state='pending'").get(id) ? 'approval' : null;
-    return {...attempt, waitReason, inbox, usage:session?.usage ?? [], activity: this.db.prepare('SELECT seq,event FROM task_activity WHERE attempt_id=? ORDER BY seq').all(id).map(event => { const value = JSON.parse(String(event.event)); if (value.type === 'tool_result' && value.name === 'select_skill' && typeof value.content === 'string') { value.content = this.redactSkill(value.content); if (value.success) { try { const detail=JSON.parse(value.content); if (typeof detail.digest === 'string' && detail.sourceDigest === undefined) { detail.sourceDigest=detail.digest; delete detail.digest; value.content=JSON.stringify(detail); } } catch { /* Historical error text is not structured selection evidence. */ } } } return {seq:event.seq, ...value}; })};
+    const {capturedProfile,...visible}=row as typeof attempt & {capturedProfile:unknown};
+    return {...visible,toolMode:parseToolModeFromProfile(capturedProfile), waitReason, inbox, usage:session?.usage ?? [], activity: this.db.prepare('SELECT seq,event FROM task_activity WHERE attempt_id=? ORDER BY seq').all(id).map(event => { const value = JSON.parse(String(event.event)); if (value.type === 'tool_result' && value.name === 'select_skill' && typeof value.content === 'string') { value.content = this.redactSkill(value.content); if (value.success) { try { const detail=JSON.parse(value.content); if (typeof detail.digest === 'string' && detail.sourceDigest === undefined) { detail.sourceDigest=detail.digest; delete detail.digest; value.content=JSON.stringify(detail); } } catch { /* Historical error text is not structured selection evidence. */ } } } return {seq:event.seq, ...value}; })};
   }
   acceptTask(input: {id:string; botId:string; objective:string; limitMs:number; predecessor?:string; delegateClock?:boolean}, visibleObjective=input.objective) {
     this.db.exec('BEGIN IMMEDIATE');
@@ -815,7 +832,7 @@ export class Instance {
   taskExecution(id: string) {
     const row=this.db.prepare('SELECT a.profile,a.context,a.state,a.limit_ms AS limitMs,t.objective FROM task_attempts a JOIN tasks t ON t.id=a.task_id WHERE a.id=?').get(id);
     if (!row || row.state !== 'queued' || typeof row.profile !== 'string' || typeof row.context !== 'string') throw Error('Task is not queued');
-    const profile=JSON.parse(row.profile) as {provider:string; model:string | null; reasoning:string | null; instructions:string; chatId:string};
+    const profile=parseCapturedProfile(JSON.parse(row.profile));
     const context=JSON.parse(row.context) as Array<{role:string;content:string;isNotice:number}>;
     return {profile,context,objective:String(row.objective),limitMs:Number(row.limitMs)};
   }
@@ -898,7 +915,7 @@ export class Instance {
   private taskContext(botId:string) { return this.db.prepare('SELECT m.id,m.role,m.content,EXISTS(SELECT 1 FROM task_notices n WHERE n.message_id=m.id) AS isNotice FROM messages m WHERE m.bot_id=? ORDER BY m.seq').all(botId); }
   messages(botId: string) { return this.db.prepare('SELECT id, role, content FROM messages WHERE bot_id=? ORDER BY seq').all(botId); }
   hasBot(botId:string) {return !!this.botIdentity(botId);}
-  command(id: string) { return this.db.prepare('SELECT id, bot_id AS botId, content, state, error FROM commands WHERE id=?').get(id); }
+  command(id: string) { const row=this.db.prepare('SELECT c.id,c.bot_id AS botId,c.content,c.state,c.error,p.profile AS capturedProfile FROM commands c LEFT JOIN command_profiles p ON p.command_id=c.id WHERE c.id=?').get(id);if(!row)return undefined;const {capturedProfile,...command}=row;return {id:command.id,botId:command.botId,content:command.content,state:command.state,error:command.error,toolMode:parseToolModeFromProfile(capturedProfile)}; }
   responseProgress(id:string) {return this.db.prepare("SELECT c.id,c.bot_id AS botId,CASE WHEN c.state='pending' THEN CASE WHEN EXISTS(SELECT 1 FROM response_stops s WHERE s.command_id=c.id) THEN 'stopping' WHEN p.command_id IS NULL THEN 'accepted' ELSE 'running' END ELSE c.state END AS state,COALESCE(p.text,'') AS text,c.error FROM commands c LEFT JOIN response_progress p ON p.command_id=c.id WHERE c.id=?").get(id);}
   latestResponse(botId:string) {const row=this.db.prepare('SELECT id FROM commands WHERE bot_id=? ORDER BY rowid DESC LIMIT 1').get(botId);return typeof row?.id==='string'?this.responseProgress(row.id):null;}
   updateResponse(id:string,text:string) {this.db.prepare("INSERT INTO response_progress(command_id,text) SELECT id,? FROM commands WHERE id=? AND state='pending' ON CONFLICT(command_id) DO UPDATE SET text=excluded.text").run(text,id);}
@@ -930,9 +947,9 @@ export class Instance {
     const events=this.db.prepare('SELECT e.command_id,e.seq AS id,e.type,e.name,e.success,e.detail FROM command_runtime_events e JOIN commands c ON c.id=e.command_id WHERE c.bot_id=? ORDER BY e.seq').all(botId);
     const byCommand=new Map<string,typeof events>();
     for(const event of events){const id=String(event.command_id);const group=byCommand.get(id) ?? [];group.push(event);byCommand.set(id,group);}
-    const requests=this.db.prepare('SELECT id FROM commands WHERE bot_id=? ORDER BY rowid').all(botId).map(row=>{
+    const requests=this.db.prepare('SELECT c.id,p.profile AS capturedProfile FROM commands c LEFT JOIN command_profiles p ON p.command_id=c.id WHERE c.bot_id=? ORDER BY c.rowid').all(botId).map(row=>{
       const id=String(row.id);
-      return {id,progress:this.responseProgress(id),events:byCommand.get(id) ?? []};
+      return {id,toolMode:parseToolModeFromProfile(row.capturedProfile),progress:this.responseProgress(id),events:byCommand.get(id) ?? []};
     });
     return {requests,messages:this.db.prepare('SELECT id,role,content FROM messages WHERE bot_id=? AND id NOT IN (SELECT message_id FROM task_notices) ORDER BY seq').all(botId)};
   }
@@ -968,16 +985,14 @@ export class Instance {
       this.db.prepare('INSERT INTO command_profiles VALUES (?, ?)').run(input.id, JSON.stringify(bot));
       this.db.prepare('INSERT INTO command_notices SELECT ?,message_id FROM task_notices WHERE bot_id=? AND delivered=0').run(input.id,input.botId);
       this.db.prepare("INSERT INTO messages VALUES (?, ?, 'user', ?, (SELECT COALESCE(MAX(seq),0)+1 FROM messages WHERE bot_id=?))").run('command-user-'+input.id, input.botId, visibleContent, input.botId);
-      this.db.exec('COMMIT'); return {kind: 'accepted' as const};
+      this.db.exec('COMMIT'); return {kind: 'accepted' as const,toolMode:bot.toolMode};
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
   }
   execution(id: string) {
     const command = this.command(id);
     const row = this.db.prepare('SELECT profile FROM command_profiles WHERE command_id=?').get(id);
     if (!command || command.state !== 'pending' || typeof command.botId !== 'string' || typeof command.content !== 'string' || typeof row?.profile !== 'string') throw Error('Command is not pending');
-    const profile: unknown = JSON.parse(row.profile);
-    if (!profile || typeof profile !== 'object' || !('provider' in profile) || typeof profile.provider !== 'string' || !('model' in profile) || !(profile.model === null || typeof profile.model === 'string') || !('reasoning' in profile) || !(profile.reasoning === null || typeof profile.reasoning === 'string') || !('instructions' in profile) || typeof profile.instructions !== 'string' || !('chatId' in profile) || typeof profile.chatId !== 'string') throw Error('Invalid captured profile');
-    const captured = profile as {provider:string;model:string | null;reasoning:string | null;instructions:string;chatId:string};
+    const captured = parseCapturedProfile(JSON.parse(row.profile));
     const saved = this.db.prepare('SELECT session FROM sessions WHERE bot_id=?').get(command.botId);
     let session: Session;
     if (typeof saved?.session === 'string') {

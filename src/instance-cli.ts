@@ -29,7 +29,7 @@ export async function instanceCommand(args: string[]) {
     const result=await request('/api/pair','',{code:values[0]});
     await mkdir(dirname(resolve(credential)),{recursive:true,mode:0o700}); await writeFile(credential,JSON.stringify(result),{mode:0o600,flag:'wx'}); console.log('Paired.'); return;
   }
-  let create: {name:string; instructions:string; operationId:string; provider?:string; model?:string} | undefined;
+  let create: {name:string; instructions:string; operationId:string; provider?:string; model?:string; toolMode?:string} | undefined;
   if (action === 'create') {
     const option=values.findIndex(value=>value.startsWith('--'));
     const names=option < 0 ? values : values.slice(0,option);
@@ -37,7 +37,7 @@ export async function instanceCommand(args: string[]) {
     const options:Record<string,string>={};
     for(let i=option < 0 ? values.length : option;i<values.length;i+=2) {
       const key=values[i],value=values[i+1];
-      if (!key || !['--instructions','--operation-id','--provider','--model'].includes(key)) throw Error('Unknown create option. Use --instructions TEXT, --operation-id ID, --provider PROVIDER or --model MODEL');
+      if (!key || !['--instructions','--operation-id','--provider','--model','--tool-mode'].includes(key)) throw Error('Unknown create option. Use --instructions TEXT, --operation-id ID, --provider PROVIDER, --model MODEL or --tool-mode MODE');
       if (value === undefined || value.startsWith('--')) throw Error(`${key} requires TEXT`);
       if (key in options) throw Error(`${key} must appear once`);
       options[key]=value;
@@ -45,7 +45,7 @@ export async function instanceCommand(args: string[]) {
     const operationId=options['--operation-id'] ?? randomUUID();
     if(!/^[\w-]{1,100}$/.test(operationId))throw Error('Invalid creation operation ID');
     console.error(`Creation operation ID: ${operationId}`);
-    create={name:names.join(' '),instructions:options['--instructions'] ?? '',operationId,...(options['--provider'] !== undefined ? {provider:options['--provider']} : {}),...(options['--model'] !== undefined ? {model:options['--model']} : {})};
+    create={name:names.join(' '),instructions:options['--instructions'] ?? '',operationId,...(options['--provider'] !== undefined ? {provider:options['--provider']} : {}),...(options['--model'] !== undefined ? {model:options['--model']} : {}),...(options['--tool-mode'] !== undefined ? {toolMode:options['--tool-mode']} : {})};
   }
   const saved: unknown=JSON.parse(await readFile(credential,'utf8'));
   if (!saved || typeof saved !== 'object' || !('token' in saved) || typeof saved.token !== 'string') throw Error('Invalid client credential');
@@ -104,7 +104,7 @@ export async function instanceCommand(args: string[]) {
     result=await request(`/api/bots/${encodeURIComponent(values[0])}/selection`,token,{revision:values[1],provider:values[2],...(args[3]?{model:args[3]==='-'?null:args[3]}:{}),...(args[4]?{reasoning:args[4]==='-'?null:args[4]}:{})});
   }
   else if(action==='defaults') result=await request('/api/creation-defaults',token);
-  else if(action==='defaults-set' && values.length===4) result=await request('/api/creation-defaults',token,{revision:Number(values[0]),provider:values[1],model:values[2]==='-'?null:values[2],reasoning:values[3]==='-'?null:values[3]});
+  else if(action==='defaults-set' && (values.length===4 || values.length===5)) result=await request('/api/creation-defaults',token,{revision:Number(values[0]),provider:values[1],model:values[2]==='-'?null:values[2],reasoning:values[3]==='-'?null:values[3],...(values[4]===undefined?{}:{toolMode:values[4]})});
   else if(action==='codex-auth-start') result=await request('/api/codex-auth/start',token,{});
   else if(action==='codex-auth-current') result=await request('/api/codex-auth/current',token);
   else if(action==='codex-auth-credential') result=await request('/api/codex-auth/credential',token);

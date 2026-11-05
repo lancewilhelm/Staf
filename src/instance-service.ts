@@ -1,3 +1,4 @@
+import {parseToolMode} from './tool-mode.js';
 import {providerLabel} from './provider-label.js';
 import { parseMemoryLanguage } from './memory-language.js';
 import { previewMemoryCandidates } from './memory-candidates.js';
@@ -473,14 +474,14 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
       }
       if(req.url === '/api/creation-defaults') {
         if(req.method === 'GET') return json(200,instance.creationDefaults());
-        if(req.method === 'POST') {if(typeof value.revision !== 'number' || typeof value.provider !== 'string' || !(value.model === null || typeof value.model === 'string') || !(value.reasoning === null || typeof value.reasoning === 'string'))return json(400,{error:'Invalid creation defaults'});return json(200,instance.setCreationDefaults({revision:value.revision,provider:value.provider,model:value.model,reasoning:value.reasoning}));}
+        if(req.method === 'POST') {if(typeof value.revision !== 'number' || typeof value.provider !== 'string' || !(value.model === null || typeof value.model === 'string') || !(value.reasoning === null || typeof value.reasoning === 'string'))return json(400,{error:'Invalid creation defaults'});return json(200,instance.setCreationDefaults({revision:value.revision,provider:value.provider,model:value.model,reasoning:value.reasoning,...(value.toolMode===undefined?{}:{toolMode:parseToolMode(value.toolMode)})}));}
       }
       if (req.method === 'POST' && req.url === '/api/main-bot') return json(200,instance.mainBot());
       if (req.method === 'GET' && req.url === '/api/bots') return json(200,instance.bots());
       if (req.method === 'POST' && req.url === '/api/bots') {
         if (typeof value.name !== 'string' || !value.name.trim() || value.name.length > 200 || (value.instructions !== undefined && (typeof value.instructions !== 'string' || value.instructions.length > 30000))) return json(400,{error:'Invalid name or instructions'});
         if ((value.reasoning!==undefined&&value.reasoning!==null&&typeof value.reasoning!=='string') || (value.operationId !== undefined && (typeof value.operationId !== 'string' || !/^[\w-]{1,100}$/.test(value.operationId))) || (value.provider !== undefined && (typeof value.provider !== 'string' || !['demo','codex','openrouter','lmstudio','live'].includes(value.provider))) || (value.model !== undefined && value.model !== null && (typeof value.model !== 'string' || value.model.length > 200))) return json(400,{error:'Invalid creation operation'});
-        return json(201,instance.createBot({name:value.name,instructions:typeof value.instructions === 'string' ? value.instructions : '',...(typeof value.operationId === 'string' ? {operationId:value.operationId} : {}),...(typeof value.provider === 'string' ? {provider:value.provider} : {}),...(typeof value.model === 'string' ? {model:value.model} : {}),...(typeof value.reasoning==='string'?{reasoning:value.reasoning}:{}),image:parseAgentImageInput(value.image)},typeof value.provider==='string'?selectionCatalogs.get(value.provider)?.defaultModel:undefined));
+        return json(201,instance.createBot({name:value.name,instructions:typeof value.instructions === 'string' ? value.instructions : '',...(typeof value.operationId === 'string' ? {operationId:value.operationId} : {}),...(typeof value.provider === 'string' ? {provider:value.provider} : {}),...(typeof value.model === 'string' ? {model:value.model} : {}),...(typeof value.reasoning==='string'?{reasoning:value.reasoning}:{}),...(value.toolMode===undefined?{}:{toolMode:parseToolMode(value.toolMode)}),image:parseAgentImageInput(value.image)},typeof value.provider==='string'?selectionCatalogs.get(value.provider)?.defaultModel:undefined));
       }
       const creationMatch=req.url?.match(/^\/api\/bot-creations\/([\w-]+)$/);
       if(req.method==='GET' && creationMatch?.[1]) {const bot=instance.creationOperation(creationMatch[1]);return bot ? json(200,bot) : json(404,{error:'Creation operation not found'});}
@@ -494,7 +495,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
         }
         if (req.method === 'POST' && action === 'profile') {
           if ('soul' in value || typeof value.revision !== 'string' || !/^[a-f0-9]{64}$/.test(value.revision) || typeof value.name !== 'string' || !value.name.trim() || value.name.length > 200 || (value.description !== undefined && (typeof value.description !== 'string' || Buffer.byteLength(value.description,'utf8') > 4096)) || typeof value.instructions !== 'string' || value.instructions.length > 30000 || typeof value.provider !== 'string' || !['demo','codex','openrouter','lmstudio','live'].includes(value.provider) || !(value.model === null || typeof value.model === 'string' && value.model.length <= 200) || !(value.reasoning === null || typeof value.reasoning === 'string' && value.reasoning.length <= 100)) return json(400,{error:'Invalid profile'});
-          return json(200,instance.editBot(id,{revision:value.revision,name:value.name,...(typeof value.description === 'string' ? {description:value.description} : {}),instructions:value.instructions,provider:value.provider,model:value.model,reasoning:value.reasoning,...(value.image===undefined?{}:{image:parseAgentImageInput(value.image)})}));
+          return json(200,instance.editBot(id,{revision:value.revision,name:value.name,...(typeof value.description === 'string' ? {description:value.description} : {}),instructions:value.instructions,provider:value.provider,model:value.model,reasoning:value.reasoning,...(value.toolMode===undefined?{}:{toolMode:parseToolMode(value.toolMode)}),...(value.image===undefined?{}:{image:parseAgentImageInput(value.image)})}));
         }
       }
       const terminalInfoMatch=req.url?.match(/^\/api\/bots\/([\w-]+)\/(usage|context|models)$/);

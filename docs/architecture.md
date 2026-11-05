@@ -279,3 +279,11 @@ unchanged asset identities do not recreate image URLs on every poll. No image
 metadata or bytes are added to model prompts. See the
 [image reference](reference.md#agent-image-configuration-and-api) for limits and
 transport details, and [usage](usage.md#agent-images) for owner controls.
+
+
+The configuration slice for basic tools stores `toolMode` in agent TOML and
+captures it in accepted chat and task profiles. `src/tool-mode.ts` owns the
+shared type and boundary parser. Database version 31 adds the creation default
+with the existing backup and migration process. This is an intermediate state:
+`runTurn` still uses its existing offers and dispatch. The shared action gateway
+and Code Mode clock runtime remain unimplemented in this slice.

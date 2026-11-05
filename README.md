@@ -41,8 +41,8 @@ Evergreen/Ink palettes, a Focus agent rail, font, text size, spacing, corners, a
 Instructions live in its `soul.md` file; settings live in `agent.toml`. You can
 [edit these files directly](docs/usage.md#agent-configuration-files) on the instance host.
 Connect an instance-wide OpenRouter key in global Settings or through the paired CLI; saved presence does not verify account or model access. New agent opens a modal; you can create an agent with just a name before connecting a provider. Agent settings
-offer Demo and configured shared connections, retain disconnected selections, and ask for confirmation before switching providers. Review the agent's model after a switch. Open full agent settings from the chat header avatar. Agent settings include archive; reveal Archived agents in the Agents sidebar to restore them. Tool requests, observed outcomes, and exact-action approvals appear in the chat conversation. The previous Advanced page has been retired;
-other management features remain available through the service and CLI while
+offer a saved tool mode, Demo and configured shared connections, retain disconnected selections, and ask for confirmation before switching providers. Review the agent's model after a switch. Open full agent settings from the chat header avatar. Agent settings include archive; reveal Archived agents in the Agents sidebar to restore them. Tool requests, observed outcomes, and exact-action approvals appear in the chat conversation. The previous Advanced page has been retired;
+The saved tool mode does not yet change tool execution. The shared action gateway and Code Mode runtime remain in development. Other management features remain available through the service and CLI while
 their GUI is developed. Shared-instance ChatGPT sign-in has synthetic coverage
 but is not live verified. Background-task creation from main chat is deferred. Explicit task API and CLI operations remain available.
 Public web reading, owner-configured local search and scratch-only shell are off
