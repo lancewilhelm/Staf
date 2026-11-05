@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS work_action_challenges (id TEXT PRIMARY KEY, kind TEX
 CREATE TABLE IF NOT EXISTS work_action_resolutions (action_id TEXT PRIMARY KEY REFERENCES action_journal(id));
 `;
 
-export type WorkContext = Readonly<{work:WorkRef; botId:string; conversation:{kind:'chat';conversationId:string} | {kind:'task';conversationId:string;context:unknown}; mode:ToolMode; workingDirectory:string; signal:AbortSignal}>;
+export type WorkContext = Readonly<{work:WorkRef; botId:string; conversation:{kind:'chat';conversationId:string} | {kind:'task';conversationId:string;context:unknown}; mode:ToolMode; workingDirectory:string; signal:AbortSignal;workSignal:AbortSignal}>;
 export type InvocationSource = {kind:'provider';responseId:string;callId:string} | {kind:'guest';executionId:string;sequence:number};
 export type ActionIntent = {kind:'new'} | {kind:'resume';actionId:string} | {kind:'repeat';challenge:string};
 export type Description = {summary:string;resource:string;effect:'read'|'change';opaque?:boolean};
@@ -94,7 +94,7 @@ export class WorkActionService {
     const key=encoded(work),entry=this.closures.get(key) ?? {controller:new AbortController(),refs:0};
     entry.refs++;this.closures.set(key,entry);
     try {
-      const context=this.context(work,AbortSignal.any([signal,entry.controller.signal]));
+      const context=Object.freeze({...this.context(work,AbortSignal.any([signal,entry.controller.signal])),workSignal:signal});
       return new WorkActions(this,context,()=>{if(--entry.refs===0 && this.closures.get(key)===entry)this.closures.delete(key);});
     } catch(error) {if(--entry.refs===0)this.closures.delete(key);throw error;}
   }

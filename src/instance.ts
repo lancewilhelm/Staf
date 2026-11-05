@@ -30,7 +30,7 @@ import { ApprovalGrants, approvalGrantSchema, type GrantBoundary } from './appro
 const clockAction: Action = { capability:'clock', operation:'read', resource:'utc', effect:'read', limits:{}, risk:'safe' };
 const clockBoundary = { enabledCapabilities:['clock'], actions:[clockAction] };
 const modes: ApprovalMode[] = ['ask-every-time','ask-for-risky-actions','never-ask'];
-export const INSTANCE_SCHEMA_VERSION = 34;
+export const INSTANCE_SCHEMA_VERSION = 36;
 const MAINTENANCE_VERSION = 2147483647;
 
 export const starterSoul = "You are an assistant working for the owner. Be clear and candid. Distinguish observations from assumptions. Follow the owner's role instructions and work within the permissions and task scope granted to you.";
@@ -194,6 +194,7 @@ export class Instance {
     if(version < 33) this.db.exec(`CREATE TABLE IF NOT EXISTS code_executions (id TEXT PRIMARY KEY, kind TEXT NOT NULL, work_id TEXT NOT NULL, response_id TEXT NOT NULL, call_id TEXT NOT NULL, source TEXT NOT NULL, source_hash TEXT NOT NULL, outcome TEXT NOT NULL, result TEXT, UNIQUE(kind,work_id,response_id,call_id));`);
     this.db.exec("UPDATE code_executions SET outcome='interrupted' WHERE outcome='running'");
     if(version < 34) this.db.exec(nativeProcessSchema);
+    if(version < 36)for(const [name,definition] of Object.entries({retained:'INTEGER NOT NULL DEFAULT 0',input_closed:'INTEGER NOT NULL DEFAULT 0',cols:'INTEGER',rows:'INTEGER'}))if(!this.db.prepare('SELECT 1 FROM pragma_table_info(\'native_processes\') WHERE name=?').get(name))this.db.exec(`ALTER TABLE native_processes ADD COLUMN ${name} ${definition}`);
     if(version < 30 && !this.db.prepare("SELECT 1 FROM pragma_table_info('command_runtime_events') WHERE name='detail'").get())this.db.exec('ALTER TABLE command_runtime_events ADD COLUMN detail TEXT');
     this.db.exec('CREATE INDEX IF NOT EXISTS command_runtime_events_command ON command_runtime_events(command_id,seq)');
     if (!maintenanceToken) this.db.exec(`PRAGMA user_version=${INSTANCE_SCHEMA_VERSION}`);
@@ -232,7 +233,7 @@ export class Instance {
     const profile=parseCapturedProfile(JSON.parse(row.profile));
     const conversation=work.kind==='command' ? {kind:'chat' as const,conversationId:profile.chatId} : {kind:'task' as const,conversationId:profile.chatId,context:typeof row.context==='string' ? JSON.parse(row.context) : []};
     const acceptedWork={...work};freezeCaptured(acceptedWork);freezeCaptured(conversation);
-    return Object.freeze({work:acceptedWork,botId:binding.bot_id,conversation,mode:profile.toolMode,workingDirectory:binding.working_directory,signal});
+    return Object.freeze({work:acceptedWork,botId:binding.bot_id,conversation,mode:profile.toolMode,workingDirectory:binding.working_directory,signal,workSignal:signal});
   }
   private processService?:NativeProcesses;
   processes(outputFilter?:()=>ByteRedactor):NativeProcesses { return this.processService ??= new NativeProcesses(this.db,outputFilter); }

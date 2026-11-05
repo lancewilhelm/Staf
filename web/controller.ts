@@ -9,7 +9,7 @@ export type Bot={revision?:string;id:string;name:string;provider:string;model:st
 export type BotProfile=Bot & {image:AgentImage;revision:string;instructions:string;description:string;reasoning:string|null;configDir:string;toolMode:ToolMode;providerChoices?:Record<string,{model:string|null;reasoning:string|null}>};
 export type Message={id:string;role:string;content:string};
 export type ResponseProgress={id:string;botId:string;state:'accepted'|'running'|'stopping'|'stopped'|'completed'|'failed'|'interrupted';text:string;error:string|null};
-export type ChatWork={id:string;processes:Array<{id:string;state:string;exitCode:number|null;exitSignal:string|null}>;progress:ResponseProgress;codeExecutions:Array<{id:string;source:string;sourceHash:string;outcome:string;result:unknown;actions:string[]}>;events:Array<{id:number;type:string;name:string;success:number|null;detail:string|null}>};
+export type ChatWork={id:string;processes:Array<{id:string;state:string;mode:string;retained:boolean;inputClosed:boolean;cols:number|null;rows:number|null;exitCode:number|null;exitSignal:string|null}>;progress:ResponseProgress;codeExecutions:Array<{id:string;source:string;sourceHash:string;outcome:string;result:unknown;actions:string[]}>;events:Array<{id:number;type:string;name:string;success:number|null;detail:string|null}>};
 export type InboxItem={kind:'question';id:string;botId:string|null;attemptId:string;text:string}|{kind:'approval';approvalKind:'clock'|'web'|'search'|'shell'|'disclosure';id:string;botId:string|null;work:{kind:'task'|'command';id:string};detail:unknown};
 type SubmissionIdentity={id:string;text:string};
 export type Submission=SubmissionIdentity & (
@@ -251,6 +251,9 @@ export class Controller {
     await this.submit(botId,current);
   }
   async stopProcess(id:string){try{await this.api('/api/processes/'+encodeURIComponent(id)+'/stop',{});await this.refresh();}catch{this.notify('Could not stop the process.','error')}}
+  async processInput(id:string,data:string){return this.api('/api/processes/'+encodeURIComponent(id)+'/input',{data});}
+  async processEof(id:string){return this.api('/api/processes/'+encodeURIComponent(id)+'/eof',{});}
+  async resizeProcess(id:string,cols:number,rows:number){return this.api('/api/processes/'+encodeURIComponent(id)+'/resize',{cols,rows});}
   async processOutput(id:string,cursor=0){return this.api<{gap:boolean;hasMore:boolean;nextCursor:number;chunks:Array<{stream:string;data:string;text:string|null}>}>('/api/processes/'+encodeURIComponent(id)+'/output?cursor='+cursor)}
   async stopResponse(){const response=this.state.response;if(!response||!['accepted','running','stopping'].includes(response.state))return;try{await this.api('/api/commands/'+encodeURIComponent(response.id)+'/stop',{});}catch(e){this.update({actionError:'Could not stop the response. Retry Stop while the response is active.'});this.notify('Could not stop the response. Retry Stop.','error')}}
   private async submit(botId:string,submission:Submission){

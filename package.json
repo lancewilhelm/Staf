@@ -45,13 +45,15 @@
     "web/**",
     "vite.config.ts",
     "dist/code-mode/**",
-    "src/code-mode/**"
+    "src/code-mode/**",
+    "pnpm-workspace.yaml"
   ],
   "bin": {
     "staf": "dist/cli.js"
   },
   "dependencies": {
     "@iarna/toml": "2.2.5",
+    "node-pty": "1.2.0-beta.17",
     "pngjs": "7.0.0",
     "quickjs-emscripten": "0.32.0",
     "rehype-sanitize": "^6.0.0",
