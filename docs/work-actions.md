@@ -1,11 +1,11 @@
 # Accepted-work action service
 
 `src/work-actions.ts` implements the instance-owned action service. Ordinary
-chat opens it once per accepted command; direct and QuickJS clock calls use the
-same registration and authorization. Task runtime and other existing tools
+chat opens it once per accepted command; direct and QuickJS clock and memory calls use the
+same registrations and authorization. Task runtime and other existing tools
 remain on their earlier paths pending their adapters. In ordinary chat, those
 other individual tools are available in Direct and Hybrid only; Code Mode offers
-only `code_mode`, with clock as its current guest capability. Dispatch rejects
+only `code_mode`, with clock and scoped memory as guest capabilities. Dispatch rejects
 individual calls that were not offered.
 
 ## Open accepted work
@@ -76,6 +76,10 @@ journal start, and before releasing a result. A completed effect remains
 recorded when Stop prevents its result from being released. The journal marks
 started effects uncertain on restart and never re-executes them automatically.
 These guarantees do not make external effects exactly once.
+
+## Memory adapter
+
+`registerMemoryCapabilities(instance, registry)` registers search, read, remember, update, forget and proposal-status actions for accepted command or task contexts. Task runtime has not yet opened this boundary. The adapter rejects helper attempts and derives agent scope from the captured bot ID. Search is bounded to 20 items and exposes a continuation cursor. Store update and delete perform their version and scope checks at the effect, not in `check`: `check` also runs when releasing a completed retry. `MemoryConflict` becomes `ActionFailed`, so the journal records a definite failure. Shared creation inserts a pending proposal through the existing instance workflow; only the separate owner command confirms it. Reads return private results through the coordinator. The shared-proposal action record shows the proposed text and ID so the owner can review it before confirmation. The generic code capability catalog remains a separate integration slice.
 
 ## Recovery
 

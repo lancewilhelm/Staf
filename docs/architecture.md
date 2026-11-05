@@ -179,7 +179,7 @@ Pairing loss unmounts settings and memory views. Archived agents remain
 inspectable without restoration. No memory mutation or provider call is added.
 
 
-Version 6 adds scoped memory in the instance database transaction after a protected migration backup. The store enforces bot and user scopes and optimistic versions. Provider calls receive bounded keyword-matched memories as untrusted request-only data. The session retains ordinary messages rather than the injected memory. Main-chat saves use only directly recognized owner input; provider output cannot invoke a memory mutation. Version 7 adds durable, bot-bound shared-memory proposals. A separate explicit owner confirmation atomically saves the proposed text once, and cancellation clears the pending proposal text without creating memory. The original text and proposal response remain in chat history and may be sent in future model requests or task context; cancellation does not erase backups or already-sent data. This is an offline-tested preview and not a general intent interpreter.
+Version 6 adds scoped memory in the instance database transaction after a protected migration backup. The store enforces bot and user scopes and optimistic versions. Provider calls receive bounded keyword-matched memories as untrusted request-only data. The session retains ordinary messages rather than the injected memory. Main-chat owner phrases and registered model actions can change agent memory or existing shared entries. Shared creation by a model creates a proposal, which requires separate owner confirmation. Version 7 adds durable, bot-bound shared-memory proposals. A separate explicit owner confirmation atomically saves the proposed text once, and cancellation clears the pending proposal text without creating memory. The original text and proposal response remain in chat history and may be sent in future model requests or task context; cancellation does not erase backups or already-sent data. This is an offline-tested preview and not a general intent interpreter.
 
 ### Shared-instance clock dispatch
 
@@ -201,7 +201,7 @@ The search tool sends only an approved literal query to the owner-configured loo
 
 Scratch shell uses only an owner-configured Docker CLI, daemon socket and pinned image, and always supplies a fixed bounded tmpfs workspace without an explicit host bind. A keyed action identity and exact-command owner decision precede daemon work. A durable lock and unresolved-action gate serialize execution; started work is marked uncertain on restart. The recorded endpoint configuration is retained for manual inspection. The owner must independently verify daemon identity because matching paths do not prove that the binary or socket still identifies the same daemon. Explicit owner review acknowledges that an absent observation cannot rule out a late create; it neither retries nor removes the old action. The CLI process and daemon can observe the command, tmpfs can use swap, and unknown output secrets can be retained. Integration tests use a synthetic executor; the component itself has separate disposable-container coverage.
 
-Descriptive memory language is parsed before the broad memory fallback. It lists a bounded set of candidates from the explicitly resolved scope and never mutates an entry. Mutations remain separate exact-ID and version-checked owner commands; shared-save confirmation is unchanged.
+Descriptive memory language is parsed before the broad memory fallback. It lists a bounded set of candidates from the explicitly resolved scope and never mutates an entry. Model actions and owner commands use the same version-checked store; shared-save confirmation is unchanged.
 
 
 OpenRouter key entry, replacement, status and disconnect use authenticated
@@ -289,8 +289,7 @@ through the protected migration process. `src/work-actions.ts` coordinates
 registered actions and uses the existing action journal. The internal clock
 registration uses the existing clock authority callback. See the
 [accepted-work action service reference](work-actions.md) for its callable API.
-Ordinary `runTurn` opens that captured command and sends direct clock and
-QuickJS child calls through the same registration. Version 33 retains source,
+Ordinary `runTurn` opens that captured command and sends direct clock and memory calls and QuickJS child calls through the same registrations. `src/memory-actions.ts` binds agent scope to captured work and calls the existing store and proposal workflow; store updates and deletes enforce versions at the atomic effect. Version 33 retains source,
 source hash, execution outcome and selected results; child linkage joins the
 existing invocation journal, which remains authoritative if a guest disappears.
 On restart a running guest is marked interrupted and is not rerun. Ordinary

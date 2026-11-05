@@ -248,6 +248,10 @@ A paired client can inspect and update copied bot defaults with `GET` and `POST 
 
 Authenticated clients use `GET` and `POST /api/skills` to list or import. Imports require `name`, `description`, `provenance` and literal `body` strings. `GET /api/skills/ID` inspects the current revision. `POST /api/skills/ID/update` adds a revision with those fields and the expected `revision`. `POST /api/skills/ID/enabled` takes a boolean `enabled`; `POST /api/skills/ID/availability` takes `botId` and boolean `available`. `GET /api/bots/BOT_ID/skills` lists currently enabled skills available to that bot. Known configured credentials are redacted before storage and from returned skill content. The catalog `digest` identifies the original submitted bytes, before redaction. Load evidence identifies this as `sourceDigest` and adds `loadedContentDigest`, the SHA-256 of the UTF-8 redacted body placed in the tool result. Older load evidence lacks a loaded-content digest. Existing stored records and backups are not rewritten. See [usage](usage.md#skills-in-the-shared-instance) for CLI syntax, selection and revocation limits.
 
+### Model memory action contract
+
+The shared action registry exports `memory_search`, `memory_read`, `memory_remember`, `memory_update`, `memory_forget`, and `memory_proposal_status`. Both individual calls and QuickJS child calls use these registrations. Scope is `{ "kind": "agent" }` or `{ "kind": "user" }`; agent identity comes only from accepted work. Search accepts `query` and an optional cursor and returns at most 20 matching items and `nextCursor`. Read returns an item with its ID, stored scope and version. Update and forget require the ID, scope and version. A stale or wrong-scope mutation is a definite failed action. Shared remember returns a pending, agent-bound proposal ID, never an active shared memory; only the owner chat confirmation or cancellation can resolve it. Proposal status is readable by the originating agent. Helpers are ineligible. These adapters accept the common command/task context; task runtime wiring remains pending. The Code Mode description currently names clock only until the generic catalog adapter lands.
+
 ### Shared-instance memory API
 
 The workspace uses the authenticated `GET` routes below for read-only memory
@@ -411,7 +415,7 @@ profiles use the existing task attempt identity, without a synthetic command ID.
 Version 31 adds `creation_defaults.tool_mode` after the existing migration backup.
 
 Ordinary chat opens the captured command's `WorkActions` and applies its mode
-to clock and `code_mode`; background tasks and other existing tool adapters
+to clock, scoped memory, and `code_mode`; background tasks and other existing tool adapters
 remain on their previous paths. `GET /api/commands/ID` returns `codeExecutions`
 (source, SHA-256 source identity, outcome, selected result, and linked action
 IDs) and `workActions` journal records. Chat-work returns code execution details
