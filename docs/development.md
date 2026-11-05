@@ -298,8 +298,9 @@ For an offline basic-tool review, use a Demo agent and repeat these steps with
    **Refresh output** shows `answer:` followed by that line. Change Columns/Rows
    and select **Resize terminal**. Select **Stop process** before its 30-second
    fixture sleep ends; expect an observed exit.
-4. Open a second tab, pair it using a new code (enter `pair` in the fixture
-   terminal), and inspect or stop the same process. For CLI controls, use the
+4. Open a private window or another browser at the same address. Enter `pair`
+   in the fixture terminal for a new code, then pair this client and inspect
+   or stop the same process. For CLI controls, use the
    [process reference](reference.md#native-process-api) with that instance and a separate paired
    credential file. Both clients should show the same process ID and outcome.
 
