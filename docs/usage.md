@@ -623,7 +623,9 @@ its captured profile. Clock permissions and applicable approvals remain live.
 
 The code tool runs a bounded QuickJS program. For example,
 `return (await capabilities.clock({})).value;` returns the UTC time. Child calls
-and direct clock calls share one action and approval service. Open **Code
+and direct clock calls share one action and approval service. The tool description
+lists the eligible guest capabilities and their input schemas, and child calls
+appear in work progress. Open **Code
 execution** in the chat work details to inspect source, selected result and
 linked action IDs. The paired CLI `instance status URL CREDENTIAL_FILE COMMAND_ID`
 and `GET /api/commands/COMMAND_ID` expose the same execution and action records.

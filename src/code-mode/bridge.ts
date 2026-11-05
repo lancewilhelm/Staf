@@ -3,9 +3,10 @@ import {startQuickJSGuest} from './executor.js';
 import {limits} from './protocol.js';
 import type {Json} from './json.js';
 import {closesAdmission, type WorkActions} from '../work-actions.js';
+import type {RuntimeEvent} from '../types.js';
 
 /** Runs one provider-requested program against the accepted work's action coordinator. */
-export async function runCode(input:{actions:WorkActions;responseId:string;callId:string;source:string;redact:(text:string)=>string}):Promise<string> {
+export async function runCode(input:{actions:WorkActions;responseId:string;callId:string;source:string;redact:(text:string)=>string;emit?:(event:RuntimeEvent)=>void}):Promise<string> {
   const {actions,source,redact}=input;
   if(Buffer.byteLength(source,'utf8')>limits.sourceBytes || redact(source)!==source) throw Error('Source cannot be retained safely or exceeds 32 KiB');
   const id=actions.startExecution(input.responseId,input.callId,source);
@@ -22,7 +23,12 @@ export async function runCode(input:{actions:WorkActions;responseId:string;callI
     try {
       if(message.type==='emit') {emitted.push(keep(message.value));persist();return {ok:true as const,value:null};}
       if(message.type==='reuse') {const value=receipts.get(message.receipt);if(value===undefined)return {ok:false as const,error:'Receipt unavailable'};return {ok:true as const,value};}
-      const result=await actions.invoke({source:{kind:'guest',executionId:id,sequence:message.seq},name:message.name,input:message.input,intent:message.intent ?? {kind:'new'}});
+      const eventId=`${id}:${message.seq}`;
+      input.emit?.({type:'tool_start',id:eventId,name:message.name});
+      let result:Awaited<ReturnType<WorkActions['invoke']>>;
+      try {result=await actions.invoke({source:{kind:'guest',executionId:id,sequence:message.seq},name:message.name,input:message.input,intent:message.intent ?? {kind:'new'}});}
+      catch(error) {input.emit?.({type:'tool_result',id:eventId,name:message.name,success:false,content:'Capability call failed'});throw error;}
+      input.emit?.({type:'tool_result',id:eventId,name:message.name,success:result.kind==='completed',content:result.kind==='completed'?'Capability completed':JSON.stringify(result)});
       if(result.kind==='blocked') {if(closesAdmission(result.reason)){fatal ??= result.reason;actions.close(fatal);}return {ok:false as const,error:result.reason};}
       if(result.kind!=='completed') return {ok:false as const,error:JSON.stringify(result)};
       const receipt=randomUUID(),value=keep(result.value);receipts.set(receipt,value);

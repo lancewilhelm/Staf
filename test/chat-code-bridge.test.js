@@ -219,3 +219,33 @@ test('code-only recovery can resume a completed child in a new guest',async()=>{
  try {const bot=await f.call('/api/bots',{name:'guest-resume',toolMode:'code'});await f.submit('guest-resume',bot.id);const c=await f.wait('guest-resume');assert.equal(c.state,'completed');assert.equal(c.workActions.length,1);assert.equal(c.codeExecutions.length,2);assert.deepEqual(c.codeExecutions[0].actions,c.codeExecutions[1].actions);assert.deepEqual(f.seen[1].offers,['code_mode']);}
  finally {await f.app.close();}
 });
+
+test('Code Mode advertises eligible capability schemas and accepts unrelated query URLs in source',async()=>{
+  let offered;
+  const f=await fixture((messages,tools)=>{
+    if(messages.at(-1).role==='tool')return {role:'assistant',content:'done'};
+    offered=tools.find(item=>item.function.name==='code_mode');
+    return tool('code_mode',{source:'return "https://example.com/path?value=ordinary";'});
+  });
+  try {
+    const bot=await f.call('/api/bots',{name:'catalog',toolMode:'code'});
+    await f.submit('catalog',bot.id);
+    const command=await f.wait('catalog');
+    assert.equal(command.state,'completed',command.error);
+    assert.equal(command.codeExecutions[0].result.value,'https://example.com/path?value=ordinary');
+    assert.match(offered.function.description,/clock/);
+    assert.match(offered.function.description,/additionalProperties/);
+  } finally {await f.app.close();}
+});
+
+test('guest capability calls appear in paired command progress',async()=>{
+  const f=await fixture(messages=>messages.at(-1).role==='tool'?{role:'assistant',content:'done'}:tool('code_mode',{source:'return await capabilities.clock({});'}));
+  try {
+    const bot=await f.call('/api/bots',{name:'progress',toolMode:'code'});
+    await f.submit('guest-progress',bot.id);
+    const command=await f.wait('guest-progress');
+    assert.equal(command.state,'completed',command.error);
+    assert.ok(command.runtimeEvents.some(event=>event.type==='tool_start' && event.name==='clock'));
+    assert.ok(command.runtimeEvents.some(event=>event.type==='tool_result' && event.name==='clock' && event.success));
+  } finally {await f.app.close();}
+});

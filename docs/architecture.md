@@ -293,6 +293,8 @@ Ordinary `runTurn` opens that captured command and sends direct clock and
 QuickJS child calls through the same registration. Version 33 retains source,
 source hash, execution outcome and selected results; child linkage joins the
 existing invocation journal, which remains authoritative if a guest disappears.
+The provider receives the eligible guest definitions as a catalog, and child
+calls publish their registered names and outcomes through command progress.
 On restart a running guest is marked interrupted and is not rerun. Ordinary
 script errors create a recovery epoch and return the manifest to the same
 provider loop. Task and helper runtime and the web, search, scratch and skill

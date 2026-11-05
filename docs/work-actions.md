@@ -118,6 +118,13 @@ argument to `capabilities.clock(input, intent)` carries `new`, `resume` or
 `repeat` intent. Direct calls use an optional `_staf` intent field outside the
 capability input. A recovery result contains the manifest and instructions.
 
+The `code_mode` tool description includes the currently eligible guest catalog,
+including each registered name, description and input schema. Guest calls emit
+capability start and result events in the existing command progress stream; their
+inspection records remain owned by the action coordinator. Direct action outcomes
+that are blocked, uncertain, failed, or require a repeat are reported as
+unsuccessful progress rather than completed calls.
+
 Before starting a worker, the service records exact safe source, SHA-256 identity,
 work and provider call. Child mapping and action preparation are committed by
 the action service before the effect. `WorkActionService.inspect(work)` and
