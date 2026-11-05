@@ -4,7 +4,7 @@ const run=promisify(execFile);
 import {mkdtemp, readFile, rm, mkdir, writeFile} from 'node:fs/promises';
 import {existsSync} from 'node:fs';
 import {homedir,tmpdir} from 'node:os';
-import {join,resolve} from 'node:path';
+import {dirname,join,resolve} from 'node:path';
 import {createServer} from 'node:net';
 import assert from 'node:assert/strict';
 const root=resolve(import.meta.dirname,'../..');
@@ -504,9 +504,58 @@ try{
  await until(()=>evaluate("[...document.querySelectorAll('.chat-work details summary')].some(e=>e.textContent.includes('Process · running'))"),'native process is visible');
  await evaluate("[...document.querySelectorAll('.chat-work details summary')].find(e=>e.textContent.includes('Process · running')).click()");
  await until(()=>evaluate("[...document.querySelectorAll('.chat-work details[open]')].some(e=>e.innerText.includes('native browser output'))"),'native process output appears');
- await evaluate("[...document.querySelectorAll('.chat-work details[open]')].find(e=>e.innerText.includes('native browser output')).querySelector('button').click()");
+ await evaluate("[...[...document.querySelectorAll('.chat-work details[open]')].find(e=>e.innerText.includes('native browser output')).querySelectorAll('button')].find(button=>button.textContent==='Stop process').click()");
  await until(()=>evaluate("[...document.querySelectorAll('.chat-work details summary')].some(e=>e.textContent.includes('Process · exited'))"),'native process Stop settles');
  console.log('PASS native output and Stop in chat');
+ // Reuse this paired browser and its independent CLI client for the combined basic-tool journey.
+ for(const mode of ['direct','hybrid','code']) {
+  await act("document.querySelector('button[aria-label=\"Open agent settings\"]').click()","!![...document.querySelectorAll('.setup label')].find(e=>e.textContent.startsWith('Tool mode'))",'open tool mode settings');
+  await evaluate(`(()=>{const select=[...document.querySelectorAll('.setup label')].find(e=>e.textContent.startsWith('Tool mode')).querySelector('select');select.value=${JSON.stringify(mode)};select.dispatchEvent(new Event('change',{bubbles:true}));testClick('Save settings')})()`);
+  await until(()=>evaluate("!!document.querySelector('[aria-label=Message]')"),'save '+mode+' mode');
+  const saved=await evaluate(`(async()=>{return (await (await fetch('/api/bots/${bot.id}',{headers:{Authorization:'Bearer '+localStorage.getItem('staf-token')}})).json()).toolMode})()`);
+  assert.equal(saved,mode);
+  const create='Basic tools fixture '+mode,revise='Revise basic tools fixture '+mode;
+  await act(`testInput('[aria-label=Message]',${JSON.stringify(create)});testClick('Send')`,`document.querySelector('.messages').innerText.includes(${JSON.stringify(create+' completed.')})`,'GUI creates file and memory in '+mode);
+  assert.equal(await readFile(join(dirname(updated.configDir),'work','basic-acceptance.txt'),'utf8'),'before');
+  const remembered=await evaluate(`(async()=>{return await (await fetch('/api/memories/bot/${bot.id}',{headers:{Authorization:'Bearer '+localStorage.getItem('staf-token')}})).json()})()`);
+  assert.equal(remembered.filter(item=>item.text==='browser acceptance').length,1);
+  const sent=await cli('send',url,credential,bot.id,revise),id=sent.match(/Command ID: ([\w-]+)/)?.[1];assert.ok(id);
+  const status=await until(async()=>{const work=JSON.parse(await cli('status',url,credential,id));return work.state!=='pending'&&work;},'CLI basic tools finish');
+  assert.equal(status.state,'completed',status.error);assert.equal(status.workActions.length,6);assert.ok(status.workActions.every(action=>action.state==='succeeded'));
+  await until(()=>evaluate(`document.querySelector('.messages').innerText.includes(${JSON.stringify(revise+' completed.')})`),'GUI observes CLI file and memory work');
+  assert.equal(await readFile(join(dirname(updated.configDir),'work','basic-acceptance.txt'),'utf8'),'after');
+  assert.equal(await evaluate(`(async()=>{return (await (await fetch('/api/memories/bot/${bot.id}',{headers:{Authorization:'Bearer '+localStorage.getItem('staf-token')}})).json()).some(item=>item.text.includes('browser acceptance'))})()`),false);
+  if(mode!=='direct') {
+   assert.match(status.codeExecutions[0].source,/file_read/);assert.deepEqual(status.codeExecutions[0].result.value.matches,[0]);
+   await evaluate("[...document.querySelectorAll('.chat-work details summary')].findLast(e=>e.textContent.includes('Code execution')).click()");
+   assert.equal(await evaluate("[...document.querySelectorAll('.chat-work details[open]')].some(e=>e.innerText.includes('file_read') && e.innerText.includes('matches') && e.innerText.includes('Action IDs:'))"),true);
+  }
+  const beforeProcesses=JSON.parse(await cli('processes',url,credential)).map(process=>process.id);
+  await evaluate("testInput('[aria-label=Message]','Interactive process fixture');testClick('Send')");
+  const process=await until(async()=>JSON.parse(await cli('processes',url,credential)).find(process=>!beforeProcesses.includes(process.id)&&process.state==='running'),'retained PTY starts');
+  await until(()=>evaluate(`document.body.innerText.includes(${JSON.stringify(process.id)}) || [...document.querySelectorAll('.chat-work details summary')].some(e=>e.textContent.includes('Process · running'))`),'PTY appears in GUI');
+  await evaluate("[...document.querySelectorAll('.chat-work details summary')].findLast(e=>e.textContent.includes('Process · running')).click()");
+  await until(()=>evaluate(`!!document.querySelector('#process-input-${process.id}')`),'PTY input control');
+  await cdp('Emulation.setDeviceMetricsOverride',{width:375,height:812,deviceScaleFactor:1,mobile:false});
+  assert.equal(await evaluate("document.documentElement.scrollWidth<=innerWidth"),true,'terminal controls fit narrow viewport');
+  await evaluate(`testInput('#process-input-${process.id}','keyboard ${mode}');document.querySelector('#process-input-${process.id}').focus()`);
+  await cdp('Input.dispatchKeyEvent',{type:'keyDown',key:'Tab',code:'Tab',windowsVirtualKeyCode:9});await cdp('Input.dispatchKeyEvent',{type:'keyUp',key:'Tab',code:'Tab',windowsVirtualKeyCode:9});
+  assert.equal(await evaluate("document.activeElement.textContent"),'Send line');
+  await cdp('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',text:'\r',unmodifiedText:'\r',windowsVirtualKeyCode:13,nativeVirtualKeyCode:13});await cdp('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13,nativeVirtualKeyCode:13});
+  await until(()=>evaluate(`document.querySelector('#process-input-${process.id}')?.value===''`),'keyboard submits the input control');
+  await until(async()=>JSON.parse(await cli('process-output',url,credential,process.id)).chunks.some(chunk=>chunk.text?.includes('answer:keyboard '+mode)),'keyboard input reaches real PTY');
+  await evaluate(`(()=>{const detail=document.querySelector('#process-input-${process.id}').closest('details');const inputs=detail.querySelectorAll('input[type=number]');for(const [index,value] of ['96','33'].entries()){Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(inputs[index],value);inputs[index].dispatchEvent(new Event('input',{bubbles:true}));} [...detail.querySelectorAll('button')].find(button=>button.textContent==='Resize terminal').click()})()`);
+  await until(async()=>{const current=JSON.parse(await cli('processes',url,credential)).find(item=>item.id===process.id);return current.cols===96&&current.rows===33;},'GUI resizes same CLI terminal');
+  await evaluate(`(()=>{const detail=document.querySelector('#process-input-${process.id}').closest('details');[...detail.querySelectorAll('button')].find(button=>button.textContent==='Refresh output').click()})()`);
+  await until(()=>evaluate(`document.querySelector('#process-input-${process.id}').closest('details').innerText.includes(${JSON.stringify('answer:keyboard '+mode)})`),'GUI displays actual PTY reply');
+  await cli('process-stop',url,credential,process.id);
+  await until(()=>evaluate(`[...document.querySelectorAll('.chat-work details')].some(detail=>detail.innerText.includes(${JSON.stringify(process.id)}) && detail.querySelector('summary').textContent.includes('Process · exited'))`),'GUI observes second-client Stop');
+  await cdp('Emulation.clearDeviceMetricsOverride');
+  console.log('PASS combined GUI/CLI files, memory and retained PTY in '+mode);
+ }
+ await act("document.querySelector('button[aria-label=\"Open agent settings\"]').click()","!![...document.querySelectorAll('.setup label')].find(e=>e.textContent.startsWith('Tool mode'))",'restore Hybrid fixture mode');
+ await evaluate("(()=>{const select=[...document.querySelectorAll('.setup label')].find(e=>e.textContent.startsWith('Tool mode')).querySelector('select');select.value='hybrid';select.dispatchEvent(new Event('change',{bubbles:true}));testClick('Save settings')})()");
+ await until(()=>evaluate("!!document.querySelector('[aria-label=Message]')"),'return from tool mode settings');
  await act("testInput('[aria-label=Message]','Start synthetic background work');testClick('Send')","document.querySelector('.messages').innerText.includes('Background tasks are deferred')",'unsolicited background creation rejected');
  assert.equal(await evaluate("[...document.querySelectorAll('.side button')].some(b=>b.textContent.includes('Updates'))"),false,'task update navigation absent');
  const duplicate=await evaluate("(async()=>{const t=localStorage.getItem('staf-token');return await (await fetch('/api/bots',{method:'POST',headers:{Authorization:'Bearer '+t,'Content-Type':'application/json'},body:JSON.stringify({name:'Mira',instructions:'Another role'})})).json()})()");

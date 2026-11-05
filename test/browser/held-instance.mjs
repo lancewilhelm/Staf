@@ -15,9 +15,36 @@ return {
   name: 'controlled-offline',
   capabilities: { toolCalls: true, incrementalText: false, transport: 'demo' },
   async complete(messages, tools, options) {
+    const prompt=options?.currentUserInput ?? '';
+    const scripted=tools.some(tool=>tool.function.name==='code_mode');
+    const calls=items=>({role:'assistant',content:null,tool_calls:items.map(([name,input])=>({id:name,type:'function',function:{name,arguments:JSON.stringify(input)}}))});
+    if (prompt.startsWith('Basic tools fixture ') || prompt.startsWith('Revise basic tools fixture ')) {
+      const revise=prompt.startsWith('Revise');
+      const results=messages.slice(messages.findLastIndex(message=>message.role==='user')+1).filter(message=>message.role==='tool');
+      const result=name=>JSON.parse(results.findLast(message=>message.tool_call_id===name).content);
+      if (scripted) {
+        if(results.length)return {role:'assistant',content:prompt+' completed.'};
+        const source=revise?`
+          const file=(await capabilities.file_read({path:'basic-acceptance.txt'})).value;
+          const memory=(await capabilities.memory_search({scope:{kind:'agent'},query:'browser acceptance'})).value.items[0];
+          await capabilities.file_edit({path:'basic-acceptance.txt',expectedHash:file.sha256,oldText:'before',newText:'after'});
+          const updated=(await capabilities.memory_update({scope:{kind:'agent'},id:memory.id,version:memory.version,text:'updated browser acceptance'})).value;
+          const found=(await capabilities.file_search({path:'basic-acceptance.txt',query:'after'})).value;
+          await capabilities.memory_forget({scope:{kind:'agent'},id:updated.id,version:updated.version});
+          return found;
+        `:`await capabilities.file_write({path:'basic-acceptance.txt',content:'before'}); return (await capabilities.memory_remember({scope:{kind:'agent'},text:'browser acceptance'})).value;`;
+        return calls([['code_mode',{source}]]);
+      }
+      if(!revise && !results.length)return calls([['file_write',{path:'basic-acceptance.txt',content:'before'}],['memory_remember',{scope:{kind:'agent'},text:'browser acceptance'}]]);
+      if(revise && !results.length)return calls([['file_read',{path:'basic-acceptance.txt'}],['memory_search',{scope:{kind:'agent'},query:'browser acceptance'}]]);
+      if(revise && results.length===2){const memory=result('memory_search').items[0];return calls([['file_edit',{path:'basic-acceptance.txt',expectedHash:result('file_read').sha256,oldText:'before',newText:'after'}],['memory_update',{scope:{kind:'agent'},id:memory.id,version:memory.version,text:'updated browser acceptance'}]]);}
+      if(revise && results.length===4){const memory=result('memory_update');return calls([['file_search',{path:'basic-acceptance.txt',query:'after'}],['memory_forget',{scope:{kind:'agent'},id:memory.id,version:memory.version}]]);}
+      return {role:'assistant',content:prompt+' completed.'};
+    }
     if (options?.currentUserInput==='Interactive process fixture') {
       if(messages.at(-1)?.role==='tool')return {role:'assistant',content:'Interactive fixture started.'};
-      return {role:'assistant',content:null,tool_calls:[{id:'interactive',type:'function',function:{name:'terminal_run',arguments:JSON.stringify({command:'printf "interactive ready\\n"; read answer; printf "answer:%s\\n" "$answer"; exec sleep 30',mode:'pty',retain:true})}}]};
+      const input={command:'printf "interactive ready\\n"; read answer; printf "answer:%s\\n" "$answer"; exec sleep 30',mode:'pty',retain:true};
+      return calls([[scripted?'code_mode':'terminal_run',scripted?{source:`return (await capabilities.terminal_run(${JSON.stringify(input)})).value;`}:input]]);
     }
     if (options?.currentUserInput==='Native process fixture') {
       if (messages.at(-1)?.role==='tool') return {role:'assistant',content:'Native fixture started.'};

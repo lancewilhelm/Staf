@@ -6,5 +6,5 @@ function change(event:Event){if(event.target instanceof HTMLSelectElement){const
 </script>
 <template>
   <label>Tool mode<select :value="modelValue" :disabled="disabled" @change="change"><option v-if="allowDefault" value="">Use creation default</option><option value="direct">Direct</option><option value="hybrid">Hybrid</option><option value="code">Code Mode</option></select></label>
-  <p class="meta">Chat offers clock directly in Direct, both clock and code in Hybrid, and code in Code Mode. Code currently calls clock; other existing tools and background tasks are not yet adapted.</p>
+  <p class="meta">Direct calls tools individually. Hybrid also offers code execution. Code Mode calls available tools through JavaScript. All three use the same capabilities and permissions.</p>
 </template>
