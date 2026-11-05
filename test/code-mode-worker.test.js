@@ -37,14 +37,14 @@ test('a rejected intent does not consume the next host call sequence', async () 
   assert.equal((await guest.finished).outcome,'return');assert.equal(requests.length,1);assert.equal(requests[0].seq,1);
 });
 
-test('guest stack exhaustion closes as a limit', async () => {
+test('observed host stack exhaustion closes the guest', async () => {
   const guest=run('function recurse(){ return recurse(); } return recurse();',async()=>({ok:false,error:'unexpected'}));
   assert.equal((await guest.finished).outcome,'limit');
 });
 
-test('guest heap exhaustion closes as a limit', async () => {
-  const guest=startQuickJSGuest({source:'const values=[]; for (;;) values.push(new Array(65536).fill("data"));',names:[],guestMs:5000,heapBytes:4*1024*1024,request:async()=>({ok:false,error:'unexpected'}),phase:()=>{}});
-  assert.equal((await guest.finished).outcome,'limit');
+test('the QuickJS allocation guard rejects a request larger than its configured capacity', async () => {
+  const guest=startQuickJSGuest({source:'new ArrayBuffer(8*1024*1024); return "unexpected";',names:[],guestMs:5000,heapBytes:4*1024*1024,request:async()=>({ok:false,error:'unexpected'}),phase:()=>{}});
+  assert.equal((await guest.finished).outcome,'error');
 });
 
 test('actual JSON bounds close the guest even if its program catches the error', async () => {

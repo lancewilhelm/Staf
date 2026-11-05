@@ -130,10 +130,18 @@ with eight pending actions. Each source is at most 32 KiB, selected output at
 most 256 KiB, guest CPU time at most 5,000 ms per execution, QuickJS heap at most
 32 MiB and stack at most 512 KiB. A worker message is bounded to 256 KiB.
 Ordinary `Error` messages, including words such as `interrupted` or `limit`,
-remain recoverable. The worker tracks actual interrupt and bridge-limit events
-and captures QuickJS's native engine-error prototype before running the program;
-it does not infer exhaustion from an error's message or mutable name.
-Denial, Stop, live restriction and observed shared or guest resource exhaustion close
-admission. Ordinary syntax/runtime errors enter recovery; Hybrid can use direct
-calls and Code Mode remains selected. These are QuickJS and protocol bounds,
-not OS/container isolation or a total host RSS limit.
+remain recoverable. Exception values, including guest-created `InternalError`
+objects, do not establish that a shared budget was exhausted. The worker tracks
+actual interrupt and bridge-limit events instead of interpreting exception text
+or prototypes.
+
+The [approved recovery contract](design/basic-tools/checkpoint.md#recovery-and-repeated-commands)
+closes admission across both styles for exhausted **shared work budgets**.
+QuickJS's allocation and stack guards apply to each program. A program may catch
+an allocation or stack exception and continue within those guards and its
+remaining work budget. An uncaught exception enters ordinary recovery; it does
+not imply that the shared action or execution allowance has been consumed.
+Observed host stack, CPU, bridge and output limit events, shared budget exhaustion, denial,
+Stop and live restrictions close admission. Hybrid can use direct calls after
+ordinary failures; Code Mode remains selected. These are QuickJS and protocol
+bounds, not OS/container isolation or a total host RSS limit.

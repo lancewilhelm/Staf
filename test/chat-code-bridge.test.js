@@ -93,6 +93,7 @@ test('ordinary errors mentioning limits keep Hybrid recovery available',async()=
   try {
     const programs=['interrupted','out of memory','stack overflow','JSON limit','JSON nesting limit','Bridge limit'].map(message=>`await capabilities.clock({}); throw Error(${JSON.stringify(message)});`);
     programs.push('await capabilities.clock({}); throw Object.assign(new Error("stack overflow"), {name:"InternalError"});');
+    programs.push('await capabilities.clock({}); throw new InternalError("ordinary failure");');
     for(const [index,source] of programs.entries()) {
       const bot=await f.call('/api/bots',{name:'error-'+index,toolMode:'hybrid'});
       await f.submit('ordinary-'+index,bot.id,source);const command=await f.wait('ordinary-'+index);
@@ -102,6 +103,21 @@ test('ordinary errors mentioning limits keep Hybrid recovery available',async()=
       assert.equal(command.workActions.length,2);
       assert.ok(command.workActions.every(action=>action.state==='succeeded'));
     }
+  } finally {await f.app.close();}
+});
+
+test('a caught per-program allocation rejection preserves the shared work budget',async()=>{
+  const f=await fixture(messages=>messages.at(-1).role==='tool'
+    ? {role:'assistant',content:'done'}
+    : tool('code_mode',{source:'let rejected=false; try {new ArrayBuffer(64*1024*1024);} catch {rejected=true;} return {rejected,time:(await capabilities.clock({})).value};'}));
+  try {
+    const bot=await f.call('/api/bots',{name:'allocation guard',toolMode:'hybrid'});
+    await f.submit('allocation-guard',bot.id);const command=await f.wait('allocation-guard');
+    assert.equal(command.state,'completed',command.error);
+    assert.equal(command.codeExecutions[0].result.value.rejected,true);
+    assert.match(command.codeExecutions[0].result.value.time,/^\d{4}-/);
+    assert.equal(command.workActions.length,1);
+    assert.equal(command.workActions[0].state,'succeeded');
   } finally {await f.app.close();}
 });
 
@@ -137,8 +153,8 @@ test('code-only syntax error returns a clear recovery result without offering di
   finally {await f.app.close();}
 });
 
-test('shared action budget closes admission when a guest exhausts it',async()=>{
-  const f=await fixture(()=>tool('code_mode',{source:'for (let i=0;i<33;i++) await capabilities.clock({}); return "done";'}));
+test('shared action budget closes admission even after a caught allocation rejection',async()=>{
+  const f=await fixture(()=>tool('code_mode',{source:'try {new ArrayBuffer(64*1024*1024);} catch {} for (let i=0;i<33;i++) await capabilities.clock({}); return "done";'}));
   try {const bot=await f.call('/api/bots',{name:'budget',toolMode:'hybrid'});await f.submit('budget',bot.id);const c=await f.wait('budget');assert.equal(c.state,'failed');assert.equal(c.codeExecutions[0].outcome,'closed');assert.equal(c.workActions.length,32);assert.ok(c.workActions.every(x=>x.state==='succeeded'));assert.match(c.error,/limit/i);}
   finally {await f.app.close();}
 });

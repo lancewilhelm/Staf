@@ -5,7 +5,6 @@ import {jsonValue} from './json.js';
 
 let context: QuickJSContext | undefined;
 let result: QuickJSHandle | undefined;
-let engineErrorTest: QuickJSHandle | undefined;
 let started = false, ended = false, sequence = 0, guestMs = 0, allowance = 0;
 let resourceExhausted = false;
 let segmentStart = 0;
@@ -18,16 +17,7 @@ function end(outcome: 'error' | 'syntax' | 'limit'): void {
 }
 function phase(busy: boolean): void { send({type: 'phase', busy, guestMs}); }
 function hostExhausted(error:unknown):boolean {return error instanceof RangeError && /call stack/i.test(error.message);}
-function exhausted(vm:QuickJSContext,error:QuickJSHandle):boolean {
-  if (resourceExhausted || guestMs >= allowance) return true;
-  const test = engineErrorTest;
-  if (!test) return false;
-  const inspected = runGuest(() => vm.callFunction(test, vm.undefined, error));
-  if (inspected.error) {inspected.error.dispose(); return true;}
-  const engineFailure = vm.getNumber(inspected.value) === 1;
-  inspected.value.dispose();
-  return engineFailure || resourceExhausted || guestMs >= allowance;
-}
+function exhausted():boolean {return resourceExhausted || guestMs >= allowance;}
 function runGuest<T>(fn: () => T): T {
   phase(true); segmentStart = performance.now();
   try { return fn(); }
@@ -40,7 +30,7 @@ function pump(): void {
     runGuest(() => {
       for (let i = 0; i < 64 && vm.runtime.hasPendingJob(); i++) {
         const job = vm.runtime.executePendingJobs(1);
-        if (job.error) { const limited=exhausted(vm,job.error);job.error.dispose();if(limited){end('limit');return;}throw Error('Guest job failed'); }
+        if (job.error) { const limited=exhausted();job.error.dispose();if(limited){end('limit');return;}throw Error('Guest job failed'); }
       }
     });
     if(ended)return;
@@ -51,7 +41,7 @@ function pump(): void {
       const value: unknown = JSON.parse(encoded);
       const parsed = jsonValue.parse(value);
       ended = true; send({type: 'end', outcome: 'return', value: parsed, guestMs});
-    } else if (state.type === 'rejected') {const limited=exhausted(vm,state.error);state.error.dispose();end(limited?'limit':'error');}
+    } else if (state.type === 'rejected') {const limited=exhausted();state.error.dispose();end(limited?'limit':'error');}
     else if (vm.runtime.hasPendingJob()) setImmediate(pump);
     else if (pending.size === 0) end('error');
   } catch(error) { end(guestMs >= allowance || hostExhausted(error) ? 'limit' : 'error'); }
@@ -69,14 +59,6 @@ async function start(source: string, names: string[], budget: number, heapBytes:
     return resourceExhausted;
   });
   const vm = runtime.newContext(); context = vm;
-  // Capture the engine's prototype before user code can change names or globals.
-  // Ordinary Error text is never evidence that a resource limit was reached.
-  const detector = runGuest(() => vm.evalCode(`(() => {
-    const prototype = InternalError.prototype, getPrototypeOf = Object.getPrototypeOf;
-    return error => { try {return getPrototypeOf(error) === prototype ? 1 : 0;} catch {return 0;} };
-  })()`));
-  if (detector.error) {detector.error.dispose(); end(resourceExhausted ? 'limit' : 'error'); return;}
-  engineErrorTest = detector.value;
   const hitLimit = vm.newFunction('__limit', () => {resourceExhausted = true;});
   vm.setProp(vm.global, '__limit', hitLimit); hitLimit.dispose();
   const bridge = vm.newFunction('__bridge', handle => {
@@ -140,12 +122,12 @@ async function start(source: string, names: string[], budget: number, heapBytes:
   })()`;
   try {
     const setup = runGuest(() => vm.evalCode(bootstrap));
-    if (setup.error) {const limited=exhausted(vm,setup.error);setup.error.dispose();end(limited?'limit':'error');return;}
+    if (setup.error) {const limited=exhausted();setup.error.dispose();end(limited?'limit':'error');return;}
     const evaluation = runGuest(() => vm.evalCode(`(async () => {\n${source}\n})()`, 'staf-code.js', {type: 'global'}));
-    if (evaluation.error) {const limited=exhausted(vm,evaluation.error);evaluation.error.dispose(); setup.value.dispose(); end(limited || guestMs >= allowance ? 'limit' : 'syntax'); return;}
+    if (evaluation.error) {const limited=exhausted();evaluation.error.dispose(); setup.value.dispose(); end(limited?'limit':'syntax'); return;}
     const wrapped = runGuest(() => vm.callFunction(setup.value, vm.undefined, evaluation.value));
     setup.value.dispose(); evaluation.value.dispose();
-    if (wrapped.error) {const limited=exhausted(vm,wrapped.error);wrapped.error.dispose();end(limited?'limit':'error');return;}
+    if (wrapped.error) {const limited=exhausted();wrapped.error.dispose();end(limited?'limit':'error');return;}
     result = wrapped.value; pump();
   } catch(error) { end(hostExhausted(error) ? 'limit' : 'error'); }
 }
