@@ -1,11 +1,11 @@
 # Accepted-work action service
 
 `src/work-actions.ts` implements the instance-owned action service. Ordinary
-chat opens it once per accepted command; direct and QuickJS clock calls use the
-same registration and authorization. Task runtime and other existing tools
+chat opens it once per accepted command; direct and QuickJS clock and memory calls use the
+same registrations and authorization. Task runtime and other existing tools
 remain on their earlier paths pending their adapters. In ordinary chat, those
 other individual tools are available in Direct and Hybrid only; Code Mode offers
-only `code_mode`, with clock as its current guest capability. Dispatch rejects
+only `code_mode`, with clock and scoped memory as guest capabilities. Dispatch rejects
 individual calls that were not offered.
 
 ## Open accepted work
@@ -62,8 +62,9 @@ one transaction.
 A `Capability<I, O>` supplies its tool definition, input and result parsers,
 safe description, eligibility and live precondition checks, authorization,
 execution, and a safe result for inspection. `execute` returns a JSON-compatible
-result. Throw `ActionFailed` only for a definite failure and provide a safe
-result. Other execution exceptions produce an uncertain journal outcome. Throw
+result. An input parser may throw `ActionFailed` with a safe reason to reject
+input before any invocation or journal record is written. An execution may throw
+it only for a definite failed effect. Other execution exceptions produce an uncertain journal outcome. Throw
 `ActionDenied` for a denied authorization. The clock adapter translates the
 existing clock denial into that error. Feature code must keep `summary`,
 `resource`, and `visibleResult` safe for inspection. Inputs and private results
@@ -76,6 +77,10 @@ journal start, and before releasing a result. A completed effect remains
 recorded when Stop prevents its result from being released. The journal marks
 started effects uncertain on restart and never re-executes them automatically.
 These guarantees do not make external effects exactly once.
+
+## Memory adapter
+
+`registerMemoryCapabilities(instance, registry, redact)` registers search, read, remember, update, forget and proposal-status actions for accepted command or task contexts. Task runtime has not yet opened this boundary. The adapter rejects helper attempts and derives agent scope from the captured bot ID. Search is bounded to 20 items and exposes a continuation cursor. Store update and delete perform their version and scope checks at the effect, not in `check`: `check` also runs when releasing a completed retry. `MemoryConflict` becomes `ActionFailed`, so the journal records a definite failure. Shared creation inserts a pending proposal through the existing instance workflow; only the separate owner command confirms it. Reads return private results through the coordinator. Memory input parsing rejects creation and update text that the instance credential redactor would change, before invocation inputs, action records, store entries or proposals are written. The shared-proposal action record therefore shows the exact text that owner confirmation saves, together with its ID; inspection and recovery still use structured redaction. The common runtime supplies the eligible memory catalog, progress and outcome reporting.
 
 ## Recovery
 
@@ -136,6 +141,8 @@ Per accepted command: at most four guest executions and 32 action invocations,
 with eight pending actions. Each source is at most 32 KiB, selected output at
 most 256 KiB, guest CPU time at most 5,000 ms per execution, QuickJS heap at most
 32 MiB and stack at most 512 KiB. A worker message is bounded to 256 KiB.
+Direct tool arguments that credential redaction would alter are rejected before dispatch; the runtime never executes their redacted replacement.
+
 Ordinary `Error` messages, including words such as `interrupted` or `limit`,
 remain recoverable. Exception values, including guest-created `InternalError`
 objects, do not establish that a shared budget was exhausted. The worker tracks
