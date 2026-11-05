@@ -208,7 +208,7 @@ report those skips separately.
 The combined basic-tool checks use the same disposable-instance boundary:
 
 ```sh
-node --test test/basic-tools-acceptance.test.js
+node --test test/basic-tools-acceptance.test.js test/basic-tools-review.test.js
 ```
 
 These checks combine real files, scoped memory, skill loading and retained native

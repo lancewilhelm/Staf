@@ -434,6 +434,40 @@ for limits, recovery and adapter entry points.
 
 Paths resolve against the captured working directory unless absolute and use ordinary host permissions. Inputs changed by redaction are rejected before journal preparation. Shared action admission, Stop, recovery, and uncertain-effect handling apply. Helper and scheduled task restrictions remain in force; task mode applies to eligible actions.
 
+### Action reconciliation
+
+`POST /api/work-actions/command/WORK_ID/ACTION_ID/reconcile` and
+`POST /api/work-actions/task/ATTEMPT_ID/ACTION_ID/reconcile` accept
+`{"evidence": OBJECT}` from a paired owner. The work must be active; task scope
+includes its predecessor lineage. Ordinary authority, Stop and denial checks
+still apply. A successful response is the recovery manifest, including resolved
+action IDs under `resolutions`. It never reruns the effect or changes the original
+observed outcome. Matching completed or resolved changes still require a repeat
+challenge; a previously blocked invocation needs a fresh call identity.
+
+Supported evidence is feature-specific:
+
+| Action | Evidence checked against the actual service |
+| --- | --- |
+| `terminal_run` | `{"processId":"ID","observedCursor":N}`; the same agent/action owns the process, its state is exited/failed, output is complete and the cursor matches. Live or lost observations cannot resolve. |
+| `file_write` | `{"sha256":"HASH"}`; bounded current file bytes match both this hash and the recorded write content. |
+| `memory_update` | `{"version":N}`; the scoped entry has the exact requested text and version immediately after the recorded version. |
+| `memory_forget` | `{"absent":true}`; the entry is absent in the recorded scope. |
+
+Other actions have no generic override. Process input submission does not prove
+application consumption. A settled process observation does not establish
+exactly-once external shell effects. The owner reviews the observed result before
+requesting resolution; later calls still pass their normal preconditions.
+
+CLI: `instance reconcile-action URL CREDENTIAL_FILE command|task WORK_ID ACTION_ID EVIDENCE_FILE`.
+The evidence file contains only the feature evidence object, without an outer
+`evidence` field. This is an owner control, not a model capability.
+
+Read receipts used for recovery stay in memory only while work is open. Their
+invocation rows have no private payload; selected output and conversation history
+remain retained. An expired read resume reports its completed status without
+re-executing it. A new read can fetch current data.
+
 ### Native process API
 
 Paired clients can list `GET /api/processes`, inspect `GET /api/processes/ID`,

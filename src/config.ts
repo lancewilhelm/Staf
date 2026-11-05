@@ -60,6 +60,10 @@ export function streamingRedactor(env: Environment, additionalSecrets: () => rea
   };
 }
 export type ByteRedactor = {write(data:Buffer):Buffer;finish():Buffer};
+/** Byte overlap needed to check a random-access page against complete known credentials. */
+export function credentialRedactionOverlap(env:Environment, additionalSecrets:readonly string[]=[]):number {
+  return Math.max(16,...[...credentialValues(env),...additionalSecrets].flatMap(value=>[value,JSON.stringify(value).slice(1,-1)]).map(value=>Buffer.byteLength(value,'utf8')));
+}
 /** Preserve noncredential bytes, retaining unfinished secret prefixes between observations. */
 export function byteStreamRedactor(env:Environment, additionalSecrets:()=>readonly string[]=()=>[]):ByteRedactor {
   let pending='',token=false;

@@ -34,7 +34,7 @@ export async function runCode(input:{actions:WorkActions;responseId:string;callI
       input.emit?.({type:'tool_result',id:eventId,name:message.name,success:result.kind==='completed',content:result.kind==='completed' && message.name==='select_skill' && typeof result.value==='string' ? JSON.stringify(skillEvidence(result.value) ?? {}) : result.kind==='completed'?'Capability completed':JSON.stringify(result)});
       if(result.kind==='blocked') {if(actions.closedReason()) fatal ??= result.reason;return {ok:false as const,error:result.reason};}
       if(result.kind!=='completed') return {ok:false as const,error:JSON.stringify(result)};
-      const receipt=randomUUID(),value=message.name==='select_skill' ? safe(result.value) : keep(result.value);
+      const receipt=randomUUID(),value=safe(result.value);
       cachedBytes+=Buffer.byteLength(JSON.stringify(value));if(cachedBytes>limits.cacheBytes){fatal='Guest cache limit reached';actions.close(fatal);throw Error(fatal);}receipts.set(receipt,value);
       return {ok:true as const,value:{receipt,actionId:result.actionId,value}};
     } catch(error) {

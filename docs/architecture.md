@@ -351,3 +351,18 @@ work cancellation signal. The process lifetime listens to the latter, so closing
 guest does not kill a retained process. Work completion stops nonretained processes;
 actual Stop, expiry, agent archive and shutdown request termination as applicable.
 Later work checks the recorded owning agent, not the selected chat pointer.
+
+The coordinator retains read receipts only in work-scoped memory, clearing them
+when the last work handle is released; only changing-action receipts remain in
+private SQLite results. Guest/internal read records keep completion metadata,
+while selected output and ordinary provider history retain their existing
+lifecycle. Random-access file reads include a credential-length byte overlap
+when checking known secrets, so page boundaries cannot expose credential pieces.
+
+Paired owner reconciliation uses the active command/task controller and its
+immutable context. Feature hooks verify actual settled process observations,
+file-write bytes or scoped memory state before recording a resolution and a new
+recovery epoch. Task retries can resolve eligible predecessor actions. Original
+outcomes remain unchanged, closed work stays closed, and a matching resolved
+uncertain change still requires a repeat challenge. There is no generic force
+resolution or model reconciliation tool. See [the contract](work-actions.md).

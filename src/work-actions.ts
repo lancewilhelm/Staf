@@ -6,6 +6,7 @@ import { jsonValue } from './code-mode/json.js';
 import type { Json } from './code-mode/json.js';
 import type { ToolMode } from './tool-mode.js';
 import type { ToolDefinition } from './types.js';
+import {z} from 'zod';
 
 export const workActionsSchema = `
 CREATE TABLE IF NOT EXISTS work_action_state (kind TEXT NOT NULL, work_id TEXT NOT NULL, used INTEGER NOT NULL DEFAULT 0, closed TEXT, epoch INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(kind,work_id));
@@ -19,7 +20,8 @@ export type WorkContext = Readonly<{work:WorkRef; botId:string; conversation:{ki
 export type InvocationSource = {kind:'provider';responseId:string;callId:string} | {kind:'guest';executionId:string;sequence:number};
 type InternalInvocationSource = {kind:'internal';parentId:string;sequence:number};
 export type ActionIntent = {kind:'new'} | {kind:'resume';actionId:string} | {kind:'repeat';challenge:string};
-export type Description = {summary:string;resource:string;effect:'read'|'change';opaque?:boolean};
+const actionDescription=z.strictObject({summary:z.string().min(1),resource:z.string().min(1),effect:z.enum(['read','change']),opaque:z.boolean().optional()});
+export type Description = z.infer<typeof actionDescription>;
 export type ActionIdentity = Readonly<{id:string;fingerprint:string}>;
 /** start runs synchronously in the coordinator's start transaction; release runs on every exit. */
 export type AuthorityClaim = {start():void;release():void};
@@ -37,7 +39,7 @@ export type Capability<I,O> = {
   visibleResult(output:O):string;
   maxResultBytes?:number;
   releaseResult?(output:O,work:WorkContext):void;
-  recovery?: {overlaps?(previous:I,next:I,work:WorkContext):boolean; reconcile?(input:I,evidence:unknown,work:WorkContext):boolean};
+  recovery?: {overlaps?(previous:I,next:I,work:WorkContext):boolean; reconcile?(input:I,evidence:unknown,work:WorkContext,action:ActionIdentity):boolean};
 };
 export class ActionDenied extends Error {}
 export class ActionDeferred extends Error {}
@@ -46,7 +48,7 @@ export class ActionFailed extends Error {
   constructor(readonly safeResult:string) {super('Action failed');}
 }
 export function closesAdmission(reason:string):boolean {return ['Action limit reached','Action denied','Action authorization failed','Action could not start','Work stopped'].includes(reason);}
-export type RecoveryManifest = {actions:ActionRecord[];truncated:boolean;instructions:string};
+export type RecoveryManifest = {actions:ActionRecord[];resolutions:string[];truncated:boolean;instructions:string};
 export type InvocationResult = {kind:'completed';actionId:string;value:Json} | {kind:'status';action:ActionRecord} | {kind:'repeat-required';actions:ActionRecord[];truncated:boolean;challenge:string} | {kind:'blocked';reason:string};
 
 function stable(value:Json):string {
@@ -68,7 +70,7 @@ type ErasedCapability = {
   check(input:Json,work:WorkContext,action?:ActionIdentity):void;authorize(input:Json,work:WorkContext,action:ActionIdentity):Promise<void|AuthorityClaim>;
   execute(input:Json,work:WorkContext,action:ActionIdentity):Promise<Json>;visible(output:Json):string;releaseResult?(output:Json,work:WorkContext):void;
   overlaps?: (previous:Json,next:Json,work:WorkContext)=>boolean;
-  reconcile?: (input:Json,evidence:unknown,work:WorkContext)=>boolean;
+  reconcile?: (input:Json,evidence:unknown,work:WorkContext,action:ActionIdentity)=>boolean;
 };
 
 /** One instance owns this coordinator and its registry. Callers cannot choose action IDs. */
@@ -81,10 +83,12 @@ export class WorkActionService {
   setWorkCheck(check:(work:WorkRef)=>void):void {this.workCheck=check;}
   private readonly closures=new Map<string,{controller:AbortController;refs:number}>();
   private readonly completedHopParents=new Set<string>();
+  private readonly readReceipts=new Map<string,{work:string;value:Json}>();
   constructor(private readonly db:DatabaseSync, private readonly key:Uint8Array,
     private readonly context:(work:WorkRef,signal:AbortSignal)=>WorkContext,
     private readonly active:(work:WorkRef)=>void, private readonly budget=32, private readonly deferred:(work:WorkRef)=>boolean=()=>false,private readonly inputRedactor:(value:string)=>string=value=>value) {
     this.journal=new ActionJournal(db);
+    this.db.exec("UPDATE work_action_invocations SET private_result=NULL WHERE private_result IS NOT NULL AND CASE WHEN json_valid(description) THEN json_extract(description,'$.effect')='read' ELSE 0 END");
   }
   register<I,O>(capability:Capability<I,O>):void {
     if (!capability.name || capability.name==='code_mode' || this.capabilities.has(capability.name) || capability.definition.function.name!==capability.name) throw Error('Invalid or duplicate capability');
@@ -99,7 +103,7 @@ export class WorkActionService {
       visible:output=>capability.visibleResult(capability.parseResult(output)),
       ...(capability.releaseResult ? {releaseResult:(output:Json,work:WorkContext)=>{try{capability.releaseResult!(capability.parseResult(output),work);}catch(error){if(!(error instanceof ActionDeferred))this.close(work,'authority');throw error;}}} : {}),
       ...(capability.recovery?.overlaps ? {overlaps:(a:Json,b:Json,work:WorkContext)=>capability.recovery!.overlaps!(parse(a),parse(b),work)} : {}),
-      ...(capability.recovery?.reconcile ? {reconcile:(input:Json,evidence:unknown,work:WorkContext)=>capability.recovery!.reconcile!(parse(input),evidence,work)} : {}),
+      ...(capability.recovery?.reconcile ? {reconcile:(input:Json,evidence:unknown,work:WorkContext,action:ActionIdentity)=>capability.recovery!.reconcile!(parse(input),evidence,work,action)} : {}),
     });
   }
   open(work:WorkRef,signal:AbortSignal):WorkActions {
@@ -107,7 +111,7 @@ export class WorkActionService {
     entry.refs++;this.closures.set(key,entry);
     try {
       const context=Object.freeze({...this.context(work,AbortSignal.any([signal,entry.controller.signal])),workSignal:signal});
-      return new WorkActions(this,context,()=>{if(--entry.refs===0 && this.closures.get(key)===entry)this.closures.delete(key);});
+      return new WorkActions(this,context,()=>{if(--entry.refs===0 && this.closures.get(key)===entry){this.closures.delete(key);for(const [id,receipt] of this.readReceipts)if(receipt.work===key)this.readReceipts.delete(id);}});
     } catch(error) {if(--entry.refs===0)this.closures.delete(key);throw error;}
   }
   offers(context:WorkContext,route:'direct'|'guest'):ToolDefinition[] {
@@ -125,20 +129,32 @@ export class WorkActionService {
   private records(context:WorkContext):Array<{action:ActionRecord;capability:string;input:Json;description:Description}> {
     const rows=this.db.prepare(`WITH RECURSIVE lineage(id) AS (SELECT ? UNION ALL SELECT predecessor FROM task_attempts JOIN lineage ON task_attempts.id=lineage.id WHERE predecessor IS NOT NULL)
       SELECT i.action_id,i.capability,i.input,i.description FROM work_action_invocations i WHERE (i.kind=? AND i.work_id=?) OR (?='task' AND i.kind='task' AND i.work_id IN lineage) GROUP BY i.action_id ORDER BY MIN(i.rowid)`).all(context.work.id,context.work.kind,context.work.id,context.work.kind);
-    const records=rows.map(row=>{const action=this.journal.get(String(row.action_id));if (!action) throw Error('Missing journal action');return {action,capability:String(row.capability),input:jsonValue.parse(JSON.parse(String(row.input))),description:JSON.parse(String(row.description)) as Description};});
+    const records=rows.map(row=>{const action=this.journal.get(String(row.action_id));if (!action) throw Error('Missing journal action');return {action,capability:String(row.capability),input:jsonValue.parse(JSON.parse(String(row.input))),description:actionDescription.parse(JSON.parse(String(row.description)))};});
     const unknown=this.db.prepare(`WITH RECURSIVE lineage(id) AS (SELECT ? UNION ALL SELECT predecessor FROM task_attempts JOIN lineage ON task_attempts.id=lineage.id WHERE predecessor IS NOT NULL) SELECT a.id FROM action_journal a WHERE a.state IN ('started','uncertain') AND ((?='command' AND a.command_id=?) OR (?='task' AND a.task_attempt_id IN lineage)) AND NOT EXISTS (SELECT 1 FROM work_action_invocations i WHERE i.action_id=a.id)`).all(context.work.id,context.work.kind,context.work.id,context.work.kind);
     for(const row of unknown) {const action=this.journal.get(String(row.id));if(action)records.push({action,capability:'',input:null,description:{summary:action.summary,resource:'unknown',effect:'change',opaque:true}});}
     return records;
   }
-  manifest(context:WorkContext):RecoveryManifest {const records=this.records(context).map(item=>item.action);return {actions:records.slice(-32),truncated:records.length>32,instructions:'Resume a completed action by ID. Reconcile uncertain changes before overlapping work. A matching completed change requires a repeat challenge.'};}
+  private resolved(id:string):boolean {return !!this.db.prepare('SELECT 1 FROM work_action_resolutions WHERE action_id=?').get(id);}
+  private accounted(action:ActionRecord):boolean {return action.state==='succeeded' || (action.state==='uncertain' && this.resolved(action.id));}
+  manifest(context:WorkContext):RecoveryManifest {const records=this.records(context).map(item=>item.action);return {actions:records.slice(-32),resolutions:records.filter(action=>this.resolved(action.id)).map(action=>action.id),truncated:records.length>32,instructions:'Resume a completed action by ID. Read receipts expire when work ends. A paired owner can reconcile supported changes with service evidence. A matching completed or resolved change still requires a repeat challenge.'};}
+  private retainedResult(id:string):Json|undefined {
+    const read=this.readReceipts.get(id);if(read)return structuredClone(read.value);
+    const saved=this.db.prepare('SELECT private_result FROM work_action_invocations WHERE action_id=? AND private_result IS NOT NULL LIMIT 1').get(id);
+    return typeof saved?.private_result==='string'?jsonValue.parse(JSON.parse(saved.private_result)):undefined;
+  }
   beginRecovery(context:WorkContext):RecoveryManifest {
     this.admit(context,true);this.db.prepare('UPDATE work_action_state SET epoch=epoch+1 WHERE kind=? AND work_id=?').run(context.work.kind,context.work.id);return this.manifest(context);
   }
   reconcile(context:WorkContext,actionId:string,evidence:unknown):void {
     this.admit(context);const record=this.records(context).find(item=>item.action.id===actionId && (item.action.state==='uncertain' || (item.action.state==='succeeded' && item.description.effect==='change' && item.description.opaque)));
     const cap=record && this.capabilities.get(record.capability);
-    if (!record || !cap?.reconcile || !cap.reconcile(record.input,evidence,context)) throw Error('Feature reconciliation did not establish the outcome');
-    this.db.prepare('INSERT OR IGNORE INTO work_action_resolutions VALUES (?)').run(actionId);
+    if(!record || !cap?.reconcile)throw Error('Feature reconciliation did not establish the outcome');
+    const identity=Object.freeze({id:record.action.id,fingerprint:record.action.fingerprint});
+    cap.check(record.input,context,identity);
+    if(!cap.reconcile(record.input,evidence,context,identity))throw Error('Feature reconciliation did not establish the outcome');
+    this.admit(context);cap.check(record.input,context,identity);
+    this.db.exec('BEGIN IMMEDIATE');
+    try {const added=this.db.prepare('INSERT OR IGNORE INTO work_action_resolutions VALUES (?)').run(actionId);if(added.changes)this.db.prepare('UPDATE work_action_state SET epoch=epoch+1 WHERE kind=? AND work_id=?').run(context.work.kind,context.work.id);this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   closedReason(context:WorkContext):string|null {const reason=this.state(context.work).closed;return typeof reason==='string'?reason:null;}
   close(context:WorkContext, reason:string):void {
@@ -218,7 +234,7 @@ export class WorkActionService {
       const previous=this.db.prepare('SELECT epoch,prior_ids,consumed FROM work_action_challenges WHERE id=?').get(pending.challenge);
       if(typeof previous?.prior_ids!=='string') throw Error('Missing recovery challenge');
       const state=this.state(context.work);
-      const matching=this.records(context).filter(item=>item.action.state==='succeeded' && item.capability===request.name && encoded(item.input)===canonical).map(item=>item.action);
+      const matching=this.records(context).filter(item=>this.accounted(item.action) && item.capability===request.name && encoded(item.input)===canonical).map(item=>item.action);
       const priorIds=JSON.stringify(matching.map(item=>item.id));
       if(previous.epoch!==state.epoch || previous.prior_ids!==priorIds || previous.consumed!==0) {
         const challenge=randomUUID();
@@ -232,8 +248,8 @@ export class WorkActionService {
     if (existing) {
       if(existing.digest!==digest)throw new ActionConflict('Invocation identity conflicts with recorded input');
       const action=this.journal.get(String(existing.action_id));if(!action)throw Error('Missing journal action');cap.check(input,context,{id:action.id,fingerprint:action.fingerprint});
-      const saved=this.db.prepare('SELECT private_result FROM work_action_invocations WHERE action_id=? AND private_result IS NOT NULL LIMIT 1').get(action.id);
-      if(action.state==='succeeded' && typeof saved?.private_result==='string') {const value=jsonValue.parse(JSON.parse(saved.private_result));cap.releaseResult?.(value,context);return {kind:'completed',actionId:action.id,value};}
+      const value=this.retainedResult(action.id);
+      if(action.state==='succeeded' && value!==undefined) {cap.releaseResult?.(value,context);return {kind:'completed',actionId:action.id,value};}
       return {kind:'status',action};
     }
     const state=this.state(context.work);
@@ -246,21 +262,20 @@ export class WorkActionService {
       if(!record || record.capability!==request.name || encoded(record.input)!==canonical)throw new ActionConflict('Resume does not match the recorded action');
       cap.check(input,context,{id:record.action.id,fingerprint:record.action.fingerprint});
       this.db.prepare('INSERT INTO work_action_invocations (kind,work_id,source,digest,action_id,capability,input,description) VALUES (?,?,?,?,?,?,?,?)').run(context.work.kind,context.work.id,source,digest,record.action.id,record.capability,canonical,JSON.stringify(record.description));
-      const saved=this.db.prepare('SELECT private_result FROM work_action_invocations WHERE action_id=? AND private_result IS NOT NULL LIMIT 1').get(record.action.id);
-      if(record.action.state==='succeeded' && typeof saved?.private_result==='string') {const value=jsonValue.parse(JSON.parse(saved.private_result));cap.releaseResult?.(value,context);return {kind:'completed',actionId:record.action.id,value};}
+      const value=this.retainedResult(record.action.id);
+      if(record.action.state==='succeeded' && value!==undefined) {cap.releaseResult?.(value,context);return {kind:'completed',actionId:record.action.id,value};}
       return {kind:'status',action:record.action};
     }
-    const description=cap.describe(input,context);
-    if(!description.summary || !description.resource || !['read','change'].includes(description.effect))throw Error('Invalid action description');
+    const description=actionDescription.parse(cap.describe(input,context));
     if(description.effect==='change') {
-      const uncertain=records.filter(item=>(item.action.state==='uncertain' || item.action.state==='started') && item.description.effect==='change' && !this.db.prepare('SELECT 1 FROM work_action_resolutions WHERE action_id=?').get(item.action.id));
+      const uncertain=records.filter(item=>(item.action.state==='uncertain' || item.action.state==='started') && item.description.effect==='change' && !this.resolved(item.action.id));
       if(uncertain.some(item=>item.description.opaque || description.opaque || item.capability!==request.name || !cap.overlaps || cap.overlaps(item.input,input,context))) {
         const reason='Uncertain overlapping change requires reconciliation';
         this.db.prepare('INSERT INTO work_action_requests VALUES (?,?,?,?,NULL,?)').run(context.work.kind,context.work.id,source,digest,reason);return {kind:'blocked',reason};
       }
       const state=this.state(context.work);
-      const matching=Number(state.epoch)>0 ? records.filter(item=>item.action.state==='succeeded' && item.capability===request.name && encoded(item.input)===canonical).map(item=>item.action) : [];
-      const ambiguous=Number(state.epoch)>0 && records.some(item=>item.action.state==='succeeded' && item.description.effect==='change' && (item.description.opaque || description.opaque) && !(item.capability===request.name && encoded(item.input)===canonical) && !this.db.prepare('SELECT 1 FROM work_action_resolutions WHERE action_id=?').get(item.action.id));
+      const matching=Number(state.epoch)>0 ? records.filter(item=>this.accounted(item.action) && item.capability===request.name && encoded(item.input)===canonical).map(item=>item.action) : [];
+      const ambiguous=Number(state.epoch)>0 && records.some(item=>item.action.state==='succeeded' && item.description.effect==='change' && (item.description.opaque || description.opaque) && !(item.capability===request.name && encoded(item.input)===canonical) && !this.resolved(item.action.id));
       if(ambiguous) {
         const reason='Opaque prior change requires reconciliation';
         this.db.prepare('INSERT INTO work_action_requests VALUES (?,?,?,?,NULL,?)').run(context.work.kind,context.work.id,source,digest,reason);return {kind:'blocked',reason};
@@ -293,8 +308,9 @@ export class WorkActionService {
     try {this.admit(context);cap.check(input,context,action);claim?.start();this.journal.startInInstanceTransaction(prepared.permit,this.db,{id:actionId,fingerprint,work:context.work});this.db.exec('COMMIT');this.journal.finalizeInstanceStart(prepared.permit);}
     catch(error){this.db.exec('ROLLBACK');this.journal.cancel(actionId);if(error instanceof ActionDeferred)return {kind:'blocked',reason:error.message};this.close(context,'authority');return {kind:'blocked',reason:context.signal.aborted?'Work stopped':'Action could not start'};}
     let output:Json;let visible:string;
-    try {output=await cap.execute(input,context,action);if(Buffer.byteLength(encoded(output))>cap.maxResultBytes)throw Error('Result exceeds the limit');visible=cap.visible(output).slice(0,16000);} catch(error) {if(!this.completedHopParents.has(actionId))this.journal.finish(actionId,error instanceof ActionFailed || error instanceof ActionDenied?'failed':'uncertain',error instanceof ActionFailed?error.safeResult.slice(0,16000):error instanceof ActionDenied?'Action denied':'Outcome unknown');if(error instanceof ActionDenied){this.close(context,'denied');return {kind:'blocked',reason:'Action denied'};}this.admit(context,true);cap.check(input,context,action);return {kind:'status',action:this.journal.get(actionId)!};}
-    this.db.prepare('UPDATE work_action_invocations SET private_result=? WHERE action_id=?').run(encoded(output),actionId);
+    try {output=await cap.execute(input,context,action);if(Buffer.byteLength(encoded(output))>cap.maxResultBytes)throw Error('Result exceeds the limit');visible=route!=='direct' && description.effect==='read'?'Read completed':cap.visible(output).slice(0,16000);} catch(error) {if(!this.completedHopParents.has(actionId))this.journal.finish(actionId,error instanceof ActionFailed || error instanceof ActionDenied?'failed':'uncertain',error instanceof ActionFailed?error.safeResult.slice(0,16000):error instanceof ActionDenied?'Action denied':'Outcome unknown');if(error instanceof ActionDenied){this.close(context,'denied');return {kind:'blocked',reason:'Action denied'};}this.admit(context,true);cap.check(input,context,action);return {kind:'status',action:this.journal.get(actionId)!};}
+    if(description.effect==='read')this.readReceipts.set(actionId,{work:encoded(context.work),value:structuredClone(output)});
+    else this.db.prepare('UPDATE work_action_invocations SET private_result=? WHERE action_id=?').run(encoded(output),actionId);
     if(!this.completedHopParents.has(actionId))this.journal.finish(actionId,'succeeded',visible);
     this.admit(context,true);cap.check(input,context,action);
     cap.releaseResult?.(output,context);

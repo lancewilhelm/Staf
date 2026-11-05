@@ -619,7 +619,18 @@ Background tasks use their captured mode for eligible registered capabilities, i
 
 File actions use the agent's stable `work` directory for relative paths. Absolute paths use the Staf service account's normal host access; the working directory is not a sandbox. `file_write` creates or replaces a UTF-8 file, and `file_read` returns base64 bytes, their offset, the file size, a `nextOffset` when more remains, and a SHA-256 for files up to 1 MiB. Use that hash with `file_edit` to replace exactly one matching UTF-8 string; changed hashes, missing matches and multiple matches fail. `file_search` finds literal UTF-8 bytes in a file or matching names in one directory. Follow `nextOffset` to continue. Directory search is not recursive. These actions do not create parent directories.
 
-An external writer can still race the hash check and write; it is not an atomic filesystem compare-and-swap. Failed effects that cannot be determined are recorded as uncertain and require reconciliation, not automatic replay. The paired action records and CLI status expose outcomes. Inputs that cannot be retained under the instance redaction rules are rejected rather than substituted. Unknown secrets and secrets split across file pages may still appear in output or retained history.
+An external writer can still race the hash check and write; it is not an atomic filesystem compare-and-swap. Failed effects that cannot be determined are recorded as uncertain and require reconciliation, not automatic replay. The paired action records and CLI status expose outcomes. Inputs that cannot be retained under the instance redaction rules are rejected rather than substituted. File reads check surrounding bytes for complete known credentials, including credentials split across page boundaries; a page near a credential may also be rejected. Unknown or deliberately transformed secrets may still appear in output or retained history.
+
+If recovery is fenced after an opaque or uncertain change, inspect the action
+and resource first. The paired CLI supports
+`instance reconcile-action URL CREDENTIAL_FILE command|task WORK_ID ACTION_ID EVIDENCE_FILE`.
+The JSON evidence must match a supported service observation: a settled native
+process (`processId` and `observedCursor`), current file-write `sha256`, updated
+memory `version`, or forgotten memory (`absent: true`). See the
+[reconciliation reference](reference.md#action-reconciliation).
+This clears a supported recovery fence for active work; it does not repeat an
+effect, reopen stopped work, or override unknown outcomes. Unselected script read
+payloads expire when work ends; selected output and conversation history remain.
 
 Skill results can occupy the guest cache up to its 2 MiB bound. Guest emitted and returned output remains bounded to 256 KiB, so a large skill can be processed inside the guest without returning its entire body.
 

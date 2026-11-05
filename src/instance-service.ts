@@ -28,7 +28,7 @@ import {agentImageBodyType,agentImageBodyLimit,parseAgentImageInput} from './age
 import { MemoryConflict, type MemoryScope } from './memory.js';
 import { selectProvider } from './registry.js';
 import { runTurn } from './runtime.js';
-import { redactor, streamingRedactor, byteStreamRedactor, redactValue, type Environment } from './config.js';
+import { redactor, streamingRedactor, byteStreamRedactor, credentialRedactionOverlap, redactValue, type Environment } from './config.js';
 import { chatSystemMessage } from './prompts.js';
 import { SkillConflict } from './skill-catalog.js';
 import { dirname, resolve } from 'node:path';
@@ -278,7 +278,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
   workActions.register(nativeStopCapability(processes,nativeAllowed));
   const interactions=nativeInteractionCapabilities(processes,nativeAllowed,redact);workActions.register(interactions.write);workActions.register(interactions.eof);workActions.register(interactions.resize);
   workActions.register(clockCapability(instance, work=>{const timer=work.work.kind==='task'?taskTimers.get(work.work.id):undefined;return authorizeClock(work.botId,work.work.kind,work.work.id,work.signal,timer?.pause,timer?.resume);}));
-  const files=fileCapabilities(redact,work=>instance.fileActionsAllowed(work.work));
+  const files=fileCapabilities(redact,work=>instance.fileActionsAllowed(work.work),()=>credentialRedactionOverlap(env,[...knownKeys]));
   workActions.register(files.read);workActions.register(files.write);workActions.register(files.edit);workActions.register(files.search);
   registerMemoryCapabilities(instance,workActions,redact);
   registerTaskCapabilities(workActions,taskActionHooks,redact);
@@ -504,6 +504,15 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
           if (action === 'delete') { instance.memories.delete({id,scope,version:value.version}); return json(200,{deleted:true}); }
         }
         return json(400,{error:'Invalid memory request'});
+      }
+      const reconciliation=req.url?.match(/^\/api\/work-actions\/(command|task)\/([\w-]+)\/([a-f0-9-]+)\/reconcile$/);
+      if(req.method==='POST' && reconciliation){
+        const kind=reconciliation[1],id=reconciliation[2],actionId=reconciliation[3];
+        if((kind!=='command' && kind!=='task') || !id || !actionId)return json(400,{error:'Invalid action resolution'});
+        const controller=(kind==='command'?responseControllers:taskControllers).get(id);
+        if(!controller)return json(409,{error:'Only active accepted work can be reconciled'});
+        const actions=workActions.open({kind,id},controller.signal);
+        try {actions.reconcile(actionId,value.evidence);return json(200,actions.manifest());}finally{actions.dispose();}
       }
       if(req.url==='/api/shell-config'){if(req.method==='GET')return json(200,instance.shellConfig());if(req.method==='POST'){if(shellControllers.size)return json(409,{error:'Settle pending shell work before changing configuration'});if(typeof value.revision!=='number'||!(value.dockerBinary===null||typeof value.dockerBinary==='string')||!(value.dockerSocket===null||typeof value.dockerSocket==='string')||!(value.imageId===null||typeof value.imageId==='string'))return json(400,{error:'Invalid shell configuration'});return json(200,instance.setShellConfig({revision:value.revision,dockerBinary:value.dockerBinary,dockerSocket:value.dockerSocket,imageId:value.imageId}));}}
       const shellScopeMatch=req.url?.match(/^\/api\/shell-permissions\/(instance|bot:[\w-]+|task:[\w-]+)$/);

@@ -52,6 +52,12 @@ export class NativeProcesses {
     const row=this.db.prepare('SELECT * FROM native_processes WHERE id=?').get(id);if(!row)return null;
     return {id:row.id,botId:row.bot_id,work:{kind:row.work_kind,id:row.work_id},actionId:row.action_id,cwd:row.cwd,mode:row.mode,retained:row.retained===1,inputClosed:row.input_closed===1,inputBytes:row.input_bytes,cols:row.cols,rows:row.rows,state:row.state,pid:row.pid,exitCode:row.exit_code,exitSignal:row.exit_signal,stopRequested:row.stop_requested===1,outputComplete:row.output_complete===1,firstCursor:row.first_cursor,nextCursor:row.next_cursor,limits:nativeProcessLimits};
   }
+  reconcileRun(work:WorkContext,action:ActionIdentity,evidence:unknown):boolean {
+    const parsed=z.strictObject({processId:z.string().uuid(),observedCursor:z.number().int().nonnegative()}).safeParse(evidence);
+    if(!parsed.success)return false;
+    const process=this.get(parsed.data.processId);
+    return !!process && process.botId===work.botId && process.actionId===action.id && ['exited','failed'].includes(String(process.state)) && process.outputComplete && process.nextCursor===parsed.data.observedCursor;
+  }
   output(id:string,cursor=0) {
     const process=this.get(id);if(!process)throw Error('Process not found');
     if(!Number.isSafeInteger(cursor)||cursor<0)throw Error('Invalid output cursor');
@@ -61,7 +67,8 @@ export class NativeProcesses {
     let bytes=0,pageNext=Math.max(cursor,first);
     const chunks=[];
     for(const row of rows) {
-      const data=Buffer.from(row.data as Uint8Array);if(bytes+data.length>nativeProcessLimits.pageBytes)break;
+      if(!(row.data instanceof Uint8Array))throw Error('Invalid stored process output');
+      const data=Buffer.from(row.data);if(bytes+data.length>nativeProcessLimits.pageBytes)break;
       bytes+=data.length;pageNext=Number(row.cursor)+1;
       let text:string|null=null;try{text=new TextDecoder('utf-8',{fatal:true}).decode(data);}catch{/* Base64 preserves bytes that are not a complete UTF-8 chunk. */}
       chunks.push({cursor:row.cursor,stream:row.stream,data:data.toString('base64'),text});
@@ -154,7 +161,7 @@ export type ProcessInteraction=z.infer<typeof processInteraction>;
 export function checkedInteraction(value:unknown,redact:(value:string)=>string):ProcessInteraction {const parsed=processInteraction.parse(value);if(parsed.operation==='input' && redact(parsed.data)!==parsed.data)throw new ActionFailed('Terminal input cannot be retained faithfully under the instance redaction rules.');return parsed;}
 const input=z.strictObject({command:z.string().min(1).max(32000).refine(value=>!value.includes('\0')),cwd:z.string().min(1).optional(),mode:z.enum(['pipe','pty']).optional(),retain:z.boolean().optional(),cols:dimensions.optional(),rows:dimensions.optional()});
 export function nativeCommandCapability(manager:NativeProcesses, allowed:(work:WorkContext)=>boolean,redact:(value:string)=>string):Capability<z.infer<typeof input>,unknown> {
-  return {name:'terminal_run',definition:{type:'function',function:{name:'terminal_run',description:'Run ordinary host shell text. Set mode pty for a terminal and retain true to keep the process after work completes. Returns process ID/status; read output separately.',parameters:{type:'object',properties:{command:{type:'string'},cwd:{type:'string'},mode:{type:'string',enum:['pipe','pty']},retain:{type:'boolean'},cols:{type:'integer'},rows:{type:'integer'}},required:['command'],additionalProperties:false}}},parseInput:value=>{const parsed=input.parse(value);for(const text of [parsed.command,parsed.cwd])if(text!==undefined && redact(text)!==text)throw new ActionFailed('Terminal input cannot be retained faithfully under the instance redaction rules.');return parsed;},parseResult:value=>value,describe:()=>({summary:'Run host command',resource:'host',effect:'change',opaque:true}),eligible:allowed,check:(_value,work)=>{if(!allowed(work))throw Error('Process work is no longer authorized');},authorize:async()=>{},execute:(value,work,action)=>manager.start(work,action,value),visibleResult:value=>JSON.stringify(value)};
+  return {name:'terminal_run',definition:{type:'function',function:{name:'terminal_run',description:'Run ordinary host shell text. Set mode pty for a terminal and retain true to keep the process after work completes. Returns process ID/status; read output separately.',parameters:{type:'object',properties:{command:{type:'string'},cwd:{type:'string'},mode:{type:'string',enum:['pipe','pty']},retain:{type:'boolean'},cols:{type:'integer'},rows:{type:'integer'}},required:['command'],additionalProperties:false}}},parseInput:value=>{const parsed=input.parse(value);for(const text of [parsed.command,parsed.cwd])if(text!==undefined && redact(text)!==text)throw new ActionFailed('Terminal input cannot be retained faithfully under the instance redaction rules.');return parsed;},parseResult:value=>value,describe:()=>({summary:'Run host command',resource:'host',effect:'change',opaque:true}),eligible:allowed,check:(_value,work)=>{if(!allowed(work))throw Error('Process work is no longer authorized');},authorize:async()=>{},execute:(value,work,action)=>manager.start(work,action,value),visibleResult:value=>JSON.stringify(value),recovery:{reconcile:(_value,evidence,work,action)=>manager.reconcileRun(work,action,evidence)}};
 }
 
 const processReadInput=z.strictObject({processId:z.string().uuid(),cursor:z.number().int().nonnegative().optional()});

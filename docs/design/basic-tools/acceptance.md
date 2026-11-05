@@ -11,7 +11,7 @@ Build before individual tests, then run the required repository checks:
 
 ```sh
 corepack pnpm run build
-node --test test/basic-tools-acceptance.test.js
+node --test test/basic-tools-acceptance.test.js test/basic-tools-review.test.js
 corepack pnpm run check
 corepack pnpm test
 node test/browser/gui-smoke.mjs
@@ -56,3 +56,10 @@ QuickJS coordinates service capabilities. Host terminal and file capabilities
 use the service account's access; this feature does not establish a host sandbox.
 Project attachment, automatic self-improvement, compaction, and the rejected
 sessions/documents/artifacts implementation remain outside this delivery.
+
+Review regressions in [basic-tools-review.test.js](../../../test/basic-tools-review.test.js)
+exercise credential fragments at random file offsets, transient read receipts,
+processing more than the selected-output budget within the separate guest cache,
+paired/CLI owner resolution with real settled processes, stale and unrelated
+evidence rejection, memory lost-receipt repeat protection, and task predecessor
+resolution through the retry's accepted context. No force resolution is exposed.

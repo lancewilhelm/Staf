@@ -133,6 +133,21 @@ feature adapter and reconciliation path before a later bridge can clear them.
 Task retries include unresolved predecessor actions. A declaration that a call
 is new does not reconcile an uncertain effect.
 
+The paired owner can call
+`POST /api/work-actions/command|task/WORK_ID/ACTION_ID/reconcile` with
+`{"evidence": ...}`. It uses the active command or task controller and captured
+context, including task predecessor lineage. It cannot reopen ended work, clear
+Stop/denial, or resolve an unrelated action. The callback receives the immutable
+action identity as its fourth argument and independently checks the resource.
+Current hooks verify a settled `terminal_run` process and its observed output
+cursor, a `file_write` hash against actual bytes, an updated memory's exact
+text/version, or a forgotten memory's absence. Unsupported or unobservable
+outcomes remain fenced; there is no force option. Resolution records the action
+ID and advances the recovery epoch without rewriting the observed outcome or
+replaying its effect. A matching resolved uncertain change still requires a
+repeat challenge. A blocked invocation stays blocked; a later attempt uses a
+fresh invocation identity. The returned manifest includes `resolutions`.
+
 The focused disposable-instance checks are in `test/work-actions.test.js`.
 They use a real SQLite journal and local fixture effects. They do not establish
 paired API, real-worker chat, live-provider, Docker, or remote-host behavior.
@@ -161,7 +176,15 @@ work and provider call. Child mapping and action preparation are committed by
 the action service before the effect. `WorkActionService.inspect(work)` and
 `inspectActions(work)` feed the paired command API and chat work details. The
 journal owns child outcomes, including after a failure or restart. Selected
-results are redacted and retained; unused receipts are discarded at guest end.
+results are redacted and retained. Guest-local receipts disappear at guest end;
+read receipts needed for same-work recovery stay in coordinator memory until
+the last work handle is released. They are never written to `private_result`.
+Opening the service clears older persisted read receipts. Guest/internal read
+action records retain completion metadata rather than unselected payloads.
+Selected output and ordinary provider conversation history remain inspectable.
+A resume after read-receipt expiry returns the completed action status without
+rerunning it; a deliberate new read can obtain current data. Changing-action
+receipts remain durable for recovery and duplicate-effect protection.
 
 Per accepted command: at most four guest executions and 32 action invocations,
 with eight pending actions. Each source is at most 32 KiB, selected output at
