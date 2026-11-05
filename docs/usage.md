@@ -614,7 +614,7 @@ The terminal supports `staf settings set toolMode hybrid` and
 set `toolMode` in the existing agent profile JSON, or pass `--tool-mode` at
 creation. The paired defaults command accepts a final mode argument.
 
-In ordinary chat, Direct offers the eligible clock and memory tools, Hybrid offers those individual tools and `code_mode`, and Code Mode offers `code_mode` with the same registered clock and memory capabilities inside it. The code tool description lists eligible registered capability names and input schemas. Existing web, search, scratch and skill tools keep their current individual
+In ordinary chat, Direct offers the eligible clock, memory, and native process tools, Hybrid offers those individual tools and `code_mode`, and Code Mode offers `code_mode` with the same registered capabilities inside it. The code tool description lists eligible registered capability names and input schemas. Existing web, search, scratch and skill tools keep their current individual
 behavior in Direct and Hybrid until their adapters are migrated. They are not
 offered in Code Mode yet, and fabricated individual calls are rejected.
 Background tasks do not yet use the selected mode. Plain text does not start a guest. A mode or other ordinary
@@ -663,6 +663,4 @@ base64 chunks labeled stdout or stderr, a cursor, and a gap indicator. Chat
 shows processes alongside their originating work and offers output and Stop.
 Stop requests termination; only an observed exit establishes an exit result.
 
-The current #84 slice has a known Stop gap: a child can continue after its shell
-exits, even when its originating work is stopped. Full process-group lifetime
-control remains unfinished.
+A live supervisor retains control of the owned process group after the shell exits. Stop requests group termination, but descendants that change group or detach may survive. A lost observation is reported as unknown; stored process IDs are not used to signal after restart.

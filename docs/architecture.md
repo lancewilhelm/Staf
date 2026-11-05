@@ -306,7 +306,7 @@ QuickJS limits do not establish OS/container isolation or a total host RSS cap.
 The coordinator supplies the immutable action ID and fingerprint to capability
 `authorize` and `execute` callbacks; existing two-argument callbacks remain
 valid. The manager records `starting` and accepted-work ownership before spawn,
-retains bounded pipe output, and records exit only from the child close event.
+retains bounded pipe output, records the shell exit status when observed, and reports the resource exited after the backend closes.
 Work Stop requests process termination while the work remains active. Service
 shutdown requests termination and records an unobserved result as unknown;
 startup marks previously live observations unknown without replay or PID-based
