@@ -1,11 +1,9 @@
 # Accepted-work action service
 
-`src/work-actions.ts` implements the instance-owned action service. Ordinary
-chat opens it once per accepted command; direct and QuickJS clock, memory, configured search, host file, and native process calls use the
-same registrations and authorization. Task runtime and other existing tools
-remain on their earlier paths pending their adapters. In ordinary chat, those
+`src/work-actions.ts` implements the instance-owned action service. Chat and task execution open it once per accepted command or task attempt; direct and QuickJS clock, memory, configured search, host file, and native process calls use the
+same registrations and authorization. Web, scratch and skill tools remain on their earlier paths pending their adapters. In ordinary chat, those
 other individual tools are available in Direct and Hybrid only; Code Mode offers
-only `code_mode`, with clock, scoped memory, configured search, host file, and native process actions as guest capabilities. Dispatch rejects
+only `code_mode`, with clock, scoped memory, configured search, host file, native process, and eligible task-control actions as guest capabilities. Dispatch rejects
 individual calls that were not offered.
 
 ## Open accepted work
@@ -90,11 +88,11 @@ These guarantees do not make external effects exactly once.
 
 ## Configured search adapter
 
-The service registers `search_web` with a query-only schema. Authorization binds the coordinator action ID and fingerprint to the exact work, query, backend origin and revision in `search_action_bindings`. Explicit decisions and optional remembered grants use the existing search approval endpoints and grant store. A reused grant is claimed synchronously in the coordinator start transaction; its controller is released on exit. Checks at start, result release and resume validate the captured boundary and claimed grant revision. The shared search effect enforces the existing rate, concurrency and scheduled-dispatch limits and uses the production loopback transport. The legacy task broker calls that same typed effect until task runtime opens `WorkActions`; it does not invent a chat command. Migration 34 creates the binding after the normal protected backup. Queries can be retained in this binding and its backups.
+The service registers `search_web` with a query-only schema. Authorization binds the coordinator action ID and fingerprint to the exact work, query, backend origin and revision in `search_action_bindings`. Explicit decisions and optional remembered grants use the existing search approval endpoints and grant store. A reused grant is claimed synchronously in the coordinator start transaction; its controller is released on exit. Checks at start, result release and resume validate the captured boundary and claimed grant revision. The shared search effect enforces the existing rate, concurrency and scheduled-dispatch limits and uses the production loopback transport. Tasks use their actual attempt identity and pause the attempt timer during approval. Migration 35 creates missing search and native tables after the normal protected backup, including upgrades from either version 34 predecessor. Queries can be retained in this binding and its backups.
 
 ## Memory adapter
 
-`registerMemoryCapabilities(instance, registry, redact)` registers search, read, remember, update, forget and proposal-status actions for accepted command or task contexts. Task runtime has not yet opened this boundary. The adapter rejects helper attempts and derives agent scope from the captured bot ID. Search is bounded to 20 items and exposes a continuation cursor. Store update and delete perform their version and scope checks at the effect, not in `check`: `check` also runs when releasing a completed retry. `MemoryConflict` becomes `ActionFailed`, so the journal records a definite failure. Shared creation inserts a pending proposal through the existing instance workflow; only the separate owner command confirms it. Reads return private results through the coordinator. Memory input parsing rejects creation and update text that the instance credential redactor would change, before invocation inputs, action records, store entries or proposals are written. The shared-proposal action record therefore shows the exact text that owner confirmation saves, together with its ID; inspection and recovery still use structured redaction. The common runtime supplies the eligible memory catalog, progress and outcome reporting.
+`registerMemoryCapabilities(instance, registry, redact)` registers search, read, remember, update, forget and proposal-status actions for accepted command or task contexts. The adapter rejects helper attempts and derives agent scope from the captured bot ID. Search is bounded to 20 items and exposes a continuation cursor. Store update and delete perform their version and scope checks at the effect, not in `check`: `check` also runs when releasing a completed retry. `MemoryConflict` becomes `ActionFailed`, so the journal records a definite failure. Shared creation inserts a pending proposal through the existing instance workflow; only the separate owner command confirms it. Reads return private results through the coordinator. Memory input parsing rejects creation and update text that the instance credential redactor would change, before invocation inputs, action records, store entries or proposals are written. The shared-proposal action record therefore shows the exact text that owner confirmation saves, together with its ID; inspection and recovery still use structured redaction. The common runtime supplies the eligible memory catalog, progress and outcome reporting.
 
 ## Recovery
 
@@ -192,3 +190,9 @@ fresh `byteStreamRedactor` per output stream. Filtering precedes SQLite retentio
 and applies equally to text, base64, model reads and paired owner reads. The
 filter preserves other binary bytes and holds incomplete credential prefixes;
 output pages declare the credential-redaction policy.
+
+## Task adapters and temporary input
+
+The task service opens `registry.open({kind:'task',id:attemptId}, signal)` after the attempt starts and disposes it on settlement. `registerTaskCapabilities` installs one set of task-control definitions; the attempt-keyed hooks provide `clarify`, optional `discover`, `delegate`, and `answerBot`. Hooks retain the existing task inbox and disclosure paths. Clock authorization uses the attempt-keyed pause and resume functions in `taskTimers`; adapters for other approval flows should use those same hooks rather than another timer. Hooks are removed on settlement.
+
+New dispatches are deferred while accepted task input is pending. Deferral does not close admission; completed action results and recovery bookkeeping remain available and the next provider iteration drains the inbox. Stop, denial, expiry, archive and live authority failures still close shared admission. Task inspection includes `workActions` and `codeExecutions`, alongside existing activity and usage.

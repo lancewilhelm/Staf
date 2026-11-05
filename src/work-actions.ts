@@ -36,6 +36,7 @@ export type Capability<I,O> = {
   recovery?: {overlaps?(previous:I,next:I,work:WorkContext):boolean; reconcile?(input:I,evidence:unknown,work:WorkContext):boolean};
 };
 export class ActionDenied extends Error {}
+export class ActionDeferred extends Error {}
 /** Reject input before journaling, or establish a definite failed effect outcome. */
 export class ActionFailed extends Error {
   constructor(readonly safeResult:string) {super('Action failed');}
@@ -74,7 +75,7 @@ export class WorkActionService {
   private readonly closures=new Map<string,{controller:AbortController;refs:number}>();
   constructor(private readonly db:DatabaseSync, private readonly key:Uint8Array,
     private readonly context:(work:WorkRef,signal:AbortSignal)=>WorkContext,
-    private readonly active:(work:WorkRef)=>void, private readonly budget=32) {
+    private readonly active:(work:WorkRef)=>void, private readonly budget=32, private readonly deferred:(work:WorkRef)=>boolean=()=>false) {
     this.journal=new ActionJournal(db);
   }
   register<I,O>(capability:Capability<I,O>):void {
@@ -107,9 +108,10 @@ export class WorkActionService {
   recognizes(name:string):boolean {return this.capabilities.has(name);}
   private digest(value:string):string {return createHmac('sha256',this.key).update(value).digest('hex');}
   private state(work:WorkRef) {const recovery=work.kind==='task' && !!this.db.prepare('SELECT 1 FROM task_attempts WHERE id=? AND predecessor IS NOT NULL').get(work.id);this.db.prepare('INSERT OR IGNORE INTO work_action_state(kind,work_id,epoch) VALUES (?,?,?)').run(work.kind,work.id,recovery?1:0);return this.db.prepare('SELECT used,closed,epoch FROM work_action_state WHERE kind=? AND work_id=?').get(work.kind,work.id)!;}
-  private admit(context:WorkContext):void {
+  private admit(context:WorkContext, allowPending=false):void {
     const state=this.state(context.work);if (typeof state.closed==='string') throw Error(`Action admission closed: ${state.closed}`);
     try {context.signal.throwIfAborted();this.active(context.work);} catch(error) {this.close(context,context.signal.aborted?'stopped':'authority');throw error;}
+    if(!allowPending && this.deferred(context.work)) throw new ActionDeferred('Owner input is pending');
   }
   private records(context:WorkContext):Array<{action:ActionRecord;capability:string;input:Json;description:Description}> {
     const rows=this.db.prepare(`WITH RECURSIVE lineage(id) AS (SELECT ? UNION ALL SELECT predecessor FROM task_attempts JOIN lineage ON task_attempts.id=lineage.id WHERE predecessor IS NOT NULL)
@@ -121,7 +123,7 @@ export class WorkActionService {
   }
   manifest(context:WorkContext):RecoveryManifest {const records=this.records(context).map(item=>item.action);return {actions:records.slice(-32),truncated:records.length>32,instructions:'Resume a completed action by ID. Reconcile uncertain changes before overlapping work. A matching completed change requires a repeat challenge.'};}
   beginRecovery(context:WorkContext):RecoveryManifest {
-    this.admit(context);this.db.prepare('UPDATE work_action_state SET epoch=epoch+1 WHERE kind=? AND work_id=?').run(context.work.kind,context.work.id);return this.manifest(context);
+    this.admit(context,true);this.db.prepare('UPDATE work_action_state SET epoch=epoch+1 WHERE kind=? AND work_id=?').run(context.work.kind,context.work.id);return this.manifest(context);
   }
   reconcile(context:WorkContext,actionId:string,evidence:unknown):void {
     this.admit(context);const record=this.records(context).find(item=>item.action.id===actionId && (item.action.state==='uncertain' || (item.action.state==='succeeded' && item.description.effect==='change' && item.description.opaque)));
@@ -163,7 +165,7 @@ export class WorkActionService {
     const queueKey=encoded(context.work),prior=this.queues.get(queueKey)??Promise.resolve();
     const depth=this.queueDepth.get(queueKey)??0;if(depth>=8){this.close(context,'pending action limit');throw Error('Too many pending actions');}this.queueDepth.set(queueKey,depth+1);
     let release!:()=>void;const next=new Promise<void>(resolve=>{release=resolve;});this.queues.set(queueKey,next);
-    try {await prior;return await this.dispatch(context,snapshot);} finally {release();const remaining=(this.queueDepth.get(queueKey)??1)-1;if(remaining)this.queueDepth.set(queueKey,remaining);else this.queueDepth.delete(queueKey);if(this.queues.get(queueKey)===next)this.queues.delete(queueKey);}
+    try {await prior;try{return await this.dispatch(context,snapshot);}catch(error){if(error instanceof ActionDeferred)return {kind:'blocked',reason:error.message};throw error;}} finally {release();const remaining=(this.queueDepth.get(queueKey)??1)-1;if(remaining)this.queueDepth.set(queueKey,remaining);else this.queueDepth.delete(queueKey);if(this.queues.get(queueKey)===next)this.queues.delete(queueKey);}
   }
   private async dispatch(context:WorkContext,request:{source:InvocationSource;name:string;input:unknown;intent:ActionIntent}):Promise<InvocationResult> {
     this.admit(context);
@@ -257,16 +259,16 @@ export class WorkActionService {
     if(prepared.kind!=='created')throw Error('New action already exists');
     const action=Object.freeze({id:actionId,fingerprint});let claim:void|AuthorityClaim=undefined;
     try {cap.check(input,context);claim=await cap.authorize(input,context,action);this.admit(context);cap.check(input,context,action);}
-    catch(error){claim?.release();this.journal.cancel(actionId);const reason=context.signal.aborted?'Work stopped':error instanceof ActionDenied?'Action denied':'Action authorization failed';this.close(context,'authority');return {kind:'blocked',reason};}
+    catch(error){claim?.release();this.journal.cancel(actionId);if(error instanceof ActionDeferred)return {kind:'blocked',reason:error.message};const reason=context.signal.aborted?'Work stopped':error instanceof ActionDenied?'Action denied':'Action authorization failed';this.close(context,'authority');return {kind:'blocked',reason};}
     try {
     this.db.exec('BEGIN IMMEDIATE');
     try {this.admit(context);cap.check(input,context,action);claim?.start();this.journal.startInInstanceTransaction(prepared.permit,this.db,{id:actionId,fingerprint,work:context.work});this.db.exec('COMMIT');this.journal.finalizeInstanceStart(prepared.permit);}
-    catch(error){this.db.exec('ROLLBACK');this.journal.cancel(actionId);this.close(context,'authority');return {kind:'blocked',reason:context.signal.aborted?'Work stopped':'Action could not start'};}
+    catch(error){this.db.exec('ROLLBACK');this.journal.cancel(actionId);if(error instanceof ActionDeferred)return {kind:'blocked',reason:error.message};this.close(context,'authority');return {kind:'blocked',reason:context.signal.aborted?'Work stopped':'Action could not start'};}
     let output:Json;let visible:string;
-    try {output=await cap.execute(input,context,action);if(Buffer.byteLength(encoded(output))>256*1024)throw Error('Result exceeds the limit');visible=cap.visible(output).slice(0,16000);} catch(error) {this.journal.finish(actionId,error instanceof ActionFailed?'failed':'uncertain',error instanceof ActionFailed?error.safeResult.slice(0,16000):'Outcome unknown');this.admit(context);cap.check(input,context,action);return {kind:'status',action:this.journal.get(actionId)!};}
+    try {output=await cap.execute(input,context,action);if(Buffer.byteLength(encoded(output))>256*1024)throw Error('Result exceeds the limit');visible=cap.visible(output).slice(0,16000);} catch(error) {this.journal.finish(actionId,error instanceof ActionFailed || error instanceof ActionDenied?'failed':'uncertain',error instanceof ActionFailed?error.safeResult.slice(0,16000):error instanceof ActionDenied?'Action denied':'Outcome unknown');if(error instanceof ActionDenied){this.close(context,'denied');return {kind:'blocked',reason:'Action denied'};}this.admit(context,true);cap.check(input,context,action);return {kind:'status',action:this.journal.get(actionId)!};}
     this.db.prepare('UPDATE work_action_invocations SET private_result=? WHERE action_id=?').run(encoded(output),actionId);
     this.journal.finish(actionId,'succeeded',visible);
-    this.admit(context);cap.check(input,context,action);
+    this.admit(context,true);cap.check(input,context,action);
     return {kind:'completed',actionId,value:output};
     } finally {claim?.release();}
   }

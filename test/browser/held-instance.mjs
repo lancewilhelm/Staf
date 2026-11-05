@@ -21,7 +21,8 @@ return {
     }
     if (options?.currentUserInput==='Scripted clock fixture') {
       if (messages.at(-1)?.role==='tool') return {role:'assistant',content:'Scripted clock completed.'};
-      return {role:'assistant',content:null,tool_calls:[{id:'script-clock',type:'function',function:{name:'code_mode',arguments:JSON.stringify({source:'return (await capabilities.clock({})).value;'})}}]};
+      const scripted=tools.some(tool=>tool.function.name==='code_mode');
+      return {role:'assistant',content:null,tool_calls:[{id:'script-clock',type:'function',function:{name:scripted?'code_mode':'clock',arguments:JSON.stringify(scripted?{source:'return (await capabilities.clock({})).value;'}:{})}}]};
     }
     if (options?.currentUserInput==='Blocked synthetic shell') {if(tools.some(tool=>tool.function.name==='run_scratch_shell')) throw Error('Shell offered while disabled');return {role:'assistant',content:'Scratch shell unavailable by default'};}
     if (['Run synthetic shell','Different synthetic shell','Deny synthetic shell','Revoke synthetic shell','Uncertain synthetic shell'].includes(options?.currentUserInput)) {
