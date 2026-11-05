@@ -424,3 +424,5 @@ guest catalog and schemas; child capability progress uses the registered name.
 Version 33 adds execution records and marks running records
 interrupted on restart without replay. See the [action service](work-actions.md)
 for limits, recovery and adapter entry points.
+
+The `search_web` registered action accepts only `{ "query": "..." }`. In ordinary chat, Direct, Hybrid and Code Mode share its configured backend, exact-query approval, action identity and result. Model input cannot select an origin, revision or identity. Completed-result release checks the captured backend and any reused grant again. Task execution retains its existing broker until the task action integration.

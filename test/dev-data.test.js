@@ -4,7 +4,7 @@ import { fork, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { Instance } from '../dist/instance.js';
+import { Instance, INSTANCE_SCHEMA_VERSION } from '../dist/instance.js';
 import { startInstance } from '../dist/instance-service.js';
 import { DatabaseSync } from 'node:sqlite';
 import { prepareUpgrade, finishUpgrade } from '../scripts/dev-upgrade.mjs';
@@ -173,7 +173,7 @@ test('development upgrade snapshots the database and agent files before migratio
     instance=new Instance(path,undefined,upgrade.token);assert.ok(instance.migrationBackup);
     db=new DatabaseSync(instance.migrationBackup);assert.equal(db.prepare('PRAGMA user_version').get().user_version,29);db.close();
     finishUpgrade(root,()=>instance.finishUpgrade(upgrade.token));assert.equal(instance.bot(bot.id).instructions,'Soul before upgrade');instance.close();
-    db=new DatabaseSync(path);assert.equal(db.prepare('PRAGMA user_version').get().user_version,33);db.close();
+    db=new DatabaseSync(path);assert.equal(db.prepare('PRAGMA user_version').get().user_version,INSTANCE_SCHEMA_VERSION);db.close();
   } finally {rmSync(root,{recursive:true,force:true});}
 });
 test('an interrupted upgrade remains fenced before and after initialization', () => {
@@ -234,5 +234,16 @@ test('explicit restore replaces the complete dataset and preserves its own recov
     const reset=command(root,'reset');assert.equal(reset.status,0,reset.stderr);const backup=reset.stdout.match(/Backup: (.+)/)?.[1];assert.ok(backup);
     const restore=spawnSync(process.execPath,['scripts/dev-data.mjs','restore',backup],{cwd:process.cwd(),env:{...process.env,STAF_DEV_DATA_DIR:root},encoding:'utf8'});assert.equal(restore.status,0,restore.stderr);assert.match(restore.stdout,/Backup:/);
     instance=new Instance(path);assert.equal(instance.bot(bot.id).instructions,'Restored instructions');assert.notEqual(instance.datasetIdentity(),oldIdentity);assert.equal(instance.authorized('old-token'),false);instance.close();
+  } finally {rmSync(root,{recursive:true,force:true});}
+});
+
+test('search action binding migration protects the prior database and preserves agents',()=>{
+  const root=mkdtempSync(join(tmpdir(),'staf-search-migration-')),path=join(root,'instance.sqlite');
+  try {
+    let instance=new Instance(path);const bot=instance.createBot({name:'Preserved',instructions:'Keep',provider:'demo'});instance.close();
+    let db=new DatabaseSync(path);db.exec('DROP TABLE search_action_bindings; PRAGMA user_version=33');db.close();
+    instance=new Instance(path);assert.equal(instance.bot(bot.id).instructions,'Keep');assert.ok(instance.migrationBackup && existsSync(instance.migrationBackup));
+    db=new DatabaseSync(instance.migrationBackup,{readOnly:true});assert.equal(db.prepare('PRAGMA user_version').get().user_version,33);assert.equal(db.prepare("SELECT count(*) AS count FROM sqlite_master WHERE name='search_action_bindings'").get().count,0);db.close();instance.close();
+    db=new DatabaseSync(path,{readOnly:true});assert.equal(db.prepare('PRAGMA user_version').get().user_version,INSTANCE_SCHEMA_VERSION);assert.equal(db.prepare("SELECT count(*) AS count FROM sqlite_master WHERE name='search_action_bindings'").get().count,1);db.close();
   } finally {rmSync(root,{recursive:true,force:true});}
 });

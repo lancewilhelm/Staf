@@ -1,11 +1,11 @@
 # Accepted-work action service
 
 `src/work-actions.ts` implements the instance-owned action service. Ordinary
-chat opens it once per accepted command; direct and QuickJS clock and memory calls use the
+chat opens it once per accepted command; direct and QuickJS clock, memory, and configured search calls use the
 same registrations and authorization. Task runtime and other existing tools
 remain on their earlier paths pending their adapters. In ordinary chat, those
 other individual tools are available in Direct and Hybrid only; Code Mode offers
-only `code_mode`, with clock and scoped memory as guest capabilities. Dispatch rejects
+only `code_mode`, with clock, scoped memory, and configured search as guest capabilities. Dispatch rejects
 individual calls that were not offered.
 
 ## Open accepted work
@@ -70,7 +70,7 @@ existing clock denial into that error. Feature code must keep `summary`,
 `resource`, and `visibleResult` safe for inspection. Inputs and private results
 remain in instance-owned records and are not part of the inspection manifest.
 
-Authorization and execution also receive the same frozen, coordinator-created
+Authorization and execution receive the same frozen, coordinator-created
 `ActionIdentity` (`id` and `fingerprint`). Existing two-argument callbacks remain
 valid. An authorizer can return an `AuthorityClaim` whose synchronous `start`
 checks or claims feature authority inside the journal start transaction. Its
@@ -78,7 +78,7 @@ checks or claims feature authority inside the journal start transaction. Its
 fails after the claim was returned. A claim does not prepare or finish a journal
 record. Adapters remain responsible for binding their exact target and checking
 live authority again when a recorded result is released; this seam does not by
-itself migrate search, web, scratch, or skill selection.
+itself migrate web, scratch, or skill selection. `check` receives the trusted identity on checks after authorization and on recovery; its initial eligibility check has no identity.
 
 The coordinator admits at most 32 new invocations per work item and at most
 eight pending invocations. Both routes share those limits. It checks active
@@ -87,6 +87,10 @@ journal start, and before releasing a result. A completed effect remains
 recorded when Stop prevents its result from being released. The journal marks
 started effects uncertain on restart and never re-executes them automatically.
 These guarantees do not make external effects exactly once.
+
+## Configured search adapter
+
+The service registers `search_web` with a query-only schema. Authorization binds the coordinator action ID and fingerprint to the exact work, query, backend origin and revision in `search_action_bindings`. Explicit decisions and optional remembered grants use the existing search approval endpoints and grant store. A reused grant is claimed synchronously in the coordinator start transaction; its controller is released on exit. Checks at start, result release and resume validate the captured boundary and claimed grant revision. The shared search effect enforces the existing rate, concurrency and scheduled-dispatch limits and uses the production loopback transport. The legacy task broker calls that same typed effect until task runtime opens `WorkActions`; it does not invent a chat command. Migration 34 creates the binding after the normal protected backup. Queries can be retained in this binding and its backups.
 
 ## Memory adapter
 

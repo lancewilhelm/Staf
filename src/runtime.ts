@@ -153,6 +153,10 @@ export async function runTurn({ session, store, provider, text, emit = () => {},
           continue;
         }
         report({ type: 'tool_start', id: call.id, name });
+        if(actions?.closedReason()) {
+          const content='Tool not executed: action admission is closed.';
+          messages.push({role:'tool',tool_call_id:call.id,content});report({type:'tool_result',id:call.id,name,success:false,content});continue;
+        }
         if(alteredToolCalls.has(call.id)) {
           const content='Tool error: arguments cannot be retained faithfully under the instance redaction rules.';
           messages.push({role:'tool',tool_call_id:call.id,content});report({type:'tool_result',id:call.id,name,success:false,content});continue;
@@ -192,7 +196,7 @@ export async function runTurn({ session, store, provider, text, emit = () => {},
             const intent=envelope===undefined ? {kind:'new' as const} : actionIntent.parse(envelope);
             let result:Awaited<ReturnType<WorkActions['invoke']>>;
             try {result=await actions.invoke({source:{kind:'provider',responseId:`${attempt}:${step}`,callId:call.id},name,input:actionInput,intent});} catch(error) {if(/no longer authorized|no longer active|admission closed|limit/i.test(errorMessage(error))) {fatalAction=errorMessage(error);actions.close('authority');}throw error;}
-            if(result.kind==='blocked' && closesAdmission(result.reason)) {fatalAction=result.reason;throw Error(result.reason);}
+            if(result.kind==='blocked' && closesAdmission(result.reason) && name!=='search_web') {fatalAction=result.reason;throw Error(result.reason);}
             if(result.kind!=='completed') success=false;
             const safeResult=result.kind==='completed' ? redactValue(result.value,redact) : redactValue(result,redact);
             content=typeof safeResult==='string' ? safeResult : JSON.stringify(safeResult);
