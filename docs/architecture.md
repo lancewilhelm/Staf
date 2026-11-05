@@ -257,9 +257,9 @@ The workspace reads service-owned command progress and persisted tool records th
 ### Shared agent images
 
 The shared agent-image contract owns the catalog, palette, descriptor validation,
-regular polygon rendering, and configuration encoding. Both the server and Vue
-use it. The descriptor is a top-level `image` string in the authoritative agent
-configuration; it is not a browser appearance preference. Omitting it preserves
+rounded regular polygon rendering, and configuration encoding. Both the server
+and Vue use it. The descriptor is a top-level `image` string in the authoritative
+agent configuration; it is not a browser appearance preference. Omitting it preserves
 legacy initials, and profile edits from older clients retain the saved choice.
 
 The image asset store accepts only bounded, normalized PNG crops during Create

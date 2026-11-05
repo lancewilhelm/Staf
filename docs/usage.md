@@ -59,10 +59,11 @@ or agent Settings, open **Change image** and select **Initials**, **Built-in
 avatar**, or **Uploaded image**. This choice belongs to the agent and is shared
 with every paired client.
 
-The built-in gallery contains a circle, rounded square, capsule, equilateral
-triangle, regular pentagon, and regular hexagon. Every character has a solid
-body color and two black circular eyes. Choose any of the eight colors
-independently of shape. Different agents can use the same combination.
+The built-in gallery shows all six shapes together: circle, rounded square,
+capsule, triangle, pentagon, and hexagon. Polygons have softly rounded corners.
+Every character has a solid body color and two black circular eyes. Choose any
+of the eight colors independently of shape. Different agents can use the same
+combination.
 
 Uploads accept PNG, JPEG, and WebP source files up to 10 MiB, 8192 pixels on
 either side, and 24 megapixels in total. Drag the square crop to reposition it,

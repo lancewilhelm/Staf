@@ -22,7 +22,7 @@ async function until(fn,label){for(let i=0;i<160;i++){const result=await fn();if
 function cdp(method,params={},sessionId,connection=socket){return new Promise((resolve,reject)=>{const id=++seq,timer=setTimeout(()=>{pending.delete(id);reject(Error('CDP timed out '+method));},10000);pending.set(id,{resolve:value=>{clearTimeout(timer);resolve(value);},reject:error=>{clearTimeout(timer);reject(error);}});connection.send(JSON.stringify({id,method,params,sessionId}));});}
 async function evaluate(expression,sessionId){const result=await cdp('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true},sessionId,sessionId?browserSocket:socket);if(result.exceptionDetails)throw Error(JSON.stringify(result.exceptionDetails));return result.result.value;}
 async function act(actions,condition,label){for(const expression of Array.isArray(actions)?actions:[actions])await evaluate(expression);await until(()=>evaluate(condition),label);console.log('PASS '+label);}
-async function key(key,windowsVirtualKeyCode){for(const type of ['keyDown','keyUp'])await cdp('Input.dispatchKeyEvent',{type,key,code:key,windowsVirtualKeyCode});}
+async function key(key,windowsVirtualKeyCode){for(const type of ['keyDown','keyUp'])await cdp('Input.dispatchKeyEvent',{type,key,code:key,windowsVirtualKeyCode,...(type==='keyDown'&&key==='Enter'?{text:'\r'}:{})});}
 async function choosePhoto(){
   await evaluate("(async()=>{if(!window.photoFile){const canvas=document.createElement('canvas');canvas.width=480;canvas.height=320;const ctx=canvas.getContext('2d');ctx.fillStyle='#E6C368';ctx.fillRect(0,0,480,320);ctx.fillStyle='#245D50';ctx.fillRect(100,40,140,240);ctx.fillStyle='#EB8D88';ctx.fillRect(300,0,180,160);const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/jpeg'));window.photoFile=new File([blob],'portrait.jpg',{type:'image/jpeg'});}const transfer=new DataTransfer();transfer.items.add(window.photoFile);const input=document.querySelector('input[type=file]');input.files=transfer.files;input.dispatchEvent(new Event('change',{bubbles:true}));})()");
   await until(()=>evaluate("document.querySelector('.image-previews img')?.naturalWidth===256"),'JPEG decoded to a 256px PNG preview');
@@ -44,7 +44,8 @@ try {
   const api=async(path,body)=>{const response=await fetch(url+path,{method:body?'POST':'GET',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});assert.ok(response.ok,await response.clone().text());return response.json();};
   await act("document.querySelector('.new-agent').click()","!!document.querySelector('dialog[open]')",'open New agent');
   assert.equal(await evaluate("document.activeElement===document.querySelector('dialog input')"),true,'Name focus retained');
-  await act(["input('dialog input','Cancelled image')", "click('Change image')", "click('Built-in avatar')"],"document.querySelectorAll('[data-image-shape]').length===6",'both shape groups are in one chooser');
+  await act(["input('dialog input','Cancelled image')", "click('Change image')", "click('Built-in avatar')"],"document.querySelectorAll('[data-image-shape]').length===6",'all six shapes are in the chooser');
+  assert.deepEqual(await evaluate("[...document.querySelectorAll('.image-shapes')].map(group=>({label:group.getAttribute('aria-label'),shapes:group.querySelectorAll('[data-image-shape]').length}))"),[{label:'Shape',shapes:6}],'all shapes share one labeled gallery');
   await act("document.querySelector('[data-image-shape=pentagon]').click()","document.querySelector('[data-image-shape=pentagon]').getAttribute('aria-pressed')==='true'",'choose a polygon');
   await act("click('Cancel')","!document.querySelector('dialog')",'cancel creation');assert.equal((await api('/api/bots')).length,0);
   await act("document.querySelector('.new-agent').click()","!!document.querySelector('dialog[open]')",'reopen clean creation');
@@ -181,12 +182,34 @@ try {
   await until(()=>evaluate("!document.querySelector('.top img')&&!document.querySelector('.top .agent-vector')",peer),'initials propagate to the second browser');
   await act("document.querySelector('[aria-label=\"Open agent settings\"]').click()","!!document.querySelector('.agent-settings input')",'review small-size layout');
   await act(["click('Change image')", "click('Built-in avatar')"],"document.querySelectorAll('[data-image-shape]').length===6",'all six choices remain available');
+  assert.deepEqual(await evaluate("[...document.querySelectorAll('.image-shapes')].map(group=>({label:group.getAttribute('aria-label'),shapes:group.querySelectorAll('[data-image-shape]').length}))"),[{label:'Shape',shapes:6}],'Settings uses the same unified gallery');
   await cdp('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
   assert.equal(await evaluate("document.querySelector('.side nav .agent-image').getBoundingClientRect().width"),28,'actual narrow sidebar badge size');
-  for(const theme of ['light','dark']){await evaluate(`document.documentElement.dataset.appearance=${JSON.stringify(theme)}`);assert.equal(await evaluate("document.documentElement.scrollWidth<=innerWidth"),true,'no horizontal overflow in '+theme);}
+  for(const theme of ['light','dark']){
+    await evaluate(`document.documentElement.dataset.appearance=${JSON.stringify(theme)}`);
+    assert.equal(await evaluate("document.documentElement.scrollWidth<=innerWidth"),true,'no horizontal overflow in '+theme);
+    for(const shape of ['triangle','pentagon','hexagon']){
+      await act(`document.querySelector('[data-image-shape=${shape}]').click()`,`document.querySelector('[data-image-shape=${shape}]').getAttribute('aria-pressed')==='true'`,theme+' selects '+shape);
+      const rendering=await evaluate(`(()=>{
+        const selected=document.querySelector('[data-image-shape=${shape}]'),other=document.querySelector('[data-image-shape=circle]');
+        const style=getComputedStyle(selected),otherStyle=getComputedStyle(other);
+        return {border:style.borderColor,otherBorder:otherStyle.borderColor,shadow:style.boxShadow,
+          previews:[...document.querySelectorAll('.image-previews .agent-image')].map(badge=>{
+            const path=badge.querySelector('svg path'),box=path?.getBBox();
+            return {size:badge.getBoundingClientRect().width,visible:!!box&&box.width>0&&box.height>0&&path.getTotalLength()>0&&getComputedStyle(path).fill!=='none'};
+          })};
+      })()`);
+      assert.notEqual(rendering.border,rendering.otherBorder,theme+' visibly marks '+shape);
+      assert.notEqual(rendering.shadow,'none',theme+' outlines the selected '+shape);
+      assert.deepEqual(rendering.previews,[64,24,28,30].map(size=>({size,visible:true})),theme+' renders rounded '+shape+' at every preview size');
+    }
+  }
   await evaluate("document.querySelector('[data-image-color=sky]').focus()");
-  await cdp('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',text:'\r',windowsVirtualKeyCode:13});await cdp('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});
+  await key('Enter',13);
   await until(()=>evaluate("document.querySelector('[data-image-color=sky]').getAttribute('aria-pressed')==='true'"),'keyboard selects color');
+  await evaluate("document.querySelector('[data-image-shape=triangle]').focus()");await key('Enter',13);
+  await until(()=>evaluate("document.querySelector('[data-image-shape=triangle]').getAttribute('aria-pressed')==='true'"),'keyboard selects a polygon');
+  assert.equal(await evaluate("document.querySelector('[data-image-color=sky]').getAttribute('aria-pressed')"),'true','keyboard shape choice preserves color');
   assert.equal(providerCalls,0,'image editing never invokes a provider');
   console.log('PASS two paired contexts, durable uploads, crop, keyboard, narrow themes and no provider calls');
 } finally {socket?.close();browserSocket?.close();browser?.kill();proxy?.close();await app.close();await sleep(200);await rm(temp,{recursive:true,force:true});}

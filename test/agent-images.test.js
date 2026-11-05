@@ -165,14 +165,25 @@ test('bad crops and stale image saves do not change the current image or weaken 
   assert.equal((await ctx.call('/api/commands',{image:valid},ctx.token,agentImageBodyType)).status,415);
 }));
 
-test('production avatars retain the approved palette, circular eyes and regular polygon geometry',()=>{
+test('production avatars retain the approved palette, circular eyes and symmetric rounded polygon geometry',()=>{
   assert.deepEqual(Object.values(agentImageColors).map(color=>color.hex),['#EFAB78','#EB8D88','#E6C368','#A8C79B','#7CC6BD','#8BB8DE','#B4A0D6','#D9A0BC']);
   for(const shape of Object.keys(agentImageShapes)) {
     const svg=avatarSvg({kind:'avatar',shape,color:'apricot'});
     const eyes=svg.match(/<g fill="#000">(.+?)<\/g>/)[1];
     assert.equal((eyes.match(/<circle /g)??[]).length,2);assert.doesNotMatch(svg,/<ellipse/);
-    const polygon=svg.match(/<polygon points="([^"]+)"/);if(!polygon)continue;
-    const points=polygon[1].split(' ').map(point=>point.split(',').map(Number));
+    const sides={triangle:3,pentagon:5,hexagon:6}[shape];if(!sides)continue;
+    const corners=[...svg.matchAll(/[ML] ([\d.,-]+) Q ([\d.,-]+) ([\d.,-]+)/g)].map(([,entry,vertex,exit])=>[entry,vertex,exit].map(point=>point.split(',').map(Number)));
+    assert.equal(corners.length,sides,shape+' has a curved segment at each corner');
+    for(const [entry,vertex,exit] of corners) {
+      assert.ok(Math.hypot(entry[0]-vertex[0],entry[1]-vertex[1])>5,shape+' rounds before the vertex');
+      assert.ok(Math.hypot(exit[0]-vertex[0],exit[1]-vertex[1])>5,shape+' rounds after the vertex');
+    }
+    const straightEdges=corners.map(([, ,exit],i)=>Math.hypot(exit[0]-corners[(i+1)%sides][0][0],exit[1]-corners[(i+1)%sides][0][1]));
+    assert.ok(Math.min(...straightEdges)>0,shape+' retains straight edges');
+    assert.ok(Math.max(...straightEdges)-Math.min(...straightEdges)<.000002,shape+' retains equal straight edges');
+    const endpoints=corners.flatMap(([entry,,exit])=>[entry,exit]);
+    assert.ok(endpoints.every(([x,y])=>endpoints.some(([mx,my])=>Math.hypot(mx-(64-x),my-y)<.000002)),shape+' rounds symmetrically');
+    const points=corners.map(([,vertex])=>vertex);
     const lengths=points.map(([x,y],i)=>Math.hypot(x-points[(i+1)%points.length][0],y-points[(i+1)%points.length][1]));
     assert.ok(Math.max(...lengths)-Math.min(...lengths)<.000002);
     assert.ok(points.every(([x,y])=>points.some(([mx,my])=>Math.hypot(mx-(64-x),my-y)<.000002)));

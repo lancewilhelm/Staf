@@ -1,10 +1,10 @@
 export const agentImageShapes = {
-  circle: {label:'Circle', group:'Rounded shapes'},
-  'rounded-square': {label:'Rounded square', group:'Rounded shapes'},
-  capsule: {label:'Capsule', group:'Rounded shapes'},
-  triangle: {label:'Triangle', group:'Regular polygons'},
-  pentagon: {label:'Pentagon', group:'Regular polygons'},
-  hexagon: {label:'Hexagon', group:'Regular polygons'},
+  circle: {label:'Circle'},
+  'rounded-square': {label:'Rounded square'},
+  capsule: {label:'Capsule'},
+  triangle: {label:'Triangle'},
+  pentagon: {label:'Pentagon'},
+  hexagon: {label:'Hexagon'},
 };
 export const agentImageColors = {
   apricot:{label:'Apricot',hex:'#EFAB78'}, coral:{label:'Coral',hex:'#EB8D88'},
@@ -60,8 +60,16 @@ export function avatarSvg(image:Extract<AgentImage,{kind:'avatar'}>):string {
     case 'capsule': body='<rect x="4" y="14" width="56" height="36" rx="18"/>';break;
     default: {
       const sides={triangle:3,pentagon:5,hexagon:6}[image.shape];
-      const points=Array.from({length:sides},(_,index)=>{const a=-Math.PI/2+index*Math.PI*2/sides;return `${(32+28*Math.cos(a)).toFixed(6)},${(32+28*Math.sin(a)).toFixed(6)}`;}).join(' ');
-      body=`<polygon points="${points}"/>`;
+      const point=(index:number)=>{const a=-Math.PI/2+index*Math.PI*2/sides;return {x:32+28*Math.cos(a),y:32+28*Math.sin(a)};};
+      // Trim six SVG units from each end of every edge, then round each vertex.
+      const trim=6/(56*Math.sin(Math.PI/sides));
+      const corners=Array.from({length:sides},(_,index)=>{
+        const vertex=point(index),before=point(index-1),after=point(index+1);
+        const entry=`${(vertex.x+(before.x-vertex.x)*trim).toFixed(6)},${(vertex.y+(before.y-vertex.y)*trim).toFixed(6)}`;
+        const exit=`${(vertex.x+(after.x-vertex.x)*trim).toFixed(6)},${(vertex.y+(after.y-vertex.y)*trim).toFixed(6)}`;
+        return `${index===0?'M':'L'} ${entry} Q ${vertex.x.toFixed(6)},${vertex.y.toFixed(6)} ${exit}`;
+      });
+      body=`<path d="${corners.join(' ')} Z"/>`;
     }
   }
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" aria-hidden="true"><g fill="${agentImageColors[image.color].hex}">${body}</g><g fill="#000"><circle cx="26" cy="32" r="3.2"/><circle cx="38" cy="32" r="3.2"/></g></svg>`;

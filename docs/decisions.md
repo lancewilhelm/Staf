@@ -400,6 +400,11 @@ independently. Characters use solid fills and two black circular eyes.
 Polygons have equal sides and angles and vertical symmetry. Initials remain the
 default, and uploads use a square crop. Changes commit through Create or Save.
 
+On 2026-11-04 the owner requested one shape gallery and softer polygon corners.
+Show all six shapes under Shape. Round the polygon vertices with matching
+curves while preserving equal straight edges and vertical symmetry. Existing
+shape IDs and saved selections keep their meaning.
+
 The choice belongs to shared agent configuration, while uploaded PNG bytes live
 with the instance's backed-up agent files. Existing revision conflicts, direct
 file editing, and retry-safe creation apply. Accepted images are retained for
