@@ -1,6 +1,6 @@
 # Basic tools: grounding
 
-Status: design research for [issue 79](https://github.com/lancewilhelm/Staf/issues/79), under [specification 78](https://github.com/lancewilhelm/Staf/issues/78). This is not implemented behavior. The checkpoint requires owner approval before implementation or issue completion.
+Status: design research for [issue 79](https://github.com/lancewilhelm/Staf/issues/79), under [specification 78](https://github.com/lancewilhelm/Staf/issues/78). This records the evidence used for the subsequently owner-approved checkpoint, not implemented behavior or fresh runtime verification.
 
 ## How the current service works
 

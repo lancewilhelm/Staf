@@ -1,6 +1,6 @@
 # Implementation contracts and verification seams
 
-Status: proposed checkpoint for [issue 79](https://github.com/lancewilhelm/Staf/issues/79). These contracts depend on owner approval and the common foundation in [issue 80](https://github.com/lancewilhelm/Staf/issues/80). They describe target behavior, not a claim that any capability is implemented.
+Status: owner-approved architecture checkpoint for [issue 79](https://github.com/lancewilhelm/Staf/issues/79). Implementation depends on the common foundation in [issue 80](https://github.com/lancewilhelm/Staf/issues/80). These contracts describe target behavior, not a claim that any capability is implemented.
 
 ## Common dependency and ownership
 
@@ -20,7 +20,7 @@ The parallel tickets may add separate capability modules and focused tests. They
 
 The primary proof is a disposable, paired Staf instance using controlled provider responses, the actual QuickJS worker, host processes, filesystem, existing SQLite memory and action records. Inspect normal API results and events. The GUI and CLI journeys are thin clients of that same instance. No real credentials, live or billable providers, Docker, or production data are required for this proof.
 
-After approval and implementation, exercise these distinct cases:
+During implementation, exercise these distinct cases:
 
 1. Assert the exact Direct, Hybrid, and Code Mode offers and reject an unoffered name even if the provider returns it. Test old missing configuration and captured profiles as Direct, new defaults as Hybrid, invalid explicit values, direct file edits, stale saves, and exact-ID retry conflicts.
 2. Hold chat and task execution while another client changes ordinary settings. The accepted profile and executing agent remain fixed. Independently revoke actual authority or stop work and prove subsequent queued, direct, and guest calls cannot start.
