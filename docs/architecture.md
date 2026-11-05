@@ -357,7 +357,7 @@ when the last work handle is released; only changing-action receipts remain in
 private SQLite results. Guest/internal read records keep completion metadata,
 while selected output and ordinary provider history retain their existing
 lifecycle. Random-access file reads include a credential-length byte overlap
-when checking known secrets, so page boundaries cannot expose credential pieces.
+when checking known secrets, so page boundaries cannot expose credential pieces. A bounded token lookback also checks pattern-recognized credentials; an unestablished boundary rejects the read.
 
 Paired owner reconciliation uses the active command/task controller and its
 immutable context. Feature hooks verify actual settled process observations,

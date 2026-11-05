@@ -58,7 +58,7 @@ Project attachment, automatic self-improvement, compaction, and the rejected
 sessions/documents/artifacts implementation remain outside this delivery.
 
 Review regressions in [basic-tools-review.test.js](../../../test/basic-tools-review.test.js)
-exercise credential fragments at random file offsets, transient read receipts,
+exercise configured and pattern-recognized credential fragments at random file offsets, bounded-lookback rejection, transient read receipts,
 processing more than the selected-output budget within the separate guest cache,
 paired/CLI owner resolution with real settled processes, stale and unrelated
 evidence rejection, memory lost-receipt repeat protection, and task predecessor

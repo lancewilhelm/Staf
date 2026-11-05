@@ -53,6 +53,30 @@ test('random file pages reject credentials crossing either byte boundary in ever
   } finally {await f.app.close();rmSync(directory,{recursive:true,force:true});}
 });
 
+test('pattern-recognized tokens cannot escape random file pages when not configured as keys',async()=>{
+  const directory=mkdtempSync(join(tmpdir(),'staf-pattern-page-')),path=join(directory,'token.txt'),safe=join(directory,'ordinary.txt');
+  const token='sk-or-v1-'+ 'q7z_'.repeat(30000);writeFileSync(path,'prefix:'+token+':end');writeFileSync(safe,'ordinary_name '.repeat(10000));
+  const f=await paired(join(directory,'db'),(profile,messages,_offers,options)=>{
+    if(messages.at(-1).role==='tool')return {role:'assistant',content:'Page checked.'};
+    const input=JSON.parse(options.currentUserInput);
+    return profile.toolMode==='direct'?tool('file_read',input):tool('code_mode',{source:`return (await capabilities.file_read(${JSON.stringify(input)})).value;`});
+  });
+  try {
+    let serial=0;
+    for(const mode of ['direct','hybrid','code']){
+      const bot=await f.call('/api/bots',{name:'Pattern '+mode,toolMode:mode});
+      for(const relative of [0,4096,100000,token.length-1]){
+        const id='pattern-'+ ++serial;await f.call('/api/commands',{id,botId:bot.id,content:JSON.stringify({path,offset:7+relative,limit:16})});
+        const work=await f.wait(id);assert.equal(work.state,'completed',work.error);assert.equal(work.workActions.length,1);
+        assert.equal(work.workActions[0].state,'failed',JSON.stringify(work));assert.match(work.workActions[0].result,/cannot be retained safely|credential boundary/);
+      }
+      const id='ordinary-'+mode;await f.call('/api/commands',{id,botId:bot.id,content:JSON.stringify({path:safe,offset:100000,limit:16})});
+      const work=await f.wait(id);assert.equal(work.workActions[0].state,'succeeded');
+      if(mode!=='direct')assert.equal(Buffer.from(work.codeExecutions[0].result.value.data,'base64').toString(),readFileSync(safe).subarray(100000,100016).toString());
+    }
+  } finally {await f.app.close();rmSync(directory,{recursive:true,force:true});}
+});
+
 test('unselected guest reads leave action metadata but no durable payload receipts',async()=>{
   const directory=mkdtempSync(join(tmpdir(),'staf-read-lifetime-')),path=join(directory,'db'),file=join(directory,'read.txt');
   const fileText='Unselected amber file payload'.repeat(10000),memoryText='Unselected cobalt memory payload';writeFileSync(file,fileText);

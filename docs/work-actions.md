@@ -243,3 +243,9 @@ New dispatches are deferred while accepted task input is pending. Deferral does 
 `read_web` binds the canonical URL to the coordinator identity in the existing `search_action_bindings` table, whose unchanged schema also stores scratch bindings; those exact boundaries can be retained in database backups. The first hop uses that action and records a successful redirect as soon as the response is received. Each redirect uses a host-created internal child action with a separate exact URL decision, journal start, and outcome. Internal actions are not model capabilities. Command and task inspection exposes their `parentActionId`. The parent checks every hop binding and reused grant before releasing text or returning a saved result on resume. Scheduled work retains its one-dispatch and exact-URL scope.
 
 `run_scratch_shell` binds the exact command, backend binary, socket, image, configuration revision, and fixed limits. The start transaction checks the owner decision or claims a matching grant. The effect reserves the existing scratch lock and schedule dispatch before using the configured sandbox executor. An uncertain result retains the lock until owner review. Both adapters use attempt timer hooks for approval waits, reject inputs changed by credential redaction, and preserve live permission and grant checks.
+
+File reads validate known-credential overlap and the preceding contiguous token
+context. The pattern check has a 64 KiB lookback, expanded when a known credential
+requires more. An unestablished boundary fails closed, including on a long benign
+ASCII token. No unchecked token fragment is returned merely because its prefix
+lies outside the requested page.
