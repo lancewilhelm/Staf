@@ -33,6 +33,13 @@ direct tools after an ordinary code error, accounting for completed actions and
 retaining shared denial, Stop, budget, permission, and uncertainty restrictions.
 Code Mode-only work must not silently change styles.
 
+The owner additionally requires memory as a core tool capability in this first
+release. Search/read, remember, update, and forget use the existing memory
+service in all three modes. Keep agent and shared user scopes, IDs, version
+checks, and existing shared-memory confirmation. This extends model access
+beyond current recalled entries and owner-command mutations. It does not replace
+the memory store or settle a different permission policy.
+
 The owner rejected PR #72 and plans to rebuild that feature later. The first
 basic-tool release does not depend on or import its sessions, documents,
 artifacts, or capability adapters. The extensible service boundary remains a

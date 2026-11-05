@@ -25,6 +25,8 @@ During the follow-up interview, the owner confirmed these release requirements:
   Permission policy is a separate topic from the terminal's supported behavior.
 - Hybrid can continue with direct tools after an ordinary code error, accounting
   for completed actions. Code Mode-only work does not switch calling styles.
+- Include first-class memory tools for search/read, remember, update, and forget.
+  Memory belongs in the core tool catalog, backed by the existing memory service.
 
 These answers replace the earlier chat-only scope and deferral of host tools.
 The owner prefers adding project folders within the agent's existing directory
@@ -206,12 +208,41 @@ conversation instead of borrowing a current chat's context.
 
 Ship the selector with working adapters for the existing eligible chat tools:
 clock, search, web reading, scratch shell, and selected skills, plus the new host
-terminal and file tools. Preserve existing chat and background-task behavior.
+terminal, file, and first-class memory tools. Preserve existing chat and
+background-task behavior.
 Use a stable working folder under the existing agent directory for basic host
 commands and relative file paths. Keep it outside revisioned configuration.
 Project-management UI, external-folder attachment, model-created skill
 management, and automatic self-improvement are deferred. Existing skill selection
 remains part of the basic tools. Do not add new sessions, documents, or artifacts.
+
+### Core memory tools
+
+The owner explicitly added memory to the basic-tool release after confirming
+the initial scope. Offer memory search/read, remember, update, and forget as
+normal tools in Direct and Hybrid. Expose the same service capabilities inside
+Code Mode scripts. Terminal access to storage and skill instructions do not
+replace the core memory tools.
+
+Use the existing memory service, not another store or retrieval system. Preserve
+agent memory and shared user memory as distinct scopes. Bind agent-specific
+operations to the agent doing the accepted work; a caller cannot substitute
+another agent's ID. Return memory IDs and versions with reads, and use the
+existing optimistic version checks for updates and deletion. Query/read output
+and recorded mutation outcomes follow the common action service rules.
+
+The current runtime accepts memory mutations through explicit owner phrases and
+paired-client APIs, while provider output and task directions cannot mutate it.
+The accepted feature changes that model interface by adding scoped memory tools
+for chat and background work. It does not implicitly change existing shared
+memory confirmation requirements or decide new permission policy. Those rules
+remain in the service and apply equally to direct and scripted calls.
+
+This is first-class access to retained memory. Automatic conversation compaction,
+new embeddings, transcript storage changes, and autonomous memory harvesting
+are outside this addition.
+
+### Compatibility and delivery order
 
 For a provider that reports no tool support, Direct retains its existing
 text-only behavior. Hybrid and Code Mode should report an actionable unsupported
@@ -228,7 +259,8 @@ Implementation sequence:
    Migrate the lab to the normal turn loop and remove the separate lab loop.
 4. Bind the same selected modes to accepted background tasks while preserving
    task-specific permissions, inputs, outcomes, and Stop behavior. Add the host
-   terminal and file capabilities through the common action service.
+   terminal, file, and scoped memory capabilities through the common action
+   service.
 5. Add the settings selector, inline approvals, retained code inspection, and
    cross-client progress using the existing workspace interactions.
 6. Run the mode and capability-parity checks before presenting the modes as
@@ -281,8 +313,14 @@ and Stop independently of guest lifetime. Run `corepack pnpm run check`,
 the existing served GUI smoke journey after implementation. No live or billable
 provider requests are authorized solely by this design review.
 
+Verify memory search/read and create/update/forget through Direct, Hybrid, and
+Code Mode against the real existing memory store. Check agent scope isolation,
+shared-memory confirmation, stale versions, retained changes after restart,
+and the same results through tools and existing owner interfaces. Do not treat
+writing a memory-storage file through the terminal as proof of tool support.
+
 The three modes, per-agent configuration, chat and background scope, first
-release's normal host terminal and file tools, defaults, shared approval policy,
+release's normal host terminal, file and memory tools, defaults, shared approval policy,
 delegated-agent mode selection, and Hybrid recovery are owner-selected.
 Project-folder choices and self-improvement direction are recorded as later
 work. The owner confirmed the complete focused product scope after the final

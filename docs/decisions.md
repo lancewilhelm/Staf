@@ -453,6 +453,15 @@ silently switch styles. The owner then confirmed the consolidated basic-tool
 scope and shared understanding, completing the follow-up interview. This confirms
 the product requirements, not implementation or live-provider verification.
 
+The owner then added basic memory operations as core tools in the same release:
+search/read, remember, update, and forget. Direct and Hybrid expose normal memory
+tools, and Code Mode scripts call the same memory service. This promotes memory
+beyond owner-phrase commands, paired-client APIs, and request-time recall into
+the model tool catalog. Preserve agent and shared user scopes, exact IDs,
+optimistic versions, and existing shared-memory confirmation. It does not add a
+new memory backend or change permission policy. Current memory behavior remains
+implemented as documented until the new tool adapters land.
+
 The owner rejected PR #72 and intends to rebuild its feature later. The basic
 tool release no longer depends on that delivery or its service contracts. Do not
 merge or import its session, document, or artifact implementation into this work.
