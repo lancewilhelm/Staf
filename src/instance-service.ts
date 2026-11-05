@@ -1,4 +1,5 @@
 import {clockCapability} from './clock-action.js';
+import {fileCapabilities} from './file-actions.js';
 import {parseToolMode} from './tool-mode.js';
 import {providerLabel} from './provider-label.js';
 import { parseMemoryLanguage } from './memory-language.js';
@@ -184,6 +185,8 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
 
   const workActions=instance.workActions();
   workActions.register(clockCapability(instance, work=>authorizeClock(work.botId,work.work.kind,work.work.id,work.signal)));
+  const files=fileCapabilities(redact);
+  workActions.register(files.read);workActions.register(files.write);workActions.register(files.edit);workActions.register(files.search);
 
   async function authorizeDisclosure(input:Parameters<Instance['proposeDisclosure']>[0],signal:AbortSignal,pause:()=>void,resume:()=>void) {
     signal.throwIfAborted();const id=instance.proposeDisclosure(input);pause();

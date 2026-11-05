@@ -117,7 +117,7 @@ export async function runTurn({ session, store, provider, text, emit = () => {},
         if(unsafe(raw.content)) throw Error('Web URLs with credentials or query strings are not supported');
         for(const call of raw.tool_calls ?? []) if(call.function.name === 'read_web') {let input:unknown;try{input=JSON.parse(call.function.arguments);}catch{throw Error('Invalid web URL');}if(!isRecord(input) || typeof input.url !== 'string' || Object.keys(input).length !== 1)throw Error('Invalid web URL');checkedOwnerWebUrl(input.url);}
       }
-      const unsafeCodeCalls = new Set(isAssistantMessage(raw) ? (raw.tool_calls ?? []).filter(call=>call.function.name==='code_mode' && redact(call.function.arguments)!==call.function.arguments).map(call=>call.id) : []);
+      const unsafeCalls = new Set(isAssistantMessage(raw) ? (raw.tool_calls ?? []).filter(call=>redact(call.function.arguments)!==call.function.arguments).map(call=>call.id) : []);
       const message = redactValue(raw, redact);
       if (isAssistantMessage(raw) && raw.responseReplay && (!isAssistantMessage(message) || !isDeepStrictEqual(raw.responseReplay.items.filter(item => item.type === 'reasoning'), message.responseReplay?.items.filter(item => item.type === 'reasoning')))) throw new Error('Cannot safely preserve provider replay');
       if (!isAssistantMessage(message)) throw new Error('Invalid assistant message');
@@ -178,10 +178,11 @@ export async function runTurn({ session, store, provider, text, emit = () => {},
         try {
           const args: unknown = JSON.parse(call.function.arguments);
           if (name === 'code_mode' && actions) {
-            if(unsafeCodeCalls.has(call.id) || !isRecord(args) || typeof args.source !== 'string' || Object.keys(args).length!==1) throw Error('Source cannot be retained safely or is invalid');
+            if(unsafeCalls.has(call.id) || !isRecord(args) || typeof args.source !== 'string' || Object.keys(args).length!==1) throw Error('Source cannot be retained safely or is invalid');
             await store.save({ ...(task ? checkpoint : history), usage: [...(history.usage || []), ...usage], events: [...history.events, ...events] });
             try {content=await runCode({actions,responseId:`${attempt}:${step}`,callId:call.id,source:args.source,redact,emit:report});const outcome:unknown=JSON.parse(content);if(isRecord(outcome) && outcome.outcome!=='return')success=false;} catch(error) {fatalAction=errorMessage(error);throw error;}
           } else if (actions && actions.recognizes(name)) {
+            if(unsafeCalls.has(call.id)) throw Error('Input cannot be retained safely');
             await store.save({ ...(task ? checkpoint : history), usage: [...(history.usage || []), ...usage], events: [...history.events, ...events] });
             const envelope=isRecord(args) ? args._staf : undefined;
             const actionInput=isRecord(args) ? Object.fromEntries(Object.entries(args).filter(([key])=>key!=='_staf')) : args;
