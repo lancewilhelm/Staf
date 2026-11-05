@@ -27,7 +27,7 @@ test('paired file operations retain bounded results and edits across settings an
  c=await submit('bad-edit',bot,'file_edit',{path:'notes.txt',expectedHash:digest('alpha beta alpha'),oldText:'alpha',newText:'changed'});assert.equal(c.workActions[0].state,'failed');assert.match(c.workActions[0].result,/more than once/);assert.equal(readFileSync(write.path,'utf8'),'alpha beta alpha');
  c=await submit('edit',bot,'file_edit',{path:'notes.txt',expectedHash:digest('alpha beta alpha'),oldText:'beta',newText:'gamma'});assert.equal(c.workActions[0].state,'succeeded');assert.equal(readFileSync(write.path,'utf8'),'alpha gamma alpha');
  await submit('stale',bot,'file_edit',{path:'notes.txt',expectedHash:digest('alpha beta alpha'),oldText:'gamma',newText:'bad'});assert.match(seen.at(-1),/hash changed/);await call(`/api/bots/${bot.id}/profile`,{...bot,name:'files renamed'});await app.close();await start();await submit('after-restart',bot,'file_read',{path:'notes.txt'});assert.equal(Buffer.from(JSON.parse(seen.at(-1)).data,'base64').toString(),'alpha gamma alpha');
- writeFileSync(join(dir,'host.txt'),'needle');await submit('absolute',bot,'file_read',{path:join(dir,'host.txt')});assert.equal(Buffer.from(JSON.parse(seen.at(-1)).data,'base64').toString(),'needle');
+ writeFileSync(join(dir,'host.txt'),'needle');await submit('absolute',bot,'file_read',{path:join(dir,'host.txt')});assert.equal(Buffer.from(JSON.parse(seen.at(-1)).data,'base64').toString(),'needle');await submit('names',bot,'file_search',{path:dir,query:'host'});assert.deepEqual(JSON.parse(seen.at(-1)).matches,['host.txt']);
  }finally{await app.close();rmSync(dir,{recursive:true,force:true});}
 });
 
