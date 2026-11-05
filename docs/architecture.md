@@ -311,19 +311,25 @@ retains bounded pipe output, and records exit only from the child close event.
 Work Stop requests process termination while the work remains active. Service
 shutdown requests termination and records an unobserved result as unknown;
 startup marks previously live observations unknown without replay or PID-based
-reattachment. The current backend is Node's shell/pipe backend. Its exported
-`startBackend(work, action, {cwd, mode, backend})` records ownership before calling
-`ProcessBackend.launch(cwd, observers)`. Backends return a `ProcessHandle` for
-termination and detachment and deliver asynchronous started, output, failed,
-exited and closed observations, including a combined `terminal` stream. The
-manager retains live handles through `handle(id)` and owns output, Stop,
-shutdown and restart accounting. Issue 85 can extend that handle for serialized
-input, EOF and resize, and register a PTY backend through the same manager.
-Those interactions and intentionally retained workflows remain unimplemented. Detached descendants are not guaranteed to
-terminate when an observed process exits.
+reattachment. The current pipe backend starts the shell under a Node supervisor that remains
+its process-group leader. After the shell exits, the supervisor waits for its
+pipes to close and uses `/bin/ps` to observe that no non-zombie group members
+remain. It accepts termination requests over its live IPC connection and signals
+its own group, so the service never signals a stored process-group number. A
+failed process listing retains the handle rather than claiming completion. The
+record can show the shell's observed exit status while the resource is still
+running or stopping. If the supervisor or observation is lost, the resource is
+unknown. Descendants that change group or detach may survive and are not covered
+by group observation or Stop. SIGKILL escalation can lose the supervisor's final
+observation and is reported as unknown rather than proof of termination.
 
-Known #84 gap: if the shell exits while a child from its process group keeps the
-pipes open, the shell exit is recorded but work Stop does not terminate that
-remaining child. A local paired fixture reproduced this. A safe group-lifetime
-owner is still needed before #84 can be considered complete; do not use a
-remembered PID as a substitute for a live verified handle.
+`startBackend(work, action, {cwd, mode, backend})` records ownership before
+calling `ProcessBackend.launch(cwd, observers)`. Backends return a
+`ProcessHandle` for termination and detachment and deliver asynchronous started,
+output, failed, exited, closed and lost observations, including a combined
+`terminal` stream. The manager retains live handles through `handle(id)` and
+owns output, Stop, shutdown and restart accounting. Issue 85 can extend that
+handle for serialized input, EOF and resize, and register a PTY backend through
+the same manager. It must also separate actual work lifetime cancellation from
+guest admission cancellation for intentionally retained processes. Those
+interactions and retained workflows remain unimplemented.

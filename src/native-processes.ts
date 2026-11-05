@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
 import type { Capability, WorkContext, ActionIdentity } from './work-actions.js';
@@ -10,7 +11,7 @@ CREATE TABLE IF NOT EXISTS native_processes (id TEXT PRIMARY KEY, bot_id TEXT NO
 CREATE TABLE IF NOT EXISTS native_process_output (process_id TEXT NOT NULL REFERENCES native_processes(id), cursor INTEGER NOT NULL, stream TEXT NOT NULL, data BLOB NOT NULL, PRIMARY KEY(process_id,cursor));
 `;
 export const nativeProcessLimits = Object.freeze({active:16, outputBytes:128*1024, pageBytes:48*1024, settleMs:200, shutdownMs:3000});
-export type ProcessObservers = {started:(pid:number|null)=>void;output:(stream:'stdout'|'stderr'|'terminal',data:Buffer)=>void;failed:()=>void;exited:(code:number|null,signal:string|null)=>void;closed:(code:number|null,signal:string|null)=>void};
+export type ProcessObservers = {started:(pid:number|null)=>void;output:(stream:'stdout'|'stderr'|'terminal',data:Buffer)=>void;failed:()=>void;exited:(code:number|null,signal:string|null)=>void;closed:(code:number|null,signal:string|null)=>void;lost:()=>void};
 export type ProcessHandle = {terminate:(signal:NodeJS.Signals)=>void;detach:()=>void};
 /** Backends deliver observations asynchronously after launch returns. */
 export type ProcessBackend = {launch:(cwd:string,observers:ProcessObservers)=>ProcessHandle};
@@ -18,10 +19,18 @@ type Live = {handle:ProcessHandle; signal:AbortSignal; abort:()=>void; timer?:Re
 
 function pipeBackend(command:string):ProcessBackend {
   return {launch:(cwd,observers)=>{
-    const child=spawn(process.env.SHELL || '/bin/sh',['-c',command],{cwd,env:process.env,detached:true,stdio:['ignore','pipe','pipe']});
+    const child=spawn(process.execPath,[fileURLToPath(new URL('./native-process-supervisor.js',import.meta.url)),command],{cwd,env:process.env,detached:true,stdio:['ignore','pipe','pipe','ipc']});
+    let code:number|null=null,signal:string|null=null,completed=false,failed=false;
     child.stdout?.on('data',(data:Buffer)=>observers.output('stdout',data));child.stderr?.on('data',(data:Buffer)=>observers.output('stderr',data));
-    child.once('spawn',()=>observers.started(child.pid ?? null));child.once('error',()=>observers.failed());child.once('exit',(code,signal)=>observers.exited(code,signal));child.once('close',(code,signal)=>observers.closed(code,signal));
-    return {terminate:signal=>{if(!child.pid || child.exitCode!==null || child.signalCode!==null)return;try{process.kill(-child.pid,signal);}catch{try{child.kill(signal);}catch{/* no observed exit */}}},detach:()=>{child.removeAllListeners();child.on('error',()=>{});child.stdout?.removeAllListeners();child.stderr?.removeAllListeners();}};
+    child.once('spawn',()=>observers.started(child.pid ?? null));child.once('error',()=>{failed=true;observers.failed();});
+    child.on('message',message=>{
+      if(!message || typeof message!=='object' || !('type' in message))return;
+      if(message.type==='failed'){failed=true;observers.failed();}
+      if(message.type==='exited' && 'code' in message && 'signal' in message && (typeof message.code==='number' || message.code===null) && (typeof message.signal==='string' || message.signal===null)) {code=message.code;signal=message.signal;observers.exited(code,signal);}
+      if(message.type==='closed')completed=true;
+    });
+    child.once('close',()=>{if(completed || failed)observers.closed(code,signal);else observers.lost();});
+    return {terminate:signal=>{if(child.connected)child.send(signal,()=>{});},detach:()=>{child.removeAllListeners();child.on('error',()=>{});child.stdout?.removeAllListeners();child.stderr?.removeAllListeners();if(child.connected)child.disconnect();}};
   }};
 }
 
@@ -83,8 +92,9 @@ export class NativeProcesses {
     const observers:ProcessObservers={
       started:pid=>{this.db.prepare("UPDATE native_processes SET state=CASE WHEN stop_requested=1 THEN 'stopping' ELSE 'running' END,pid=? WHERE id=?").run(pid,id);if(work.signal.aborted || this.get(id)?.stopRequested)this.stop(id);},
       output:(stream,data)=>this.append(id,stream,data),
-      failed:()=>{this.db.prepare("UPDATE native_processes SET state='failed' WHERE id=? AND pid IS NULL").run(id);},
-      exited:(code,signal)=>{this.db.prepare("UPDATE native_processes SET state='exited',exit_code=?,exit_signal=? WHERE id=?").run(code,signal,id);},
+      failed:()=>{this.db.prepare("UPDATE native_processes SET state='failed' WHERE id=?").run(id);},
+      exited:(code,signal)=>{this.db.prepare("UPDATE native_processes SET exit_code=?,exit_signal=? WHERE id=?").run(code,signal,id);},
+      lost:()=>{if(live.timer)clearTimeout(live.timer);work.signal.removeEventListener('abort',abort);this.live.delete(id);this.db.prepare("UPDATE native_processes SET state='unknown' WHERE id=?").run(id);done();},
       closed:(code,signal)=>{if(live.timer)clearTimeout(live.timer);work.signal.removeEventListener('abort',abort);this.live.delete(id);this.db.prepare("UPDATE native_processes SET state=CASE WHEN state='failed' THEN 'failed' ELSE 'exited' END,exit_code=?,exit_signal=?,output_complete=1 WHERE id=?").run(code,signal,id);done();},
     };
     let handle:ProcessHandle;
@@ -100,7 +110,7 @@ export class NativeProcesses {
   stop(id:string) {
     const record=this.get(id);if(!record)throw Error('Process not found');const live=this.live.get(id);
     if(!live) {if(record.state==='unknown')throw Error('Process observation lost; no live handle');return record;}
-    if(record.state==='exited' || record.state==='failed')return record;
+    if(record.state==='failed')return record;
     this.db.prepare("UPDATE native_processes SET stop_requested=1,state='stopping' WHERE id=?").run(id);
     const signal=(name:NodeJS.Signals)=>{if(this.live.has(id))live.handle.terminate(name);};
     signal('SIGTERM');if(!live.timer)live.timer=setTimeout(()=>signal('SIGKILL'),1000);
@@ -111,7 +121,7 @@ export class NativeProcesses {
     let timer:ReturnType<typeof setTimeout> | undefined;
     await Promise.race([Promise.all([...this.live.values()].map(live=>live.finished)),new Promise(resolve=>{timer=setTimeout(resolve,nativeProcessLimits.shutdownMs);})]);
     if(timer)clearTimeout(timer);
-    for(const [id,live] of this.live){if(live.timer)clearTimeout(live.timer);live.signal.removeEventListener('abort',live.abort);live.handle.detach();this.db.prepare("UPDATE native_processes SET state=CASE WHEN state='exited' THEN state ELSE 'unknown' END WHERE id=?").run(id);live.done();}
+    for(const [id,live] of this.live){if(live.timer)clearTimeout(live.timer);live.signal.removeEventListener('abort',live.abort);live.handle.detach();this.db.prepare("UPDATE native_processes SET state='unknown' WHERE id=?").run(id);live.done();}
     this.live.clear();
   }
 }

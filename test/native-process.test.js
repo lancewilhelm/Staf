@@ -103,3 +103,21 @@ test('all modes preserve arbitrary shell text and observe stdout, stderr and non
   try{token=(await call('/api/pair',{code:app.code})).token;for(mode of ['direct','hybrid','code']){const bot=await call('/api/bots',{name:'result-'+mode,toolMode:mode});await call('/api/commands',{id:'result-'+mode,botId:bot.id,content:'Run fixture'});let result;for(let i=0;i<500;i++){result=await call('/api/commands/result-'+mode);if(result.state!=='pending')break;await new Promise(resolve=>setTimeout(resolve,10));}assert.equal(result.state,'completed',result.error);const process=(await call('/api/processes')).find(p=>p.work.id==='result-'+mode);assert.equal(process.exitCode,7);const page=await call(`/api/processes/${process.id}/output`);assert.equal(page.chunks.filter(c=>c.stream==='stdout').map(c=>c.text).join(''),'https://example.test/?q=1\n');assert.equal(page.chunks.filter(c=>c.stream==='stderr').map(c=>c.text).join(''),'stderr\n');}}
   finally{await app.close();}
 });
+
+for(const [description,command] of [['pipe-holding child','sleep 30 & echo $!; exit 0'],['child with redirected pipes','sleep 30 >/dev/null 2>&1 & echo $!; exit 0']]) test(`another client stopping active work terminates a ${description} after the shell exits`,async()=>{
+  let entered,release;const ready=new Promise(resolve=>{entered=resolve;}),gate=new Promise(resolve=>{release=resolve;});
+  const app=startInstance(':memory:',0,{env:{},providerFactory:async()=>({name:'fixture',capabilities:{toolCalls:true},async complete(messages){if(messages.at(-1).role==='tool'){entered();await gate;return {role:'assistant',content:'done'};}return tool('terminal_run',{command});}})});
+  const port=await app.listen();let token,childPid;
+  const call=async(path,body,t=token)=>{const r=await fetch(`http://127.0.0.1:${port}${path}`,{method:body?'POST':'GET',headers:{...(t?{Authorization:`Bearer ${t}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});const v=await r.json();assert.ok(r.ok,JSON.stringify(v));return v;};
+  const until=async f=>{for(let i=0;i<300;i++){const v=await f();if(v)return v;await new Promise(resolve=>setTimeout(resolve,10));}throw Error('timed out');};
+  const alive=()=>{try{process.kill(childPid,0);return true;}catch(error){if(error.code==='ESRCH')return false;throw error;}};
+  try {
+    token=(await call('/api/pair',{code:app.code})).token;const second=(await call('/api/pair',{code:app.issueCode()},'')).token;
+    const bot=await call('/api/bots',{name:'orphan',toolMode:'direct'});await call('/api/commands',{id:'orphan-work',botId:bot.id,content:'Start fixture'});await ready;
+    const resource=(await call('/api/processes'))[0];const page=await call(`/api/processes/${resource.id}/output`);childPid=Number(page.chunks.map(c=>c.text??'').join('').trim());assert.ok(Number.isSafeInteger(childPid)&&childPid>1);assert.ok(alive());assert.equal(resource.exitCode,0);assert.equal(resource.outputComplete,false);
+    await call('/api/commands/orphan-work/stop',{},second);release();
+    await until(()=>!alive());childPid=undefined;
+    const ended=await until(async()=>{const p=await call(`/api/processes/${resource.id}`,undefined,second);return p.outputComplete&&p;});assert.equal(ended.stopRequested,true);
+    const work=await until(async()=>{const c=await call('/api/commands/orphan-work',undefined,second);return c.state!=='pending'&&c;});assert.equal(work.state,'stopped');
+  } finally {release();if(childPid)try{process.kill(childPid,'SIGKILL');}catch{}await app.close();}
+});
