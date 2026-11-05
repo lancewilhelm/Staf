@@ -4,26 +4,41 @@ import {startInstance} from '../dist/instance-service.js';
 
 const tool=(name,args)=>({role:'assistant',content:null,tool_calls:[{id:'one',type:'function',function:{name,arguments:JSON.stringify(args)}}]});
 
-test('shared proposal inspection and recovery redact configured credentials',async()=>{
+test('shared proposals that cannot be shown faithfully are rejected before confirmation',async()=>{
+  const {mkdtempSync,rmSync}=await import('node:fs');
+  const {tmpdir}=await import('node:os');const {join}=await import('node:path');
+  const {DatabaseSync}=await import('node:sqlite');
+  const directory=mkdtempSync(join(tmpdir(),'staf-proposal-privacy-')),database=join(directory,'instance.sqlite');
   const secret=['synthetic','proposal','secret'].join('-'),seen=[];
-  const app=startInstance(':memory:',0,{env:{OPENROUTER_API_KEY:secret},providerFactory:async()=>({name:'fixture',capabilities:{toolCalls:true},async complete(messages){
+  const app=startInstance(database,0,{env:{OPENROUTER_API_KEY:secret},providerFactory:async profile=>({name:'fixture',capabilities:{toolCalls:true},async complete(messages){
     seen.push(structuredClone(messages));
-    return messages.at(-1).role==='tool'?{role:'assistant',content:'done'}:tool('code_mode',{source:'await capabilities.memory_remember({scope:{kind:"user"},text:["synthetic","proposal","secret"].join("-")}); throw Error("fixture");'});
+    if(messages.at(-1).role==='tool')return {role:'assistant',content:'done'};
+    return profile.toolMode==='direct'?tool('memory_remember',{scope:{kind:'user'},text:secret}):tool('code_mode',{source:'await capabilities.memory_remember({scope:{kind:"user"},text:["synthetic","proposal","secret"].join("-")}); throw Error("fixture");'});
   }})});
-  const port=await app.listen();let token;
+  const port=await app.listen();let token,closed=false;
   const call=async(path,body)=>{const response=await fetch(`http://127.0.0.1:${port}${path}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});assert.ok(response.ok);return response.json();};
   try {
     token=(await call('/api/pair',{code:app.code})).token;
-    const bot=await call('/api/bots',{name:'Proposal privacy',toolMode:'hybrid'});
-    await call('/api/commands',{id:'proposal-privacy',botId:bot.id,content:'Perform fixture operation.'});
-    let command;for(let n=0;n<500;n++){command=await call('/api/commands/proposal-privacy');if(command.state!=='pending')break;await new Promise(resolve=>setTimeout(resolve,10));}
-    assert.equal(command.state,'completed',command.error);
-    assert.equal(command.workActions.length,1);
-    assert.equal(command.codeExecutions[0].outcome,'error');
-    assert.equal(JSON.stringify(command).includes(secret),false);
-    assert.equal(JSON.stringify(seen).includes(secret),false);
-    assert.match(command.workActions[0].result,/REDACTED/);
-  } finally {await app.close();}
+    for(const mode of ['direct','hybrid','code']) {
+      const bot=await call('/api/bots',{name:'Proposal privacy '+mode,toolMode:mode}),id='proposal-privacy-'+mode;
+      await call('/api/commands',{id,botId:bot.id,content:'Perform fixture operation.'});
+      let command;for(let n=0;n<500;n++){command=await call('/api/commands/'+id);if(command.state!=='pending')break;await new Promise(resolve=>setTimeout(resolve,10));}
+      assert.equal(command.state,'completed',command.error);
+      assert.equal(command.workActions.length,mode==='direct'?0:1);
+      assert.equal(JSON.stringify(command).includes(secret),false);
+      assert.equal(JSON.stringify(seen).includes(secret),false);
+      if(mode==='direct') assert.match(seen.at(-1).findLast(message=>message.role==='tool').content,/faithfully/);
+      else {
+        assert.equal(command.codeExecutions[0].outcome,'error');
+        assert.equal(command.workActions[0].state,'failed');
+        assert.match(command.workActions[0].result,/faithfully/);
+      }
+      assert.deepEqual(await call('/api/memories/user'),[]);
+    }
+    await app.close();closed=true;
+    const db=new DatabaseSync(database);
+    try {assert.equal(db.prepare('SELECT count(*) AS count FROM memory_proposals').get().count,0);} finally {db.close();}
+  } finally {if(!closed)await app.close();rmSync(directory,{recursive:true,force:true});}
 });
 
 test('registered memory action changes the owner-visible store',async()=>{
@@ -77,12 +92,12 @@ test('all modes share scoped store, owner confirmation, conflicts, and restart p
       await run(bot,route,'memory_forget',{scope,id:item.id,version:2});assert.deepEqual(await call(`/api/memories/bot/${bot.id}`),[]);
     }
     const bot=bots.hybrid,scope={kind:'user'};
-    const proposal=await run(bot,'direct','memory_remember',{scope,text:'shared violet'});const proposalId=JSON.parse(proposal.result).proposal.id;
+    const proposal=await run(bot,'direct','memory_remember',{scope,text:'shared violet'});const reviewed=JSON.parse(proposal.result).proposal,proposalId=reviewed.id;
     assert.match(proposal.command.workActions[0].result,/shared violet/);assert.match(proposal.command.workActions[0].result,new RegExp(proposalId));
     assert.deepEqual(await call('/api/memories/user'),[]);
     const status=await run(bot,'code','memory_proposal_status',{id:proposalId});assert.match(status.result,/pending/);
     await call('/api/commands',{id:'owner-confirm',botId:bot.id,content:`Confirm shared memory ${proposalId}`},other);assert.equal((await wait('owner-confirm')).state,'completed');
-    let shared=(await call('/api/memories/user'))[0];assert.equal(shared.text,'shared violet');
+    let shared=(await call('/api/memories/user'))[0];assert.equal(shared.text,'shared violet');assert.equal(shared.text,reviewed.text);
     const sharedCli=await promisify(execFile)(process.execPath,['dist/cli.js','instance','memory-list',`http://127.0.0.1:${port}`,credential,'user']);assert.match(sharedCli.stdout,/shared violet/);
     assert.match((await run(bot,'direct','memory_proposal_status',{id:proposalId})).result,/confirmed/);
     await run(bot,'code','memory_update',{scope,id:shared.id,version:shared.version,text:'shared green'});

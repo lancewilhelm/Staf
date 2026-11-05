@@ -79,7 +79,7 @@ These guarantees do not make external effects exactly once.
 
 ## Memory adapter
 
-`registerMemoryCapabilities(instance, registry, redact)` registers search, read, remember, update, forget and proposal-status actions for accepted command or task contexts. Task runtime has not yet opened this boundary. The adapter rejects helper attempts and derives agent scope from the captured bot ID. Search is bounded to 20 items and exposes a continuation cursor. Store update and delete perform their version and scope checks at the effect, not in `check`: `check` also runs when releasing a completed retry. `MemoryConflict` becomes `ActionFailed`, so the journal records a definite failure. Shared creation inserts a pending proposal through the existing instance workflow; only the separate owner command confirms it. Reads return private results through the coordinator. The shared-proposal action record shows the proposed text and ID after the instance credential redactor runs, so inspection and recovery do not expose configured credentials. The common runtime supplies the eligible memory catalog, progress and outcome reporting.
+`registerMemoryCapabilities(instance, registry, redact)` registers search, read, remember, update, forget and proposal-status actions for accepted command or task contexts. Task runtime has not yet opened this boundary. The adapter rejects helper attempts and derives agent scope from the captured bot ID. Search is bounded to 20 items and exposes a continuation cursor. Store update and delete perform their version and scope checks at the effect, not in `check`: `check` also runs when releasing a completed retry. `MemoryConflict` becomes `ActionFailed`, so the journal records a definite failure. Shared creation inserts a pending proposal through the existing instance workflow; only the separate owner command confirms it. Reads return private results through the coordinator. Memory creation and update reject text that the instance credential redactor would change, before the store or proposal is written. The shared-proposal action record therefore shows the exact text that owner confirmation saves, together with its ID; inspection and recovery still use structured redaction. The common runtime supplies the eligible memory catalog, progress and outcome reporting.
 
 ## Recovery
 
@@ -140,6 +140,8 @@ Per accepted command: at most four guest executions and 32 action invocations,
 with eight pending actions. Each source is at most 32 KiB, selected output at
 most 256 KiB, guest CPU time at most 5,000 ms per execution, QuickJS heap at most
 32 MiB and stack at most 512 KiB. A worker message is bounded to 256 KiB.
+Direct tool arguments that credential redaction would alter are rejected before dispatch; the runtime never executes their redacted replacement.
+
 Ordinary `Error` messages, including words such as `interrupted` or `limit`,
 remain recoverable. Exception values, including guest-created `InternalError`
 objects, do not establish that a shared budget was exhausted. The worker tracks
