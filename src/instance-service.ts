@@ -185,7 +185,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
 
   const workActions=instance.workActions();
   workActions.register(clockCapability(instance, work=>authorizeClock(work.botId,work.work.kind,work.work.id,work.signal)));
-  registerMemoryCapabilities(instance,workActions);
+  registerMemoryCapabilities(instance,workActions,redact);
 
   async function authorizeDisclosure(input:Parameters<Instance['proposeDisclosure']>[0],signal:AbortSignal,pause:()=>void,resume:()=>void) {
     signal.throwIfAborted();const id=instance.proposeDisclosure(input);pause();

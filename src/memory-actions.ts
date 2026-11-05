@@ -16,7 +16,7 @@ const str=(description:string):ToolParameter=>({type:'string',description});
 const num=(description:string):ToolParameter=>({type:'integer',description});
 
 /** Register once on the instance action service; both routes and future task callers share these operations. */
-export function registerMemoryCapabilities(instance:Instance, registry:WorkActionService):void {
+export function registerMemoryCapabilities(instance:Instance, registry:WorkActionService, redact:(value:string)=>string):void {
   function capability<I>(name:string, description:string, schema:z.ZodType<I>, properties:Record<string,ToolParameter>, required:string[], effect:'read'|'change', execute:(input:I,work:WorkContext)=>Json):Capability<I,Json> {
     const definition:ToolDefinition={type:'function',function:{name,description,parameters:{type:'object',properties,required,additionalProperties:false}}};
     const allowed=(work:WorkContext)=>work.work.kind!=='task' || !instance.isHelperAttempt(work.work.id);
@@ -24,7 +24,7 @@ export function registerMemoryCapabilities(instance:Instance, registry:WorkActio
       describe:()=>({summary:description,resource:'memory',effect}),eligible:allowed,
       check:(_input,work)=>{if(!allowed(work))throw Error('Memory is no longer authorized');},authorize:async()=>{},
       execute:async(input,work)=>{try{return execute(input,work);}catch(error){if(error instanceof MemoryConflict)throw new ActionFailed('Memory changed or was not found in this scope. Refresh and use the current version.');throw error;}},
-      visibleResult:output=>name==='memory_remember' && output && !Array.isArray(output) && typeof output==='object' && 'proposal' in output ? JSON.stringify(output) : effect==='read'?'Memory read completed':'Memory operation completed'};
+      visibleResult:output=>redact(name==='memory_remember' && output && !Array.isArray(output) && typeof output==='object' && 'proposal' in output ? JSON.stringify(output) : effect==='read'?'Memory read completed':'Memory operation completed')};
   }
   function register<I>(value:Capability<I,Json>):void {registry.register(value);}
   const common={scope:scopeParameter};
