@@ -1,5 +1,12 @@
 # Coordination with the overnight feature work
 
+The owner subsequently rejected PR #72 and deferred rebuilding its feature.
+This file preserves historical coordination, not a dependency of the current
+basic-tool release. Do not merge or import that PR or treat its contracts as
+accepted requirements. Keep the host bridge extensible for future services.
+The [current mode design](tool-modes.md) and [later-work record](later-work.md)
+describe the narrowed scope.
+
 On 2026-11-04 the owner chose [selectable tool modes](tool-modes.md). The earlier
 prohibition on a direct model calling style below is superseded. Direct tools
 and script calls must use the same feature-owned service implementations and

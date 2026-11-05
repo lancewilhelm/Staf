@@ -9,9 +9,41 @@ service-owned capabilities, permissions, accepted work context, and outcomes.
 This replaces the earlier requirement to retire direct tools and prohibit a
 second model-facing calling style.
 
+In the follow-up interview, the owner confirmed a saved per-agent mode exposed
+through Settings, CLI, and API, applied to chat and background tasks. Active work
+retains its accepted mode. The first release also includes host terminal and
+file read, write, edit, and search capabilities using the service account's
+permissions without requiring containers. This replaces the proposed chat-only
+scope and deferral of host tools. These capabilities remain unimplemented.
+
+The owner confirmed Hybrid for new agents, Direct for existing configurations
+without a saved choice, shared permission and approval settings for both calling
+styles, and the executing agent's own mode for delegated work. Adding project
+folders within the existing agent directory is preferred over relocating the
+agent directory. The owner accepted adding projects and attaching existing
+folders, writing tested scripts and saved skills, and normal reviewed
+development for Staf changes, then deferred these workflows to prioritize basic
+tools. See the [later-work record](../design/code-mode/later-work.md).
+
+The owner rejected a foreground-only terminal scope. Normal host commands,
+scripts, interactive programs, input, output, and background processes belong in
+the basic-tool release. Permission policy is a separate topic. Terminal process
+lifetime must remain distinct from a QuickJS script's lifetime. Hybrid can use
+direct tools after an ordinary code error, accounting for completed actions and
+retaining shared denial, Stop, budget, permission, and uncertainty restrictions.
+Code Mode-only work must not silently change styles.
+
+The owner rejected PR #72 and plans to rebuild that feature later. The first
+basic-tool release does not depend on or import its sessions, documents,
+artifacts, or capability adapters. The extensible service boundary remains a
+requirement for future integrations.
+
 The [revised architecture checkpoint](../design/code-mode/tool-modes.md) proposes
-the setting, defaults, and production migration. It awaits architecture review;
-the current implementation remains a synthetic developer experiment. New
+the focused basic-tool release and production migration.
+The owner confirmed the focused product scope and completed the follow-up
+interview. The expanded task and terminal implementation design still needs
+architecture review; the current implementation remains a synthetic developer
+experiment. New
 container or OS isolation is deferred at the owner's direction. The earlier
 requirements below remain a historical record, not evidence that those checks
 passed or that the mode setting exists.

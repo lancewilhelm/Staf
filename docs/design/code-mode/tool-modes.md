@@ -2,12 +2,49 @@
 
 The owner chose Direct, Hybrid, and Code Mode on 2026-11-04. That product
 decision replaces the earlier requirement to retire direct model tools.
-This document is the revised architecture checkpoint. The setting and production
-integration described here are proposed, not implemented by the experiment.
+The owner confirmed the focused basic-tool scope after the follow-up interview.
+This document records those product decisions and the proposed implementation.
+The setting and production integration are not implemented by the experiment.
+
+During the follow-up interview, the owner confirmed these release requirements:
+
+- Save the mode per agent and expose it through Settings, CLI, and API.
+- Apply the selected mode to chat and background tasks. Active work retains
+  its accepted mode when settings change.
+- Include a host terminal and individual file read, write, edit, and search
+  tools in the first selectable-modes release. Commands run on the service host
+  with the service account's permissions, without requiring containers.
+- Default new agents to Hybrid. Existing configurations without a saved choice
+  retain Direct, and an explicit choice wins.
+- Extend the existing permission and approval settings to host terminal and file
+  tools. Direct and scripted calls use one decision for the underlying action.
+- Delegated work uses the executing agent's own selected mode, with its task
+  restrictions still in force.
+- Provide a normal host terminal, including interactive programs, input, output,
+  and background processes. The owner rejected a foreground-only first version.
+  Permission policy is a separate topic from the terminal's supported behavior.
+- Hybrid can continue with direct tools after an ordinary code error, accounting
+  for completed actions. Code Mode-only work does not switch calling styles.
+
+These answers replace the earlier chat-only scope and deferral of host tools.
+The owner prefers adding project folders within the agent's existing directory
+instead of relocating the entire agent directory. The owner accepted adding
+projects and attaching existing folders without moving their contents, reusable
+scripts and agent-authored skills, and ordinary reviewed development for changes
+to Staf itself. The owner then deferred these expanded workflows to focus on
+basic tool use. Their [later-work record](later-work.md) preserves that direction.
+
+The owner rejected PR #72 and plans to rebuild that feature later. This release
+does not depend on, merge, or import its sessions, documents, artifacts, or
+workspace capability adapters. GitHub still reported the PR open when this
+scope change was recorded; owner rejection takes precedence over that status.
+The interview is complete and the owner confirmed shared understanding. The
+implementation sketch still needs to cover the expanded task and terminal
+requirements before the architecture checkpoint for production work.
 
 ## Usage
 
-In Agent Settings, **Tool mode for chat** offers these choices:
+In Agent Settings, **Tool mode** offers these choices:
 
 | Choice | Tools offered to the model |
 | --- | --- |
@@ -15,10 +52,10 @@ In Agent Settings, **Tool mode for chat** offers these choices:
 | Hybrid | Those individual tools plus `code_mode`. |
 | Code Mode | `code_mode`, with those capabilities available inside its scripts. |
 
-The proposed default for new agents is Hybrid. An existing configuration or
-captured profile without a mode retains Direct. An explicit choice always wins.
-These defaults require checkpoint agreement. Instance creation defaults may
-select the mode copied into a new agent, following the existing defaults model.
+The owner-confirmed default for new agents is Hybrid. An existing configuration
+or captured profile without a mode retains Direct. An explicit choice always
+wins. Instance creation defaults may select the mode copied into a new agent,
+following the existing defaults model.
 
 The proposed authoritative configuration field is `toolMode`:
 
@@ -28,8 +65,9 @@ toolMode = "hybrid" # direct | hybrid | code
 
 This example is a proposed format. The current parser rejects the new field.
 Save through the existing settings revision and conflict handling. A valid edit
-applies to the next accepted chat request. An active request keeps its captured
-mode even if settings or the selected session change in another client.
+applies to newly accepted chat and background work. An active request or task
+keeps its captured mode even if settings or the selected session change in
+another client.
 
 For example, Direct can call `search_web({query: "example"})`. Hybrid can make
 that same call or call `code_mode({source: "..."})`. Code Mode exposes only the
@@ -49,12 +87,19 @@ synthetic-only loop and no migrated production capabilities. Adding a selector
 without integrating those behaviors would advertise modes that do not work.
 
 Two calling styles are intentional in Hybrid. Each underlying capability still
-has one implementation and one authorization and action-record path. The
-session, document, and artifact services continue to own their operations.
-Neither calling style looks up an agent's mutable current-session selection.
-Fresh sessions retain the existing rule against implicit compaction or replay.
+has one implementation and one authorization and action-record path. Keep the
+bridge extensible for future application services without importing the rejected
+PR #72. Both calling styles use accepted work context instead of mutable client
+selection. Preserve current conversation history without implicit compaction,
+summarization, truncation, or replay from other conversations. New session,
+document, and artifact features are outside this release.
 
 ## Shape
+
+The sketch below describes the chat binding. The expanded first release also
+requires a task binding with captured task identity, session, mode, permissions,
+and cancellation. Its action records must retain task ownership rather than
+invent a chat command identity. Complete that design after the interview.
 
 Keep `runTurn` as the provider conversation loop. Extract the existing action
 definitions and dispatch into a command-bound action service. Derive individual
@@ -100,6 +145,13 @@ wrapping an already authorized action with a second approval or journal is
 incorrect. Existing capability-specific URL, skill, grant, and permission rules
 remain in that shared service path.
 
+In Hybrid, an ordinary script error does not remove the available direct tools.
+The agent can continue through them after accounting for completed actions and
+checking any unknown outcome. This is use of the selected Hybrid mode, not a
+mode change. Code Mode-only work reports failure instead of changing styles.
+Denial, Stop, expiry, permission restrictions, exhausted shared budgets, and
+uncertain effects still prevent a workaround through another calling style.
+
 A denial ends the script and blocks further actions in the accepted request,
 including direct calls already returned in the same provider response. Hybrid
 cannot retry the denied action through another route. Stop, expiry, revocation,
@@ -126,22 +178,40 @@ Keep QuickJS as the current coordination runner. Selecting a mode does not
 select a machine, shell backend, or isolation level. The owner has deferred new
 container or OS isolation work. The existing process and resource limitations
 must remain documented rather than described as checks that passed. Host
-terminal access and file editing require separate capabilities and are not
-provided by this setting. Existing scratch-shell restrictions remain actual
-runtime behavior until a terminal capability changes them explicitly.
+terminal and file tools are separate capabilities included in the first release.
+The mode selects how those capabilities are called. Existing scratch-shell
+restrictions describe the current runtime until the new capabilities land.
+
+The host terminal uses the normal host shell and installed programs. Support
+ordinary commands, scripts, interactive programs, and background processes,
+including input, output, process observation, and Stop. Do not impose an allowed
+command list or foreground-only behavior as a consequence of Code Mode. Separate
+permission policy from the tool's functional capability.
+
+Terminal process lifetime must be distinct from a QuickJS script's lifetime.
+A script can start or interact with a service-owned process and return its
+handle. Ending that script does not silently end an intentionally retained
+terminal process. The implementation design must cover process ownership,
+interaction, cancellation, and observed or uncertain restart outcomes without
+automatically replaying commands. Guest execution limits are not terminal
+session limits.
 
 ## Scope and delivery
 
-The proposed first delivery covers main chat. Label the setting accordingly.
-Background tasks and helpers keep their current direct tools and captured task
-authority. Extending the setting to all agent work requires task-specific host
-bindings and approval handling. This scope is part of the checkpoint proposal.
+The owner confirmed chat and background tasks in the first delivery. Implement
+task-specific host bindings, captured profiles, and approval handling alongside
+chat. Delegated work uses its executing agent's configured mode and retains
+existing task restrictions. Preserve each task's actual authority and captured
+conversation instead of borrowing a current chat's context.
 
 Ship the selector with working adapters for the existing eligible chat tools:
-clock, search, web reading, scratch shell, and selected skills. Preserve all
-regular-chat behavior. Register separately owned feature methods when their
-contracts are available on the integration base. Do not duplicate feature
-storage, search, or revision logic.
+clock, search, web reading, scratch shell, and selected skills, plus the new host
+terminal and file tools. Preserve existing chat and background-task behavior.
+Use a stable working folder under the existing agent directory for basic host
+commands and relative file paths. Keep it outside revisioned configuration.
+Project-management UI, external-folder attachment, model-created skill
+management, and automatic self-improvement are deferred. Existing skill selection
+remains part of the basic tools. Do not add new sessions, documents, or artifacts.
 
 For a provider that reports no tool support, Direct retains its existing
 text-only behavior. Hybrid and Code Mode should report an actionable unsupported
@@ -156,9 +226,12 @@ Implementation sequence:
 2. Extract and verify the common action service through existing direct calls.
 3. Adapt the guest host to that service and add mode-based offers and dispatch.
    Migrate the lab to the normal turn loop and remove the separate lab loop.
-4. Add the settings selector, inline approvals, retained code inspection, and
+4. Bind the same selected modes to accepted background tasks while preserving
+   task-specific permissions, inputs, outcomes, and Stop behavior. Add the host
+   terminal and file capabilities through the common action service.
+5. Add the settings selector, inline approvals, retained code inspection, and
    cross-client progress using the existing workspace interactions.
-5. Run the mode and capability-parity checks before presenting the modes as
+6. Run the mode and capability-parity checks before presenting the modes as
    available. Named live-model validation remains distinct from offline tests.
 
 ## Synthesis decision
@@ -174,6 +247,11 @@ needed the broad profile-revision check corrected. Reject a separate production
 code-only loop, hand-maintained duplicate catalogs, and a settings-only change
 that leaves the new modes unavailable. These choices concentrate action policy
 without moving conversation ownership into the executor.
+
+Both candidate sketches initially limited mode selection to chat. The owner's
+follow-up answers supersede that scope. They also add host terminal and file
+capabilities to the release. Their task and capability bindings require the
+remaining interview and revised checkpoint before implementation.
 
 We accept two model-facing calling styles in exchange for a user choice suited
 to ordinary commands and larger scripted workflows. Keeping one action service
@@ -191,13 +269,25 @@ denial across routes, completed-change guards, uncertain effects, skill
 invalidation, Stop, restart without replay, and executor cleanup.
 
 Check normal streaming, provider history, usage, memory, selected skills, and
-session persistence in every mode. Exercise unsupported providers and executor
-failure without fallback. Run `corepack pnpm run check`, `corepack pnpm test`, and
+session persistence in every mode. Exercise captured mode changes, authority,
+Stop, and retained outcomes for background tasks as well as chat. Verify actual
+host command execution and file operations in disposable working folders.
+Exercise unsupported providers and executor failures without silently changing
+the configured mode or model. Verify recovery through direct tools after an
+ordinary code error in Hybrid, while preserving completed-action and uncertainty
+guards. Verify interactive terminal input, retained background processes, output,
+and Stop independently of guest lifetime. Run `corepack pnpm run check`,
+`corepack pnpm test`, and
 the existing served GUI smoke journey after implementation. No live or billable
 provider requests are authorized solely by this design review.
 
-The three choices are owner-selected. The proposed new-agent default, chat-only
-first scope, and implementation shape await the previously requested
-architecture checkpoint. After agreement, implement the complete chat slice in
-a dedicated tracked issue and branch. The existing experiment remains a
-developer lab until that integration is delivered.
+The three modes, per-agent configuration, chat and background scope, first
+release's normal host terminal and file tools, defaults, shared approval policy,
+delegated-agent mode selection, and Hybrid recovery are owner-selected.
+Project-folder choices and self-improvement direction are recorded as later
+work. The owner confirmed the complete focused product scope after the final
+interview summary. Turn these decisions into a buildable specification and
+dependency-linked tickets, and complete the expanded implementation design
+before production changes. Use a dedicated issue and branch based on current
+main and the reviewed execution experiment without PR #72. The existing
+experiment remains a developer lab until that integration is delivered.

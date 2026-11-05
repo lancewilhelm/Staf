@@ -420,10 +420,49 @@ action records. This supersedes the earlier prohibition on a direct model path
 and the plan to retire individual tools.
 
 The owner prioritizes simplicity and has deferred additional container or OS
-isolation work. Mode selection does not itself add a host terminal or file
-editing. The existing runner's actual limits remain documented. The
+isolation work. In the follow-up interview, the owner confirmed that modes are
+saved per agent through Settings, CLI, and API and apply to chat and background
+tasks. Active work retains its captured mode. The first selectable-modes release
+also includes a host terminal and file read, write, edit, and search tools.
+Host commands use the service account's permissions without requiring containers.
+These choices supersede the proposed chat-only first scope and deferral of host
+tools. They are release requirements, not implemented runtime behavior.
+The owner subsequently confirmed Hybrid for new agents and Direct for existing
+configurations without a saved choice. Host terminal and file tools use the
+existing permission and approval settings, with one underlying action decision
+for both calling styles. Delegated work uses the executing agent's own mode and
+retains task restrictions. The owner prefers adding project folders to the
+agent's existing directory rather than moving the agent directory. Folder layout
+and code-based self-improvement were subsequently accepted as later work: add
+project folders or attach existing locations without moving them, allow tested
+scripts and saved skills, and use ordinary reviewed development for Staf changes.
+The owner explicitly deferred these expanded workflows to focus on basic tool
+use. Basic terminal and file tools remain in the first release, with a stable
+working folder. Research into current harness skill conventions belongs to the
+[later-work record](design/code-mode/later-work.md).
+
+The owner rejected limiting the terminal to foreground commands. The basic tool
+release must support the normal host terminal's commands, scripts, interactive
+programs, input, output, and background processes. Permission policy is a
+separate topic. A QuickJS script's lifetime must not silently limit an
+intentionally retained terminal process. The owner also confirmed that Hybrid
+can continue through direct tools after an ordinary code error, accounting for
+completed actions. Denial, Stop, restrictions, exhausted shared budgets, and
+uncertain effects still prevent workarounds; Code Mode-only work does not
+silently switch styles. The owner then confirmed the consolidated basic-tool
+scope and shared understanding, completing the follow-up interview. This confirms
+the product requirements, not implementation or live-provider verification.
+
+The owner rejected PR #72 and intends to rebuild its feature later. The basic
+tool release no longer depends on that delivery or its service contracts. Do not
+merge or import its session, document, or artifact implementation into this work.
+This supersedes the earlier recommendation to land #72 before #75 integration.
+GitHub still reported #72 open when the rejection was recorded; this status does
+not reverse the owner's decision.
+
+The existing runner's actual limits remain documented. The
 [revised architecture checkpoint](design/code-mode/tool-modes.md) proposes
-defaults, settings scope, and the production integration. These are not current
+the focused basic-tool release and production design. These are not current
 settings or verified runtime behavior. The remaining text records the prior
 decision and the bounded experiment built from it.
 
