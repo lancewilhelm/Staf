@@ -145,3 +145,11 @@ Observed host stack, CPU, bridge and output limit events, shared budget exhausti
 Stop and live restrictions close admission. Hybrid can use direct calls after
 ordinary failures; Code Mode remains selected. These are QuickJS and protocol
 bounds, not OS/container isolation or a total host RSS limit.
+
+Capabilities may take a third `ActionIdentity` argument in `authorize` and
+`execute`. The coordinator creates and freezes its `{id, fingerprint}` after
+preparing the existing journal action; the provider and guest cannot choose it.
+Existing callbacks that accept only input and work remain valid. Native process
+registration uses this identity to link process observations to the accepted
+action before spawning. The process-manager exports and pipe limitations are in
+[architecture](architecture.md#native-process-slice).

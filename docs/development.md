@@ -363,3 +363,10 @@ fixture pattern. It uses generated JPEG input, two independently paired browser
 contexts, a real service restart, and blocked external networking. It proves
 cropping, saved identity, and supported UI interactions without a live provider.
 The broader workspace and memory browser journeys remain relevant regressions.
+
+The native process fixture uses disposable paired instances, a controlled
+provider and real host commands. Run `node --test test/native-process.test.js`
+after building. It does not exercise a real provider, Docker, or interactive
+PTYs. The pipe backend is intended for Linux and macOS; verification must state
+the actual host platform and must not infer Windows support. Issue 85 remains
+necessary for interactive and intentionally retained terminal workflows.
