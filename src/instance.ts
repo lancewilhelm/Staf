@@ -23,6 +23,7 @@ import { checkedSearchOrigin, checkedSearchQuery } from './searxng-search.js';
 import { checkedOwnerWebUrl } from './web-reader.js';
 import { scratchLimits } from './shell-sandbox.js';
 import { WorkActionService, workActionsSchema } from './work-actions.js';
+import type { ByteRedactor } from './config.js';
 import { NativeProcesses, nativeProcessSchema } from './native-processes.js';
 import { ApprovalGrants, approvalGrantSchema, type GrantBoundary } from './approval-grants.js';
 
@@ -234,7 +235,7 @@ export class Instance {
     return Object.freeze({work:acceptedWork,botId:binding.bot_id,conversation,mode:profile.toolMode,workingDirectory:binding.working_directory,signal});
   }
   private processService?:NativeProcesses;
-  processes():NativeProcesses { return this.processService ??= new NativeProcesses(this.db); }
+  processes(outputFilter?:()=>ByteRedactor):NativeProcesses { return this.processService ??= new NativeProcesses(this.db,outputFilter); }
   workActions():WorkActionService {
     if (!this.actionService) this.actionService=new WorkActionService(this.db,this.fingerprintKey,
       (work,signal)=>this.workContext(work,signal),

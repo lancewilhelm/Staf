@@ -171,3 +171,10 @@ Existing callbacks that accept only input and work remain valid. Native process
 registration uses this identity to link process observations to the accepted
 action before spawning. The process-manager exports and pipe limitations are in
 [architecture](architecture.md#native-process-slice).
+
+Native command parsing receives the instance redactor and rejects altered input
+before invocation persistence. The service supplies `NativeProcesses` with a
+fresh `byteStreamRedactor` per output stream. Filtering precedes SQLite retention
+and applies equally to text, base64, model reads and paired owner reads. The
+filter preserves other binary bytes and holds incomplete credential prefixes;
+output pages declare the credential-redaction policy.

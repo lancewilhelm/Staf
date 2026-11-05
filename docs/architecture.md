@@ -307,6 +307,11 @@ The host file capability registration supplies read, write, exact-match edit and
 ### Native process slice
 
 `NativeProcesses` owns host child handles independently of the guest worker.
+The native capability rejects redaction-altered command and working-path input
+before journal preparation. Each output stream has a byte-preserving credential
+filter ahead of SQLite retention, so text and base64 cannot expose different
+versions. The filter retains unfinished prefixes across observations and flushes
+them on closure or lost observation; it does not decode arbitrary binary as UTF-8.
 The coordinator supplies the immutable action ID and fingerprint to capability
 `authorize` and `execute` callbacks; existing two-argument callbacks remain
 valid. The manager records `starting` and accepted-work ownership before spawn,

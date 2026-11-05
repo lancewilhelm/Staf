@@ -439,6 +439,14 @@ read `GET /api/processes/ID/output?cursor=N`, and request termination with
 base64-encoded bytes, optional UTF-8 text, and a stdout/stderr label; `gap` indicates that earlier
 chunks expired. `outputComplete` becomes true after output pipes close and the supervised group is observed settled. Output retention is 128 KiB per process, pages are at most 48 KiB, with at most 16 live
 handles. The returned limits describe Staf's buffers, not OS memory limits.
+Terminal command and working-path inputs requiring credential redaction are
+rejected before invocation journaling or execution. Process output replaces known
+configured credential bytes before storage, including matches split across
+observations in the same stream. Text and base64 encode the same filtered bytes;
+unrelated binary bytes are preserved. Pages identify this with
+`redaction: "known-credentials"`. Unfinished credential prefixes can be delayed
+until the next observation or stream closure. This does not detect unknown or
+deliberately transformed credentials or rewrite older stored output and backups.
 The process record identifies its originating agent, accepted work and action.
 `unknown` means the service lost observation; it does not mean the OS process
 exited, and Stop cannot signal a process without its live handle.

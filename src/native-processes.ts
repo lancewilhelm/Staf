@@ -4,6 +4,8 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
+import { byteStreamRedactor, type ByteRedactor } from './config.js';
+import { ActionFailed } from './work-actions.js';
 import type { Capability, WorkContext, ActionIdentity } from './work-actions.js';
 
 export const nativeProcessSchema = `
@@ -15,7 +17,7 @@ export type ProcessObservers = {started:(pid:number|null)=>void;output:(stream:'
 export type ProcessHandle = {terminate:(signal:NodeJS.Signals)=>void;detach:()=>void};
 /** Backends deliver observations asynchronously after launch returns. */
 export type ProcessBackend = {launch:(cwd:string,observers:ProcessObservers)=>ProcessHandle};
-type Live = {handle:ProcessHandle; signal:AbortSignal; abort:()=>void; timer?:ReturnType<typeof setTimeout>; finished:Promise<void>; done:()=>void};
+type Live = {handle:ProcessHandle; signal:AbortSignal; abort:()=>void; timer?:ReturnType<typeof setTimeout>; finished:Promise<void>; done:()=>void;flush:()=>void};
 
 function pipeBackend(command:string):ProcessBackend {
   return {launch:(cwd,observers)=>{
@@ -38,7 +40,7 @@ function pipeBackend(command:string):ProcessBackend {
 export class NativeProcesses {
   private readonly live=new Map<string,Live>();
   private closing=false;
-  constructor(private readonly db:DatabaseSync) {
+  constructor(private readonly db:DatabaseSync,private readonly outputFilter:()=>ByteRedactor=()=>byteStreamRedactor({})) {
     db.exec("UPDATE native_processes SET state='unknown' WHERE state IN ('starting','running','stopping')");
   }
   list() {return this.db.prepare('SELECT id FROM native_processes ORDER BY created_ms DESC, rowid DESC LIMIT 200').all().map(row=>this.get(String(row.id)));}
@@ -61,7 +63,7 @@ export class NativeProcesses {
       let text:string|null=null;try{text=new TextDecoder('utf-8',{fatal:true}).decode(data);}catch{/* Base64 preserves bytes that are not a complete UTF-8 chunk. */}
       chunks.push({cursor:row.cursor,stream:row.stream,data:data.toString('base64'),text});
     }
-    return {processId:id,process,encoding:'base64',gap:cursor<first,firstCursor:first,nextCursor:pageNext,observedCursor:next,hasMore:pageNext<next,chunks,limits:nativeProcessLimits};
+    return {processId:id,process,encoding:'base64',redaction:'known-credentials',gap:cursor<first,firstCursor:first,nextCursor:pageNext,observedCursor:next,hasMore:pageNext<next,chunks,limits:nativeProcessLimits};
   }
   private append(id:string,stream:'stdout'|'stderr'|'terminal',buffer:Buffer) {
     // Each event is bounded independently so one large write cannot exceed retention.
@@ -88,18 +90,20 @@ export class NativeProcesses {
     const id=randomUUID(),cwd=resolve(work.workingDirectory,input.cwd ?? '.');
     this.db.prepare("INSERT INTO native_processes (id,bot_id,work_kind,work_id,action_id,cwd,mode,state,created_ms) VALUES (?,?,?,?,?,?,?,'starting',?)").run(id,work.botId,work.work.kind,work.work.id,action.id,cwd,input.mode,Date.now());
     let done!:()=>void;const finished=new Promise<void>(resolve=>{done=resolve;});
+    const filters=new Map<'stdout'|'stderr'|'terminal',ByteRedactor>();let flushed=false;
+    const flush=()=>{if(flushed)return;flushed=true;for(const [stream,filter] of filters)this.append(id,stream,filter.finish());};
     const abort=()=>{this.stop(id);};let live!:Live;
     const observers:ProcessObservers={
       started:pid=>{this.db.prepare("UPDATE native_processes SET state=CASE WHEN stop_requested=1 THEN 'stopping' ELSE 'running' END,pid=? WHERE id=?").run(pid,id);if(work.signal.aborted || this.get(id)?.stopRequested)this.stop(id);},
-      output:(stream,data)=>this.append(id,stream,data),
+      output:(stream,data)=>{const filter=filters.get(stream)??this.outputFilter();filters.set(stream,filter);this.append(id,stream,filter.write(data));},
       failed:()=>{this.db.prepare("UPDATE native_processes SET state='failed' WHERE id=?").run(id);},
       exited:(code,signal)=>{this.db.prepare("UPDATE native_processes SET exit_code=?,exit_signal=? WHERE id=?").run(code,signal,id);},
-      lost:()=>{if(live.timer)clearTimeout(live.timer);work.signal.removeEventListener('abort',abort);this.live.delete(id);this.db.prepare("UPDATE native_processes SET state='unknown' WHERE id=?").run(id);done();},
-      closed:(code,signal)=>{if(live.timer)clearTimeout(live.timer);work.signal.removeEventListener('abort',abort);this.live.delete(id);this.db.prepare("UPDATE native_processes SET state=CASE WHEN state='failed' THEN 'failed' ELSE 'exited' END,exit_code=?,exit_signal=?,output_complete=1 WHERE id=?").run(code,signal,id);done();},
+      lost:()=>{flush();if(live.timer)clearTimeout(live.timer);work.signal.removeEventListener('abort',abort);this.live.delete(id);this.db.prepare("UPDATE native_processes SET state='unknown' WHERE id=?").run(id);done();},
+      closed:(code,signal)=>{flush();if(live.timer)clearTimeout(live.timer);work.signal.removeEventListener('abort',abort);this.live.delete(id);this.db.prepare("UPDATE native_processes SET state=CASE WHEN state='failed' THEN 'failed' ELSE 'exited' END,exit_code=?,exit_signal=?,output_complete=1 WHERE id=?").run(code,signal,id);done();},
     };
     let handle:ProcessHandle;
     try {handle=input.backend.launch(cwd,observers);} catch(error){this.db.prepare("UPDATE native_processes SET state='failed' WHERE id=?").run(id);throw error;}
-    live={handle,signal:work.signal,abort,finished,done};this.live.set(id,live);work.signal.addEventListener('abort',abort,{once:true});
+    live={handle,signal:work.signal,abort,finished,done,flush};this.live.set(id,live);work.signal.addEventListener('abort',abort,{once:true});
     if(work.signal.aborted)this.stop(id);
     let timer:ReturnType<typeof setTimeout> | undefined;
     await Promise.race([finished,new Promise<void>(resolve=>{timer=setTimeout(resolve,nativeProcessLimits.settleMs);})]);if(timer)clearTimeout(timer);
@@ -121,18 +125,18 @@ export class NativeProcesses {
     let timer:ReturnType<typeof setTimeout> | undefined;
     await Promise.race([Promise.all([...this.live.values()].map(live=>live.finished)),new Promise(resolve=>{timer=setTimeout(resolve,nativeProcessLimits.shutdownMs);})]);
     if(timer)clearTimeout(timer);
-    for(const [id,live] of this.live){if(live.timer)clearTimeout(live.timer);live.signal.removeEventListener('abort',live.abort);live.handle.detach();this.db.prepare("UPDATE native_processes SET state='unknown' WHERE id=?").run(id);live.done();}
+    for(const [id,live] of this.live){if(live.timer)clearTimeout(live.timer);live.signal.removeEventListener('abort',live.abort);live.handle.detach();live.flush();this.db.prepare("UPDATE native_processes SET state='unknown' WHERE id=?").run(id);live.done();}
     this.live.clear();
   }
 }
 const input=z.strictObject({command:z.string().min(1).max(32000).refine(value=>!value.includes('\0')),cwd:z.string().min(1).optional()});
-export function nativeCommandCapability(manager:NativeProcesses, allowed:(work:WorkContext)=>boolean):Capability<z.infer<typeof input>,unknown> {
-  return {name:'terminal_run',definition:{type:'function',function:{name:'terminal_run',description:'Run ordinary host shell text. Returns observed process state and ID; inspect output separately.',parameters:{type:'object',properties:{command:{type:'string'},cwd:{type:'string'}},required:['command'],additionalProperties:false}}},parseInput:value=>input.parse(value),parseResult:value=>value,describe:()=>({summary:'Run host command',resource:'host',effect:'change',opaque:true}),eligible:allowed,check:(_value,work)=>{if(!allowed(work))throw Error('Process work is no longer authorized');},authorize:async()=>{},execute:(value,work,action)=>manager.start(work,action,value),visibleResult:value=>JSON.stringify(value)};
+export function nativeCommandCapability(manager:NativeProcesses, allowed:(work:WorkContext)=>boolean,redact:(value:string)=>string):Capability<z.infer<typeof input>,unknown> {
+  return {name:'terminal_run',definition:{type:'function',function:{name:'terminal_run',description:'Run ordinary host shell text. Returns observed process state and ID; inspect output separately.',parameters:{type:'object',properties:{command:{type:'string'},cwd:{type:'string'}},required:['command'],additionalProperties:false}}},parseInput:value=>{const parsed=input.parse(value);for(const text of [parsed.command,parsed.cwd])if(text!==undefined && redact(text)!==text)throw new ActionFailed('Terminal input cannot be retained faithfully under the instance redaction rules.');return parsed;},parseResult:value=>value,describe:()=>({summary:'Run host command',resource:'host',effect:'change',opaque:true}),eligible:allowed,check:(_value,work)=>{if(!allowed(work))throw Error('Process work is no longer authorized');},authorize:async()=>{},execute:(value,work,action)=>manager.start(work,action,value),visibleResult:value=>JSON.stringify(value)};
 }
 
 const processReadInput=z.strictObject({processId:z.string().uuid(),cursor:z.number().int().nonnegative().optional()});
 export function nativeOutputCapability(manager:NativeProcesses, allowed:(work:WorkContext)=>boolean):Capability<z.infer<typeof processReadInput>,unknown> {
-  return {name:'terminal_read',definition:{type:'function',function:{name:'terminal_read',description:'Read observed process output as base64 stream chunks with optional UTF-8 text, a cursor and explicit gap.',parameters:{type:'object',properties:{processId:{type:'string'},cursor:{type:'integer'}},required:['processId'],additionalProperties:false}}},parseInput:value=>processReadInput.parse(value),parseResult:value=>value,describe:value=>({summary:'Read process output',resource:value.processId,effect:'read'}),eligible:allowed,check:(value,work)=>{if(!allowed(work) || manager.get(value.processId)?.botId!==work.botId)throw Error('Process unavailable');},authorize:async()=>{},execute:async value=>manager.output(value.processId,value.cursor),visibleResult:value=>JSON.stringify(value)};
+  return {name:'terminal_read',definition:{type:'function',function:{name:'terminal_read',description:'Read credential-filtered process output as base64 stream chunks with optional UTF-8 text, a cursor and explicit gap.',parameters:{type:'object',properties:{processId:{type:'string'},cursor:{type:'integer'}},required:['processId'],additionalProperties:false}}},parseInput:value=>processReadInput.parse(value),parseResult:value=>value,describe:value=>({summary:'Read process output',resource:value.processId,effect:'read'}),eligible:allowed,check:(value,work)=>{if(!allowed(work) || manager.get(value.processId)?.botId!==work.botId)throw Error('Process unavailable');},authorize:async()=>{},execute:async value=>manager.output(value.processId,value.cursor),visibleResult:value=>JSON.stringify(value)};
 }
 
 const processStopInput=z.strictObject({processId:z.string().uuid()});

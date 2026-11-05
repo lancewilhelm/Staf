@@ -666,5 +666,10 @@ A paired owner can use `instance processes URL CREDENTIAL_FILE`,
 base64 chunks labeled stdout or stderr, a cursor, and a gap indicator. Chat
 shows processes alongside their originating work and offers output and Stop.
 Stop requests termination; only an observed exit establishes an exit result.
+Commands and working paths that would be changed by configured credential
+redaction are rejected before execution. Output replaces known credentials
+before storage; text and base64 show the same filtered bytes. Other binary
+bytes are preserved. A possible credential prefix may wait for more output or
+stream closure. Unknown or transformed credentials are outside this filter.
 
 A live supervisor retains control of the owned process group after the shell exits. Stop requests group termination, but descendants that change group or detach may survive. A lost observation is reported as unknown; stored process IDs are not used to signal after restart.

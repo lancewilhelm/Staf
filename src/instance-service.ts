@@ -25,7 +25,7 @@ import {agentImageBodyType,agentImageBodyLimit,parseAgentImageInput} from './age
 import { MemoryConflict, type MemoryScope } from './memory.js';
 import { selectProvider } from './registry.js';
 import { runTurn } from './runtime.js';
-import { redactor, streamingRedactor, redactValue, type Environment } from './config.js';
+import { redactor, streamingRedactor, byteStreamRedactor, redactValue, type Environment } from './config.js';
 import { chatSystemMessage } from './prompts.js';
 import { SkillConflict } from './skill-catalog.js';
 import { dirname, resolve } from 'node:path';
@@ -186,10 +186,10 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
     if(current.outcome === 'block') { if(workKind === 'task') instance.taskEvent(workId,{type:'approval_blocked',reason:current.reason}); throw Error('Clock blocked by '+current.reason); }
   }
 
-  const processes=instance.processes();
+  const processes=instance.processes(()=>byteStreamRedactor(env,()=>[...knownKeys]));
   const workActions=instance.workActions();
   const nativeAllowed=(work:import('./work-actions.js').WorkContext)=>instance.nativeProcessAllowed(work.work);
-  workActions.register(nativeCommandCapability(processes,nativeAllowed));
+  workActions.register(nativeCommandCapability(processes,nativeAllowed,redact));
   workActions.register(nativeOutputCapability(processes,nativeAllowed));
   workActions.register(nativeStopCapability(processes,nativeAllowed));
   workActions.register(clockCapability(instance, work=>authorizeClock(work.botId,work.work.kind,work.work.id,work.signal)));
