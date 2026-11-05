@@ -3,7 +3,10 @@
 `src/work-actions.ts` implements the instance-owned action service. Ordinary
 chat opens it once per accepted command; direct and QuickJS clock calls use the
 same registration and authorization. Task runtime and other existing tools
-remain on their earlier paths pending their adapters.
+remain on their earlier paths pending their adapters. In ordinary chat, those
+other individual tools are available in Direct and Hybrid only; Code Mode offers
+only `code_mode`, with clock as its current guest capability. Dispatch rejects
+individual calls that were not offered.
 
 ## Open accepted work
 

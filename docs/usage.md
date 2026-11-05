@@ -615,8 +615,9 @@ creation. The paired defaults command accepts a final mode argument.
 In ordinary chat, Direct offers the eligible clock, Hybrid offers clock and
 `code_mode`, and Code Mode offers `code_mode` with the eligible clock inside
 it. Existing web, search, scratch and skill tools keep their current individual
-behavior until their adapters are migrated; background tasks do not yet use the
-selected mode. Plain text does not start a guest. A mode or other ordinary
+behavior in Direct and Hybrid until their adapters are migrated. They are not
+offered in Code Mode yet, and fabricated individual calls are rejected.
+Background tasks do not yet use the selected mode. Plain text does not start a guest. A mode or other ordinary
 settings edit applies to new work; an accepted command and its exact retry keep
 its captured profile. Clock permissions and applicable approvals remain live.
 

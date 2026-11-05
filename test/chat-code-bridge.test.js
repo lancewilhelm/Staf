@@ -60,6 +60,28 @@ test('hybrid script errors expose recovery and retain a completed child before d
   finally {await f.app.close();}
 });
 
+test('Code Mode excludes legacy individual tools and rejects their forged calls',async()=>{
+  let skill;
+  const f=await fixture(messages=>messages.at(-1).role==='tool'
+    ? {role:'assistant',content:'done'}
+    : tool('select_skill',{id:skill.id,revision:1}));
+  try {
+    skill=await f.call('/api/skills',{name:'Available helper',description:'A fixture skill',provenance:'owner',body:'Use the clock when needed.'});
+    for(const mode of ['direct','hybrid','code']) {
+      const bot=await f.call('/api/bots',{name:'skill-'+mode,toolMode:mode});
+      await f.call(`/api/skills/${skill.id}/availability`,{botId:bot.id,available:true});
+      const index=f.seen.length;
+      await f.submit('skill-'+mode,bot.id);const command=await f.wait('skill-'+mode);
+      assert.equal(command.state,'completed',command.error);
+      assert.deepEqual(f.seen[index].offers,mode==='direct'?['clock','select_skill']:mode==='hybrid'?['clock','code_mode','select_skill']:['code_mode']);
+      assert.equal(command.skillActivity.length,mode==='code'?0:1);
+      const result=command.runtimeEvents.find(event=>event.type==='tool_result' && event.name==='select_skill');
+      assert.equal(result.success,mode!=='code');
+      if(mode==='code') assert.match(f.seen.at(-1).messages.at(-1).content,/not offered/);
+    }
+  } finally {await f.app.close();}
+});
+
 test('approval denial and Stop close queued guest calls',async()=>{
   const f=await fixture(messages=>messages.at(-1).role==='tool'?{role:'assistant',content:'unexpected'}:tool('code_mode',{source:'await Promise.all([capabilities.clock({}),capabilities.clock({})]);'}));
   try {await f.call('/api/approval-settings/instance',{mode:'ask-every-time',clockEnabled:true});
