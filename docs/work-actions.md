@@ -70,6 +70,16 @@ existing clock denial into that error. Feature code must keep `summary`,
 `resource`, and `visibleResult` safe for inspection. Inputs and private results
 remain in instance-owned records and are not part of the inspection manifest.
 
+Authorization and execution also receive the same frozen, coordinator-created
+`ActionIdentity` (`id` and `fingerprint`). Existing two-argument callbacks remain
+valid. An authorizer can return an `AuthorityClaim` whose synchronous `start`
+checks or claims feature authority inside the journal start transaction. Its
+`release` runs after the effect or if authorization, start, or work admission
+fails after the claim was returned. A claim does not prepare or finish a journal
+record. Adapters remain responsible for binding their exact target and checking
+live authority again when a recorded result is released; this seam does not by
+itself migrate search, web, scratch, or skill selection.
+
 The coordinator admits at most 32 new invocations per work item and at most
 eight pending invocations. Both routes share those limits. It checks active
 work and live feature restrictions after authorization, immediately before the
