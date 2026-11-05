@@ -205,6 +205,20 @@ drafts, cross-tab Stop, long Markdown responses, scroll following, code Copy,
 and narrow Light/Dark/System layouts. Docker-specific tests may be skipped without Docker;
 report those skips separately.
 
+Docker installation has its own opt-in journey, separate from scratch-shell
+execution. After building, `node test/browser/recovery-smoke.mjs` exercises its
+current browser/CLI pairing, shared Demo chat and revocation steps against a
+disposable local process. `node --test test/recovery.test.js` checks full-data tar
+recovery and the schema-29 to schema-30 migration using local files. Neither
+establishes container or SSH acceptance. With Docker access and free loopback
+port 3210, run `node test/docker/installation.mjs` for the actual-container
+journey. It creates and removes unique test projects/volumes and uses no live
+provider. See [Docker acceptance](docker-installation.md#verification-and-reusable-acceptance)
+for prerequisites, retained evidence and separate-machine checks.
+`node --test test/docker/recovery-guards.test.mjs` separately tests shell failure
+propagation and Compose/mount selection with a synthetic Docker command. These
+offline guard tests do not establish actual Docker backup/restore acceptance.
+
 ## Review chat locally without a provider
 
 After building, run the existing controlled fixture in a terminal:

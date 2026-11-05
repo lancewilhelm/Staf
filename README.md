@@ -48,7 +48,9 @@ but is not live verified. Background-task creation from main chat is deferred. E
 Public web reading, owner-configured local search and scratch-only shell are off
 by default and require owner approval. Press Enter in the host
 terminal to issue a fresh one-time code for another client. This preview binds
-only to loopback; it does not support LAN access. See [usage](docs/usage.md#local-shared-instance-offline-preview) for CLI commands and limitations.
+only to loopback. Native and Docker instructions prepare SSH forwarding for
+remote clients; cross-machine verification remains open. See
+[usage](docs/usage.md#local-shared-instance-offline-preview) for CLI commands and limitations.
 
 The loopback instance retains the background-task engine; its separate Activity and task-update workspace is deferred. It is an offline-tested preview with important permission and recovery limitations; see [usage](docs/usage.md#background-task-preview).
 
@@ -70,7 +72,7 @@ The shared instance includes a provisional daily and weekly schedule preview for
 
 - [Usage guide](docs/usage.md)
 - [Native Linux installation and backup](docs/native-linux-installation.md)
-- [Docker Compose installation and backup](docs/docker-installation.md)
+- [Docker Compose installation, protected SSH access and recovery](docs/docker-installation.md) ([verification gaps](docs/docker-verification.md))
 - [Browser and CLI test plan](docs/mvp-test-plan.md)
 - [Fresh direct ChatGPT sign-in](docs/codex-direct.md)
 - [Settings and recovery](docs/settings.md)

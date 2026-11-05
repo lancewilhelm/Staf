@@ -219,6 +219,15 @@ and revoke a client. Revoking this browser returns it to pairing. A revoked
 client needs a new host code to reconnect. Clients are identified by an ID,
 not a device name.
 
+For Docker, use the [installation and recovery instructions](docker-installation.md).
+Both prepared native and Docker deployments use `sh deploy/connect.sh USER@HOST`
+from a client checkout for an authenticated SSH tunnel, retaining the exact
+`http://127.0.0.1:3210` origin. The HTTP service itself remains loopback-only.
+Cross-machine access and replacement-host restore remain acceptance gaps; see
+[Docker verification](docker-verification.md). Back up the full instance data
+directory, including adjacent agent configuration and credentials, rather than
+copying only SQLite.
+
 The workspace keeps an agent list beside the selected main chat, visible while
 the chat scrolls. Select an agent to switch conversations; agents with the same
 name, including archived namesakes, show the last four characters of their stable
