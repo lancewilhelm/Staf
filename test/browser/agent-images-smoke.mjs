@@ -185,12 +185,30 @@ try {
   assert.deepEqual(await evaluate("[...document.querySelectorAll('.image-shapes')].map(group=>({label:group.getAttribute('aria-label'),shapes:group.querySelectorAll('[data-image-shape]').length}))"),[{label:'Shape',shapes:6}],'Settings uses the same unified gallery');
   await cdp('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
   assert.equal(await evaluate("document.querySelector('.side nav .agent-image').getBoundingClientRect().width"),28,'actual narrow sidebar badge size');
-  for(const theme of ['light','dark']){await evaluate(`document.documentElement.dataset.appearance=${JSON.stringify(theme)}`);assert.equal(await evaluate("document.documentElement.scrollWidth<=innerWidth"),true,'no horizontal overflow in '+theme);}
+  for(const theme of ['light','dark']){
+    await evaluate(`document.documentElement.dataset.appearance=${JSON.stringify(theme)}`);
+    assert.equal(await evaluate("document.documentElement.scrollWidth<=innerWidth"),true,'no horizontal overflow in '+theme);
+    for(const shape of ['triangle','pentagon','hexagon']){
+      await act(`document.querySelector('[data-image-shape=${shape}]').click()`,`document.querySelector('[data-image-shape=${shape}]').getAttribute('aria-pressed')==='true'`,theme+' selects '+shape);
+      const rendering=await evaluate(`(()=>{
+        const selected=document.querySelector('[data-image-shape=${shape}]'),other=document.querySelector('[data-image-shape=circle]');
+        const style=getComputedStyle(selected),otherStyle=getComputedStyle(other);
+        return {border:style.borderColor,otherBorder:otherStyle.borderColor,shadow:style.boxShadow,
+          previews:[...document.querySelectorAll('.image-previews .agent-image')].map(badge=>{
+            const path=badge.querySelector('svg path'),box=path?.getBBox();
+            return {size:badge.getBoundingClientRect().width,visible:!!box&&box.width>0&&box.height>0&&path.getTotalLength()>0&&getComputedStyle(path).fill!=='none'};
+          })};
+      })()`);
+      assert.notEqual(rendering.border,rendering.otherBorder,theme+' visibly marks '+shape);
+      assert.notEqual(rendering.shadow,'none',theme+' outlines the selected '+shape);
+      assert.deepEqual(rendering.previews,[64,24,28,30].map(size=>({size,visible:true})),theme+' renders rounded '+shape+' at every preview size');
+    }
+  }
   await evaluate("document.querySelector('[data-image-color=sky]').focus()");
   await key('Enter',13);
   await until(()=>evaluate("document.querySelector('[data-image-color=sky]').getAttribute('aria-pressed')==='true'"),'keyboard selects color');
-  await evaluate("document.querySelector('[data-image-shape=hexagon]').focus()");await key('Enter',13);
-  await until(()=>evaluate("document.querySelector('[data-image-shape=hexagon]').getAttribute('aria-pressed')==='true'"),'keyboard selects a polygon');
+  await evaluate("document.querySelector('[data-image-shape=triangle]').focus()");await key('Enter',13);
+  await until(()=>evaluate("document.querySelector('[data-image-shape=triangle]').getAttribute('aria-pressed')==='true'"),'keyboard selects a polygon');
   assert.equal(await evaluate("document.querySelector('[data-image-color=sky]').getAttribute('aria-pressed')"),'true','keyboard shape choice preserves color');
   assert.equal(providerCalls,0,'image editing never invokes a provider');
   console.log('PASS two paired contexts, durable uploads, crop, keyboard, narrow themes and no provider calls');
