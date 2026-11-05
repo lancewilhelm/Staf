@@ -372,3 +372,9 @@ and expect the process to reach an observed exited state. It does not exercise a
 PTYs. The pipe backend is intended for Linux and macOS; verification must state
 the actual host platform and must not infer Windows support. Issue 85 remains
 necessary for interactive and intentionally retained terminal workflows.
+
+### Task action verification
+
+`node --test test/task-work-actions.test.js` after `corepack pnpm exec tsc -p tsconfig.json` exercises paired disposable tasks with controlled providers and the real QuickJS worker. It covers all modes, owner input and a differently configured helper. Existing `test/background-task.test.js`, `test/clock-approval.test.js`, and `test/collaboration-integration.test.js` exercise task lifecycle and CLI behavior. These are local synthetic-provider checks; they do not establish GUI, live-provider, Docker or production behavior.
+
+For a manual CLI check, start the controlled fixture as described in [Review chat locally without a provider](#review-chat-locally-without-a-provider). Pair the CLI with `node dist/cli.js instance pair http://127.0.0.1:3211 .staf/chat-review/client.json PAIRING_CODE`. Create a Demo agent in the workspace and select a tool mode. Use `node dist/cli.js instance bots http://127.0.0.1:3211 .staf/chat-review/client.json` to find its ID, then run `node dist/cli.js instance task-start http://127.0.0.1:3211 .staf/chat-review/client.json AGENT_ID "Scripted clock fixture"`. Inspect the printed attempt ID with `instance task` using the same URL and credential path. Expect a completed task and a succeeded clock action. Hybrid and Code Mode also show a returned code execution. Repeat after changing the agent mode; each new attempt uses the selected mode.

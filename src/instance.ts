@@ -22,7 +22,7 @@ import { ActionJournal, actionJournalSchema, type WorkRef, type StartPermit } fr
 import { checkedSearchOrigin, checkedSearchQuery } from './searxng-search.js';
 import { checkedOwnerWebUrl } from './web-reader.js';
 import { scratchLimits } from './shell-sandbox.js';
-import { WorkActionService, workActionsSchema } from './work-actions.js';
+import { WorkActionService, workActionsSchema, type ActionIdentity } from './work-actions.js';
 import type { ByteRedactor } from './config.js';
 import { NativeProcesses, nativeProcessSchema } from './native-processes.js';
 import { ApprovalGrants, approvalGrantSchema, type GrantBoundary } from './approval-grants.js';
@@ -108,7 +108,7 @@ export class Instance {
     this.maintenanceToken=maintenanceToken;
     if (version > INSTANCE_SCHEMA_VERSION) throw new Error(`Database version ${version} is newer than this Staf (maximum ${INSTANCE_SCHEMA_VERSION}). Use a compatible checkout or select another data directory; the database was not reset.`);
     if (hasBots && version < INSTANCE_SCHEMA_VERSION && path !== ':memory:') {
-      this.migrationBackup = `${path}.before-${version < 2 ? 'profiles' : version < 3 ? 'tasks' : version < 4 ? 'approvals' : version < 5 ? 'task-inbox' : version < 6 ? 'memory' : version < 7 ? 'memory-confirmation' : version < 8 ? 'skills' : version < 9 ? 'schedules' : version < 10 ? 'schedule-retries' : version < 11 ? 'schedule-lineage' : version < 12 ? 'bot-description' : version < 13 ? 'delegation-scope' : version < 14 ? 'collaboration' : version < 15 ? 'disclosure' : version < 16 ? 'chat-tasks' : version < 17 ? 'creation-defaults' : version < 18 ? 'web-actions' : version < 19 ? 'search-actions' : version < 20 ? 'scratch-shell' : version < 21 ? 'approval-grants' : version < 22 ? 'schedule-web-scope' : version < 23 ? 'schedule-search-scope' : version < 24 ? 'schedule-shell-scope' : version < 25 ? 'main-bot' : version < 26 ? 'command-events' : version < 27 ? 'bot-creation' : version < 28 ? 'response-progress' : version < 31 ? 'response-stop' : 'work-actions'}-${randomUUID()}.sqlite`;
+      this.migrationBackup = `${path}.before-${version < 2 ? 'profiles' : version < 3 ? 'tasks' : version < 4 ? 'approvals' : version < 5 ? 'task-inbox' : version < 6 ? 'memory' : version < 7 ? 'memory-confirmation' : version < 8 ? 'skills' : version < 9 ? 'schedules' : version < 10 ? 'schedule-retries' : version < 11 ? 'schedule-lineage' : version < 12 ? 'bot-description' : version < 13 ? 'delegation-scope' : version < 14 ? 'collaboration' : version < 15 ? 'disclosure' : version < 16 ? 'chat-tasks' : version < 17 ? 'creation-defaults' : version < 18 ? 'web-actions' : version < 19 ? 'search-actions' : version < 20 ? 'scratch-shell' : version < 21 ? 'approval-grants' : version < 22 ? 'schedule-web-scope' : version < 23 ? 'schedule-search-scope' : version < 24 ? 'schedule-shell-scope' : version < 25 ? 'main-bot' : version < 26 ? 'command-events' : version < 27 ? 'bot-creation' : version < 28 ? 'response-progress' : version < 31 ? 'response-stop' : version < 33 ? 'work-actions' : 'search-bindings'}-${randomUUID()}.sqlite`;
       const previousUmask = process.umask(0o077);
       try {
         this.db.prepare('VACUUM INTO ?').run(this.migrationBackup);
@@ -191,10 +191,11 @@ export class Instance {
         this.bindWork({kind:row.kind,id:row.id}, row.bot_id);
       }
     }
+    if(version < 35) this.db.exec('CREATE TABLE IF NOT EXISTS search_action_bindings (action_id TEXT PRIMARY KEY REFERENCES action_journal(id), fingerprint TEXT NOT NULL, work_kind TEXT NOT NULL, work_id TEXT NOT NULL, boundary TEXT NOT NULL, grant_id TEXT, grant_revision INTEGER)');
     if(version < 33) this.db.exec(`CREATE TABLE IF NOT EXISTS code_executions (id TEXT PRIMARY KEY, kind TEXT NOT NULL, work_id TEXT NOT NULL, response_id TEXT NOT NULL, call_id TEXT NOT NULL, source TEXT NOT NULL, source_hash TEXT NOT NULL, outcome TEXT NOT NULL, result TEXT, UNIQUE(kind,work_id,response_id,call_id));`);
     this.db.exec("UPDATE code_executions SET outcome='interrupted' WHERE outcome='running'");
-    if(version < 34) this.db.exec(nativeProcessSchema);
-    if(version < 36)for(const [name,definition] of Object.entries({retained:'INTEGER NOT NULL DEFAULT 0',input_closed:'INTEGER NOT NULL DEFAULT 0',cols:'INTEGER',rows:'INTEGER'}))if(!this.db.prepare('SELECT 1 FROM pragma_table_info(\'native_processes\') WHERE name=?').get(name))this.db.exec(`ALTER TABLE native_processes ADD COLUMN ${name} ${definition}`);
+    if(version < 35) this.db.exec(nativeProcessSchema);
+    if(version < 36)for(const [name,definition] of Object.entries({retained:'INTEGER NOT NULL DEFAULT 0',input_closed:'INTEGER NOT NULL DEFAULT 0',cols:'INTEGER',rows:'INTEGER'}))if(!this.db.prepare("SELECT 1 FROM pragma_table_info('native_processes') WHERE name=?").get(name))this.db.exec(`ALTER TABLE native_processes ADD COLUMN ${name} ${definition}`);
     if(version < 30 && !this.db.prepare("SELECT 1 FROM pragma_table_info('command_runtime_events') WHERE name='detail'").get())this.db.exec('ALTER TABLE command_runtime_events ADD COLUMN detail TEXT');
     this.db.exec('CREATE INDEX IF NOT EXISTS command_runtime_events_command ON command_runtime_events(command_id,seq)');
     if (!maintenanceToken) this.db.exec(`PRAGMA user_version=${INSTANCE_SCHEMA_VERSION}`);
@@ -242,8 +243,8 @@ export class Instance {
       (work,signal)=>this.workContext(work,signal),
       work=>{
         const record=work.kind==='command' ? this.command(work.id) : this.taskAttempt(work.id);
-        if (!record || typeof record.botId !== 'string' || record.state!==(work.kind==='command' ? 'pending' : 'running') || this.botIdentity(record.botId)?.archived !== false || (work.kind==='command' && this.responseStopping(work.id)) || (work.kind==='task' && this.taskHasPending(work.id))) throw Error('Work is no longer active or authorized');
-      });
+        if (!record || typeof record.botId !== 'string' || record.state!==(work.kind==='command' ? 'pending' : 'running') || this.botIdentity(record.botId)?.archived !== false || (work.kind==='command' && this.responseStopping(work.id)) || (work.kind==='task' && this.scheduleOrigin(work.id)?.revoked === 1)) throw Error('Work is no longer active or authorized');
+      },32,work=>work.kind==='task' && this.taskHasPending(work.id));
     return this.actionService;
   }
   private scheduleOrigin(attemptId:string) {
@@ -255,6 +256,8 @@ export class Instance {
   fileActionsAllowed(work:WorkRef) {return work.kind!=='task' || (!this.isHelperAttempt(work.id) && !this.scheduleOrigin(work.id));}
 
   nativeProcessAllowed(work:WorkRef) {return work.kind==='command' || (!this.isHelperAttempt(work.id) && !this.scheduleOrigin(work.id));}
+
+  isScheduledAttempt(attemptId:string) {return !!this.scheduleOrigin(attemptId);}
   scheduleClockAllowed(attemptId:string) {
     const row=this.scheduleOrigin(attemptId);
     if (!row) return true;
@@ -295,12 +298,12 @@ export class Instance {
 
   get #approvalGrants() { return new ApprovalGrants(this.db); }
   listApprovalGrants() { return this.#approvalGrants.list(); }
-  recordGrantedDecision(input:{work:WorkRef;boundary:GrantBoundary;id:string;fingerprint:string;callId:string;hop:number;scope:'bot'|'all-bots';lifetime:'task'|'remembered'}):void {
+  recordGrantedDecision(input:{work:WorkRef;boundary:GrantBoundary;id:string;fingerprint:string;scope:'bot'|'all-bots';lifetime:'task'|'remembered'} & ({kind:'registered'} | {kind?:'legacy';callId:string;hop:number})):void {
     if(this.db.isTransaction!==false)throw new BotConflict('Instance connection is busy');
     this.db.exec('BEGIN IMMEDIATE');try {
       this.validateGrantBoundary(input.boundary);
-      const identity=input.boundary.kind==='web'?this.webIdentity(input.work,input.callId,input.hop,input.boundary.url):input.boundary.kind==='search'?this.searchIdentity(input.work,input.callId,input.boundary.origin,input.boundary.revision,input.boundary.query):this.shellIdentity(input.work,input.callId,{revision:input.boundary.revision,dockerBinary:input.boundary.dockerBinary,dockerSocket:input.boundary.dockerSocket,imageId:input.boundary.imageId},input.boundary.command);
-      if(identity.id!==input.id || identity.fingerprint!==input.fingerprint)throw new BotConflict('Grant boundary does not match action');
+      const identity=input.kind==='registered' ? this.registeredSearchIdentity(input.work,input.id,input.fingerprint,input.boundary) : (input.boundary.kind==='web'?this.webIdentity(input.work,input.callId,input.hop,input.boundary.url):input.boundary.kind==='search'?this.searchIdentity(input.work,input.callId,input.boundary.origin,input.boundary.revision,input.boundary.query):this.shellIdentity(input.work,input.callId,{revision:input.boundary.revision,dockerBinary:input.boundary.dockerBinary,dockerSocket:input.boundary.dockerSocket,imageId:input.boundary.imageId},input.boundary.command));
+      if(!identity || identity.id!==input.id || identity.fingerprint!==input.fingerprint)throw new BotConflict('Grant boundary does not match action');
       const action=this.webJournal().get(input.id);
       if(!action || action.state!=='prepared' || action.fingerprint!==input.fingerprint || action.work.kind!==input.work.kind || action.work.id!==input.work.id)throw new BotConflict('Action changed');
       if(input.boundary.kind==='web')this.recordWebDecision(input.id,input.fingerprint,'approve');
@@ -486,12 +489,52 @@ export class Instance {
     return {query:scope.query,origin:scope.origin,revision:scope.revision,scheduleId:String(origin.schedule_id),dueAt:Number(origin.due_at)};
   }
   searchCanOffer(work:WorkRef) {const record=work.kind==='task' ? this.taskAttempt(work.id) : this.command(work.id);if(!record || typeof record.botId!=='string' || record.state !== (work.kind==='task' ? 'running' : 'pending'))return false;if(!this.botIdentity(record.botId) || this.botIdentity(record.botId)?.archived || !this.searchConfig().origin || !this.searchPermission('instance').enabled || !this.searchPermission('bot:'+record.botId).enabled)return false;if(work.kind!=='task')return true;if(this.isHelperAttempt(work.id))return false;return !this.scheduleOrigin(work.id) || !!this.scheduleSearchScope(work.id);}
-  searchAllowed(work:WorkRef,origin:string,revision:number,query?:string) {if(!this.searchCanOffer(work) || this.searchConfig().origin!==origin || this.searchConfig().revision!==revision)return false;if(work.kind!=='task')return true;const scheduled=this.scheduleOrigin(work.id);if(scheduled){const scope=this.scheduleSearchScope(work.id),row=this.db.prepare('SELECT enabled FROM search_permissions WHERE scope=?').get('task:'+work.id);if(!scope || row?.enabled===0 || scope.origin!==origin || scope.revision!==revision || (query!==undefined && query!==scope.query) || this.db.prepare('SELECT 1 FROM schedule_search_dispatches WHERE schedule_id=? AND due_at=?').get(scope.scheduleId,scope.dueAt))return false;}else if(!this.searchPermission('task:'+work.id).enabled)return false;return !this.taskHasPending(work.id);}
+  searchAllowed(work:WorkRef,origin:string,revision:number,query?:string,actionId?:string) {if(!this.searchCanOffer(work) || this.searchConfig().origin!==origin || this.searchConfig().revision!==revision)return false;if(work.kind!=='task')return true;const scheduled=this.scheduleOrigin(work.id);if(scheduled){const scope=this.scheduleSearchScope(work.id),row=this.db.prepare('SELECT enabled FROM search_permissions WHERE scope=?').get('task:'+work.id);if(!scope || row?.enabled===0 || scope.origin!==origin || scope.revision!==revision || (query!==undefined && query!==scope.query) || this.db.prepare('SELECT 1 FROM schedule_search_dispatches WHERE schedule_id=? AND due_at=? AND action_id<>?').get(scope.scheduleId,scope.dueAt,actionId ?? ''))return false;}else if(!this.searchPermission('task:'+work.id).enabled)return false;return !this.taskHasPending(work.id);}
   claimScheduledSearchDispatch(work:WorkRef,origin:string,revision:number,query:string,actionId:string) {
     if(work.kind!=='task' || !this.scheduleOrigin(work.id))return true;
     if(this.db.isTransaction!==false)throw new BotConflict('Instance connection is busy');this.db.exec('BEGIN IMMEDIATE');try{const scope=this.scheduleSearchScope(work.id);if(!scope || !this.searchAllowed(work,origin,revision,query)){this.db.exec('ROLLBACK');return false;}this.db.prepare('INSERT INTO schedule_search_dispatches VALUES (?,?,?)').run(scope.scheduleId,scope.dueAt,actionId);this.db.exec('COMMIT');return true;}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   searchIdentity(work:WorkRef,callId:string,origin:string,revision:number,query:string) {return {id:createHmac('sha256',this.fingerprintKey).update(JSON.stringify(['search-id',work.kind,work.id,callId])).digest('hex'),fingerprint:createHmac('sha256',this.fingerprintKey).update(JSON.stringify(['search-action',work.kind,work.id,callId,origin,revision,query,{results:10,timeoutMs:10000}])).digest('hex')};}
+  bindRegisteredSearch(work:WorkRef,action:ActionIdentity,boundary:Extract<GrantBoundary,{kind:'search'}>) {
+    this.validateGrantBoundary(boundary);
+    const record=this.webJournal().get(action.id);
+    if(!record || record.state!=='prepared' || record.fingerprint!==action.fingerprint || record.work.kind!==work.kind || record.work.id!==work.id || !this.searchAllowed(work,boundary.origin,boundary.revision,boundary.query))throw new BotConflict('Search action changed');
+    this.db.prepare('INSERT INTO search_action_bindings VALUES (?,?,?,?,?,NULL,NULL)').run(action.id,action.fingerprint,work.kind,work.id,JSON.stringify(boundary));
+  }
+  private registeredSearchIdentity(work:WorkRef,id:string,fingerprint:string,boundary:GrantBoundary):ActionIdentity|null {
+    const row=this.db.prepare('SELECT fingerprint,work_kind,work_id,boundary FROM search_action_bindings WHERE action_id=?').get(id);
+    if(!row)return null;
+    if(row.fingerprint!==fingerprint || row.work_kind!==work.kind || row.work_id!==work.id || row.boundary!==JSON.stringify(boundary))throw new BotConflict('Search binding changed');
+    return {id,fingerprint};
+  }
+  registeredSearchBoundary(work:WorkRef,action:ActionIdentity,query:string) {
+    const row=this.db.prepare('SELECT boundary,grant_id,grant_revision FROM search_action_bindings WHERE action_id=?').get(action.id);
+    if(typeof row?.boundary!=='string')throw new BotConflict('Search binding unavailable');
+    const boundary:GrantBoundary=JSON.parse(row.boundary);this.validateGrantBoundary(boundary);
+    if(boundary.kind!=='search' || boundary.query!==query || !this.registeredSearchIdentity(work,action.id,action.fingerprint,boundary) || !this.searchAllowed(work,boundary.origin,boundary.revision,query,action.id))throw new BotConflict('Search scope changed');
+    if(typeof row.grant_id==='string') {
+      const botId=this.webWorkBotId(work),grant=this.#approvalGrants.list().find(g=>g.id===row.grant_id);
+      if(!botId || !grant || grant.revoked || grant.revision!==row.grant_revision || JSON.stringify(grant.boundary)!==row.boundary || (grant.scope.kind==='bot' && grant.scope.botId!==botId) || (grant.lifetime.kind==='task' && (work.kind!=='task' || grant.lifetime.taskId!==work.id)))throw new BotConflict('Search grant revoked');
+    }
+    return boundary;
+  }
+  assertRegisteredSearchDecision(work:WorkRef,action:ActionIdentity,query:string):void {
+    this.registeredSearchBoundary(work,action,query);
+    const decision=this.db.prepare('SELECT fingerprint,decision FROM search_action_decisions WHERE action_id=?').get(action.id);
+    if(decision?.fingerprint!==action.fingerprint || decision.decision!=='approve')throw new BotConflict('Search decision changed');
+  }
+  claimRegisteredSearchGrant(work:WorkRef,action:ActionIdentity,query:string,controller:AbortController):string {
+    if(!this.db.isTransaction || controller.signal.aborted)throw new BotConflict('Search claim requires active transaction');
+    const boundary=this.registeredSearchBoundary(work,action,query),botId=this.webWorkBotId(work);
+    if(!botId || !this.matchingApprovalGrant(work,boundary))throw new BotConflict('Search grant changed');
+    const grantId=this.#approvalGrants.matchingId(boundary,botId,work.kind==='task'?work.id:null);
+    const record=this.webJournal().get(action.id);
+    if(!grantId || !record || record.state!=='prepared')throw new BotConflict('Search grant or action changed');
+    const grant=this.#approvalGrants.list().find(item=>item.id===grantId);if(!grant)throw new BotConflict('Search grant changed');
+    this.db.prepare('UPDATE search_action_bindings SET grant_id=?,grant_revision=? WHERE action_id=?').run(grantId,grant.revision,action.id);
+    const controllers=this.grantControllers.get(grantId)??new Set<AbortController>();controllers.add(controller);this.grantControllers.set(grantId,controllers);
+    return grantId;
+  }
   recordSearchDecision(id:string,fingerprint:string,decision:'approve'|'deny') {this.db.prepare('INSERT INTO search_action_decisions VALUES (?,?,?)').run(id,fingerprint,decision);}
   claimSearchDispatch(id:string,now:number) {this.db.exec('BEGIN IMMEDIATE');try{this.db.prepare('DELETE FROM search_dispatches WHERE started_ms<?').run(now-60000);const count=Number(this.db.prepare('SELECT count(*) AS count FROM search_dispatches').get()?.count);if(count>=10){this.db.exec('ROLLBACK');return false;}this.db.prepare('INSERT INTO search_dispatches VALUES (?,?)').run(id,now);this.db.exec('COMMIT');return true;}catch(error){this.db.exec('ROLLBACK');throw error;}}
   searchActions(work:WorkRef) {return this.db.prepare(`SELECT id,state,summary,result FROM action_journal WHERE ${work.kind==='task' ? 'task_attempt_id' : 'command_id'}=? AND summary='Search configured backend' ORDER BY rowid`).all(work.id);}
@@ -679,7 +722,7 @@ export class Instance {
     const inbox = new TaskInbox(this.db).inspect({botId:attempt.botId,attemptId:id});
     const waitReason=attempt.state === 'waiting' ? 'replacement' : inbox.questions.some(question=>question.state === 'open') ? 'owner-input' : this.db.prepare("SELECT 1 FROM approval_requests WHERE work_kind='task' AND work_id=? AND state='pending'").get(id) ? 'approval' : null;
     const {capturedProfile,...visible}=row as typeof attempt & {capturedProfile:unknown};
-    return {...visible,toolMode:parseToolModeFromProfile(capturedProfile), waitReason, inbox, usage:session?.usage ?? [], activity: this.db.prepare('SELECT seq,event FROM task_activity WHERE attempt_id=? ORDER BY seq').all(id).map(event => { const value = JSON.parse(String(event.event)); if (value.type === 'tool_result' && value.name === 'select_skill' && typeof value.content === 'string') { value.content = this.redactSkill(value.content); if (value.success) { try { const detail=JSON.parse(value.content); if (typeof detail.digest === 'string' && detail.sourceDigest === undefined) { detail.sourceDigest=detail.digest; delete detail.digest; value.content=JSON.stringify(detail); } } catch { /* Historical error text is not structured selection evidence. */ } } } return {seq:event.seq, ...value}; })};
+    return {...visible,toolMode:parseToolModeFromProfile(capturedProfile), workActions:this.workActions().inspectActions({kind:'task',id}),codeExecutions:this.workActions().inspect({kind:'task',id}), waitReason, inbox, usage:session?.usage ?? [], activity: this.db.prepare('SELECT seq,event FROM task_activity WHERE attempt_id=? ORDER BY seq').all(id).map(event => { const value = JSON.parse(String(event.event)); if (value.type === 'tool_result' && value.name === 'select_skill' && typeof value.content === 'string') { value.content = this.redactSkill(value.content); if (value.success) { try { const detail=JSON.parse(value.content); if (typeof detail.digest === 'string' && detail.sourceDigest === undefined) { detail.sourceDigest=detail.digest; delete detail.digest; value.content=JSON.stringify(detail); } } catch { /* Historical error text is not structured selection evidence. */ } } } return {seq:event.seq, ...value}; })};
   }
   acceptTask(input: {id:string; botId:string; objective:string; limitMs:number; predecessor?:string; delegateClock?:boolean}, visibleObjective=input.objective) {
     this.db.exec('BEGIN IMMEDIATE');
@@ -716,12 +759,15 @@ export class Instance {
         if ((prior?.delegation_clock === 1) !== (input.delegateClock === true)) throw new BotConflict('Retry must retain its delegation scope');
       }
       if (!this.db.prepare('SELECT 1 FROM tasks WHERE id=?').get(taskId)) this.db.prepare('INSERT INTO tasks VALUES (?,?,?)').run(taskId,input.botId,visibleObjective);
-      const context = isolated ? [] : this.taskContext(input.botId);
-      this.db.prepare("INSERT INTO task_attempts (id,task_id,bot_id,predecessor,profile,context,state,limit_ms) VALUES (?,?,?,?,?,?,'queued',?)").run(input.id,taskId,input.botId,input.predecessor ?? null,JSON.stringify(bot),JSON.stringify(context),input.limitMs);
+      const previousCapture=input.predecessor ? this.db.prepare('SELECT profile,context FROM task_attempts WHERE id=?').get(input.predecessor) : undefined;
+      const capturedProfile=typeof previousCapture?.profile==='string' ? previousCapture.profile : JSON.stringify(bot);
+      const capturedContext=typeof previousCapture?.context==='string' ? previousCapture.context : JSON.stringify(isolated ? [] : this.taskContext(input.botId));
+      this.db.prepare("INSERT INTO task_attempts (id,task_id,bot_id,predecessor,profile,context,state,limit_ms) VALUES (?,?,?,?,?,?,'queued',?)").run(input.id,taskId,input.botId,input.predecessor ?? null,capturedProfile,capturedContext,input.limitMs);
       if (input.delegateClock) this.db.prepare('UPDATE task_attempts SET delegation_clock=1 WHERE id=?').run(input.id);
       if (origin) { if (typeof origin.schedule_id !== 'string' || typeof origin.due_at !== 'number') throw Error('Invalid schedule origin'); this.db.prepare('INSERT INTO schedule_task_retries VALUES (?,?,?)').run(input.id,origin.schedule_id,origin.due_at); const scope=this.db.prepare('SELECT url FROM schedule_web_scopes WHERE attempt_id=?').get(input.predecessor ?? '');if(typeof scope?.url==='string'){this.db.prepare('INSERT INTO schedule_web_scopes VALUES (?,?)').run(input.id,scope.url);const priorPermission=this.db.prepare('SELECT enabled FROM web_permissions WHERE scope=?').get('task:'+(input.predecessor ?? ''));if(priorPermission?.enabled===0)this.db.prepare('INSERT INTO web_permissions VALUES (?,0)').run('task:'+input.id);}const search=this.db.prepare('SELECT query,origin,revision FROM schedule_search_scopes WHERE attempt_id=?').get(input.predecessor ?? '');if(typeof search?.query==='string' && typeof search.origin==='string' && typeof search.revision==='number'){this.db.prepare('INSERT INTO schedule_search_scopes VALUES (?,?,?,?)').run(input.id,search.query,search.origin,search.revision);const prior=this.db.prepare('SELECT enabled FROM search_permissions WHERE scope=?').get('task:'+(input.predecessor ?? ''));if(prior?.enabled===0)this.db.prepare('INSERT INTO search_permissions VALUES (?,0)').run('task:'+input.id);}const shell=this.db.prepare('SELECT command,docker_binary,docker_socket,image_id,revision FROM schedule_shell_scopes WHERE attempt_id=?').get(input.predecessor ?? '');if(typeof shell?.command==='string' && typeof shell.docker_binary==='string' && typeof shell.docker_socket==='string' && typeof shell.image_id==='string' && typeof shell.revision==='number'){this.db.prepare('INSERT INTO schedule_shell_scopes VALUES (?,?,?,?,?,?)').run(input.id,shell.command,shell.docker_binary,shell.docker_socket,shell.image_id,shell.revision);const prior=this.db.prepare('SELECT enabled FROM shell_permissions WHERE scope=?').get('task:'+(input.predecessor ?? ''));if(prior?.enabled===0)this.db.prepare('INSERT INTO shell_permissions VALUES (?,0)').run('task:'+input.id);} }
       this.bindWork({kind:'task',id:input.id},input.botId);
-      this.captureTaskSkills(input.id,input.botId);
+      if(input.predecessor) this.db.prepare('INSERT INTO task_skill_catalog SELECT ?,skill_id,revision,name,description,digest FROM task_skill_catalog WHERE attempt_id=?').run(input.id,input.predecessor);
+      else this.captureTaskSkills(input.id,input.botId);
       this.db.prepare('INSERT INTO task_fingerprints VALUES (?,?)').run(input.id,digest);
       this.taskEvent(input.id,{type:'queued',message:'Task accepted'});
       this.taskAnnouncement(input.botId,`Task ${input.id} accepted: ${visibleObjective}`);

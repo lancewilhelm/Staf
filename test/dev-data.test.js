@@ -4,7 +4,7 @@ import { fork, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { Instance } from '../dist/instance.js';
+import { Instance, INSTANCE_SCHEMA_VERSION } from '../dist/instance.js';
 import { startInstance } from '../dist/instance-service.js';
 import { DatabaseSync } from 'node:sqlite';
 import { prepareUpgrade, finishUpgrade } from '../scripts/dev-upgrade.mjs';
@@ -173,7 +173,7 @@ test('development upgrade snapshots the database and agent files before migratio
     instance=new Instance(path,undefined,upgrade.token);assert.ok(instance.migrationBackup);
     db=new DatabaseSync(instance.migrationBackup);assert.equal(db.prepare('PRAGMA user_version').get().user_version,29);db.close();
     finishUpgrade(root,()=>instance.finishUpgrade(upgrade.token));assert.equal(instance.bot(bot.id).instructions,'Soul before upgrade');instance.close();
-    db=new DatabaseSync(path);assert.equal(db.prepare('PRAGMA user_version').get().user_version,34);db.close();
+    db=new DatabaseSync(path);assert.equal(db.prepare('PRAGMA user_version').get().user_version,INSTANCE_SCHEMA_VERSION);db.close();
   } finally {rmSync(root,{recursive:true,force:true});}
 });
 test('an interrupted upgrade remains fenced before and after initialization', () => {
@@ -235,4 +235,32 @@ test('explicit restore replaces the complete dataset and preserves its own recov
     const restore=spawnSync(process.execPath,['scripts/dev-data.mjs','restore',backup],{cwd:process.cwd(),env:{...process.env,STAF_DEV_DATA_DIR:root},encoding:'utf8'});assert.equal(restore.status,0,restore.stderr);assert.match(restore.stdout,/Backup:/);
     instance=new Instance(path);assert.equal(instance.bot(bot.id).instructions,'Restored instructions');assert.notEqual(instance.datasetIdentity(),oldIdentity);assert.equal(instance.authorized('old-token'),false);instance.close();
   } finally {rmSync(root,{recursive:true,force:true});}
+});
+
+test('search action binding migration protects the prior database and preserves agents',()=>{
+  const root=mkdtempSync(join(tmpdir(),'staf-search-migration-')),path=join(root,'instance.sqlite');
+  try {
+    let instance=new Instance(path);const bot=instance.createBot({name:'Preserved',instructions:'Keep',provider:'demo'});instance.close();
+    let db=new DatabaseSync(path);db.exec('DROP TABLE search_action_bindings; PRAGMA user_version=33');db.close();
+    instance=new Instance(path);assert.equal(instance.bot(bot.id).instructions,'Keep');assert.ok(instance.migrationBackup && existsSync(instance.migrationBackup));
+    db=new DatabaseSync(instance.migrationBackup,{readOnly:true});assert.equal(db.prepare('PRAGMA user_version').get().user_version,33);assert.equal(db.prepare("SELECT count(*) AS count FROM sqlite_master WHERE name='search_action_bindings'").get().count,0);db.close();instance.close();
+    db=new DatabaseSync(path,{readOnly:true});assert.equal(db.prepare('PRAGMA user_version').get().user_version,INSTANCE_SCHEMA_VERSION);assert.equal(db.prepare("SELECT count(*) AS count FROM sqlite_master WHERE name='search_action_bindings'").get().count,1);db.close();
+  } finally {rmSync(root,{recursive:true,force:true});}
+});
+
+test('both version 34 predecessors retain their tables through the protected combined migration',()=>{
+  for(const predecessor of ['native','search']) {
+    const root=mkdtempSync(join(tmpdir(),'staf-combined-migration-')),path=join(root,'instance.sqlite');
+    try {
+      let instance=new Instance(path);const bot=instance.createBot({name:'Preserved',instructions:'Keep',provider:'demo'});instance.close();
+      let db=new DatabaseSync(path);
+      db.exec('PRAGMA foreign_keys=OFF');
+      if(predecessor==='native')db.exec("DROP TABLE search_action_bindings; INSERT INTO native_processes (id,bot_id,work_kind,work_id,action_id,cwd,mode,state,created_ms) VALUES ('preserved','bot','task','work','action','/','pipe','exited',1); INSERT INTO native_process_output VALUES ('preserved',0,'stdout',X'6162')");
+      else db.exec("DROP TABLE native_process_output; DROP TABLE native_processes; INSERT INTO search_action_bindings VALUES ('preserved','fingerprint','task','work','boundary',NULL,NULL)");
+      db.exec('PRAGMA user_version=34');db.close();
+      instance=new Instance(path);assert.equal(instance.bot(bot.id).name,'Preserved');assert.ok(instance.migrationBackup && existsSync(instance.migrationBackup));
+      db=new DatabaseSync(instance.migrationBackup,{readOnly:true});assert.equal(db.prepare('PRAGMA user_version').get().user_version,34);const oldTables=db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('native_processes','native_process_output','search_action_bindings') ORDER BY name").all().map(x=>x.name);assert.deepEqual(oldTables,predecessor==='native'?['native_process_output','native_processes']:['search_action_bindings']);db.close();
+      instance.close();db=new DatabaseSync(path,{readOnly:true});assert.equal(db.prepare('PRAGMA user_version').get().user_version,35);assert.deepEqual(db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('native_processes','native_process_output','search_action_bindings') ORDER BY name").all().map(x=>x.name),['native_process_output','native_processes','search_action_bindings']);if(predecessor==='native'){assert.equal(db.prepare("SELECT count(*) AS n FROM native_processes WHERE id='preserved'").get().n,1);assert.equal(db.prepare("SELECT hex(data) AS data FROM native_process_output WHERE process_id='preserved'").get().data,'6162');}else assert.equal(db.prepare("SELECT fingerprint FROM search_action_bindings WHERE action_id='preserved'").get().fingerprint,'fingerprint');db.close();
+    } finally {rmSync(root,{recursive:true,force:true});}
+  }
 });

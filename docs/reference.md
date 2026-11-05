@@ -250,7 +250,7 @@ Authenticated clients use `GET` and `POST /api/skills` to list or import. Import
 
 ### Model memory action contract
 
-The shared action registry exports `memory_search`, `memory_read`, `memory_remember`, `memory_update`, `memory_forget`, and `memory_proposal_status`. Both individual calls and QuickJS child calls use these registrations. Scope is `{ "kind": "agent" }` or `{ "kind": "user" }`; agent identity comes only from accepted work. Search accepts `query` and an optional cursor and returns at most 20 matching items and `nextCursor`. Read returns an item with its ID, stored scope and version. Update and forget require the ID, scope and version. A stale or wrong-scope mutation is a definite failed action. Text requiring current instance credential redaction is rejected during input parsing, before invocation inputs, action records, creation, proposal or update, so confirmation cannot save hidden text that differs from the review. Shared remember returns a pending, agent-bound proposal ID, never an active shared memory; only the owner chat confirmation or cancellation can resolve it. Proposal status is readable by the originating agent. Helpers are ineligible. These adapters accept the common command/task context; task runtime wiring remains pending. The Code Mode description includes the eligible registered names and input schemas.
+The shared action registry exports `memory_search`, `memory_read`, `memory_remember`, `memory_update`, `memory_forget`, and `memory_proposal_status`. Both individual calls and QuickJS child calls use these registrations. Scope is `{ "kind": "agent" }` or `{ "kind": "user" }`; agent identity comes only from accepted work. Search accepts `query` and an optional cursor and returns at most 20 matching items and `nextCursor`. Read returns an item with its ID, stored scope and version. Update and forget require the ID, scope and version. A stale or wrong-scope mutation is a definite failed action. Text requiring current instance credential redaction is rejected during input parsing, before invocation inputs, action records, creation, proposal or update, so confirmation cannot save hidden text that differs from the review. Shared remember returns a pending, agent-bound proposal ID, never an active shared memory; only the owner chat confirmation or cancellation can resolve it. Proposal status is readable by the originating agent. Helpers are ineligible. These adapters use the common command/task context. The Code Mode description includes the eligible registered names and input schemas.
 
 ### Shared-instance memory API
 
@@ -414,11 +414,9 @@ profile without the field reads as `direct`; invalid explicit values fail. Task
 profiles use the existing task attempt identity, without a synthetic command ID.
 Version 31 adds `creation_defaults.tool_mode` after the existing migration backup.
 
-Ordinary chat opens the captured command's `WorkActions` and applies its mode
-to clock, scoped memory, host files, native processes, and `code_mode`; background tasks and other existing tool adapters
-remain on their previous paths. `GET /api/commands/ID` returns `codeExecutions`
+Chat and tasks open `WorkActions` for the captured command or actual attempt. Modes apply to eligible clock, scoped memory, configured search, host files, native processes, task controls, and `code_mode`; web, scratch and skill adapters remain on their previous paths. Helpers use their captured profiles and existing restrictions. `GET /api/commands/ID` returns `codeExecutions`
 (source, SHA-256 source identity, outcome, selected result, and linked action
-IDs) and `workActions` journal records. Chat-work returns code execution details
+IDs) and `workActions` journal records. `GET /api/tasks/ID` and the paired `instance task` command expose the same fields for an attempt. Chat-work returns code execution details
 for the owning agent. The `code_mode` definition includes the eligible registered
 guest catalog and schemas; child capability progress uses the registered name.
 Version 33 adds execution records and marks running records
@@ -429,7 +427,7 @@ for limits, recovery and adapter entry points.
 
 `file_read({path, offset?, limit?})` reads at most 32,768 bytes (default 8,192) and returns base64 data, byte offset, size, next offset and, for files up to 1 MiB, a SHA-256. `file_write({path, content})` writes UTF-8. `file_edit({path, expectedHash, oldText, newText})` requires valid UTF-8, a file at most 1 MiB, the current hash and one exact match. `file_search({path, query, offset?, limit?})` returns byte offsets in a file, scanning up to 65,536 bytes per page, or matching names in a single directory. A page has at most 100 matches; a directory over 10,000 entries is rejected. Paths are at most 4,096 characters; write content is at most 131,072 UTF-16 code units, each edit string at most 65,536, and search queries at most 1,024. The shared 256 KiB serialized invocation limit also applies. Follow `nextOffset` until null. Concurrent host changes can invalidate a page or race an edit; the hash check is not an atomic compare-and-swap.
 
-Paths resolve against the captured working directory unless absolute and use ordinary host permissions. Inputs changed by redaction are rejected before journal preparation. Shared action admission, Stop, recovery, and uncertain-effect handling apply. Helper and scheduled task restrictions remain in force; task-mode integration remains pending.
+Paths resolve against the captured working directory unless absolute and use ordinary host permissions. Inputs changed by redaction are rejected before journal preparation. Shared action admission, Stop, recovery, and uncertain-effect handling apply. Helper and scheduled task restrictions remain in force; task mode applies to eligible actions.
 
 ### Native process API
 
@@ -450,3 +448,5 @@ deliberately transformed credentials or rewrite older stored output and backups.
 The process record identifies its originating agent, accepted work and action.
 `unknown` means the service lost observation; it does not mean the OS process
 exited, and Stop cannot signal a process without its live handle.
+
+The `search_web` registered action accepts only `{ "query": "..." }`. In chat and eligible tasks, Direct, Hybrid and Code Mode share its configured backend, exact-query approval, action identity and result. Model input cannot select an origin, revision or identity. Completed-result release checks the captured backend and any reused grant again. Task approvals pause the attempt timer.
