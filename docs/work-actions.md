@@ -1,9 +1,9 @@
 # Accepted-work action service
 
-`src/work-actions.ts` implements the instance-owned action service. Chat and task execution open it once per accepted command or task attempt; direct and QuickJS clock, memory, configured search, host file, and native process calls use the
-same registrations and authorization. Web, scratch and skill tools remain on their earlier paths pending their adapters. In ordinary chat, those
+`src/work-actions.ts` implements the instance-owned action service. Chat and task execution open it once per accepted command or task attempt; direct and QuickJS clock, memory, configured search, skill selection, host file, and native process calls use the
+same registrations and authorization. Web and scratch tools remain on their earlier paths pending their adapters. In ordinary chat, those
 other individual tools are available in Direct and Hybrid only; Code Mode offers
-only `code_mode`, with clock, scoped memory, configured search, host file, native process, and eligible task-control actions as guest capabilities. Dispatch rejects
+only `code_mode`, with clock, scoped memory, configured search, skill selection, host file, native process, and eligible task-control actions as guest capabilities. Dispatch rejects
 individual calls that were not offered.
 
 ## Open accepted work
@@ -76,7 +76,7 @@ checks or claims feature authority inside the journal start transaction. Its
 fails after the claim was returned. A claim does not prepare or finish a journal
 record. Adapters remain responsible for binding their exact target and checking
 live authority again when a recorded result is released; this seam does not by
-itself migrate web, scratch, or skill selection. `check` receives the trusted identity on checks after authorization and on recovery; its initial eligibility check has no identity.
+itself migrate web or scratch. `check` receives the trusted identity on checks after authorization and on recovery; its initial eligibility check has no identity.
 
 The coordinator admits at most 32 new invocations per work item and at most
 eight pending invocations. Both routes share those limits. It checks active
@@ -89,6 +89,12 @@ These guarantees do not make external effects exactly once.
 ## Configured search adapter
 
 The service registers `search_web` with a query-only schema. Authorization binds the coordinator action ID and fingerprint to the exact work, query, backend origin and revision in `search_action_bindings`. Explicit decisions and optional remembered grants use the existing search approval endpoints and grant store. A reused grant is claimed synchronously in the coordinator start transaction; its controller is released on exit. Checks at start, result release and resume validate the captured boundary and claimed grant revision. The shared search effect enforces the existing rate, concurrency and scheduled-dispatch limits and uses the production loopback transport. Tasks use their actual attempt identity and pause the attempt timer during approval. Migration 35 creates missing search and native tables after the normal protected backup, including upgrades from either version 34 predecessor. Queries can be retained in this binding and its backups.
+
+## Skill selection adapter
+
+The service registers `select_skill` once and installs a tracker for the actual command or task attempt. The tracker owns the captured catalog, current availability checks, selected IDs, and load evidence. Both calling styles use the same operation. A completed result is released only after the captured ID, revision, source digest, and current availability are checked. Recovery adopts a completed selection without recording another load. Admission and guest receipt reuse check the selected skills before continuing.
+
+Code execution records link each guest child to the service invocation. On later turns, the runtime uses that linkage to remove the entire prior code result from provider replay when it contains a skill child. Direct selection results receive the same treatment. Stored history and native reasoning items are retained. A guest declaration does not create load evidence or replay linkage. Skill results can use the 2 MiB guest cache; emitted and returned output retains its 256 KiB limit.
 
 ## Memory adapter
 

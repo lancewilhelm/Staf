@@ -61,7 +61,7 @@ test('hybrid script errors expose recovery and retain a completed child before d
   finally {await f.app.close();}
 });
 
-test('Code Mode excludes legacy individual tools and rejects their forged calls',async()=>{
+test('Code Mode offers skill guidance while rejecting forged individual calls',async()=>{
   let skill;
   const f=await fixture(messages=>messages.at(-1).role==='tool'
     ? {role:'assistant',content:'done'}
@@ -75,7 +75,7 @@ test('Code Mode excludes legacy individual tools and rejects their forged calls'
       await f.submit('skill-'+mode,bot.id);const command=await f.wait('skill-'+mode);
       assert.equal(command.state,'completed',command.error);
       assert.deepEqual(f.seen[index].offers,mode==='direct'?['terminal_run','terminal_read','terminal_stop','terminal_write','terminal_eof','terminal_resize','clock','file_read','file_write','file_edit','file_search',...memoryOffers,'select_skill']:mode==='hybrid'?['terminal_run','terminal_read','terminal_stop','terminal_write','terminal_eof','terminal_resize','clock','file_read','file_write','file_edit','file_search',...memoryOffers,'code_mode','select_skill']:['code_mode']);
-      assert.equal(f.seen[index].messages.some(message=>typeof message.content==='string' && message.content.includes('Available skill catalog')),mode!=='code');
+      assert.equal(f.seen[index].messages.some(message=>typeof message.content==='string' && message.content.includes('Available skill catalog')),true);
       assert.equal(command.skillActivity.length,mode==='code'?0:1);
       const result=command.runtimeEvents.find(event=>event.type==='tool_result' && event.name==='select_skill');
       assert.equal(result.success,mode!=='code');
@@ -313,4 +313,83 @@ test('denied direct search closes admission for other queued tools',async()=>{
   const f=await fixture(messages=>messages.at(-1).role==='tool'?{role:'assistant',content:'done'}:{role:'assistant',content:null,tool_calls:[{id:'search',type:'function',function:{name:'search_web',arguments:JSON.stringify({query:'deny query'})}},{id:'clock',type:'function',function:{name:'clock',arguments:'{}'}}]});
   try {const config=await f.call('/api/search-config');await f.call('/api/search-config',{revision:config.revision,origin:'http://127.0.0.1:8888'});await f.call('/api/search-permissions/instance',{enabled:true});const bot=await f.call('/api/bots',{name:'deny-queue',toolMode:'direct'});await f.call(`/api/search-permissions/bot:${bot.id}`,{enabled:true});await f.submit('deny-queue',bot.id);const pending=await f.until(async()=>(await f.call('/api/search-approvals')).find(x=>x.work.id==='deny-queue'));await f.call(`/api/search-approvals/${pending.id}/deny`,{});const command=await f.wait('deny-queue');assert.equal(command.workActions.length,1);assert.equal(command.workActions[0].state,'cancelled');assert.ok(command.runtimeEvents.some(x=>x.type==='tool_result' && x.name==='clock' && !x.success));}
   finally {await f.app.close();}
+});
+
+test('paired Code Mode loads an available skill through a registered guest action', async()=>{
+  let skill;
+  const f=await fixture(messages=>messages.at(-1).role==='tool' ? {role:'assistant',content:'done'} : tool('code_mode',{source:`return (await capabilities.select_skill({id:${JSON.stringify(skill.id)},revision:1})).value;`}));
+  try {
+    const bot=await f.call('/api/bots',{name:'guest skill',toolMode:'code'});
+    skill=await f.call('/api/skills',{name:'Fixture',description:'A skill',provenance:'owner',body:'A distinctive skill body'});
+    await f.call(`/api/skills/${skill.id}/availability`,{botId:bot.id,available:true});
+    await f.submit('guest-skill',bot.id);const command=await f.wait('guest-skill');
+    assert.equal(command.state,'completed',command.error);
+    assert.match(JSON.stringify(f.seen[0].messages),/Available skill catalog/);
+    assert.equal(command.workActions.length,1);
+    assert.equal(command.skillActivity.length,1);
+    assert.match(JSON.stringify(f.seen[1].messages),/A distinctive skill body/);
+    assert.match(JSON.stringify(f.seen[1].messages),/Untrusted skill data/);
+  } finally {await f.app.close();}
+});
+
+test('three modes retain selection evidence and scrub loaded bodies from later provider replay',async()=>{
+  let skill;
+  const f=await fixture((messages,_tools,profile)=>{
+    const user=messages.findLast(m=>m.role==='user').content;
+    if(user.startsWith('second'))return {role:'assistant',content:'done again'};
+    if(messages.at(-1).role==='tool')return {role:'assistant',content:'done'};
+    return profile.toolMode==='direct' ? tool('select_skill',{id:skill.id,revision:1}) : tool('code_mode',{source:`const s=await capabilities.select_skill({id:${JSON.stringify(skill.id)},revision:1}); const c=await capabilities.clock({}); return [s.value,c.value];`});
+  });
+  try {
+    skill=await f.call('/api/skills',{name:'Replay skill',description:'replay',provenance:'owner',body:'REPLAY_SKILL_BODY'});
+    for(const mode of ['direct','hybrid','code']) {
+      const bot=await f.call('/api/bots',{name:'replay '+mode,toolMode:mode});await f.call(`/api/skills/${skill.id}/availability`,{botId:bot.id,available:true});
+      let index=f.seen.length;await f.submit('first-'+mode,bot.id,'first');const first=await f.wait('first-'+mode);
+      assert.equal(first.state,'completed',first.error);assert.equal(first.skillActivity.length,1);assert.equal(first.skillActivity[0].sourceDigest,skill.digest);
+      assert.match(JSON.stringify(f.seen[index+1].messages),/REPLAY_SKILL_BODY/);assert.equal(first.workActions.length,mode==='direct'?1:2);
+      index=f.seen.length;await f.submit('second-'+mode,bot.id,'second');const second=await f.wait('second-'+mode);assert.equal(second.state,'completed');
+      assert.doesNotMatch(JSON.stringify(f.seen[index].messages),/REPLAY_SKILL_BODY/);assert.match(JSON.stringify(f.seen[index].messages),/Previously loaded skill content/);
+    }
+  } finally {await f.app.close();}
+});
+
+test('guest skill revocation during a later approval fences the queued child',async()=>{
+  let skill;const f=await fixture(messages=>messages.at(-1).role==='tool'?{role:'assistant',content:'done'}:tool('code_mode',{source:`await capabilities.select_skill({id:${JSON.stringify(skill.id)},revision:1}); await capabilities.clock({}); return await capabilities.file_write({path:'must-not-exist',content:'no'});`}));
+  try {
+    const bot=await f.call('/api/bots',{name:'revoke guest',toolMode:'code'});skill=await f.call('/api/skills',{name:'Revoke',description:'test',provenance:'owner',body:'body'});await f.call(`/api/skills/${skill.id}/availability`,{botId:bot.id,available:true});
+    await f.call('/api/approval-settings/instance',{mode:'ask-every-time',clockEnabled:true});await f.submit('revoke-guest',bot.id);
+    const approval=await f.until(async()=>(await f.call('/api/approvals')).find(x=>x.workId==='revoke-guest' && x.state==='pending'));
+    await f.call(`/api/skills/${skill.id}/enabled`,{enabled:false});await f.call(`/api/approvals/${approval.id}/approve`,{});
+    const command=await f.wait('revoke-guest');assert.equal(command.state,'failed');assert.equal(command.skillActivity.length,1);assert.equal(command.workActions.length,2);assert.equal(command.workActions[1].state,'cancelled');
+  } finally {await f.app.close();}
+});
+
+test('guest selection rejects stale and out-of-catalog IDs without load evidence',async()=>{
+  let skill,other;
+  const f=await fixture(messages=>messages.at(-1).role==='tool'?{role:'assistant',content:'done'}:tool('code_mode',{source:`const a=await capabilities.select_skill({id:${JSON.stringify(skill.id)},revision:99}).catch(e=>String(e)); const b=await capabilities.select_skill({id:${JSON.stringify(other.id)},revision:1}).catch(e=>String(e)); return [a,b];`}));
+  try {const bot=await f.call('/api/bots',{name:'bounded',toolMode:'code'});skill=await f.call('/api/skills',{name:'Allowed',description:'allowed',provenance:'owner',body:'allowed body'});other=await f.call('/api/skills',{name:'Other',description:'other',provenance:'owner',body:'OTHER_SECRET_BODY'});await f.call(`/api/skills/${skill.id}/availability`,{botId:bot.id,available:true});await f.submit('bounded',bot.id);const c=await f.wait('bounded');assert.equal(c.state,'completed',c.error);assert.equal(c.skillActivity.length,0);assert.ok(c.workActions.every(action=>action.state==='failed'));assert.doesNotMatch(JSON.stringify(f.seen),/OTHER_SECRET_BODY|allowed body/);}finally{await f.app.close();}
+});
+
+test('completed guest skill selection resumes without a second load',async()=>{
+  let skill,actionId;
+  const f=await fixture(messages=>{const results=messages.filter(m=>m.role==='tool');if(!results.length)return tool('code_mode',{source:`await capabilities.select_skill({id:${JSON.stringify(skill.id)},revision:1}); throw Error('ordinary');`},'first');if(results.length===1){const result=JSON.parse(results[0].content);actionId=result.recovery.actions[0].id;return tool('select_skill',{id:skill.id,revision:1,_staf:{kind:'resume',actionId}},'resume');}return {role:'assistant',content:'done'};});
+  try{const bot=await f.call('/api/bots',{name:'recovery skill',toolMode:'hybrid'});skill=await f.call('/api/skills',{name:'Recover',description:'test',provenance:'owner',body:'RECOVER_BODY'});await f.call(`/api/skills/${skill.id}/availability`,{botId:bot.id,available:true});await f.submit('recover-skill',bot.id);const c=await f.wait('recover-skill');assert.equal(c.state,'completed',c.error);assert.equal(c.workActions.length,1);assert.equal(c.skillActivity.length,1);assert.equal(c.workActions[0].id,actionId);assert.match(f.seen[2].messages.at(-1).content,/RECOVER_BODY/);}finally{await f.app.close();}
+});
+
+test('maximum-size skill can be selected directly and inspected in a guest',async()=>{
+  let skill;const body='x'.repeat(256*1024);
+  const f=await fixture((messages,_tools,profile)=>messages.at(-1).role==='tool'?{role:'assistant',content:'done'}:profile.toolMode==='direct'?tool('select_skill',{id:skill.id,revision:1}):tool('code_mode',{source:`const s=await capabilities.select_skill({id:${JSON.stringify(skill.id)},revision:1}); return JSON.parse(s.value.split('\\n')[1]).body.length;`}));
+  try{skill=await f.call('/api/skills',{name:'Large',description:'test',provenance:'owner',body});for(const mode of ['direct','code']){const bot=await f.call('/api/bots',{name:'large '+mode,toolMode:mode});await f.call(`/api/skills/${skill.id}/availability`,{botId:bot.id,available:true});await f.submit('large-'+mode,bot.id);const c=await f.wait('large-'+mode);assert.equal(c.state,'completed',c.error);assert.equal(c.skillActivity.length,1);assert.equal(c.workActions[0].state,'succeeded');if(mode==='code')assert.equal(c.codeExecutions[0].result.value,body.length);}}finally{await f.app.close();}
+});
+
+test('skill replay scrub preserves native reasoning and call boundaries',async()=>{
+  const {responsesInput}=await import('../dist/codex-direct.js');let skill;
+  const f=await fixture(messages=>{const user=messages.findLast(m=>m.role==='user').content;if(user.startsWith('second') || messages.at(-1).role==='tool')return {role:'assistant',content:'done'};const response=tool('code_mode',{source:`return (await capabilities.select_skill({id:${JSON.stringify(skill.id)},revision:1})).value;`},'native-call');response.responseReplay={provider:'codex-direct',model:'fixture-model',items:[{type:'reasoning',encrypted_content:'opaque+/=exact'},{type:'function_call',call_id:'native-call',name:'code_mode',arguments:response.tool_calls[0].function.arguments}]};return response;});
+  try{const bot=await f.call('/api/bots',{name:'native replay',toolMode:'code'});skill=await f.call('/api/skills',{name:'Native',description:'test',provenance:'owner',body:'NATIVE_SKILL_BODY'});await f.call(`/api/skills/${skill.id}/availability`,{botId:bot.id,available:true});await f.submit('native-first',bot.id,'first');assert.equal((await f.wait('native-first')).state,'completed');const index=f.seen.length;await f.submit('native-second',bot.id,'second');assert.equal((await f.wait('native-second')).state,'completed');const native=responsesInput(f.seen[index].messages,'fixture-model');assert.equal(native.find(x=>x.type==='reasoning').encrypted_content,'opaque+/=exact');assert.equal(native.find(x=>x.type==='function_call').call_id,'native-call');const output=native.find(x=>x.type==='function_call_output');assert.equal(output.call_id,'native-call');assert.match(output.output,/Previously loaded skill content/);assert.doesNotMatch(JSON.stringify(native),/NATIVE_SKILL_BODY/);}finally{await f.app.close();}
+});
+
+test('replay scrubbing leaves persisted skill history inspectable',async()=>{
+  const {mkdtempSync,rmSync}=await import('node:fs');const {tmpdir}=await import('node:os');const {join}=await import('node:path');const {DatabaseSync}=await import('node:sqlite');const dir=mkdtempSync(join(tmpdir(),'staf-skill-replay-'));const path=join(dir,'instance.sqlite');let skill;
+  const f=await fixture(messages=>{const user=messages.findLast(m=>m.role==='user').content;if(user.startsWith('second')||messages.at(-1).role==='tool')return {role:'assistant',content:'done'};return tool('code_mode',{source:`return (await capabilities.select_skill({id:${JSON.stringify(skill.id)},revision:1})).value;`});},{},{path});let closed=false;
+  try{const bot=await f.call('/api/bots',{name:'history',toolMode:'code'});skill=await f.call('/api/skills',{name:'History',description:'test',provenance:'owner',body:'PERSISTED_SKILL_BODY'});await f.call(`/api/skills/${skill.id}/availability`,{botId:bot.id,available:true});await f.submit('history-first',bot.id,'first');assert.equal((await f.wait('history-first')).state,'completed');await f.submit('history-second',bot.id,'second');assert.equal((await f.wait('history-second')).state,'completed');await f.app.close();closed=true;const db=new DatabaseSync(path,{readOnly:true});try{const saved=db.prepare('SELECT session FROM sessions WHERE bot_id=?').get(bot.id).session;assert.match(saved,/PERSISTED_SKILL_BODY/);}finally{db.close();}}finally{if(!closed)await f.app.close();rmSync(dir,{recursive:true,force:true});}
 });

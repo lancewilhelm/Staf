@@ -53,7 +53,7 @@ only to loopback; it does not support LAN access. See [usage](docs/usage.md#loca
 The loopback instance retains the background-task engine; its separate Activity and task-update workspace is deferred. It is an offline-tested preview with important permission and recovery limitations; see [usage](docs/usage.md#background-task-preview).
 
 
-The shared instance supports owner-imported [skills](docs/usage.md#skills-in-the-shared-instance) as an offline-tested preview.
+The shared instance supports owner-imported [skills](docs/usage.md#skills-in-the-shared-instance) as an offline-tested preview. Eligible chat and task work can select them in Direct, Hybrid, or Code Mode.
 
 The shared instance supports [scoped memory](docs/usage.md#scoped-memory-in-the-shared-instance) in an offline-tested preview, with read-only agent and shared user memory pages in Settings.
 

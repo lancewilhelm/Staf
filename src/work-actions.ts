@@ -33,6 +33,8 @@ export type Capability<I,O> = {
   authorize(input:I,work:WorkContext,action:ActionIdentity):Promise<void|AuthorityClaim>;
   execute(input:I,work:WorkContext,action:ActionIdentity):Promise<O>;
   visibleResult(output:O):string;
+  maxResultBytes?:number;
+  releaseResult?(output:O,work:WorkContext):void;
   recovery?: {overlaps?(previous:I,next:I,work:WorkContext):boolean; reconcile?(input:I,evidence:unknown,work:WorkContext):boolean};
 };
 export class ActionDenied extends Error {}
@@ -58,10 +60,10 @@ function sourceKey(source:InvocationSource):string {
 }
 
 type ErasedCapability = {
-  name:string;definition:ToolDefinition;eligible(work:WorkContext):boolean;
+  name:string;definition:ToolDefinition;eligible(work:WorkContext):boolean;maxResultBytes:number;
   parse(input:unknown):Json;describe(input:Json,work:WorkContext):Description;
   check(input:Json,work:WorkContext,action?:ActionIdentity):void;authorize(input:Json,work:WorkContext,action:ActionIdentity):Promise<void|AuthorityClaim>;
-  execute(input:Json,work:WorkContext,action:ActionIdentity):Promise<Json>;visible(output:Json):string;
+  execute(input:Json,work:WorkContext,action:ActionIdentity):Promise<Json>;visible(output:Json):string;releaseResult?(output:Json,work:WorkContext):void;
   overlaps?: (previous:Json,next:Json,work:WorkContext)=>boolean;
   reconcile?: (input:Json,evidence:unknown,work:WorkContext)=>boolean;
 };
@@ -72,6 +74,8 @@ export class WorkActionService {
   private readonly queues=new Map<string,Promise<void>>();
   private readonly queueDepth=new Map<string,number>();
   private readonly journal:ActionJournal;
+  private workCheck:(work:WorkRef)=>void=()=>{};
+  setWorkCheck(check:(work:WorkRef)=>void):void {this.workCheck=check;}
   private readonly closures=new Map<string,{controller:AbortController;refs:number}>();
   constructor(private readonly db:DatabaseSync, private readonly key:Uint8Array,
     private readonly context:(work:WorkRef,signal:AbortSignal)=>WorkContext,
@@ -82,13 +86,14 @@ export class WorkActionService {
     if (!capability.name || capability.name==='code_mode' || this.capabilities.has(capability.name) || capability.definition.function.name!==capability.name) throw Error('Invalid or duplicate capability');
     const parse=(input:unknown)=>capability.parseInput(input);
     this.capabilities.set(capability.name,{
-      name:capability.name,definition:structuredClone(capability.definition),eligible:capability.eligible,
+      name:capability.name,definition:structuredClone(capability.definition),eligible:capability.eligible,maxResultBytes:capability.maxResultBytes ?? 256*1024,
       parse:input=>jsonValue.parse(parse(input)),
       describe:(input,work)=>capability.describe(parse(input),work),
       check:(input,work,action)=>capability.check(parse(input),work,action),
       authorize:(input,work,action)=>capability.authorize(parse(input),work,action),
       execute:async (input,work,action)=>jsonValue.parse(capability.parseResult(await capability.execute(parse(input),work,action))),
       visible:output=>capability.visibleResult(capability.parseResult(output)),
+      ...(capability.releaseResult ? {releaseResult:(output:Json,work:WorkContext)=>capability.releaseResult!(capability.parseResult(output),work)} : {}),
       ...(capability.recovery?.overlaps ? {overlaps:(a:Json,b:Json,work:WorkContext)=>capability.recovery!.overlaps!(parse(a),parse(b),work)} : {}),
       ...(capability.recovery?.reconcile ? {reconcile:(input:Json,evidence:unknown,work:WorkContext)=>capability.recovery!.reconcile!(parse(input),evidence,work)} : {}),
     });
@@ -110,7 +115,7 @@ export class WorkActionService {
   private state(work:WorkRef) {const recovery=work.kind==='task' && !!this.db.prepare('SELECT 1 FROM task_attempts WHERE id=? AND predecessor IS NOT NULL').get(work.id);this.db.prepare('INSERT OR IGNORE INTO work_action_state(kind,work_id,epoch) VALUES (?,?,?)').run(work.kind,work.id,recovery?1:0);return this.db.prepare('SELECT used,closed,epoch FROM work_action_state WHERE kind=? AND work_id=?').get(work.kind,work.id)!;}
   private admit(context:WorkContext, allowPending=false):void {
     const state=this.state(context.work);if (typeof state.closed==='string') throw Error(`Action admission closed: ${state.closed}`);
-    try {context.signal.throwIfAborted();this.active(context.work);} catch(error) {this.close(context,context.signal.aborted?'stopped':'authority');throw error;}
+    try {context.signal.throwIfAborted();this.active(context.work);this.workCheck(context.work);} catch(error) {this.close(context,context.signal.aborted?'stopped':'authority');throw error;}
     if(!allowPending && this.deferred(context.work)) throw new ActionDeferred('Owner input is pending');
   }
   private records(context:WorkContext):Array<{action:ActionRecord;capability:string;input:Json;description:Description}> {
@@ -151,6 +156,9 @@ export class WorkActionService {
   }
   finishExecution(context:WorkContext,id:string,outcome:string,result:string|null):void {
     this.db.prepare("UPDATE code_executions SET outcome=?,result=? WHERE id=? AND kind=? AND work_id=? AND outcome='running'").run(outcome,result,id,context.work.kind,context.work.id);
+  }
+  isSkillExecution(id:string,callId:string):boolean {
+    return !!this.db.prepare("SELECT 1 FROM code_executions e JOIN work_action_invocations i ON i.kind=e.kind AND i.work_id=e.work_id AND json_extract(i.source,'$.kind')='guest' AND json_extract(i.source,'$.executionId')=e.id WHERE e.id=? AND e.call_id=? AND i.capability='select_skill' LIMIT 1").get(id,callId);
   }
   inspect(work:WorkRef) {
     const executions=this.db.prepare('SELECT id,response_id AS responseId,call_id AS callId,source,source_hash AS sourceHash,outcome,result FROM code_executions WHERE kind=? AND work_id=? ORDER BY rowid').all(work.kind,work.id);
@@ -205,7 +213,7 @@ export class WorkActionService {
       if(existing.digest!==digest)throw new ActionConflict('Invocation identity conflicts with recorded input');
       const action=this.journal.get(String(existing.action_id));if(!action)throw Error('Missing journal action');cap.check(input,context,{id:action.id,fingerprint:action.fingerprint});
       const saved=this.db.prepare('SELECT private_result FROM work_action_invocations WHERE action_id=? AND private_result IS NOT NULL LIMIT 1').get(action.id);
-      if(action.state==='succeeded' && typeof saved?.private_result==='string')return {kind:'completed',actionId:action.id,value:jsonValue.parse(JSON.parse(saved.private_result))};
+      if(action.state==='succeeded' && typeof saved?.private_result==='string') {const value=jsonValue.parse(JSON.parse(saved.private_result));cap.releaseResult?.(value,context);return {kind:'completed',actionId:action.id,value};}
       return {kind:'status',action};
     }
     const state=this.state(context.work);
@@ -219,7 +227,7 @@ export class WorkActionService {
       cap.check(input,context,{id:record.action.id,fingerprint:record.action.fingerprint});
       this.db.prepare('INSERT INTO work_action_invocations (kind,work_id,source,digest,action_id,capability,input,description) VALUES (?,?,?,?,?,?,?,?)').run(context.work.kind,context.work.id,source,digest,record.action.id,record.capability,canonical,JSON.stringify(record.description));
       const saved=this.db.prepare('SELECT private_result FROM work_action_invocations WHERE action_id=? AND private_result IS NOT NULL LIMIT 1').get(record.action.id);
-      if(record.action.state==='succeeded' && typeof saved?.private_result==='string')return {kind:'completed',actionId:record.action.id,value:jsonValue.parse(JSON.parse(saved.private_result))};
+      if(record.action.state==='succeeded' && typeof saved?.private_result==='string') {const value=jsonValue.parse(JSON.parse(saved.private_result));cap.releaseResult?.(value,context);return {kind:'completed',actionId:record.action.id,value};}
       return {kind:'status',action:record.action};
     }
     const description=cap.describe(input,context);
@@ -265,10 +273,11 @@ export class WorkActionService {
     try {this.admit(context);cap.check(input,context,action);claim?.start();this.journal.startInInstanceTransaction(prepared.permit,this.db,{id:actionId,fingerprint,work:context.work});this.db.exec('COMMIT');this.journal.finalizeInstanceStart(prepared.permit);}
     catch(error){this.db.exec('ROLLBACK');this.journal.cancel(actionId);if(error instanceof ActionDeferred)return {kind:'blocked',reason:error.message};this.close(context,'authority');return {kind:'blocked',reason:context.signal.aborted?'Work stopped':'Action could not start'};}
     let output:Json;let visible:string;
-    try {output=await cap.execute(input,context,action);if(Buffer.byteLength(encoded(output))>256*1024)throw Error('Result exceeds the limit');visible=cap.visible(output).slice(0,16000);} catch(error) {this.journal.finish(actionId,error instanceof ActionFailed || error instanceof ActionDenied?'failed':'uncertain',error instanceof ActionFailed?error.safeResult.slice(0,16000):error instanceof ActionDenied?'Action denied':'Outcome unknown');if(error instanceof ActionDenied){this.close(context,'denied');return {kind:'blocked',reason:'Action denied'};}this.admit(context,true);cap.check(input,context,action);return {kind:'status',action:this.journal.get(actionId)!};}
+    try {output=await cap.execute(input,context,action);if(Buffer.byteLength(encoded(output))>cap.maxResultBytes)throw Error('Result exceeds the limit');visible=cap.visible(output).slice(0,16000);} catch(error) {this.journal.finish(actionId,error instanceof ActionFailed || error instanceof ActionDenied?'failed':'uncertain',error instanceof ActionFailed?error.safeResult.slice(0,16000):error instanceof ActionDenied?'Action denied':'Outcome unknown');if(error instanceof ActionDenied){this.close(context,'denied');return {kind:'blocked',reason:'Action denied'};}this.admit(context,true);cap.check(input,context,action);return {kind:'status',action:this.journal.get(actionId)!};}
     this.db.prepare('UPDATE work_action_invocations SET private_result=? WHERE action_id=?').run(encoded(output),actionId);
     this.journal.finish(actionId,'succeeded',visible);
     this.admit(context,true);cap.check(input,context,action);
+    cap.releaseResult?.(output,context);
     return {kind:'completed',actionId,value:output};
     } finally {claim?.release();}
   }
@@ -280,6 +289,7 @@ export class WorkActions {
   dispose() {if(!this.disposed){this.disposed=true;this.release();}}
   offers(route:'direct'|'guest') {return this.service.offers(this.context,route);}
   recognizes(name:string) {return this.service.recognizes(name);}
+  isSkillExecution(id:string,callId:string) {return this.service.isSkillExecution(id,callId);}
   invoke(request:{source:InvocationSource;name:string;input:unknown;intent:ActionIntent}) {return this.service.invoke(this.context,request);}
   beginRecovery() {return this.service.beginRecovery(this.context);}
   manifest() {return this.service.manifest(this.context);}

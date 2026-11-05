@@ -135,7 +135,7 @@ let buffered = Buffer.alloc(0);
 process.stdin.on('data', (chunk: Buffer) => {
   if (ended) return;
   buffered = Buffer.concat([buffered, chunk]);
-  if (buffered.length > limits.childBytes * 3) { end('error'); return; }
+  if (buffered.length > limits.cacheBytes + 8192) { end('error'); return; }
   for (;;) {
     const index = buffered.indexOf(10); if (index < 0) break;
     const line = buffered.subarray(0, index); buffered = buffered.subarray(index + 1);

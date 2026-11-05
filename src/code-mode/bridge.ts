@@ -3,17 +3,18 @@ import {startQuickJSGuest} from './executor.js';
 import {limits} from './protocol.js';
 import type {Json} from './json.js';
 import {ActionDeferred, closesAdmission, type WorkActions} from '../work-actions.js';
+import {skillEvidence} from '../skill-actions.js';
 import type {RuntimeEvent} from '../types.js';
 
 /** Runs one provider-requested program against the accepted work's action coordinator. */
-export async function runCode(input:{actions:WorkActions;responseId:string;callId:string;source:string;redact:(text:string)=>string;emit?:(event:RuntimeEvent)=>void}):Promise<string> {
+export async function runCode(input:{actions:WorkActions;responseId:string;callId:string;source:string;redact:(text:string)=>string;emit?:(event:RuntimeEvent)=>void;ensureSkills?:()=>void}):Promise<string> {
   const {actions,source,redact}=input;
   if(Buffer.byteLength(source,'utf8')>limits.sourceBytes || redact(source)!==source) throw Error('Source cannot be retained safely or exceeds 32 KiB');
   let id:string;
   try {id=actions.startExecution(input.responseId,input.callId,source);} catch(error) {if(error instanceof ActionDeferred)return JSON.stringify({outcome:'deferred',notice:error.message});throw error;}
   const receipts=new Map<string,Json>(), emitted:Json[]=[];
   const persist=()=>actions.updateExecution(id,JSON.stringify({emitted}));
-  let outputBytes=0, fatal:string|undefined;
+  let outputBytes=0, cachedBytes=0, fatal:string|undefined;
   const pending=new Set<Promise<unknown>>();
   const safe=(value:Json):Json=>{if(typeof value==='string')return redact(value);if(Array.isArray(value))return value.map(safe);if(value && typeof value==='object')return Object.fromEntries(Object.entries(value).map(([key,item])=>[redact(key),safe(item)]));return value;};
   const keep=(value:Json):Json=>{const result=safe(value);outputBytes+=Buffer.byteLength(JSON.stringify(result));if(outputBytes>limits.outputBytes){fatal='Guest output limit reached';actions.close(fatal);throw Error(fatal);}return result;};
@@ -22,6 +23,7 @@ export async function runCode(input:{actions:WorkActions;responseId:string;callI
     const operation=(async()=>{
     if(fatal || actions.context.signal.aborted) return {ok:false as const,error:'Work stopped or closed'};
     try {
+      input.ensureSkills?.();
       if(message.type==='emit') {emitted.push(keep(message.value));persist();return {ok:true as const,value:null};}
       if(message.type==='reuse') {const value=receipts.get(message.receipt);if(value===undefined)return {ok:false as const,error:'Receipt unavailable'};return {ok:true as const,value};}
       const eventId=`${id}:${message.seq}`;
@@ -29,14 +31,15 @@ export async function runCode(input:{actions:WorkActions;responseId:string;callI
       let result:Awaited<ReturnType<WorkActions['invoke']>>;
       try {result=await actions.invoke({source:{kind:'guest',executionId:id,sequence:message.seq},name:message.name,input:message.input,intent:message.intent ?? {kind:'new'}});}
       catch(error) {input.emit?.({type:'tool_result',id:eventId,name:message.name,success:false,content:'Capability call failed'});throw error;}
-      input.emit?.({type:'tool_result',id:eventId,name:message.name,success:result.kind==='completed',content:result.kind==='completed'?'Capability completed':JSON.stringify(result)});
+      input.emit?.({type:'tool_result',id:eventId,name:message.name,success:result.kind==='completed',content:result.kind==='completed' && message.name==='select_skill' && typeof result.value==='string' ? JSON.stringify(skillEvidence(result.value) ?? {}) : result.kind==='completed'?'Capability completed':JSON.stringify(result)});
       if(result.kind==='blocked') {if(closesAdmission(result.reason)){fatal ??= result.reason;actions.close(fatal);}return {ok:false as const,error:result.reason};}
       if(result.kind!=='completed') return {ok:false as const,error:JSON.stringify(result)};
-      const receipt=randomUUID(),value=keep(result.value);receipts.set(receipt,value);
+      const receipt=randomUUID(),value=message.name==='select_skill' ? safe(result.value) : keep(result.value);
+      cachedBytes+=Buffer.byteLength(JSON.stringify(value));if(cachedBytes>limits.cacheBytes){fatal='Guest cache limit reached';actions.close(fatal);throw Error(fatal);}receipts.set(receipt,value);
       return {ok:true as const,value:{receipt,actionId:result.actionId,value}};
     } catch(error) {
       if(!fatal && actions.context.signal.aborted && !actions.closedReason()) fatal='Work stopped';
-      else if(!fatal && error instanceof Error && /admission closed|no longer active|no longer authorized|limit/i.test(error.message)) {fatal=error.message;actions.close(fatal);}
+      else if(!fatal && error instanceof Error && /admission closed|no longer active|no longer authorized|no longer available|limit/i.test(error.message)) {fatal=error.message;actions.close(fatal);}
       return {ok:false as const,error:fatal ?? 'Capability call failed'};
     }
     })();
