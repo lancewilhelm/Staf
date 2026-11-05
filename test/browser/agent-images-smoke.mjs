@@ -22,7 +22,7 @@ async function until(fn,label){for(let i=0;i<160;i++){const result=await fn();if
 function cdp(method,params={},sessionId,connection=socket){return new Promise((resolve,reject)=>{const id=++seq,timer=setTimeout(()=>{pending.delete(id);reject(Error('CDP timed out '+method));},10000);pending.set(id,{resolve:value=>{clearTimeout(timer);resolve(value);},reject:error=>{clearTimeout(timer);reject(error);}});connection.send(JSON.stringify({id,method,params,sessionId}));});}
 async function evaluate(expression,sessionId){const result=await cdp('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true},sessionId,sessionId?browserSocket:socket);if(result.exceptionDetails)throw Error(JSON.stringify(result.exceptionDetails));return result.result.value;}
 async function act(actions,condition,label){for(const expression of Array.isArray(actions)?actions:[actions])await evaluate(expression);await until(()=>evaluate(condition),label);console.log('PASS '+label);}
-async function key(key,windowsVirtualKeyCode){for(const type of ['keyDown','keyUp'])await cdp('Input.dispatchKeyEvent',{type,key,code:key,windowsVirtualKeyCode});}
+async function key(key,windowsVirtualKeyCode){for(const type of ['keyDown','keyUp'])await cdp('Input.dispatchKeyEvent',{type,key,code:key,windowsVirtualKeyCode,...(type==='keyDown'&&key==='Enter'?{text:'\r'}:{})});}
 async function choosePhoto(){
   await evaluate("(async()=>{if(!window.photoFile){const canvas=document.createElement('canvas');canvas.width=480;canvas.height=320;const ctx=canvas.getContext('2d');ctx.fillStyle='#E6C368';ctx.fillRect(0,0,480,320);ctx.fillStyle='#245D50';ctx.fillRect(100,40,140,240);ctx.fillStyle='#EB8D88';ctx.fillRect(300,0,180,160);const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/jpeg'));window.photoFile=new File([blob],'portrait.jpg',{type:'image/jpeg'});}const transfer=new DataTransfer();transfer.items.add(window.photoFile);const input=document.querySelector('input[type=file]');input.files=transfer.files;input.dispatchEvent(new Event('change',{bubbles:true}));})()");
   await until(()=>evaluate("document.querySelector('.image-previews img')?.naturalWidth===256"),'JPEG decoded to a 256px PNG preview');
@@ -187,7 +187,7 @@ try {
   assert.equal(await evaluate("document.querySelector('.side nav .agent-image').getBoundingClientRect().width"),28,'actual narrow sidebar badge size');
   for(const theme of ['light','dark']){await evaluate(`document.documentElement.dataset.appearance=${JSON.stringify(theme)}`);assert.equal(await evaluate("document.documentElement.scrollWidth<=innerWidth"),true,'no horizontal overflow in '+theme);}
   await evaluate("document.querySelector('[data-image-color=sky]').focus()");
-  await cdp('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',text:'\r',windowsVirtualKeyCode:13});await cdp('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});
+  await key('Enter',13);
   await until(()=>evaluate("document.querySelector('[data-image-color=sky]').getAttribute('aria-pressed')==='true'"),'keyboard selects color');
   await evaluate("document.querySelector('[data-image-shape=hexagon]').focus()");await key('Enter',13);
   await until(()=>evaluate("document.querySelector('[data-image-shape=hexagon]').getAttribute('aria-pressed')==='true'"),'keyboard selects a polygon');
