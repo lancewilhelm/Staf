@@ -19,6 +19,7 @@ export type WorkContext = Readonly<{work:WorkRef; botId:string; conversation:{ki
 export type InvocationSource = {kind:'provider';responseId:string;callId:string} | {kind:'guest';executionId:string;sequence:number};
 export type ActionIntent = {kind:'new'} | {kind:'resume';actionId:string} | {kind:'repeat';challenge:string};
 export type Description = {summary:string;resource:string;effect:'read'|'change';opaque?:boolean};
+export type ActionIdentity = Readonly<{id:string;fingerprint:string}>;
 export type Capability<I,O> = {
   name:string;
   definition:ToolDefinition;
@@ -27,8 +28,8 @@ export type Capability<I,O> = {
   describe(input:I,work:WorkContext):Description;
   eligible(work:WorkContext):boolean;
   check(input:I,work:WorkContext):void;
-  authorize(input:I,work:WorkContext):Promise<void>;
-  execute(input:I,work:WorkContext):Promise<O>;
+  authorize(input:I,work:WorkContext,action:ActionIdentity):Promise<void>;
+  execute(input:I,work:WorkContext,action:ActionIdentity):Promise<O>;
   visibleResult(output:O):string;
   recovery?: {overlaps?(previous:I,next:I,work:WorkContext):boolean; reconcile?(input:I,evidence:unknown,work:WorkContext):boolean};
 };
@@ -56,8 +57,8 @@ function sourceKey(source:InvocationSource):string {
 type ErasedCapability = {
   name:string;definition:ToolDefinition;eligible(work:WorkContext):boolean;
   parse(input:unknown):Json;describe(input:Json,work:WorkContext):Description;
-  check(input:Json,work:WorkContext):void;authorize(input:Json,work:WorkContext):Promise<void>;
-  execute(input:Json,work:WorkContext):Promise<Json>;visible(output:Json):string;
+  check(input:Json,work:WorkContext):void;authorize(input:Json,work:WorkContext,action:ActionIdentity):Promise<void>;
+  execute(input:Json,work:WorkContext,action:ActionIdentity):Promise<Json>;visible(output:Json):string;
   overlaps?: (previous:Json,next:Json,work:WorkContext)=>boolean;
   reconcile?: (input:Json,evidence:unknown,work:WorkContext)=>boolean;
 };
@@ -82,8 +83,8 @@ export class WorkActionService {
       parse:input=>jsonValue.parse(parse(input)),
       describe:(input,work)=>capability.describe(parse(input),work),
       check:(input,work)=>capability.check(parse(input),work),
-      authorize:(input,work)=>capability.authorize(parse(input),work),
-      execute:async (input,work)=>jsonValue.parse(capability.parseResult(await capability.execute(parse(input),work))),
+      authorize:(input,work,action)=>capability.authorize(parse(input),work,action),
+      execute:async (input,work,action)=>jsonValue.parse(capability.parseResult(await capability.execute(parse(input),work,action))),
       visible:output=>capability.visibleResult(capability.parseResult(output)),
       ...(capability.recovery?.overlaps ? {overlaps:(a:Json,b:Json,work:WorkContext)=>capability.recovery!.overlaps!(parse(a),parse(b),work)} : {}),
       ...(capability.recovery?.reconcile ? {reconcile:(input:Json,evidence:unknown,work:WorkContext)=>capability.recovery!.reconcile!(parse(input),evidence,work)} : {}),
@@ -252,13 +253,14 @@ export class WorkActionService {
       this.db.exec('COMMIT');
     } catch(error){this.db.exec('ROLLBACK');throw error;}
     if(prepared.kind!=='created')throw Error('New action already exists');
-    try {cap.check(input,context);await cap.authorize(input,context);this.admit(context);cap.check(input,context);}
+    const action=Object.freeze({id:actionId,fingerprint});
+    try {cap.check(input,context);await cap.authorize(input,context,action);this.admit(context);cap.check(input,context);}
     catch(error){this.journal.cancel(actionId);const reason=context.signal.aborted?'Work stopped':error instanceof ActionDenied?'Action denied':'Action authorization failed';this.close(context,'authority');return {kind:'blocked',reason};}
     this.db.exec('BEGIN IMMEDIATE');
     try {this.admit(context);cap.check(input,context);this.journal.startInInstanceTransaction(prepared.permit,this.db,{id:actionId,fingerprint,work:context.work});this.db.exec('COMMIT');this.journal.finalizeInstanceStart(prepared.permit);}
     catch(error){this.db.exec('ROLLBACK');this.journal.cancel(actionId);this.close(context,'authority');return {kind:'blocked',reason:context.signal.aborted?'Work stopped':'Action could not start'};}
     let output:Json;let visible:string;
-    try {output=await cap.execute(input,context);if(Buffer.byteLength(encoded(output))>256*1024)throw Error('Result exceeds the limit');visible=cap.visible(output).slice(0,16000);} catch(error) {this.journal.finish(actionId,error instanceof ActionFailed?'failed':'uncertain',error instanceof ActionFailed?error.safeResult.slice(0,16000):'Outcome unknown');this.admit(context);cap.check(input,context);return {kind:'status',action:this.journal.get(actionId)!};}
+    try {output=await cap.execute(input,context,action);if(Buffer.byteLength(encoded(output))>256*1024)throw Error('Result exceeds the limit');visible=cap.visible(output).slice(0,16000);} catch(error) {this.journal.finish(actionId,error instanceof ActionFailed?'failed':'uncertain',error instanceof ActionFailed?error.safeResult.slice(0,16000):'Outcome unknown');this.admit(context);cap.check(input,context);return {kind:'status',action:this.journal.get(actionId)!};}
     this.db.prepare('UPDATE work_action_invocations SET private_result=? WHERE action_id=?').run(encoded(output),actionId);
     this.journal.finish(actionId,'succeeded',visible);
     this.admit(context);cap.check(input,context);

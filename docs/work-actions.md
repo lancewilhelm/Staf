@@ -1,11 +1,11 @@
 # Accepted-work action service
 
 `src/work-actions.ts` implements the instance-owned action service. Ordinary
-chat opens it once per accepted command; direct and QuickJS clock and memory calls use the
+chat opens it once per accepted command; direct and QuickJS clock, memory, host file, and native process calls use the
 same registrations and authorization. Task runtime and other existing tools
 remain on their earlier paths pending their adapters. In ordinary chat, those
 other individual tools are available in Direct and Hybrid only; Code Mode offers
-only `code_mode`, with clock, scoped memory and host file actions as guest capabilities. Dispatch rejects
+only `code_mode`, with clock, scoped memory, host file, and native process actions as guest capabilities. Dispatch rejects
 individual calls that were not offered.
 
 ## Open accepted work
@@ -163,3 +163,11 @@ bounds, not OS/container isolation or a total host RSS limit.
 ## Host files
 
 `src/file-actions.ts` registers the same four host operations for direct calls and guest calls. Relative paths resolve against captured `workingDirectory`; absolute paths retain service-account access. Read and search return bounded pages and continuation offsets. The edit hash is checked in the effect, not in the replay authorization check, so a resume returns the original outcome. External filesystem writers can race the check and write; this is not atomic compare-and-swap. The action journal records uncertain I/O outcomes without replay. See [host file actions](reference.md#host-file-actions) for limits.
+
+Capabilities may take a third `ActionIdentity` argument in `authorize` and
+`execute`. The coordinator creates and freezes its `{id, fingerprint}` after
+preparing the existing journal action; the provider and guest cannot choose it.
+Existing callbacks that accept only input and work remain valid. Native process
+registration uses this identity to link process observations to the accepted
+action before spawning. The process-manager exports and pipe limitations are in
+[architecture](architecture.md#native-process-slice).

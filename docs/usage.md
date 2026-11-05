@@ -614,7 +614,7 @@ The terminal supports `staf settings set toolMode hybrid` and
 set `toolMode` in the existing agent profile JSON, or pass `--tool-mode` at
 creation. The paired defaults command accepts a final mode argument.
 
-In ordinary chat, Direct offers the eligible clock, memory and host file tools, Hybrid offers those individual tools and `code_mode`, and Code Mode offers `code_mode` with the same registered clock, memory and file capabilities inside it. The code tool description lists eligible registered capability names and input schemas. Existing web, search, scratch and skill tools keep their current individual
+In ordinary chat, Direct offers the eligible clock, memory, host file, and native process tools, Hybrid offers those individual tools and `code_mode`, and Code Mode offers `code_mode` with the same registered capabilities inside it. The code tool description lists eligible registered capability names and input schemas. Existing web, search, scratch and skill tools keep their current individual
 behavior in Direct and Hybrid until their adapters are migrated. They are not
 offered in Code Mode yet, and fabricated individual calls are rejected.
 Background tasks do not yet use the selected mode. Plain text does not start a guest. A mode or other ordinary
@@ -645,3 +645,26 @@ source, returned time and action ID. Select Direct or Code Mode for later work
 and use a tool-capable provider to exercise the respective offer. This fixture
 uses synthetic provider responses and does not establish live-provider behavior.
 The broader basic-tools feature remains incomplete.
+
+### Native process slice
+
+Agents can call `terminal_run` with shell text and an optional `cwd`, and
+`terminal_read` with a process ID and optional output cursor. `terminal_stop`
+requests termination of an owned process. These operations run on the Staf
+host with the service account's environment and access. The captured agent work
+folder is the default; relative and absolute working paths are supported. They
+are offered directly in Direct and Hybrid and through Code Mode in Hybrid and
+Code. Existing scheduled and helper restrictions remain in force; task runtime
+binding is delivered by issue 86. This implementation uses pipes, not an interactive terminal. Interactive
+input, PTY and intentionally retained background workflows still require
+[issue 85](https://github.com/lancewilhelm/Staf/issues/85).
+
+A paired owner can use `instance processes URL CREDENTIAL_FILE`,
+`instance process URL CREDENTIAL_FILE PROCESS_ID`,
+`instance process-output URL CREDENTIAL_FILE PROCESS_ID [CURSOR]`, and
+`instance process-stop URL CREDENTIAL_FILE PROCESS_ID`. Output pages carry
+base64 chunks labeled stdout or stderr, a cursor, and a gap indicator. Chat
+shows processes alongside their originating work and offers output and Stop.
+Stop requests termination; only an observed exit establishes an exit result.
+
+A live supervisor retains control of the owned process group after the shell exits. Stop requests group termination, but descendants that change group or detach may survive. A lost observation is reported as unknown; stored process IDs are not used to signal after restart.

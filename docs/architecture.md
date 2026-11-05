@@ -289,7 +289,7 @@ through the protected migration process. `src/work-actions.ts` coordinates
 registered actions and uses the existing action journal. The internal clock
 registration uses the existing clock authority callback. See the
 [accepted-work action service reference](work-actions.md) for its callable API.
-Ordinary `runTurn` opens that captured command and sends direct clock and memory calls and QuickJS child calls through the same registrations. `src/memory-actions.ts` binds agent scope to captured work and calls the existing store and proposal workflow; store updates and deletes enforce versions at the atomic effect. Version 33 retains source,
+Ordinary `runTurn` opens that captured command and sends direct clock, memory, file and native process calls and QuickJS child calls through the same registrations. `src/memory-actions.ts` binds agent scope to captured work and calls the existing store and proposal workflow; store updates and deletes enforce versions at the atomic effect. Version 33 retains source,
 source hash, execution outcome and selected results; child linkage joins the
 existing invocation journal, which remains authoritative if a guest disappears.
 The provider receives the eligible guest definitions as a catalog, and child
@@ -303,3 +303,36 @@ QuickJS limits do not establish OS/container isolation or a total host RSS cap.
 ### Registered host files
 
 The host file capability registration supplies read, write, exact-match edit and bounded search to the existing work-action coordinator. Both chat calling styles use the accepted working directory and the same invocation identity and journal. Hash checks run within the edit effect so a completed-action resume returns its recorded result. An external writer may still race the check and the filesystem write; Staf does not claim atomic compare-and-swap. Effects with unknown outcomes remain uncertain rather than being automatically retried. File data uses service-account filesystem access, not QuickJS isolation.
+
+### Native process slice
+
+`NativeProcesses` owns host child handles independently of the guest worker.
+The coordinator supplies the immutable action ID and fingerprint to capability
+`authorize` and `execute` callbacks; existing two-argument callbacks remain
+valid. The manager records `starting` and accepted-work ownership before spawn,
+retains bounded pipe output, records the shell exit status when observed, and reports the resource exited after the backend closes.
+Work Stop requests process termination while the work remains active. Service
+shutdown requests termination and records an unobserved result as unknown;
+startup marks previously live observations unknown without replay or PID-based
+reattachment. The current pipe backend starts the shell under a Node supervisor that remains
+its process-group leader. After the shell exits, the supervisor waits for its
+pipes to close and uses `/bin/ps` to observe that no non-zombie group members
+remain. It accepts termination requests over its live IPC connection and signals
+its own group, so the service never signals a stored process-group number. A
+failed process listing retains the handle rather than claiming completion. The
+record can show the shell's observed exit status while the resource is still
+running or stopping. If the supervisor or observation is lost, the resource is
+unknown. Descendants that change group or detach may survive and are not covered
+by group observation or Stop. SIGKILL escalation can lose the supervisor's final
+observation and is reported as unknown rather than proof of termination.
+
+`startBackend(work, action, {cwd, mode, backend})` records ownership before
+calling `ProcessBackend.launch(cwd, observers)`. Backends return a
+`ProcessHandle` for termination and detachment and deliver asynchronous started,
+output, failed, exited, closed and lost observations, including a combined
+`terminal` stream. The manager retains live handles through `handle(id)` and
+owns output, Stop, shutdown and restart accounting. Issue 85 can extend that
+handle for serialized input, EOF and resize, and register a PTY backend through
+the same manager. It must also separate actual work lifetime cancellation from
+guest admission cancellation for intentionally retained processes. Those
+interactions and retained workflows remain unimplemented.

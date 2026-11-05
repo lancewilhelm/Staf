@@ -1,5 +1,7 @@
 import {clockCapability} from './clock-action.js';
 import {fileCapabilities} from './file-actions.js';
+
+import {nativeCommandCapability,nativeOutputCapability,nativeStopCapability} from './native-processes.js';
 import {registerMemoryCapabilities} from './memory-actions.js';
 import {parseToolMode} from './tool-mode.js';
 import {providerLabel} from './provider-label.js';
@@ -184,7 +186,12 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
     if(current.outcome === 'block') { if(workKind === 'task') instance.taskEvent(workId,{type:'approval_blocked',reason:current.reason}); throw Error('Clock blocked by '+current.reason); }
   }
 
+  const processes=instance.processes();
   const workActions=instance.workActions();
+  const nativeAllowed=(work:import('./work-actions.js').WorkContext)=>instance.nativeProcessAllowed(work.work);
+  workActions.register(nativeCommandCapability(processes,nativeAllowed));
+  workActions.register(nativeOutputCapability(processes,nativeAllowed));
+  workActions.register(nativeStopCapability(processes,nativeAllowed));
   workActions.register(clockCapability(instance, work=>authorizeClock(work.botId,work.work.kind,work.work.id,work.signal)));
   const files=fileCapabilities(redact,work=>instance.fileActionsAllowed(work.work));
   workActions.register(files.read);workActions.register(files.write);workActions.register(files.edit);workActions.register(files.search);
@@ -556,6 +563,13 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
         if (claim.kind === 'accepted') executeTask(id);
         return json(200,claim);
       }
+      if(req.method==='GET' && req.url==='/api/processes')return json(200,processes.list());
+      const processMatch=req.url?.match(/^\/api\/processes\/([\w-]+)(?:\/(output|stop))?(?:\?cursor=(\d+))?$/);
+      if(processMatch?.[1]) {
+        if(req.method==='GET' && processMatch[2]==='output')return json(200,processes.output(processMatch[1],Number(processMatch[3] ?? 0)));
+        if(req.method==='GET' && !processMatch[2])return json(200,processes.get(processMatch[1]));
+        if(req.method==='POST' && processMatch[2]==='stop')return json(200,processes.stop(processMatch[1]));
+      }
       const messageMatch = req.url?.match(/^\/api\/bots\/([\w-]+)\/messages$/);
       if (req.method === 'GET' && messageMatch?.[1]) return json(200,instance.messages(messageMatch[1]));
       const responseMatch = req.url?.match(/^\/api\/bots\/([\w-]+)\/response$/);
@@ -641,5 +655,5 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
       return json(404,{error:'Not found'});
     } catch (error) { if(error instanceof AgentConfigInvalid)return json(422,{error:error.message,code:'invalid_agent_configuration'});if(error instanceof AgentConfigUncertain)return json(503,{error:error.message,code:'configuration_save_uncertain'});return json((error instanceof BotConflict || error instanceof AgentConfigConflict || error instanceof MemoryConflict || error instanceof SkillConflict || error instanceof ScheduleConflict) ? 409 : 400,{error:error instanceof Error ? error.message : 'Request failed'}); }
   });
-  return { server, code, migrationBackup: instance.migrationBackup, finishUpgrade: (token:string)=>instance.finishUpgrade(token), issueCode: () => (code = randomBytes(18).toString('base64url')), close: () => new Promise<void>((resolve,reject)=>{closing=true; instanceAuth?.shutdown(); if(scheduleTimer) clearInterval(scheduleTimer); for(const subscriber of responseSubscribers)subscriber.response.end();for(const controller of active) controller.abort(); server.close(error=>{instance.close(); if(error)reject(error);else resolve();});}), listen: () => new Promise<number>((resolve,reject)=>{server.once('error',reject);server.listen(port,'127.0.0.1',()=>{const a=server.address();if(a && typeof a !== 'string') { tickSchedules(); scheduleTimer=setInterval(tickSchedules,30000); resolve(a.port); }else reject(Error('Listen failed'));});}) };
+  return { server, code, migrationBackup: instance.migrationBackup, finishUpgrade: (token:string)=>instance.finishUpgrade(token), issueCode: () => (code = randomBytes(18).toString('base64url')), close: () => new Promise<void>((resolve,reject)=>{closing=true; instanceAuth?.shutdown(); if(scheduleTimer) clearInterval(scheduleTimer); for(const subscriber of responseSubscribers)subscriber.response.end();for(const controller of active) controller.abort(); server.close(error=>{void processes.shutdown().then(()=>{instance.close(); if(error)reject(error);else resolve();},reject);});}), listen: () => new Promise<number>((resolve,reject)=>{server.once('error',reject);server.listen(port,'127.0.0.1',()=>{const a=server.address();if(a && typeof a !== 'string') { tickSchedules(); scheduleTimer=setInterval(tickSchedules,30000); resolve(a.port); }else reject(Error('Listen failed'));});}) };
 }
