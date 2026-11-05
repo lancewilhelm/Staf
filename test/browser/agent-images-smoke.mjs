@@ -44,7 +44,8 @@ try {
   const api=async(path,body)=>{const response=await fetch(url+path,{method:body?'POST':'GET',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});assert.ok(response.ok,await response.clone().text());return response.json();};
   await act("document.querySelector('.new-agent').click()","!!document.querySelector('dialog[open]')",'open New agent');
   assert.equal(await evaluate("document.activeElement===document.querySelector('dialog input')"),true,'Name focus retained');
-  await act(["input('dialog input','Cancelled image')", "click('Change image')", "click('Built-in avatar')"],"document.querySelectorAll('[data-image-shape]').length===6",'both shape groups are in one chooser');
+  await act(["input('dialog input','Cancelled image')", "click('Change image')", "click('Built-in avatar')"],"document.querySelectorAll('[data-image-shape]').length===6",'all six shapes are in the chooser');
+  assert.deepEqual(await evaluate("[...document.querySelectorAll('.image-shapes')].map(group=>({label:group.getAttribute('aria-label'),shapes:group.querySelectorAll('[data-image-shape]').length}))"),[{label:'Shape',shapes:6}],'all shapes share one labeled gallery');
   await act("document.querySelector('[data-image-shape=pentagon]').click()","document.querySelector('[data-image-shape=pentagon]').getAttribute('aria-pressed')==='true'",'choose a polygon');
   await act("click('Cancel')","!document.querySelector('dialog')",'cancel creation');assert.equal((await api('/api/bots')).length,0);
   await act("document.querySelector('.new-agent').click()","!!document.querySelector('dialog[open]')",'reopen clean creation');
@@ -181,12 +182,16 @@ try {
   await until(()=>evaluate("!document.querySelector('.top img')&&!document.querySelector('.top .agent-vector')",peer),'initials propagate to the second browser');
   await act("document.querySelector('[aria-label=\"Open agent settings\"]').click()","!!document.querySelector('.agent-settings input')",'review small-size layout');
   await act(["click('Change image')", "click('Built-in avatar')"],"document.querySelectorAll('[data-image-shape]').length===6",'all six choices remain available');
+  assert.deepEqual(await evaluate("[...document.querySelectorAll('.image-shapes')].map(group=>({label:group.getAttribute('aria-label'),shapes:group.querySelectorAll('[data-image-shape]').length}))"),[{label:'Shape',shapes:6}],'Settings uses the same unified gallery');
   await cdp('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
   assert.equal(await evaluate("document.querySelector('.side nav .agent-image').getBoundingClientRect().width"),28,'actual narrow sidebar badge size');
   for(const theme of ['light','dark']){await evaluate(`document.documentElement.dataset.appearance=${JSON.stringify(theme)}`);assert.equal(await evaluate("document.documentElement.scrollWidth<=innerWidth"),true,'no horizontal overflow in '+theme);}
   await evaluate("document.querySelector('[data-image-color=sky]').focus()");
   await cdp('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',text:'\r',windowsVirtualKeyCode:13});await cdp('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});
   await until(()=>evaluate("document.querySelector('[data-image-color=sky]').getAttribute('aria-pressed')==='true'"),'keyboard selects color');
+  await evaluate("document.querySelector('[data-image-shape=hexagon]').focus()");await key('Enter',13);
+  await until(()=>evaluate("document.querySelector('[data-image-shape=hexagon]').getAttribute('aria-pressed')==='true'"),'keyboard selects a polygon');
+  assert.equal(await evaluate("document.querySelector('[data-image-color=sky]').getAttribute('aria-pressed')"),'true','keyboard shape choice preserves color');
   assert.equal(providerCalls,0,'image editing never invokes a provider');
   console.log('PASS two paired contexts, durable uploads, crop, keyboard, narrow themes and no provider calls');
 } finally {socket?.close();browserSocket?.close();browser?.kill();proxy?.close();await app.close();await sleep(200);await rm(temp,{recursive:true,force:true});}

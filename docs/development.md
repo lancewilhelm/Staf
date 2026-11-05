@@ -337,7 +337,9 @@ corepack pnpm dev
 
 Reuse the existing paired browser and provider connections. No provider request
 is needed for this feature. In New agent or an existing agent's Settings, open
-**Change image**. Pick a rounded shape or a regular polygon and change its color.
+**Change image** and choose **Built-in avatar**. Expect one **Shape** gallery
+with all six choices. Pick a triangle, pentagon, or hexagon and check its softly
+rounded corners in the large preview and small badges. Change its color.
 Expect a local preview until Create or Save. Cancel and reopen to verify the
 previous choice remains. Save and check the sidebar, Focus rail, header, and
 agent messages; another paired browser must show the same saved image.

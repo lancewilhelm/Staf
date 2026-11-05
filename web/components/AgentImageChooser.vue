@@ -12,7 +12,6 @@ const source=shallowRef<ImageBitmap|null>(null),canvas=ref<HTMLCanvasElement|nul
 const zoom=ref(1),horizontal=ref(0),vertical=ref(0);
 const shapes=Object.keys(agentImageShapes).filter(isAgentImageShape);
 const colors=Object.keys(agentImageColors).filter(isAgentImageColor);
-const groups=[...new Set(Object.values(agentImageShapes).map(shape=>shape.group))];
 const pending=computed(()=>mode.value==='upload' && !['upload','upload-data'].includes(props.modelValue.kind));
 const preview=computed<AgentImageInput>(()=>pending.value?{kind:'initials'}:props.modelValue);
 const color=computed(()=>props.modelValue.kind==='avatar'?props.modelValue.color:lastAvatar.value.color);
@@ -79,7 +78,7 @@ function move(event:PointerEvent){
       <div class="image-modes" role="group" aria-label="Image type"><button v-for="choice in [{kind:'initials',label:'Initials'},{kind:'avatar',label:'Built-in avatar'},{kind:'upload',label:'Uploaded image'}]" :key="choice.kind" type="button" :aria-pressed="mode===choice.kind" @click="selectMode(choice.kind==='avatar'?'avatar':choice.kind==='upload'?'upload':'initials')">{{ choice.label }}</button></div>
       <div class="image-previews"><AgentImage :image="preview" :name="name" :size="80" /><figure v-for="size in [24,28,30]" :key="size"><AgentImage :image="preview" :name="name" :size="size===24?24:size===28?28:30" /><figcaption>{{ size }} px</figcaption></figure></div>
       <template v-if="mode==='avatar'">
-        <div v-for="group in groups" :key="group" class="image-shape-group"><h3>{{ group }}</h3><div class="image-shapes" role="group" :aria-label="group"><button v-for="id in shapes.filter(id=>agentImageShapes[id].group===group)" :key="id" :data-image-shape="id" type="button" :aria-pressed="modelValue.kind==='avatar'&&modelValue.shape===id" @click="shape(id)"><AgentImage :image="{kind:'avatar',shape:id,color}" :name="name" :size="30" /><span>{{ agentImageShapes[id].label }}</span></button></div></div>
+        <h3>Shape</h3><div class="image-shapes" role="group" aria-label="Shape"><button v-for="id in shapes" :key="id" :data-image-shape="id" type="button" :aria-pressed="modelValue.kind==='avatar'&&modelValue.shape===id" @click="shape(id)"><AgentImage :image="{kind:'avatar',shape:id,color}" :name="name" :size="30" /><span>{{ agentImageShapes[id].label }}</span></button></div>
         <h3>Color</h3><div class="image-colors" role="group" aria-label="Character color"><button v-for="id in colors" :key="id" :data-image-color="id" type="button" :aria-label="agentImageColors[id].label" :title="agentImageColors[id].label" :aria-pressed="color===id" @click="chooseColor(id)"><svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true"><circle cx="11" cy="11" r="9" :fill="agentImageColors[id].hex" /></svg></button></div>
       </template>
       <template v-if="mode==='upload'">
