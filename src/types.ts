@@ -24,7 +24,7 @@ export interface ToolDefinition {
   function: {
     name: string;
     description: string;
-    parameters: { type: 'object'; properties: Record<string, {type:string}>; required?: string[]; additionalProperties: false };
+    parameters: { type: 'object'; properties: Record<string, {type:string;description?:string}>; required?: string[]; additionalProperties: false };
   };
 }
 export interface ProviderCapabilities {

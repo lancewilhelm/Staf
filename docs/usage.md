@@ -612,7 +612,29 @@ The terminal supports `staf settings set toolMode hybrid` and
 set `toolMode` in the existing agent profile JSON, or pass `--tool-mode` at
 creation. The paired defaults command accepts a final mode argument.
 
-These controls save the choice and capture it with newly accepted work. They do
-not yet alter tool offers or dispatch. The shared action gateway and Code Mode
-clock execution are separate unfinished work for issue 80. This intermediate
-configuration slice does not complete issue 80 or authorize release of issue 78.
+In ordinary chat, Direct offers the eligible clock, Hybrid offers clock and
+`code_mode`, and Code Mode offers `code_mode` with the eligible clock inside
+it. Existing web, search, scratch and skill tools keep their current individual
+behavior until their adapters are migrated; background tasks do not yet use the
+selected mode. Plain text does not start a guest. A mode or other ordinary
+settings edit applies to new work; an accepted command and its exact retry keep
+its captured profile. Clock permissions and applicable approvals remain live.
+
+The code tool runs a bounded QuickJS program. For example,
+`return (await capabilities.clock({})).value;` returns the UTC time. Child calls
+and direct clock calls share one action and approval service. Open **Code
+execution** in the chat work details to inspect source, selected result and
+linked action IDs. The paired CLI `instance status URL CREDENTIAL_FILE COMMAND_ID`
+and `GET /api/commands/COMMAND_ID` expose the same execution and action records.
+Known configured secrets are redacted; source that cannot be retained faithfully
+is rejected. Unknown secrets can still be retained in source, output, provider
+history and backups.
+
+For an offline manual check, build and start the controlled fixture in
+[development](development.md#review-chat-locally-without-a-provider), pair,
+create a Demo agent with Hybrid, and send `Scripted clock fixture`. Expect
+“Scripted clock completed” and a **Code execution** detail containing the
+source, returned time and action ID. Select Direct or Code Mode for later work
+and use a tool-capable provider to exercise the respective offer. This fixture
+uses synthetic provider responses and does not establish live-provider behavior.
+The broader basic-tools feature remains incomplete.

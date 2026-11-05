@@ -1,5 +1,5 @@
 // Ported from Staf PR #75 experiment at 2da3b8fb0dbda9d5b58526ba66bbc17b6a6ffc6f.
-// The worker is not yet connected to accepted work or provider turns.
+// Used by the accepted-work bridge and standalone worker checks.
 import {spawn} from 'node:child_process';
 import {mkdtempSync, rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
@@ -13,8 +13,8 @@ export interface GuestRun {
   readonly finished: Promise<GuestEnd>;
   stop(): void;
 }
-/** Deliberately named native-lab: this is not an OS isolation or total RSS claim. */
-export function startNativeLabGuest(input: {
+/** Starts the QuickJS worker; this is not an OS isolation or total RSS claim. */
+export function startQuickJSGuest(input: {
   source: string;
   names: string[];
   guestMs: number;
@@ -58,7 +58,7 @@ export function startNativeLabGuest(input: {
           if (message.guestMs < guestMs || message.guestMs > input.guestMs + 100) {fail(); return;}
           guestMs = message.guestMs;
           clearTimeout(busyTimer);
-          if (message.busy) busyTimer = setTimeout(fail, Math.max(1, input.guestMs - guestMs));
+          if (message.busy) busyTimer = setTimeout(() => finish({type:'end',outcome:'limit',guestMs}), Math.max(1, input.guestMs - guestMs));
           input.phase(message.busy, guestMs);
         } else if (message.type === 'end') finish(message);
         else {

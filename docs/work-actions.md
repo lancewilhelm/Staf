@@ -1,9 +1,9 @@
 # Accepted-work action service
 
-`src/work-actions.ts` implements the internal action service. Normal chat does not
-call it yet. The QuickJS worker is not connected to this service or to the chat
-turn. The clock registration in `src/clock-action.ts` is executable through the
-service, but is not yet the clock path used by chat.
+`src/work-actions.ts` implements the instance-owned action service. Ordinary
+chat opens it once per accepted command; direct and QuickJS clock calls use the
+same registration and authorization. Task runtime and other existing tools
+remain on their earlier paths pending their adapters.
 
 ## Open accepted work
 
@@ -11,14 +11,16 @@ service, but is not yet the clock path used by chat.
 instance. Register each capability once. Call `open(work, signal)` with the
 actual command ID or task attempt ID and the service's live controller signal.
 The returned `WorkActions.context` contains the accepted bot, conversation,
-mode, absolute working directory, and signal. The directory is
+mode, absolute working directory, and signal. Dispose the handle after the work
+settles with `actions.dispose()`; shared closure interrupts pending authorization
+across all open handles. The directory is
 `agents/<bot-id>/work` beside the revisioned configuration. Acceptance stores
 the path with the work. Migration 32 backfills the same path for older work; a
 legacy command without a captured profile cannot open an action context.
 Missing captured modes still mean Direct.
 
 `WorkActions.offers('direct' | 'guest')` returns eligible registered definitions
-for that route and captured mode. The chat bridge must add `code_mode` to its
+for that route and captured mode. The chat bridge adds `code_mode` to its
 provider offer where appropriate. The action service never registers or invokes
 `code_mode` as a child capability.
 
@@ -37,7 +39,7 @@ registry.register(clockCapability(instance, work =>
 	authorizeClock(work.botId, work.work.kind, work.work.id, work.signal)
 ));
 
-// In a future guest bridge, after the command has been accepted:
+// In the guest bridge, after the command has been accepted:
 const actions = registry.open({kind: 'command', id: commandId}, controller.signal);
 const outcome = await actions.invoke({
 	source: {kind: 'guest', executionId, sequence: message.seq},
@@ -100,3 +102,31 @@ is new does not reconcile an uncertain effect.
 The focused disposable-instance checks are in `test/work-actions.test.js`.
 They use a real SQLite journal and local fixture effects. They do not establish
 paired API, real-worker chat, live-provider, Docker, or remote-host behavior.
+
+## Chat bridge and inspection
+
+`src/code-mode/bridge.ts` exports `runCode({actions,responseId,callId,source,redact})`.
+`runTurn` generates the response identity, opens no guest for text, and dispatches
+only names in the captured mode's offers. Guest sequence numbers come from the
+worker; execution and action IDs are service-generated. A child call returns
+`{receipt, actionId, value}`; `staf.reuse(receipt)` retrieves that guest's safe
+cached value, and `staf.emit(value)` selects visible output. The optional second
+argument to `capabilities.clock(input, intent)` carries `new`, `resume` or
+`repeat` intent. Direct calls use an optional `_staf` intent field outside the
+capability input. A recovery result contains the manifest and instructions.
+
+Before starting a worker, the service records exact safe source, SHA-256 identity,
+work and provider call. Child mapping and action preparation are committed by
+the action service before the effect. `WorkActionService.inspect(work)` and
+`inspectActions(work)` feed the paired command API and chat work details. The
+journal owns child outcomes, including after a failure or restart. Selected
+results are redacted and retained; unused receipts are discarded at guest end.
+
+Per accepted command: at most four guest executions and 32 action invocations,
+with eight pending actions. Each source is at most 32 KiB, selected output at
+most 256 KiB, guest CPU time at most 5,000 ms per execution, QuickJS heap at most
+32 MiB and stack at most 512 KiB. A worker message is bounded to 256 KiB.
+Denial, Stop, live restriction and exhausted shared or guest limits close
+admission. Ordinary syntax/runtime errors enter recovery; Hybrid can use direct
+calls and Code Mode remains selected. These are QuickJS and protocol bounds,
+not OS/container isolation or a total host RSS limit.

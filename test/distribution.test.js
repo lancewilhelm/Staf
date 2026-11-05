@@ -25,7 +25,7 @@ test('package excludes synthetic developer settings/auth/env and fresh extracted
  assert.ok(!listing.stdout.split('\n').includes('package/pnpm-lock.yaml'),'pnpm 12 excludes root lockfiles from packed packages');
  const install=spawnSync('corepack',[packageManager,'install','--offline','--prod','--no-frozen-lockfile'],{cwd:join(fresh,'package'),env:{...process.env,CI:'true'},encoding:'utf8'});assert.equal(install.status,0,install.stdout+install.stderr);
  assert.ok(listing.stdout.includes('package/dist/code-mode/worker.js'));
- const worker=spawnSync(process.execPath,['--input-type=module','-e',`import {startNativeLabGuest} from './dist/code-mode/executor.js'; const run=startNativeLabGuest({source:'return await capabilities.clock({})',names:['clock'],guestMs:5000,request:async()=>({ok:true,value:'ok'}),phase:()=>{}}); const result=await run.finished; if(result.outcome!=='return'||result.value!=='ok') process.exit(1);`],{cwd:join(fresh,'package'),encoding:'utf8'});
+ const worker=spawnSync(process.execPath,['--input-type=module','-e',`import {startQuickJSGuest} from './dist/code-mode/executor.js'; const run=startQuickJSGuest({source:'return await capabilities.clock({})',names:['clock'],guestMs:5000,request:async()=>({ok:true,value:'ok'}),phase:()=>{}}); const result=await run.finished; if(result.outcome!=='return'||result.value!=='ok') process.exit(1);`],{cwd:join(fresh,'package'),encoding:'utf8'});
  assert.equal(worker.status,0,worker.stdout+worker.stderr);
  const data=join(root,'fresh-data');
  const shown=spawnSync(process.execPath,[join(fresh,'package','dist','cli.js'),'settings','show','--data-dir',data],{cwd:fresh,encoding:'utf8'});

@@ -1,9 +1,9 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {startNativeLabGuest} from '../dist/code-mode/executor.js';
+import {startQuickJSGuest} from '../dist/code-mode/executor.js';
 
 function run(source, request) {
-  return startNativeLabGuest({source,names:['clock'],guestMs:5000,request,phase:()=>{}});
+  return startQuickJSGuest({source,names:['clock'],guestMs:5000,request,phase:()=>{}});
 }
 
 test('real QuickJS worker calls the host and returns its result', async () => {
@@ -24,4 +24,20 @@ test('real QuickJS worker reports script errors and can be stopped', async () =>
   const stopped=run('while (true) {}',async()=>({ok:false,error:'unexpected'}));
   stopped.stop();
   assert.equal((await stopped.finished).outcome,'stopped');
+});
+
+test('guest CPU exhaustion is distinct from an ordinary script error', async () => {
+  const guest=startQuickJSGuest({source:'while (true) {}',names:[],guestMs:50,request:async()=>({ok:false,error:'unexpected'}),phase:()=>{}});
+  assert.equal((await guest.finished).outcome,'limit');
+});
+
+test('a rejected intent does not consume the next host call sequence', async () => {
+  const requests=[];
+  const guest=run('try { await capabilities.clock({}, {kind:"invalid"}); } catch {} return await capabilities.clock({});',async request=>{requests.push(request);return {ok:true,value:'ok'};});
+  assert.equal((await guest.finished).outcome,'return');assert.equal(requests.length,1);assert.equal(requests[0].seq,1);
+});
+
+test('guest stack exhaustion closes as a limit', async () => {
+  const guest=run('function recurse(){ return recurse(); } return recurse();',async()=>({ok:false,error:'unexpected'}));
+  assert.equal((await guest.finished).outcome,'limit');
 });

@@ -265,3 +265,15 @@ test('a feature can reconcile without providing an overlap hook',async()=>{
     actions.reconcile(first.action.id,'verified');assert.equal((await invoke(actions,source('after'),'local_change',{value:'y'})).kind,'completed');
   }finally{instance.close();}
 });
+
+test('explicit shared closure rejects queued and later calls on both routes',async()=>{
+  const {instance,actions}=fixture();let release;
+  try {
+    let entered;const ready=new Promise(resolve=>entered=resolve),gate=new Promise(resolve=>release=resolve);let effects=0;
+    instance.workActions().register(localChange({authorize:async()=>{entered();await gate;},execute:async()=>{effects++;return 'done';}}));
+    const first=invoke(actions,guest(1),'local_change',{value:'x'});await ready;
+    const second=invoke(actions,source('queued'),'local_change',{value:'y'});actions.close('guest limit');release();
+    assert.equal((await first).kind,'blocked');await assert.rejects(second,/admission closed/);
+    await assert.rejects(()=>invoke(actions,guest(2),'local_change',{value:'z'}),/admission closed/);assert.equal(effects,0);
+  } finally {release?.();instance.close();}
+});

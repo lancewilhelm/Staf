@@ -289,5 +289,12 @@ through the protected migration process. `src/work-actions.ts` coordinates
 registered actions and uses the existing action journal. The internal clock
 registration uses the existing clock authority callback. See the
 [accepted-work action service reference](work-actions.md) for its callable API.
-`runTurn` still uses its existing offers and dispatch. The worker and chat
-bridge remain unconnected.
+Ordinary `runTurn` opens that captured command and sends direct clock and
+QuickJS child calls through the same registration. Version 33 retains source,
+source hash, execution outcome and selected results; child linkage joins the
+existing invocation journal, which remains authoritative if a guest disappears.
+On restart a running guest is marked interrupted and is not rerun. Ordinary
+script errors create a recovery epoch and return the manifest to the same
+provider loop. Task and helper runtime and the web, search, scratch and skill
+adapters remain later slices; they do not yet follow this chat mode. The worker's
+QuickJS limits do not establish OS/container isolation or a total host RSS cap.

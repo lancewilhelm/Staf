@@ -15,6 +15,10 @@ return {
   name: 'controlled-offline',
   capabilities: { toolCalls: true, incrementalText: false, transport: 'demo' },
   async complete(messages, tools, options) {
+    if (options?.currentUserInput==='Scripted clock fixture') {
+      if (messages.at(-1)?.role==='tool') return {role:'assistant',content:'Scripted clock completed.'};
+      return {role:'assistant',content:null,tool_calls:[{id:'script-clock',type:'function',function:{name:'code_mode',arguments:JSON.stringify({source:'return (await capabilities.clock({})).value;'})}}]};
+    }
     if (options?.currentUserInput==='Blocked synthetic shell') {if(tools.some(tool=>tool.function.name==='run_scratch_shell')) throw Error('Shell offered while disabled');return {role:'assistant',content:'Scratch shell unavailable by default'};}
     if (['Run synthetic shell','Different synthetic shell','Deny synthetic shell','Revoke synthetic shell','Uncertain synthetic shell'].includes(options?.currentUserInput)) {
       if (shellCalls++===0) {if(!tools.some(tool=>tool.function.name==='run_scratch_shell'))throw Error('Shell tool not offered');const command=options.currentUserInput==='Uncertain synthetic shell'?'simulate uncertainty':options.currentUserInput==='Different synthetic shell'?'printf different':'printf synthetic';return {role:'assistant',content:null,tool_calls:[{id:'shell-run',type:'function',function:{name:'run_scratch_shell',arguments:JSON.stringify({command})}}]};}

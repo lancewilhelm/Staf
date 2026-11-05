@@ -410,7 +410,11 @@ profile without the field reads as `direct`; invalid explicit values fail. Task
 profiles use the existing task attempt identity, without a synthetic command ID.
 Version 31 adds `creation_defaults.tool_mode` after the existing migration backup.
 
-The current runtime still uses its existing tool offers and dispatch regardless
-of the saved mode. An internal accepted-work action service and clock registration
-are implemented, but chat and the Code Mode worker do not call them. See the
-[accepted-work action service reference](work-actions.md) for the actual API.
+Ordinary chat opens the captured command's `WorkActions` and applies its mode
+to clock and `code_mode`; background tasks and other existing tool adapters
+remain on their previous paths. `GET /api/commands/ID` returns `codeExecutions`
+(source, SHA-256 source identity, outcome, selected result, and linked action
+IDs) and `workActions` journal records. Chat-work returns code execution details
+for the owning agent. Version 33 adds execution records and marks running records
+interrupted on restart without replay. See the [action service](work-actions.md)
+for limits, recovery and adapter entry points.

@@ -28,7 +28,7 @@ import { ApprovalGrants, approvalGrantSchema, type GrantBoundary } from './appro
 const clockAction: Action = { capability:'clock', operation:'read', resource:'utc', effect:'read', limits:{}, risk:'safe' };
 const clockBoundary = { enabledCapabilities:['clock'], actions:[clockAction] };
 const modes: ApprovalMode[] = ['ask-every-time','ask-for-risky-actions','never-ask'];
-export const INSTANCE_SCHEMA_VERSION = 32;
+export const INSTANCE_SCHEMA_VERSION = 33;
 const MAINTENANCE_VERSION = 2147483647;
 
 export const starterSoul = "You are an assistant working for the owner. Be clear and candid. Distinguish observations from assumptions. Follow the owner's role instructions and work within the permissions and task scope granted to you.";
@@ -189,6 +189,8 @@ export class Instance {
         this.bindWork({kind:row.kind,id:row.id}, row.bot_id);
       }
     }
+    if(version < 33) this.db.exec(`CREATE TABLE IF NOT EXISTS code_executions (id TEXT PRIMARY KEY, kind TEXT NOT NULL, work_id TEXT NOT NULL, response_id TEXT NOT NULL, call_id TEXT NOT NULL, source TEXT NOT NULL, source_hash TEXT NOT NULL, outcome TEXT NOT NULL, result TEXT, UNIQUE(kind,work_id,response_id,call_id));`);
+    this.db.exec("UPDATE code_executions SET outcome='interrupted' WHERE outcome='running'");
     if(version < 30 && !this.db.prepare("SELECT 1 FROM pragma_table_info('command_runtime_events') WHERE name='detail'").get())this.db.exec('ALTER TABLE command_runtime_events ADD COLUMN detail TEXT');
     this.db.exec('CREATE INDEX IF NOT EXISTS command_runtime_events_command ON command_runtime_events(command_id,seq)');
     if (!maintenanceToken) this.db.exec(`PRAGMA user_version=${INSTANCE_SCHEMA_VERSION}`);
@@ -995,7 +997,7 @@ export class Instance {
     for(const event of events){const id=String(event.command_id);const group=byCommand.get(id) ?? [];group.push(event);byCommand.set(id,group);}
     const requests=this.db.prepare('SELECT c.id,p.profile AS capturedProfile FROM commands c LEFT JOIN command_profiles p ON p.command_id=c.id WHERE c.bot_id=? ORDER BY c.rowid').all(botId).map(row=>{
       const id=String(row.id);
-      return {id,toolMode:parseToolModeFromProfile(row.capturedProfile),progress:this.responseProgress(id),events:byCommand.get(id) ?? []};
+      return {id,toolMode:parseToolModeFromProfile(row.capturedProfile),progress:this.responseProgress(id),events:byCommand.get(id) ?? [],codeExecutions:this.workActions().inspect({kind:'command',id})};
     });
     return {requests,messages:this.db.prepare('SELECT id,role,content FROM messages WHERE bot_id=? AND id NOT IN (SELECT message_id FROM task_notices) ORDER BY seq').all(botId)};
   }

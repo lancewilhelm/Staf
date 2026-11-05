@@ -1,4 +1,4 @@
-import { createHmac, randomUUID } from 'node:crypto';
+import { createHash, createHmac, randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { ActionConflict, ActionJournal } from './action-journal.js';
 import type { ActionRecord, WorkRef } from './action-journal.js';
@@ -37,6 +37,7 @@ export class ActionDenied extends Error {}
 export class ActionFailed extends Error {
   constructor(readonly safeResult:string) {super('Action failed');}
 }
+export function closesAdmission(reason:string):boolean {return ['Action limit reached','Action denied','Action authorization failed','Action could not start','Work stopped'].includes(reason);}
 export type RecoveryManifest = {actions:ActionRecord[];truncated:boolean;instructions:string};
 export type InvocationResult = {kind:'completed';actionId:string;value:Json} | {kind:'status';action:ActionRecord} | {kind:'repeat-required';actions:ActionRecord[];truncated:boolean;challenge:string} | {kind:'blocked';reason:string};
 
@@ -67,6 +68,7 @@ export class WorkActionService {
   private readonly queues=new Map<string,Promise<void>>();
   private readonly queueDepth=new Map<string,number>();
   private readonly journal:ActionJournal;
+  private readonly closures=new Map<string,{controller:AbortController;refs:number}>();
   constructor(private readonly db:DatabaseSync, private readonly key:Uint8Array,
     private readonly context:(work:WorkRef,signal:AbortSignal)=>WorkContext,
     private readonly active:(work:WorkRef)=>void, private readonly budget=32) {
@@ -87,16 +89,24 @@ export class WorkActionService {
       ...(capability.recovery?.reconcile ? {reconcile:(input:Json,evidence:unknown,work:WorkContext)=>capability.recovery!.reconcile!(parse(input),evidence,work)} : {}),
     });
   }
-  open(work:WorkRef,signal:AbortSignal):WorkActions {return new WorkActions(this,this.context(work,signal));}
+  open(work:WorkRef,signal:AbortSignal):WorkActions {
+    const key=encoded(work),entry=this.closures.get(key) ?? {controller:new AbortController(),refs:0};
+    entry.refs++;this.closures.set(key,entry);
+    try {
+      const context=this.context(work,AbortSignal.any([signal,entry.controller.signal]));
+      return new WorkActions(this,context,()=>{if(--entry.refs===0 && this.closures.get(key)===entry)this.closures.delete(key);});
+    } catch(error) {if(--entry.refs===0)this.closures.delete(key);throw error;}
+  }
   offers(context:WorkContext,route:'direct'|'guest'):ToolDefinition[] {
     if ((route==='direct' && context.mode==='code') || (route==='guest' && context.mode==='direct')) return [];
     return [...this.capabilities.values()].filter(cap=>cap.eligible(context)).map(cap=>structuredClone(cap.definition));
   }
+  recognizes(name:string):boolean {return this.capabilities.has(name);}
   private digest(value:string):string {return createHmac('sha256',this.key).update(value).digest('hex');}
   private state(work:WorkRef) {const recovery=work.kind==='task' && !!this.db.prepare('SELECT 1 FROM task_attempts WHERE id=? AND predecessor IS NOT NULL').get(work.id);this.db.prepare('INSERT OR IGNORE INTO work_action_state(kind,work_id,epoch) VALUES (?,?,?)').run(work.kind,work.id,recovery?1:0);return this.db.prepare('SELECT used,closed,epoch FROM work_action_state WHERE kind=? AND work_id=?').get(work.kind,work.id)!;}
   private admit(context:WorkContext):void {
-    context.signal.throwIfAborted();this.active(context.work);
     const state=this.state(context.work);if (typeof state.closed==='string') throw Error(`Action admission closed: ${state.closed}`);
+    try {context.signal.throwIfAborted();this.active(context.work);} catch(error) {this.close(context,context.signal.aborted?'stopped':'authority');throw error;}
   }
   private records(context:WorkContext):Array<{action:ActionRecord;capability:string;input:Json;description:Description}> {
     const rows=this.db.prepare(`WITH RECURSIVE lineage(id) AS (SELECT ? UNION ALL SELECT predecessor FROM task_attempts JOIN lineage ON task_attempts.id=lineage.id WHERE predecessor IS NOT NULL)
@@ -116,10 +126,39 @@ export class WorkActionService {
     if (!record || !cap?.reconcile || !cap.reconcile(record.input,evidence,context)) throw Error('Feature reconciliation did not establish the outcome');
     this.db.prepare('INSERT OR IGNORE INTO work_action_resolutions VALUES (?)').run(actionId);
   }
+  closedReason(context:WorkContext):string|null {const reason=this.state(context.work).closed;return typeof reason==='string'?reason:null;}
+  close(context:WorkContext, reason:string):void {
+    this.state(context.work);
+    this.db.prepare('UPDATE work_action_state SET closed=COALESCE(closed,?) WHERE kind=? AND work_id=?').run(reason,context.work.kind,context.work.id);
+    this.closures.get(encoded(context.work))?.controller.abort();
+  }
+  startExecution(context:WorkContext,responseId:string,callId:string,source:string):string {
+    this.admit(context);
+    if(!responseId || !callId || Buffer.byteLength(encoded([responseId,callId]))>2048)throw Error('Invalid provider call identity');
+    const count=this.db.prepare('SELECT count(*) AS n FROM code_executions WHERE kind=? AND work_id=?').get(context.work.kind,context.work.id);
+    if(Number(count?.n)>=4) {this.close(context,'guest execution limit');throw Error('Guest execution limit reached');}
+    const id=randomUUID(),hash=createHash('sha256').update(source).digest('hex');
+    this.db.prepare("INSERT INTO code_executions VALUES (?,?,?,?,?,?,?,'running',NULL)").run(id,context.work.kind,context.work.id,responseId,callId,source,hash);
+    return id;
+  }
+  updateExecution(context:WorkContext,id:string,result:string):void {
+    this.db.prepare("UPDATE code_executions SET result=? WHERE id=? AND kind=? AND work_id=? AND outcome='running'").run(result,id,context.work.kind,context.work.id);
+  }
+  finishExecution(context:WorkContext,id:string,outcome:string,result:string|null):void {
+    this.db.prepare("UPDATE code_executions SET outcome=?,result=? WHERE id=? AND kind=? AND work_id=? AND outcome='running'").run(outcome,result,id,context.work.kind,context.work.id);
+  }
+  inspect(work:WorkRef) {
+    const executions=this.db.prepare('SELECT id,response_id AS responseId,call_id AS callId,source,source_hash AS sourceHash,outcome,result FROM code_executions WHERE kind=? AND work_id=? ORDER BY rowid').all(work.kind,work.id);
+    return executions.map(row=>({...row,result:typeof row.result==='string'?JSON.parse(row.result):null,actions:this.db.prepare("SELECT action_id AS actionId FROM work_action_invocations WHERE kind=? AND work_id=? AND json_extract(source,'$.kind')='guest' AND json_extract(source,'$.executionId')=? ORDER BY rowid").all(work.kind,work.id,String(row.id)).map(item=>item.actionId)}));
+  }
+  inspectActions(work:WorkRef) {
+    const column=work.kind==='command'?'command_id':'task_attempt_id';
+    return this.db.prepare(`SELECT id FROM action_journal WHERE ${column}=? ORDER BY rowid`).all(work.id).map(row=>this.journal.get(String(row.id)));
+  }
   async invoke(context:WorkContext,request:{source:InvocationSource;name:string;input:unknown;intent:ActionIntent}):Promise<InvocationResult> {
     const snapshot=structuredClone(request);
     const queueKey=encoded(context.work),prior=this.queues.get(queueKey)??Promise.resolve();
-    const depth=this.queueDepth.get(queueKey)??0;if(depth>=8)throw Error('Too many pending actions');this.queueDepth.set(queueKey,depth+1);
+    const depth=this.queueDepth.get(queueKey)??0;if(depth>=8){this.close(context,'pending action limit');throw Error('Too many pending actions');}this.queueDepth.set(queueKey,depth+1);
     let release!:()=>void;const next=new Promise<void>(resolve=>{release=resolve;});this.queues.set(queueKey,next);
     try {await prior;return await this.dispatch(context,snapshot);} finally {release();const remaining=(this.queueDepth.get(queueKey)??1)-1;if(remaining)this.queueDepth.set(queueKey,remaining);else this.queueDepth.delete(queueKey);if(this.queues.get(queueKey)===next)this.queues.delete(queueKey);}
   }
@@ -127,7 +166,8 @@ export class WorkActionService {
     this.admit(context);
     const route=request.source.kind==='provider'?'direct':'guest';
     const cap=this.capabilities.get(request.name);
-    if (!cap || !this.offers(context,route).some(tool=>tool.function.name===request.name)) throw Error('Capability is not offered for this work');
+    if (!cap || (route==='direct' && context.mode==='code') || (route==='guest' && context.mode==='direct')) throw Error('Capability is not offered for this work');
+    if(!cap.eligible(context)) {this.close(context,'authority');throw Error('Capability is no longer authorized');}
     const source=sourceKey(request.source),rawInput=jsonValue.parse(request.input),raw=encoded(rawInput);
     if(Buffer.byteLength(source)>2048 || Buffer.byteLength(raw)>256*1024)throw Error('Invocation input exceeds the limit');
     const input=cap.parse(rawInput),canonical=encoded(input);
@@ -161,7 +201,7 @@ export class WorkActionService {
       return {kind:'status',action};
     }
     const state=this.state(context.work);
-    if(Number(state.used)>=this.budget) {this.db.prepare("UPDATE work_action_state SET closed='limit' WHERE kind=? AND work_id=?").run(context.work.kind,context.work.id);return {kind:'blocked',reason:'Action limit reached'};}
+    if(Number(state.used)>=this.budget) {this.close(context,'limit');return {kind:'blocked',reason:'Action limit reached'};}
     this.db.prepare('UPDATE work_action_state SET used=used+1 WHERE kind=? AND work_id=?').run(context.work.kind,context.work.id);
     const records=this.records(context);
     if(request.intent.kind==='resume') {
@@ -210,10 +250,10 @@ export class WorkActionService {
     } catch(error){this.db.exec('ROLLBACK');throw error;}
     if(prepared.kind!=='created')throw Error('New action already exists');
     try {cap.check(input,context);await cap.authorize(input,context);this.admit(context);cap.check(input,context);}
-    catch(error){this.journal.cancel(actionId);const reason=context.signal.aborted?'Work stopped':error instanceof ActionDenied?'Action denied':'Action authorization failed';this.db.prepare("UPDATE work_action_state SET closed='authority' WHERE kind=? AND work_id=?").run(context.work.kind,context.work.id);return {kind:'blocked',reason};}
+    catch(error){this.journal.cancel(actionId);const reason=context.signal.aborted?'Work stopped':error instanceof ActionDenied?'Action denied':'Action authorization failed';this.close(context,'authority');return {kind:'blocked',reason};}
     this.db.exec('BEGIN IMMEDIATE');
     try {this.admit(context);cap.check(input,context);this.journal.startInInstanceTransaction(prepared.permit,this.db,{id:actionId,fingerprint,work:context.work});this.db.exec('COMMIT');this.journal.finalizeInstanceStart(prepared.permit);}
-    catch(error){this.db.exec('ROLLBACK');this.journal.cancel(actionId);return {kind:'blocked',reason:context.signal.aborted?'Work stopped':'Action could not start'};}
+    catch(error){this.db.exec('ROLLBACK');this.journal.cancel(actionId);this.close(context,'authority');return {kind:'blocked',reason:context.signal.aborted?'Work stopped':'Action could not start'};}
     let output:Json;let visible:string;
     try {output=await cap.execute(input,context);if(Buffer.byteLength(encoded(output))>256*1024)throw Error('Result exceeds the limit');visible=cap.visible(output).slice(0,16000);} catch(error) {this.journal.finish(actionId,error instanceof ActionFailed?'failed':'uncertain',error instanceof ActionFailed?error.safeResult.slice(0,16000):'Outcome unknown');this.admit(context);cap.check(input,context);return {kind:'status',action:this.journal.get(actionId)!};}
     this.db.prepare('UPDATE work_action_invocations SET private_result=? WHERE action_id=?').run(encoded(output),actionId);
@@ -224,10 +264,18 @@ export class WorkActionService {
 }
 
 export class WorkActions {
-  constructor(private readonly service:WorkActionService,readonly context:WorkContext) {}
+  private disposed=false;
+  constructor(private readonly service:WorkActionService,readonly context:WorkContext,private readonly release:()=>void) {}
+  dispose() {if(!this.disposed){this.disposed=true;this.release();}}
   offers(route:'direct'|'guest') {return this.service.offers(this.context,route);}
+  recognizes(name:string) {return this.service.recognizes(name);}
   invoke(request:{source:InvocationSource;name:string;input:unknown;intent:ActionIntent}) {return this.service.invoke(this.context,request);}
   beginRecovery() {return this.service.beginRecovery(this.context);}
   manifest() {return this.service.manifest(this.context);}
   reconcile(actionId:string,evidence:unknown) {return this.service.reconcile(this.context,actionId,evidence);}
+  closedReason() {return this.service.closedReason(this.context);}
+  close(reason:string) {this.service.close(this.context,reason);}
+  startExecution(responseId:string,callId:string,source:string) {return this.service.startExecution(this.context,responseId,callId,source);}
+  updateExecution(id:string,result:string) {this.service.updateExecution(this.context,id,result);}
+  finishExecution(id:string,outcome:string,result:string|null) {this.service.finishExecution(this.context,id,outcome,result);}
 }

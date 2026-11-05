@@ -1,6 +1,6 @@
-// This process is the native lab profile. QuickJS is the guest, not Node's VM.
+// QuickJS is the guest; this worker is not an OS isolation boundary.
 import {getQuickJS, type QuickJSContext, type QuickJSDeferredPromise, type QuickJSHandle} from 'quickjs-emscripten';
-import {hostMessage, limits, type WorkerMessage} from './protocol.js';
+import {hostMessage, actionIntent, limits, type WorkerMessage} from './protocol.js';
 import {jsonValue} from './json.js';
 
 let context: QuickJSContext | undefined;
@@ -9,12 +9,16 @@ let started = false, ended = false, sequence = 0, guestMs = 0, allowance = 0;
 let segmentStart = 0;
 const pending = new Map<number, QuickJSDeferredPromise>();
 function send(message: WorkerMessage): void { process.stdout.write(JSON.stringify(message) + '\n'); }
-function end(outcome: 'error' | 'syntax'): void {
+function end(outcome: 'error' | 'syntax' | 'limit'): void {
   if (ended) return;
   ended = true;
   send({type: 'end', outcome, guestMs});
 }
 function phase(busy: boolean): void { send({type: 'phase', busy, guestMs}); }
+function hostExhausted(error:unknown):boolean {return error instanceof RangeError && /call stack/i.test(error.message);}
+function exhausted(vm:QuickJSContext,error:QuickJSHandle):boolean {
+  try {const message=vm.getProp(error,'message');try {return /out of memory|stack overflow|interrupted|JSON limit|JSON nesting limit|Bridge limit/i.test(vm.getString(message));} finally {message.dispose();}} catch {return false;}
+}
 function runGuest<T>(fn: () => T): T {
   phase(true); segmentStart = performance.now();
   try { return fn(); }
@@ -27,20 +31,21 @@ function pump(): void {
     runGuest(() => {
       for (let i = 0; i < 64 && vm.runtime.hasPendingJob(); i++) {
         const job = vm.runtime.executePendingJobs(1);
-        if (job.error) { job.error.dispose(); throw Error('Guest job failed'); }
+        if (job.error) { const limited=exhausted(vm,job.error);job.error.dispose();if(limited){end('limit');return;}throw Error('Guest job failed'); }
       }
     });
-    if (guestMs >= allowance) { end('error'); return; }
+    if(ended)return;
+    if (guestMs >= allowance) { end('limit'); return; }
     const state = vm.getPromiseState(promise);
     if (state.type === 'fulfilled') {
       const encoded = vm.getString(state.value); state.value.dispose();
       const value: unknown = JSON.parse(encoded);
       const parsed = jsonValue.parse(value);
       ended = true; send({type: 'end', outcome: 'return', value: parsed, guestMs});
-    } else if (state.type === 'rejected') { state.error.dispose(); end('error'); }
+    } else if (state.type === 'rejected') {const limited=exhausted(vm,state.error);state.error.dispose();end(limited?'limit':'error');}
     else if (vm.runtime.hasPendingJob()) setImmediate(pump);
     else if (pending.size === 0) end('error');
-  } catch { end('error'); }
+  } catch(error) { end(guestMs >= allowance || hostExhausted(error) ? 'limit' : 'error'); }
 }
 async function start(source: string, names: string[], budget: number, heapBytes: number, stackBytes: number): Promise<void> {
   if (started) { end('error'); return; }
@@ -57,10 +62,14 @@ async function start(source: string, names: string[], budget: number, heapBytes:
     const payload: unknown = JSON.parse(vm.getString(handle));
     const parsed = jsonValue.parse(payload);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {error: vm.newError('Invalid bridge request')};
+    const intent=parsed.type==='call' && parsed.intent!==undefined ? actionIntent.safeParse(parsed.intent) : undefined;
+    if(intent && !intent.success) return {error:vm.newError('Invalid action intent')};
     const seq = ++sequence;
     const request = vm.newPromise(); pending.set(seq, request);
     // Parse again at the parent boundary; guest code has no authority over IDs.
-    if (parsed.type === 'call' && typeof parsed.name === 'string' && 'input' in parsed) send({type: 'call', seq, name: parsed.name, input: parsed.input ?? null});
+    if (parsed.type === 'call' && typeof parsed.name === 'string' && 'input' in parsed) {
+      send({type:'call',seq,name:parsed.name,input:parsed.input ?? null,...(intent?.success ? {intent:intent.data} : {})});
+    }
     else if (parsed.type === 'reuse' && typeof parsed.receipt === 'string') send({type: 'reuse', seq, receipt: parsed.receipt});
     else if (parsed.type === 'emit' && 'value' in parsed) send({type: 'emit', seq, value: parsed.value ?? null});
     else { pending.delete(seq); request.dispose(); return {error: vm.newError('Invalid bridge request')}; }
@@ -97,7 +106,7 @@ async function start(source: string, names: string[], budget: number, heapBytes:
       return answer.value;
     };
     const capabilities = Object.create(null);
-    for (const name of ${JSON.stringify(names)}) capabilities[name] = input => request({type:'call',name,input});
+    for (const name of ${JSON.stringify(names)}) capabilities[name] = (input, intent) => request(intent === undefined ? {type:'call',name,input} : {type:'call',name,input,intent});
     Object.defineProperty(globalThis, 'capabilities', {value:Object.freeze(capabilities)});
     Object.defineProperty(globalThis, 'staf', {value:Object.freeze({
       emit: value => request({type:'emit',value}),
@@ -107,14 +116,14 @@ async function start(source: string, names: string[], budget: number, heapBytes:
   })()`;
   try {
     const setup = runGuest(() => vm.evalCode(bootstrap));
-    if (setup.error) {setup.error.dispose(); end('error'); return;}
+    if (setup.error) {const limited=exhausted(vm,setup.error);setup.error.dispose();end(limited?'limit':'error');return;}
     const evaluation = runGuest(() => vm.evalCode(`(async () => {\n${source}\n})()`, 'staf-code.js', {type: 'global'}));
-    if (evaluation.error) {evaluation.error.dispose(); setup.value.dispose(); end('syntax'); return;}
+    if (evaluation.error) {const limited=exhausted(vm,evaluation.error);evaluation.error.dispose(); setup.value.dispose(); end(limited || guestMs >= allowance ? 'limit' : 'syntax'); return;}
     const wrapped = runGuest(() => vm.callFunction(setup.value, vm.undefined, evaluation.value));
     setup.value.dispose(); evaluation.value.dispose();
-    if (wrapped.error) {wrapped.error.dispose(); end('error'); return;}
+    if (wrapped.error) {const limited=exhausted(vm,wrapped.error);wrapped.error.dispose();end(limited?'limit':'error');return;}
     result = wrapped.value; pump();
-  } catch { end('error'); }
+  } catch(error) { end(hostExhausted(error) ? 'limit' : 'error'); }
 }
 let buffered = Buffer.alloc(0);
 process.stdin.on('data', (chunk: Buffer) => {
@@ -127,7 +136,7 @@ process.stdin.on('data', (chunk: Buffer) => {
     try {
       const raw: unknown = JSON.parse(line.toString('utf8'));
       const message = hostMessage.parse(raw);
-      if (message.type === 'start') void start(message.source, message.names, message.guestMs, message.heapBytes, message.stackBytes).catch(() => end('error'));
+      if (message.type === 'start') void start(message.source, message.names, message.guestMs, message.heapBytes, message.stackBytes).catch(error => end(hostExhausted(error) ? 'limit' : 'error'));
       else {
         const promise = pending.get(message.seq);
         if (!promise || !context) {end('error'); return;}

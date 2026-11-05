@@ -173,7 +173,7 @@ test('development upgrade snapshots the database and agent files before migratio
     instance=new Instance(path,undefined,upgrade.token);assert.ok(instance.migrationBackup);
     db=new DatabaseSync(instance.migrationBackup);assert.equal(db.prepare('PRAGMA user_version').get().user_version,29);db.close();
     finishUpgrade(root,()=>instance.finishUpgrade(upgrade.token));assert.equal(instance.bot(bot.id).instructions,'Soul before upgrade');instance.close();
-    db=new DatabaseSync(path);assert.equal(db.prepare('PRAGMA user_version').get().user_version,32);db.close();
+    db=new DatabaseSync(path);assert.equal(db.prepare('PRAGMA user_version').get().user_version,33);db.close();
   } finally {rmSync(root,{recursive:true,force:true});}
 });
 test('an interrupted upgrade remains fenced before and after initialization', () => {

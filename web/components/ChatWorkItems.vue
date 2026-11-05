@@ -12,6 +12,12 @@ const approvals = computed(() => props.inbox.filter(item => item.kind === 'appro
       <summary>{{ event.name }} · {{ event.type === 'tool_start' ? 'Requested' : event.success ? 'Succeeded' : 'Failed' }}</summary>
       <pre v-if="event.detail">{{ event.detail }}</pre>
     </details>
+    <details v-for="execution in work.codeExecutions" :key="execution.id">
+      <summary>Code execution · {{ execution.outcome }}</summary>
+      <p>Source</p><pre>{{ execution.source }}</pre>
+      <p>Result</p><pre>{{ JSON.stringify(execution.result, null, 2) }}</pre>
+      <p v-if="execution.actions.length">Action IDs: {{ execution.actions.join(', ') }}</p>
+    </details>
     <ApprovalItem v-for="item in approvals" :key="item.id" :item="item" />
     <div v-if="work.events.length" class="meta">{{ approvals.length ? 'Waiting for approval' : work.progress.state === 'running' ? 'Working' : work.progress.state }}</div>
   </div>

@@ -32,3 +32,25 @@ During implementation, exercise these distinct cases:
 8. Run the repository-required `pnpm run check`, `pnpm test`, affected served GUI and CLI journeys, and distribution checks for the worker and native process dependency. Record actual platform skips and keep synthetic-provider, native-process, client, Docker, remote, and live-provider evidence separate.
 
 Fixtures must terminate the processes they start, including on assertion failure. Tests must inspect real service records and actual process/file/memory outcomes, not only mocks of those components. The experiment's earlier tests are historical evidence and must not be reported as runs of this design.
+
+## Concrete clock bridge handoff
+
+The accepted command seam is `instance.workActions().open({kind:'command',id},
+signal)` and must dispose the handle when the attempt settles. `startInstance` registers `clockCapability` once; `runTurn` consumes
+`WorkActions.offers`, `invoke`, `beginRecovery` and the real
+`src/code-mode/bridge.ts` runner. `WorkActionService.inspect` and
+`inspectActions` back paired command inspection and chat details. The reusable
+paired fixture is `test/chat-code-bridge.test.js` (`startInstance` with a
+controlled `providerFactory`), and `test/browser/held-instance.mjs` supports
+`Scripted clock fixture` for the served client. Neither fixture uses credentials
+or live inference.
+
+For #81, reserve `_staf` outside direct capability input and the guest's second
+argument for recovery intent; preserve the current web, search, scratch and
+skill restrictions when registering them. #82 and #84 consume
+`actions.context.workingDirectory` and feature-owned overlap/reconciliation;
+#83 derives memory scope from `actions.context.botId`. #86 must open the actual
+task attempt with its live signal and retain pause/resume of approval timers,
+questions and task restrictions. These later adapters must expand the guest
+catalog and provider offers together; no second journal or provider loop is
+needed. Current production chat guest coverage is clock only.
