@@ -89,11 +89,11 @@ export class WorkActionService {
       name:capability.name,definition:structuredClone(capability.definition),eligible:capability.eligible,maxResultBytes:capability.maxResultBytes ?? 256*1024,
       parse:input=>jsonValue.parse(parse(input)),
       describe:(input,work)=>capability.describe(parse(input),work),
-      check:(input,work,action)=>capability.check(parse(input),work,action),
+      check:(input,work,action)=>{const parsed=parse(input);if(this.deferred(work.work))throw new ActionDeferred('Owner input is pending');try{capability.check(parsed,work,action);}catch(error){if(!(error instanceof ActionDeferred))this.close(work,'authority');throw error;}},
       authorize:(input,work,action)=>capability.authorize(parse(input),work,action),
       execute:async (input,work,action)=>jsonValue.parse(capability.parseResult(await capability.execute(parse(input),work,action))),
       visible:output=>capability.visibleResult(capability.parseResult(output)),
-      ...(capability.releaseResult ? {releaseResult:(output:Json,work:WorkContext)=>capability.releaseResult!(capability.parseResult(output),work)} : {}),
+      ...(capability.releaseResult ? {releaseResult:(output:Json,work:WorkContext)=>{try{capability.releaseResult!(capability.parseResult(output),work);}catch(error){if(!(error instanceof ActionDeferred))this.close(work,'authority');throw error;}}} : {}),
       ...(capability.recovery?.overlaps ? {overlaps:(a:Json,b:Json,work:WorkContext)=>capability.recovery!.overlaps!(parse(a),parse(b),work)} : {}),
       ...(capability.recovery?.reconcile ? {reconcile:(input:Json,evidence:unknown,work:WorkContext)=>capability.recovery!.reconcile!(parse(input),evidence,work)} : {}),
     });

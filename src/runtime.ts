@@ -56,7 +56,7 @@ export async function runTurn({ session, store, provider, text, emit = () => {},
   let started: number | undefined;
   let checkpoint = history as Session;
   const tracker=skills && ('ensure' in skills ? skills : skillTracker(skills,redact));
-  const ensureSkills = () => tracker?.ensure();
+  const ensureSkills = () => {try{tracker?.ensure();}catch(error){actions?.close('selected skill unavailable');throw error;}};
   let memoryQuery = redact(requestText ?? text);
   const observe = (report: UsageReport | undefined, outcome: UsageObservation['outcome']) => {
     usage.push({ observedAt: new Date().toISOString(), ...(report?.scope === 'request' || report?.scope === 'execution' ? {scope: report.scope} : {}), id: randomUUID(), attempt, turnStart: history.messages.length, provider: redact(provider.name),
@@ -207,7 +207,7 @@ export async function runTurn({ session, store, provider, text, emit = () => {},
             const actionInput=isRecord(args) ? Object.fromEntries(Object.entries(args).filter(([key])=>key!=='_staf')) : args;
             const intent=envelope===undefined ? {kind:'new' as const} : actionIntent.parse(envelope);
             let result:Awaited<ReturnType<WorkActions['invoke']>>;
-            try {result=await actions.invoke({source:{kind:'provider',responseId:`${attempt}:${step}`,callId:call.id},name,input:actionInput,intent});} catch(error) {if(/no longer authorized|no longer active|admission closed|limit/i.test(errorMessage(error))) {fatalAction=errorMessage(error);actions.close('authority');}throw error;}
+            try {result=await actions.invoke({source:{kind:'provider',responseId:`${attempt}:${step}`,callId:call.id},name,input:actionInput,intent});} catch(error) {const closed=actions.closedReason();if(closed)fatalAction='Action admission closed: '+closed;throw error;}
             if(result.kind==='blocked' && closesAdmission(result.reason) && name!=='search_web') {fatalAction=name==='clock' && result.reason==='Action authorization failed' ? (clockUnavailable?.() ?? result.reason) : result.reason;throw Error(fatalAction);}
             if(result.kind!=='completed') success=false;
             const safeResult=result.kind==='completed' ? redactValue(result.value,redact) : redactValue(result,redact);

@@ -39,7 +39,7 @@ export async function runCode(input:{actions:WorkActions;responseId:string;callI
       return {ok:true as const,value:{receipt,actionId:result.actionId,value}};
     } catch(error) {
       if(!fatal && actions.context.signal.aborted && !actions.closedReason()) fatal='Work stopped';
-      else if(!fatal && error instanceof Error && /admission closed|no longer active|no longer authorized|no longer available|limit/i.test(error.message)) {fatal=error.message;actions.close(fatal);}
+      else if(!fatal && actions.closedReason()) fatal='Action admission closed: '+actions.closedReason();
       return {ok:false as const,error:fatal ?? 'Capability call failed'};
     }
     })();

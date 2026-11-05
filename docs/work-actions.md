@@ -75,6 +75,12 @@ when a feature later rejects an invalid ID. This check applies to every register
 capability, so a new adapter cannot omit it. Standalone coordinator fixtures use
 the default identity redactor unless they explicitly supply configured secrets.
 
+Validation error text is data, including words such as `limit` or `authorized`.
+The runtime and guest bridge consult the coordinator's recorded closure state.
+Trusted live precondition and result-release checks close admission when they
+fail; pending owner input remains a typed deferral. An ordinary schema error
+does not become a work-wide restriction because of its wording.
+
 Authorization and execution receive the same frozen, coordinator-created
 `ActionIdentity` (`id` and `fingerprint`). Existing two-argument callbacks remain
 valid. An authorizer can return an `AuthorityClaim` whose synchronous `start`

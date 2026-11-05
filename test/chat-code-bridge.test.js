@@ -48,6 +48,11 @@ test('all capability inputs are checked before private journaling, including an 
   }finally{if(!closed)await f.app.close();rmSync(directory,{recursive:true,force:true});}
 });
 
+for(const route of ['direct','guest'])for(const key of ['limit','no longer available','no longer authorized'])test(`${route} schema errors mentioning ${key} permit ordinary Hybrid continuation`,async()=>{
+  let calls=0;const f=await fixture(()=>calls++===0?route==='direct'?tool('clock',{[key]:true}):tool('code_mode',{source:`return await capabilities.clock(${JSON.stringify({[key]:true})});`}):calls===2?tool('clock'): {role:'assistant',content:'recovered'});
+  try{const bot=await f.call('/api/bots',{name:'schema recovery',toolMode:'hybrid'});await f.submit('schema',bot.id);const result=await f.wait('schema');assert.equal(result.state,'completed',result.error);assert.equal(f.seen.length,3);assert.equal(result.workActions.length,1);assert.equal(result.workActions[0].state,'succeeded');if(route==='guest')assert.equal(result.codeExecutions[0].outcome,'error');}finally{await f.app.close();}
+});
+
 test('direct, hybrid and code offers are captured and unoffered calls cannot dispatch',async()=>{
   const f=await fixture((messages)=>{const user=messages.findLast(x=>x.role==='user').content;if(messages.at(-1).role==='tool')return {role:'assistant',content:'done'};return user==='plain'?{role:'assistant',content:'text'}:user==='forged'?tool('clock'):tool(user==='direct'?'clock':'code_mode',user==='direct'?{}:{source:'return (await capabilities.clock({})).value;'});});
   try {
