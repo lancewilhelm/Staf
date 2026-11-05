@@ -272,6 +272,18 @@ export class Instance {
   }
   get skills() { return new SkillCatalog(this.db, this.redactSkill); }
   get memories() { return new MemoryStore(this.db); }
+  proposeSharedMemory(botId:string,text:string,id:string=randomUUID()) {
+    const clean=text.trim();
+    if (!clean || clean.length>4000) throw Error('Invalid memory text');
+    this.db.prepare("INSERT INTO memory_proposals VALUES (?,?,?,'pending')").run(id,botId,clean);
+    return {id,state:'pending' as const};
+  }
+  sharedMemoryProposal(botId:string,id:string) {
+    const row=this.db.prepare('SELECT id,state FROM memory_proposals WHERE id=? AND bot_id=?').get(id,botId);
+    if (!row || (row.state!=='pending' && row.state!=='confirmed' && row.state!=='cancelled')) return null;
+    return {id:String(row.id),state:row.state};
+  }
+
   get #approvalGrants() { return new ApprovalGrants(this.db); }
   listApprovalGrants() { return this.#approvalGrants.list(); }
   recordGrantedDecision(input:{work:WorkRef;boundary:GrantBoundary;id:string;fingerprint:string;callId:string;hop:number;scope:'bot'|'all-bots';lifetime:'task'|'remembered'}):void {
@@ -1068,7 +1080,7 @@ export class Instance {
       if (typeof command.botId !== 'string' || typeof command.content !== 'string') throw Error('Invalid command');
       if (input) this.memories.create(input);
       if (proposal?.kind === 'propose') {
-        this.db.prepare("INSERT INTO memory_proposals VALUES (?,?,?,'pending')").run(id,command.botId,proposal.text);
+        this.proposeSharedMemory(command.botId,proposal.text,id);
         reply=`Proposed shared user memory: ${JSON.stringify(proposal.text)}\nALL agents will see this memory. Nothing has been saved to active memory yet. To save exactly this text, say: Confirm shared memory ${id}\nTo discard it, say: Cancel shared memory ${id}`;
       } else if (proposal) {
         const row=this.db.prepare('SELECT text,state FROM memory_proposals WHERE id=? AND bot_id=?').get(proposal.id,command.botId);

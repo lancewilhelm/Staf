@@ -33,7 +33,7 @@ export type Capability<I,O> = {
   recovery?: {overlaps?(previous:I,next:I,work:WorkContext):boolean; reconcile?(input:I,evidence:unknown,work:WorkContext):boolean};
 };
 export class ActionDenied extends Error {}
-/** Throw only when the feature can establish a definite failed outcome. */
+/** Reject input before journaling, or establish a definite failed effect outcome. */
 export class ActionFailed extends Error {
   constructor(readonly safeResult:string) {super('Action failed');}
 }
@@ -170,7 +170,10 @@ export class WorkActionService {
     if(!cap.eligible(context)) {this.close(context,'authority');throw Error('Capability is no longer authorized');}
     const source=sourceKey(request.source),rawInput=jsonValue.parse(request.input),raw=encoded(rawInput);
     if(Buffer.byteLength(source)>2048 || Buffer.byteLength(raw)>256*1024)throw Error('Invocation input exceeds the limit');
-    const input=cap.parse(rawInput),canonical=encoded(input);
+    let input:Json;
+    try {input=cap.parse(rawInput);}
+    catch(error){if(error instanceof ActionFailed)return {kind:'blocked',reason:error.safeResult.slice(0,16000)};throw error;}
+    const canonical=encoded(input);
     if(Buffer.byteLength(canonical)>256*1024)throw Error('Parsed input exceeds the limit');
     const digest=this.digest(encoded([request.name,rawInput,request.intent]));
     const pending=this.db.prepare('SELECT digest,challenge,reason FROM work_action_requests WHERE kind=? AND work_id=? AND source=?').get(context.work.kind,context.work.id,source);
