@@ -284,6 +284,10 @@ transport details, and [usage](usage.md#agent-images) for owner controls.
 The configuration slice for basic tools stores `toolMode` in agent TOML and
 captures it in accepted chat and task profiles. `src/tool-mode.ts` owns the
 shared type and boundary parser. Database version 31 adds the creation default
-with the existing backup and migration process. This is an intermediate state:
-`runTurn` still uses its existing offers and dispatch. The shared action gateway
-and Code Mode clock runtime remain unimplemented in this slice.
+with the existing backup and migration process. Database version 32 adds accepted-work folder bindings and action-service records
+through the protected migration process. `src/work-actions.ts` coordinates
+registered actions and uses the existing action journal. The internal clock
+registration uses the existing clock authority callback. See the
+[accepted-work action service reference](work-actions.md) for its callable API.
+`runTurn` still uses its existing offers and dispatch. The worker and chat
+bridge remain unconnected.

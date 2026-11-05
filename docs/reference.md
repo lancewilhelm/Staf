@@ -411,5 +411,6 @@ profiles use the existing task attempt identity, without a synthetic command ID.
 Version 31 adds `creation_defaults.tool_mode` after the existing migration backup.
 
 The current runtime still uses its existing tool offers and dispatch regardless
-of the saved mode. No Code Mode guest or shared clock gateway is implemented by
-this configuration slice.
+of the saved mode. An internal accepted-work action service and clock registration
+are implemented, but chat and the Code Mode worker do not call them. See the
+[accepted-work action service reference](work-actions.md) for the actual API.

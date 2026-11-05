@@ -2,7 +2,7 @@ import {parseToolMode,type ToolMode} from './tool-mode.js';
 import {ProviderDefaultsStore} from './provider-choices.js';
 import { DatabaseSync } from 'node:sqlite';
 import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
-import { closeSync, existsSync, openSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { closeSync, existsSync, openSync, mkdtempSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { AgentConfigStore, AgentConfigUncertain } from './agent-config.js';
@@ -22,12 +22,13 @@ import { ActionJournal, actionJournalSchema, type WorkRef, type StartPermit } fr
 import { checkedSearchOrigin, checkedSearchQuery } from './searxng-search.js';
 import { checkedOwnerWebUrl } from './web-reader.js';
 import { scratchLimits } from './shell-sandbox.js';
+import { WorkActionService, workActionsSchema } from './work-actions.js';
 import { ApprovalGrants, approvalGrantSchema, type GrantBoundary } from './approval-grants.js';
 
 const clockAction: Action = { capability:'clock', operation:'read', resource:'utc', effect:'read', limits:{}, risk:'safe' };
 const clockBoundary = { enabledCapabilities:['clock'], actions:[clockAction] };
 const modes: ApprovalMode[] = ['ask-every-time','ask-for-risky-actions','never-ask'];
-export const INSTANCE_SCHEMA_VERSION = 31;
+export const INSTANCE_SCHEMA_VERSION = 32;
 const MAINTENANCE_VERSION = 2147483647;
 
 export const starterSoul = "You are an assistant working for the owner. Be clear and candid. Distinguish observations from assumptions. Follow the owner's role instructions and work within the permissions and task scope granted to you.";
@@ -44,6 +45,13 @@ function parseToolModeFromProfile(raw:unknown) {
 function parseCapturedProfile(profile:unknown) {
   if (!profile || typeof profile !== 'object' || !('provider' in profile) || typeof profile.provider !== 'string' || !('model' in profile) || !(profile.model === null || typeof profile.model === 'string') || !('reasoning' in profile) || !(profile.reasoning === null || typeof profile.reasoning === 'string') || !('instructions' in profile) || typeof profile.instructions !== 'string' || !('chatId' in profile) || typeof profile.chatId !== 'string') throw Error('Invalid captured profile');
   return {provider:profile.provider,model:profile.model,reasoning:profile.reasoning,instructions:profile.instructions,chatId:profile.chatId,toolMode:parseToolMode('toolMode' in profile ? profile.toolMode : undefined)};
+}
+
+function freezeCaptured(value:unknown):void {
+  if (value && typeof value==='object') {
+    for (const child of Object.values(value)) freezeCaptured(child);
+    Object.freeze(value);
+  }
 }
 
 export function assertDatasetAvailable(path: string, maintenanceToken?:string) {
@@ -68,15 +76,18 @@ export class Instance {
   private readonly configs: AgentConfigStore;
   private images:AgentImageAssets|undefined;
   private readonly temporaryConfigRoot: string | undefined;
+  private readonly agentRoot: string;
   private readonly fingerprintKey: Uint8Array;
   private readonly datasetKey: Uint8Array;
   private maintenanceToken: string | undefined;
+  private actionService: WorkActionService | undefined;
   private readonly grantControllers = new Map<string,Set<AbortController>>();
   readonly migrationBackup: string | undefined;
   constructor(path: string, private readonly redactSkill: (text:string) => string = text => text, maintenanceToken?:string) {
     assertDatasetAvailable(path,maintenanceToken);
     this.temporaryConfigRoot = path === ':memory:' ? mkdtempSync(join(tmpdir(),'staf-config-')) : undefined;
-    this.configs = new AgentConfigStore(this.temporaryConfigRoot ?? join(dirname(resolve(path)),'agents'));
+    this.agentRoot = resolve(this.temporaryConfigRoot ?? join(dirname(resolve(path)),'agents'));
+    this.configs = new AgentConfigStore(this.agentRoot);
     if (path !== ':memory:') {
       try { closeSync(openSync(path, 'wx', 0o600)); }
       catch (error) { if (!hasCode(error, 'EEXIST')) throw error; }
@@ -95,7 +106,7 @@ export class Instance {
     this.maintenanceToken=maintenanceToken;
     if (version > INSTANCE_SCHEMA_VERSION) throw new Error(`Database version ${version} is newer than this Staf (maximum ${INSTANCE_SCHEMA_VERSION}). Use a compatible checkout or select another data directory; the database was not reset.`);
     if (hasBots && version < INSTANCE_SCHEMA_VERSION && path !== ':memory:') {
-      this.migrationBackup = `${path}.before-${version < 2 ? 'profiles' : version < 3 ? 'tasks' : version < 4 ? 'approvals' : version < 5 ? 'task-inbox' : version < 6 ? 'memory' : version < 7 ? 'memory-confirmation' : version < 8 ? 'skills' : version < 9 ? 'schedules' : version < 10 ? 'schedule-retries' : version < 11 ? 'schedule-lineage' : version < 12 ? 'bot-description' : version < 13 ? 'delegation-scope' : version < 14 ? 'collaboration' : version < 15 ? 'disclosure' : version < 16 ? 'chat-tasks' : version < 17 ? 'creation-defaults' : version < 18 ? 'web-actions' : version < 19 ? 'search-actions' : version < 20 ? 'scratch-shell' : version < 21 ? 'approval-grants' : version < 22 ? 'schedule-web-scope' : version < 23 ? 'schedule-search-scope' : version < 24 ? 'schedule-shell-scope' : version < 25 ? 'main-bot' : version < 26 ? 'command-events' : version < 27 ? 'bot-creation' : version < 28 ? 'response-progress' : 'response-stop'}-${randomUUID()}.sqlite`;
+      this.migrationBackup = `${path}.before-${version < 2 ? 'profiles' : version < 3 ? 'tasks' : version < 4 ? 'approvals' : version < 5 ? 'task-inbox' : version < 6 ? 'memory' : version < 7 ? 'memory-confirmation' : version < 8 ? 'skills' : version < 9 ? 'schedules' : version < 10 ? 'schedule-retries' : version < 11 ? 'schedule-lineage' : version < 12 ? 'bot-description' : version < 13 ? 'delegation-scope' : version < 14 ? 'collaboration' : version < 15 ? 'disclosure' : version < 16 ? 'chat-tasks' : version < 17 ? 'creation-defaults' : version < 18 ? 'web-actions' : version < 19 ? 'search-actions' : version < 20 ? 'scratch-shell' : version < 21 ? 'approval-grants' : version < 22 ? 'schedule-web-scope' : version < 23 ? 'schedule-search-scope' : version < 24 ? 'schedule-shell-scope' : version < 25 ? 'main-bot' : version < 26 ? 'command-events' : version < 27 ? 'bot-creation' : version < 28 ? 'response-progress' : version < 31 ? 'response-stop' : 'work-actions'}-${randomUUID()}.sqlite`;
       const previousUmask = process.umask(0o077);
       try {
         this.db.prepare('VACUUM INTO ?').run(this.migrationBackup);
@@ -170,6 +181,14 @@ export class Instance {
     if(version < 28)this.db.exec("CREATE TABLE IF NOT EXISTS response_progress (command_id TEXT PRIMARY KEY REFERENCES commands(id), text TEXT NOT NULL DEFAULT '')");
     if(version < 29)this.db.exec("CREATE TABLE IF NOT EXISTS response_stops (command_id TEXT PRIMARY KEY REFERENCES commands(id))");
     if(version < 31 && !this.db.prepare("SELECT 1 FROM pragma_table_info('creation_defaults') WHERE name='tool_mode'").get())this.db.exec("ALTER TABLE creation_defaults ADD COLUMN tool_mode TEXT NOT NULL DEFAULT 'hybrid'");
+    if(version < 32) {
+      this.db.exec(workActionsSchema);
+      this.db.exec("CREATE TABLE IF NOT EXISTS work_bindings (kind TEXT NOT NULL CHECK(kind IN ('command','task')), work_id TEXT NOT NULL, bot_id TEXT NOT NULL REFERENCES bots(id), working_directory TEXT NOT NULL, PRIMARY KEY(kind,work_id))");
+      for (const row of this.db.prepare("SELECT 'command' AS kind,id,bot_id FROM commands UNION ALL SELECT 'task',id,bot_id FROM task_attempts").all()) {
+        if ((row.kind !== 'command' && row.kind !== 'task') || typeof row.id !== 'string' || typeof row.bot_id !== 'string') throw Error('Invalid legacy work binding');
+        this.bindWork({kind:row.kind,id:row.id}, row.bot_id);
+      }
+    }
     if(version < 30 && !this.db.prepare("SELECT 1 FROM pragma_table_info('command_runtime_events') WHERE name='detail'").get())this.db.exec('ALTER TABLE command_runtime_events ADD COLUMN detail TEXT');
     this.db.exec('CREATE INDEX IF NOT EXISTS command_runtime_events_command ON command_runtime_events(command_id,seq)');
     if (!maintenanceToken) this.db.exec(`PRAGMA user_version=${INSTANCE_SCHEMA_VERSION}`);
@@ -193,6 +212,31 @@ export class Instance {
     // Seal valid pre-existing file configurations before accepting clients.
     this.bots();
     } catch (error) { this.db.close(); if(this.temporaryConfigRoot)rmSync(this.temporaryConfigRoot,{recursive:true,force:true}); throw error; }
+  }
+  private bindWork(work:WorkRef, botId:string) {
+    if (!/^[a-zA-Z0-9_-]+$/.test(botId)) throw Error('Invalid agent identity for working directory');
+    const directory=join(this.agentRoot,botId,'work');
+    mkdirSync(directory,{recursive:true,mode:0o700});
+    this.db.prepare('INSERT OR IGNORE INTO work_bindings VALUES (?,?,?,?)').run(work.kind,work.id,botId,directory);
+  }
+  workContext(work:WorkRef, signal:AbortSignal) {
+    const binding=this.db.prepare('SELECT bot_id,working_directory FROM work_bindings WHERE kind=? AND work_id=?').get(work.kind,work.id);
+    if (typeof binding?.bot_id !== 'string' || typeof binding.working_directory !== 'string' || !isAbsolute(binding.working_directory)) throw Error('Accepted work binding unavailable');
+    const row=work.kind==='command' ? this.db.prepare('SELECT profile FROM command_profiles WHERE command_id=?').get(work.id) : this.db.prepare('SELECT profile,context FROM task_attempts WHERE id=?').get(work.id);
+    if (typeof row?.profile !== 'string') throw Error('Accepted work profile unavailable');
+    const profile=parseCapturedProfile(JSON.parse(row.profile));
+    const conversation=work.kind==='command' ? {kind:'chat' as const,conversationId:profile.chatId} : {kind:'task' as const,conversationId:profile.chatId,context:typeof row.context==='string' ? JSON.parse(row.context) : []};
+    const acceptedWork={...work};freezeCaptured(acceptedWork);freezeCaptured(conversation);
+    return Object.freeze({work:acceptedWork,botId:binding.bot_id,conversation,mode:profile.toolMode,workingDirectory:binding.working_directory,signal});
+  }
+  workActions():WorkActionService {
+    if (!this.actionService) this.actionService=new WorkActionService(this.db,this.fingerprintKey,
+      (work,signal)=>this.workContext(work,signal),
+      work=>{
+        const record=work.kind==='command' ? this.command(work.id) : this.taskAttempt(work.id);
+        if (!record || typeof record.botId !== 'string' || record.state!==(work.kind==='command' ? 'pending' : 'running') || this.botIdentity(record.botId)?.archived !== false || (work.kind==='command' && this.responseStopping(work.id)) || (work.kind==='task' && this.taskHasPending(work.id))) throw Error('Work is no longer active or authorized');
+      });
+    return this.actionService;
   }
   private scheduleOrigin(attemptId:string) {
     return this.db.prepare(`SELECT s.id AS schedule_id, s.revoked, s.authorization, o.due_at, o.status
@@ -653,6 +697,7 @@ export class Instance {
       this.db.prepare("INSERT INTO task_attempts (id,task_id,bot_id,predecessor,profile,context,state,limit_ms) VALUES (?,?,?,?,?,?,'queued',?)").run(input.id,taskId,input.botId,input.predecessor ?? null,JSON.stringify(bot),JSON.stringify(context),input.limitMs);
       if (input.delegateClock) this.db.prepare('UPDATE task_attempts SET delegation_clock=1 WHERE id=?').run(input.id);
       if (origin) { if (typeof origin.schedule_id !== 'string' || typeof origin.due_at !== 'number') throw Error('Invalid schedule origin'); this.db.prepare('INSERT INTO schedule_task_retries VALUES (?,?,?)').run(input.id,origin.schedule_id,origin.due_at); const scope=this.db.prepare('SELECT url FROM schedule_web_scopes WHERE attempt_id=?').get(input.predecessor ?? '');if(typeof scope?.url==='string'){this.db.prepare('INSERT INTO schedule_web_scopes VALUES (?,?)').run(input.id,scope.url);const priorPermission=this.db.prepare('SELECT enabled FROM web_permissions WHERE scope=?').get('task:'+(input.predecessor ?? ''));if(priorPermission?.enabled===0)this.db.prepare('INSERT INTO web_permissions VALUES (?,0)').run('task:'+input.id);}const search=this.db.prepare('SELECT query,origin,revision FROM schedule_search_scopes WHERE attempt_id=?').get(input.predecessor ?? '');if(typeof search?.query==='string' && typeof search.origin==='string' && typeof search.revision==='number'){this.db.prepare('INSERT INTO schedule_search_scopes VALUES (?,?,?,?)').run(input.id,search.query,search.origin,search.revision);const prior=this.db.prepare('SELECT enabled FROM search_permissions WHERE scope=?').get('task:'+(input.predecessor ?? ''));if(prior?.enabled===0)this.db.prepare('INSERT INTO search_permissions VALUES (?,0)').run('task:'+input.id);}const shell=this.db.prepare('SELECT command,docker_binary,docker_socket,image_id,revision FROM schedule_shell_scopes WHERE attempt_id=?').get(input.predecessor ?? '');if(typeof shell?.command==='string' && typeof shell.docker_binary==='string' && typeof shell.docker_socket==='string' && typeof shell.image_id==='string' && typeof shell.revision==='number'){this.db.prepare('INSERT INTO schedule_shell_scopes VALUES (?,?,?,?,?,?)').run(input.id,shell.command,shell.docker_binary,shell.docker_socket,shell.image_id,shell.revision);const prior=this.db.prepare('SELECT enabled FROM shell_permissions WHERE scope=?').get('task:'+(input.predecessor ?? ''));if(prior?.enabled===0)this.db.prepare('INSERT INTO shell_permissions VALUES (?,0)').run('task:'+input.id);} }
+      this.bindWork({kind:'task',id:input.id},input.botId);
       this.captureTaskSkills(input.id,input.botId);
       this.db.prepare('INSERT INTO task_fingerprints VALUES (?,?)').run(input.id,digest);
       this.taskEvent(input.id,{type:'queued',message:'Task accepted'});
@@ -773,6 +818,7 @@ export class Instance {
       const taskId=randomUUID();this.db.prepare('INSERT INTO tasks VALUES (?,?,?)').run(taskId,previous.botId,visibleObjective);
       this.db.prepare("INSERT INTO task_attempts (id,task_id,bot_id,predecessor,profile,context,state,limit_ms) VALUES (?,?,?,?,?,?,'waiting',?)").run(input.id,taskId,previous.botId,input.predecessor,JSON.stringify(bot),JSON.stringify(this.taskContext(previous.botId)),input.limitMs);
       if (input.delegateClock) this.db.prepare('UPDATE task_attempts SET delegation_clock=1 WHERE id=?').run(input.id);
+      this.bindWork({kind:'task',id:input.id},previous.botId);
       this.captureTaskSkills(input.id,previous.botId);
       this.db.prepare('INSERT INTO task_fingerprints VALUES (?,?)').run(input.id,digest);
       this.taskEvent(input.id,{type:'waiting',message:'Waiting for previous attempt to settle'});
@@ -983,6 +1029,7 @@ export class Instance {
       this.db.prepare("INSERT INTO commands VALUES (?, ?, ?, 'pending', NULL)").run(input.id, input.botId, visibleContent);
       this.db.prepare('INSERT INTO command_fingerprints VALUES (?, ?)').run(input.id, digest);
       this.db.prepare('INSERT INTO command_profiles VALUES (?, ?)').run(input.id, JSON.stringify(bot));
+      this.bindWork({kind:'command',id:input.id},input.botId);
       this.db.prepare('INSERT INTO command_notices SELECT ?,message_id FROM task_notices WHERE bot_id=? AND delivered=0').run(input.id,input.botId);
       this.db.prepare("INSERT INTO messages VALUES (?, ?, 'user', ?, (SELECT COALESCE(MAX(seq),0)+1 FROM messages WHERE bot_id=?))").run('command-user-'+input.id, input.botId, visibleContent, input.botId);
       this.db.exec('COMMIT'); return {kind: 'accepted' as const,toolMode:bot.toolMode};
