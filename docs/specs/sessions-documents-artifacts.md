@@ -86,14 +86,24 @@ Expose all three through the shared service and protected owner interface.
 - Keep a small feature toolbar in chat. Put session history, documents, and
   artifacts in reusable views. Preserve chat streaming, Stop, drafts, provider
   selection, memory navigation, and the existing visual language.
-- The feature services are independent of the generated-code executor. Export
-  typed, scoped capability adapters for Code Mode. Do not introduce another
-  model-facing direct-tool interface. Any final Code Mode registration must
-  use its authoritative host bridge and action policy.
+- Workspace services are independent of model calling style. Direct exposes
+  individual tools; Hybrid exposes individual tools plus `code_mode`; Code Mode
+  exposes only `code_mode`, with capabilities callable inside scripts. Later
+  adapters for both calling styles must use the same service-owned operations,
+  immutable accepted context, per-call authority checks, and action records.
+  Mode selection and model-tool registration are separate adoption work.
 - Native and Docker installations use the same persisted instance data.
   Include the new data in the existing backup and recovery boundary.
 - Deliver one integration PR, left open for review. Parallel implementation
   branches do not merge themselves to main.
+
+The owner's 2026-11-04 tool-mode decision supersedes the original requirement,
+"Do not introduce another model-facing direct-tool interface." The original
+requirement belongs to the earlier implementation plan. The shared-service
+requirement remains. Hybrid for new agents, legacy Direct, and a chat-only first
+scope remain proposals awaiting the architecture checkpoint. See the
+[recorded calling-style decision](../decisions.md#selectable-tool-modes-share-workspace-operations).
+PR #72 implements no selector or model-tool registration.
 
 ## Testing decisions
 

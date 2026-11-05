@@ -11,6 +11,30 @@ parallel with Code Mode. See the [session decision](adr/0006-fresh-sessions-with
 and [implementation specification](specs/sessions-documents-artifacts.md).
 These describe the target until the implementation establishes the behavior.
 
+## Selectable tool modes share workspace operations
+
+On 2026-11-04 the owner selected Direct, Hybrid, and Code Mode. Direct offers
+individual tools. Hybrid offers individual tools plus `code_mode`. Code Mode
+offers only `code_mode`, whose scripts can call the registered capabilities.
+This supersedes the original workspace plan's blanket prohibition on a second
+model-facing calling style. Both styles must use the same service-owned
+operations, authority checks, immutable accepted context, and action records.
+They must not duplicate session, document, or artifact implementations.
+
+The [revised architecture checkpoint](https://github.com/lancewilhelm/Staf/blob/02637da8552fcf65de85872f165943ff11ea7786/docs/design/code-mode/tool-modes.md)
+records the decision and the remaining proposals. Hybrid for new agents, legacy
+Direct, and an initial chat-only scope await that checkpoint. PR #72 retains its
+independent workspace scope. PR #75 remains a bounded synthetic execution
+experiment. Review the workspace delivery first, then update and review the
+experiment against the combined main before a separate adoption feature.
+Neither PR is authorized to merge by this coordination decision.
+
+The [fresh-session decision](adr/0006-fresh-sessions-with-original-references.md)
+remains unchanged: no compaction, summarization, truncation, or implicit replay
+of older sessions. See the [adapter compatibility notes](design/workspace-code-mode-integration.md)
+for remaining integration work. The earlier prohibition remains identifiable in
+this record and in Git history.
+
 ## Keep conversation state and tool dispatch in Staf
 
 Accepted on 2026-10-25. Each adapter translates its own protocol into Staf messages.

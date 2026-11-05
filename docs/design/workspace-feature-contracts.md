@@ -12,8 +12,9 @@ are [#69](https://github.com/lancewilhelm/Staf/issues/69), artifacts are
 
 Each implementer owns a feature module, route handling, a reusable Vue component,
 focused tests, and a feature usage page. The coordinator owns final cross-feature
-context references, Code Mode registration, consolidated documentation, toolbar
-integration, and review fixes. Small shared-file insertions are expected.
+context references, consolidated documentation, toolbar integration, and review
+fixes. The original plan assigned Code Mode registration here; registration now
+belongs to the separate adoption feature. Small shared-file insertions are expected.
 
 Use these independent migration slots: 31 for conversation sessions, 32 for
 documents, and 33 for artifacts. Each branch may set its own maximum version;
@@ -86,8 +87,12 @@ reference context separate from original messages and retained memory.
 
 Feature model capabilities must be scoped by an immutable captured
 `{botId, sessionId, commandId, signal}`. Recheck active work and authority for
-every call. The final factory will expose real feature service methods through
-Code Mode's host bridge. Do not add new direct provider tools in feature branches.
+every call. The factory exposes service-owned operations independently of model
+calling style. The owner's 2026-11-04 decision supersedes this plan's earlier
+prohibition on additional direct tools. Later Direct, Hybrid, and Code Mode
+adapters must share those operations, accepted context, authority, and action
+records. PR #72 adds no selector or model-tool registrations. See the
+[executable-contract compatibility notes](workspace-code-mode-integration.md).
 
 ## Review and delivery
 

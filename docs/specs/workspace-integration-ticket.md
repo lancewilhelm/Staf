@@ -13,9 +13,11 @@ existing workspace and expose their bounded service contracts for Code Mode.
 - [ ] Capture and fingerprint accepted references with the command/session.
   Resolve only original same-agent sources and include bounded source context
   as untrusted data without changing originals or creating retained memory.
-- [ ] Expose scoped list/search/read/write service capabilities through the
-  authoritative Code Mode host bridge when its contract is available. Preserve
-  action policy and cancellation. Do not create another direct-tool path.
+- [ ] Export scoped service adapters independently of model calling style.
+  Later Direct, Hybrid, and Code Mode registration must share service operations,
+  accepted context, per-call authority, action records, and cancellation.
+  The owner's revised decision supersedes the earlier direct-tool prohibition.
+  Selector and model-tool registration remain separate adoption work.
 - [ ] Preserve streaming, Stop, draft recovery, provider choices, memory, themes,
   and existing instance APIs. Run full checks and relevant served GUI journeys.
 - [ ] Complete independent Standards and Spec reviews and fix accepted findings.

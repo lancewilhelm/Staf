@@ -474,10 +474,12 @@ on later turns. Saved source identities and excerpts remain with their command.
 Model replies and previously sent requests can still contain information derived
 from those sources.
 
-The service exports scoped session, document, and artifact methods for the
-separately developed Code Mode host. This feature does not register additional
-direct provider tools or claim live model citation reliability. The owner can
-use all workspace controls and explicit references with the existing chat path.
+The service exports scoped session, document, and artifact methods independently
+of model calling style. Later Direct, Hybrid, and Code Mode adapters can share
+these operations and their authority checks. This feature adds no mode selector
+or model-tool registrations. You can use all workspace controls and explicit
+references with the existing chat path. Live model citation reliability remains
+unverified.
 
 ## Background task preview
 

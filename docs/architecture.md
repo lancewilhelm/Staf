@@ -101,13 +101,15 @@ session, document, or artifact revision. Artifact previews share the Markdown
 sanitizer and disable links and images. Downloads require a paired client and use
 fixed types and safe filenames.
 
-`workspaceCapabilities` composes the scoped feature adapters for registration by
-the future Code Mode host. It binds the accepted agent, session, command, and abort
-signal and rechecks active work before each action. The Code Mode host remains
-responsible for capability registration and its action policy. No second direct
-provider-tool interface is registered here. Offline providers and served browser
-journeys verify the implemented boundaries; live model selection and citation
-behavior remain unverified.
+`workspaceCapabilities` composes service-owned feature adapters independently of
+model calling style. It binds the accepted agent, session, command, and abort
+signal and rechecks active work before each action. Later Direct, Hybrid, and
+Code Mode adapters must share those operations, authority checks, accepted
+context, and action records. This workspace delivery adds no mode selector or
+model-tool registration. The separate adoption feature owns registration and
+shared action policy. See the [compatibility notes](design/workspace-code-mode-integration.md).
+Prior offline providers and served browser journeys verify the workspace
+boundaries; live model selection and citation behavior remain unverified.
 
 ### Shared workspace and execution
 
