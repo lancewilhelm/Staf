@@ -1,7 +1,8 @@
+import {parseToolMode,type ToolMode} from './tool-mode.js';
 import {ProviderDefaultsStore} from './provider-choices.js';
 import { DatabaseSync } from 'node:sqlite';
 import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
-import { closeSync, existsSync, openSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { closeSync, existsSync, openSync, mkdtempSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { AgentConfigStore, AgentConfigUncertain } from './agent-config.js';
@@ -21,17 +22,39 @@ import { ActionJournal, actionJournalSchema, type WorkRef, type StartPermit } fr
 import { checkedSearchOrigin, checkedSearchQuery } from './searxng-search.js';
 import { checkedOwnerWebUrl } from './web-reader.js';
 import { scratchLimits } from './shell-sandbox.js';
+import { WorkActionService, workActionsSchema, type ActionIdentity } from './work-actions.js';
+import type { ByteRedactor } from './config.js';
+import { NativeProcesses, nativeProcessSchema } from './native-processes.js';
 import { ApprovalGrants, approvalGrantSchema, type GrantBoundary } from './approval-grants.js';
 
 const clockAction: Action = { capability:'clock', operation:'read', resource:'utc', effect:'read', limits:{}, risk:'safe' };
 const clockBoundary = { enabledCapabilities:['clock'], actions:[clockAction] };
 const modes: ApprovalMode[] = ['ask-every-time','ask-for-risky-actions','never-ask'];
-export const INSTANCE_SCHEMA_VERSION = 30;
+export const INSTANCE_SCHEMA_VERSION = 36;
 const MAINTENANCE_VERSION = 2147483647;
 
 export const starterSoul = "You are an assistant working for the owner. Be clear and candid. Distinguish observations from assumptions. Follow the owner's role instructions and work within the permissions and task scope granted to you.";
-export type BotEdit = { revision: string; name: string; description?: string; instructions: string; provider: string; model: string | null; reasoning: string | null;image?:AgentImageInput };
+export type BotEdit = { revision: string; name: string; description?: string; instructions: string; provider: string; model: string | null; reasoning: string | null;toolMode?:ToolMode;image?:AgentImageInput };
 export class BotConflict extends Error {}
+
+function parseToolModeFromProfile(raw:unknown) {
+  if(raw===null || raw===undefined)return parseToolMode(undefined);
+  if(typeof raw!=='string')throw Error('Invalid captured profile');
+  const profile:unknown=JSON.parse(raw);
+  if(!profile || typeof profile!=='object')throw Error('Invalid captured profile');
+  return parseToolMode('toolMode' in profile ? profile.toolMode : undefined);
+}
+function parseCapturedProfile(profile:unknown) {
+  if (!profile || typeof profile !== 'object' || !('provider' in profile) || typeof profile.provider !== 'string' || !('model' in profile) || !(profile.model === null || typeof profile.model === 'string') || !('reasoning' in profile) || !(profile.reasoning === null || typeof profile.reasoning === 'string') || !('instructions' in profile) || typeof profile.instructions !== 'string' || !('chatId' in profile) || typeof profile.chatId !== 'string') throw Error('Invalid captured profile');
+  return {provider:profile.provider,model:profile.model,reasoning:profile.reasoning,instructions:profile.instructions,chatId:profile.chatId,toolMode:parseToolMode('toolMode' in profile ? profile.toolMode : undefined)};
+}
+
+function freezeCaptured(value:unknown):void {
+  if (value && typeof value==='object') {
+    for (const child of Object.values(value)) freezeCaptured(child);
+    Object.freeze(value);
+  }
+}
 
 export function assertDatasetAvailable(path: string, maintenanceToken?:string) {
   if (path !== ':memory:' && existsSync(`${path}.maintenance.json`)) {
@@ -55,15 +78,18 @@ export class Instance {
   private readonly configs: AgentConfigStore;
   private images:AgentImageAssets|undefined;
   private readonly temporaryConfigRoot: string | undefined;
+  private readonly agentRoot: string;
   private readonly fingerprintKey: Uint8Array;
   private readonly datasetKey: Uint8Array;
   private maintenanceToken: string | undefined;
+  private actionService: WorkActionService | undefined;
   private readonly grantControllers = new Map<string,Set<AbortController>>();
   readonly migrationBackup: string | undefined;
   constructor(path: string, private readonly redactSkill: (text:string) => string = text => text, maintenanceToken?:string) {
     assertDatasetAvailable(path,maintenanceToken);
     this.temporaryConfigRoot = path === ':memory:' ? mkdtempSync(join(tmpdir(),'staf-config-')) : undefined;
-    this.configs = new AgentConfigStore(this.temporaryConfigRoot ?? join(dirname(resolve(path)),'agents'));
+    this.agentRoot = resolve(this.temporaryConfigRoot ?? join(dirname(resolve(path)),'agents'));
+    this.configs = new AgentConfigStore(this.agentRoot);
     if (path !== ':memory:') {
       try { closeSync(openSync(path, 'wx', 0o600)); }
       catch (error) { if (!hasCode(error, 'EEXIST')) throw error; }
@@ -82,7 +108,7 @@ export class Instance {
     this.maintenanceToken=maintenanceToken;
     if (version > INSTANCE_SCHEMA_VERSION) throw new Error(`Database version ${version} is newer than this Staf (maximum ${INSTANCE_SCHEMA_VERSION}). Use a compatible checkout or select another data directory; the database was not reset.`);
     if (hasBots && version < INSTANCE_SCHEMA_VERSION && path !== ':memory:') {
-      this.migrationBackup = `${path}.before-${version < 2 ? 'profiles' : version < 3 ? 'tasks' : version < 4 ? 'approvals' : version < 5 ? 'task-inbox' : version < 6 ? 'memory' : version < 7 ? 'memory-confirmation' : version < 8 ? 'skills' : version < 9 ? 'schedules' : version < 10 ? 'schedule-retries' : version < 11 ? 'schedule-lineage' : version < 12 ? 'bot-description' : version < 13 ? 'delegation-scope' : version < 14 ? 'collaboration' : version < 15 ? 'disclosure' : version < 16 ? 'chat-tasks' : version < 17 ? 'creation-defaults' : version < 18 ? 'web-actions' : version < 19 ? 'search-actions' : version < 20 ? 'scratch-shell' : version < 21 ? 'approval-grants' : version < 22 ? 'schedule-web-scope' : version < 23 ? 'schedule-search-scope' : version < 24 ? 'schedule-shell-scope' : version < 25 ? 'main-bot' : version < 26 ? 'command-events' : version < 27 ? 'bot-creation' : version < 28 ? 'response-progress' : 'response-stop'}-${randomUUID()}.sqlite`;
+      this.migrationBackup = `${path}.before-${version < 2 ? 'profiles' : version < 3 ? 'tasks' : version < 4 ? 'approvals' : version < 5 ? 'task-inbox' : version < 6 ? 'memory' : version < 7 ? 'memory-confirmation' : version < 8 ? 'skills' : version < 9 ? 'schedules' : version < 10 ? 'schedule-retries' : version < 11 ? 'schedule-lineage' : version < 12 ? 'bot-description' : version < 13 ? 'delegation-scope' : version < 14 ? 'collaboration' : version < 15 ? 'disclosure' : version < 16 ? 'chat-tasks' : version < 17 ? 'creation-defaults' : version < 18 ? 'web-actions' : version < 19 ? 'search-actions' : version < 20 ? 'scratch-shell' : version < 21 ? 'approval-grants' : version < 22 ? 'schedule-web-scope' : version < 23 ? 'schedule-search-scope' : version < 24 ? 'schedule-shell-scope' : version < 25 ? 'main-bot' : version < 26 ? 'command-events' : version < 27 ? 'bot-creation' : version < 28 ? 'response-progress' : version < 31 ? 'response-stop' : version < 33 ? 'work-actions' : 'search-bindings'}-${randomUUID()}.sqlite`;
       const previousUmask = process.umask(0o077);
       try {
         this.db.prepare('VACUUM INTO ?').run(this.migrationBackup);
@@ -141,7 +167,7 @@ export class Instance {
     if (version < 15) this.db.exec(`CREATE TABLE IF NOT EXISTS disclosure_requests (id TEXT PRIMARY KEY, parent_attempt_id TEXT NOT NULL REFERENCES task_attempts(id), sender_bot_id TEXT NOT NULL REFERENCES bots(id), recipient_bot_id TEXT NOT NULL REFERENCES bots(id), kind TEXT NOT NULL CHECK(kind IN ('request','question','answer','result','failure')), content TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('pending','approved','denied','consumed','interrupted')), CHECK(sender_bot_id<>recipient_bot_id))`);
     this.db.exec("UPDATE disclosure_requests SET state='interrupted' WHERE state IN ('pending','approved')");
     if (version < 16) this.db.exec("CREATE TABLE IF NOT EXISTS command_task_starts (command_id TEXT PRIMARY KEY REFERENCES commands(id), call_id TEXT NOT NULL, digest TEXT NOT NULL, attempt_id TEXT REFERENCES task_attempts(id), outcome TEXT NOT NULL CHECK(outcome IN ('accepted','busy')))");
-    if (version < 17) this.db.exec("CREATE TABLE IF NOT EXISTS creation_defaults (id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL, provider TEXT NOT NULL, model TEXT, reasoning TEXT); INSERT OR IGNORE INTO creation_defaults VALUES (1,1,'demo',NULL,NULL)");
+    if (version < 17) this.db.exec("CREATE TABLE IF NOT EXISTS creation_defaults (id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL, provider TEXT NOT NULL, model TEXT, reasoning TEXT); INSERT OR IGNORE INTO creation_defaults (id,revision,provider,model,reasoning) VALUES (1,1,'demo',NULL,NULL)");
     if(version < 18){if(!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='action_journal'").get())this.db.exec(actionJournalSchema);this.db.exec("CREATE TABLE IF NOT EXISTS web_permissions (scope TEXT PRIMARY KEY, enabled INTEGER NOT NULL CHECK(enabled IN (0,1))); CREATE TABLE IF NOT EXISTS web_action_decisions (action_id TEXT PRIMARY KEY REFERENCES action_journal(id), fingerprint TEXT NOT NULL, decision TEXT NOT NULL CHECK(decision IN ('approve','deny')))");}
     this.db.exec("UPDATE action_journal SET state='uncertain',result=NULL WHERE state='started'; UPDATE action_journal SET state='cancelled',result=NULL WHERE state='prepared'");
     if(version < 19)this.db.exec("CREATE TABLE IF NOT EXISTS search_config (id INTEGER PRIMARY KEY CHECK(id=1),revision INTEGER NOT NULL,origin TEXT); INSERT OR IGNORE INTO search_config VALUES (1,1,NULL); CREATE TABLE IF NOT EXISTS search_permissions (scope TEXT PRIMARY KEY,enabled INTEGER NOT NULL CHECK(enabled IN (0,1))); CREATE TABLE IF NOT EXISTS search_action_decisions (action_id TEXT PRIMARY KEY REFERENCES action_journal(id),fingerprint TEXT NOT NULL,decision TEXT NOT NULL CHECK(decision IN ('approve','deny'))); CREATE TABLE IF NOT EXISTS search_dispatches (action_id TEXT PRIMARY KEY REFERENCES action_journal(id),started_ms INTEGER NOT NULL)");
@@ -156,6 +182,20 @@ export class Instance {
     if(version < 27)this.db.exec('CREATE TABLE IF NOT EXISTS bot_creation_operations (id TEXT PRIMARY KEY, digest TEXT NOT NULL, bot_id TEXT NOT NULL REFERENCES bots(id))');
     if(version < 28)this.db.exec("CREATE TABLE IF NOT EXISTS response_progress (command_id TEXT PRIMARY KEY REFERENCES commands(id), text TEXT NOT NULL DEFAULT '')");
     if(version < 29)this.db.exec("CREATE TABLE IF NOT EXISTS response_stops (command_id TEXT PRIMARY KEY REFERENCES commands(id))");
+    if(version < 31 && !this.db.prepare("SELECT 1 FROM pragma_table_info('creation_defaults') WHERE name='tool_mode'").get())this.db.exec("ALTER TABLE creation_defaults ADD COLUMN tool_mode TEXT NOT NULL DEFAULT 'hybrid'");
+    if(version < 32) {
+      this.db.exec(workActionsSchema);
+      this.db.exec("CREATE TABLE IF NOT EXISTS work_bindings (kind TEXT NOT NULL CHECK(kind IN ('command','task')), work_id TEXT NOT NULL, bot_id TEXT NOT NULL REFERENCES bots(id), working_directory TEXT NOT NULL, PRIMARY KEY(kind,work_id))");
+      for (const row of this.db.prepare("SELECT 'command' AS kind,id,bot_id FROM commands UNION ALL SELECT 'task',id,bot_id FROM task_attempts").all()) {
+        if ((row.kind !== 'command' && row.kind !== 'task') || typeof row.id !== 'string' || typeof row.bot_id !== 'string') throw Error('Invalid legacy work binding');
+        this.bindWork({kind:row.kind,id:row.id}, row.bot_id);
+      }
+    }
+    if(version < 35) this.db.exec('CREATE TABLE IF NOT EXISTS search_action_bindings (action_id TEXT PRIMARY KEY REFERENCES action_journal(id), fingerprint TEXT NOT NULL, work_kind TEXT NOT NULL, work_id TEXT NOT NULL, boundary TEXT NOT NULL, grant_id TEXT, grant_revision INTEGER)');
+    if(version < 33) this.db.exec(`CREATE TABLE IF NOT EXISTS code_executions (id TEXT PRIMARY KEY, kind TEXT NOT NULL, work_id TEXT NOT NULL, response_id TEXT NOT NULL, call_id TEXT NOT NULL, source TEXT NOT NULL, source_hash TEXT NOT NULL, outcome TEXT NOT NULL, result TEXT, UNIQUE(kind,work_id,response_id,call_id));`);
+    this.db.exec("UPDATE code_executions SET outcome='interrupted' WHERE outcome='running'");
+    if(version < 35) this.db.exec(nativeProcessSchema);
+    if(version < 36)for(const [name,definition] of Object.entries({retained:'INTEGER NOT NULL DEFAULT 0',input_closed:'INTEGER NOT NULL DEFAULT 0',input_bytes:'INTEGER NOT NULL DEFAULT 0',cols:'INTEGER',rows:'INTEGER'}))if(!this.db.prepare("SELECT 1 FROM pragma_table_info('native_processes') WHERE name=?").get(name))this.db.exec(`ALTER TABLE native_processes ADD COLUMN ${name} ${definition}`);
     if(version < 30 && !this.db.prepare("SELECT 1 FROM pragma_table_info('command_runtime_events') WHERE name='detail'").get())this.db.exec('ALTER TABLE command_runtime_events ADD COLUMN detail TEXT');
     this.db.exec('CREATE INDEX IF NOT EXISTS command_runtime_events_command ON command_runtime_events(command_id,seq)');
     if (!maintenanceToken) this.db.exec(`PRAGMA user_version=${INSTANCE_SCHEMA_VERSION}`);
@@ -180,12 +220,44 @@ export class Instance {
     this.bots();
     } catch (error) { this.db.close(); if(this.temporaryConfigRoot)rmSync(this.temporaryConfigRoot,{recursive:true,force:true}); throw error; }
   }
+  private bindWork(work:WorkRef, botId:string) {
+    if (!/^[a-zA-Z0-9_-]+$/.test(botId)) throw Error('Invalid agent identity for working directory');
+    const directory=join(this.agentRoot,botId,'work');
+    mkdirSync(directory,{recursive:true,mode:0o700});
+    this.db.prepare('INSERT OR IGNORE INTO work_bindings VALUES (?,?,?,?)').run(work.kind,work.id,botId,directory);
+  }
+  workContext(work:WorkRef, signal:AbortSignal) {
+    const binding=this.db.prepare('SELECT bot_id,working_directory FROM work_bindings WHERE kind=? AND work_id=?').get(work.kind,work.id);
+    if (typeof binding?.bot_id !== 'string' || typeof binding.working_directory !== 'string' || !isAbsolute(binding.working_directory)) throw Error('Accepted work binding unavailable');
+    const row=work.kind==='command' ? this.db.prepare('SELECT profile FROM command_profiles WHERE command_id=?').get(work.id) : this.db.prepare('SELECT profile,context FROM task_attempts WHERE id=?').get(work.id);
+    if (typeof row?.profile !== 'string') throw Error('Accepted work profile unavailable');
+    const profile=parseCapturedProfile(JSON.parse(row.profile));
+    const conversation=work.kind==='command' ? {kind:'chat' as const,conversationId:profile.chatId} : {kind:'task' as const,conversationId:profile.chatId,context:typeof row.context==='string' ? JSON.parse(row.context) : []};
+    const acceptedWork={...work};freezeCaptured(acceptedWork);freezeCaptured(conversation);
+    return Object.freeze({work:acceptedWork,botId:binding.bot_id,conversation,mode:profile.toolMode,workingDirectory:binding.working_directory,signal,workSignal:signal});
+  }
+  private processService?:NativeProcesses;
+  processes(outputFilter?:()=>ByteRedactor):NativeProcesses { return this.processService ??= new NativeProcesses(this.db,outputFilter); }
+  workActions():WorkActionService {
+    if (!this.actionService) this.actionService=new WorkActionService(this.db,this.fingerprintKey,
+      (work,signal)=>this.workContext(work,signal),
+      work=>{
+        const record=work.kind==='command' ? this.command(work.id) : this.taskAttempt(work.id);
+        if (!record || typeof record.botId !== 'string' || record.state!==(work.kind==='command' ? 'pending' : 'running') || this.botIdentity(record.botId)?.archived !== false || (work.kind==='command' && this.responseStopping(work.id)) || (work.kind==='task' && this.scheduleOrigin(work.id)?.revoked === 1)) throw Error('Work is no longer active or authorized');
+      },32,work=>work.kind==='task' && this.taskHasPending(work.id),this.redactSkill);
+    return this.actionService;
+  }
   private scheduleOrigin(attemptId:string) {
     return this.db.prepare(`SELECT s.id AS schedule_id, s.revoked, s.authorization, o.due_at, o.status
       FROM schedules s JOIN schedule_occurrences o ON o.schedule_id=s.id
       WHERE o.task_id=? OR EXISTS (SELECT 1 FROM schedule_task_retries r WHERE r.attempt_id=? AND r.schedule_id=o.schedule_id AND r.due_at=o.due_at)`).get(attemptId,attemptId);
   }
   datasetIdentity() { return createHmac('sha256',this.datasetKey).update('staf-dataset-identity-v1').digest('hex'); }
+  fileActionsAllowed(work:WorkRef) {return work.kind!=='task' || (!this.isHelperAttempt(work.id) && !this.scheduleOrigin(work.id));}
+
+  nativeProcessAllowed(work:WorkRef) {return work.kind==='command' || (!this.isHelperAttempt(work.id) && !this.scheduleOrigin(work.id));}
+
+  isScheduledAttempt(attemptId:string) {return !!this.scheduleOrigin(attemptId);}
   scheduleClockAllowed(attemptId:string) {
     const row=this.scheduleOrigin(attemptId);
     if (!row) return true;
@@ -212,14 +284,26 @@ export class Instance {
   }
   get skills() { return new SkillCatalog(this.db, this.redactSkill); }
   get memories() { return new MemoryStore(this.db); }
+  proposeSharedMemory(botId:string,text:string,id:string=randomUUID()) {
+    const clean=text.trim();
+    if (!clean || clean.length>4000) throw Error('Invalid memory text');
+    this.db.prepare("INSERT INTO memory_proposals VALUES (?,?,?,'pending')").run(id,botId,clean);
+    return {id,state:'pending' as const};
+  }
+  sharedMemoryProposal(botId:string,id:string) {
+    const row=this.db.prepare('SELECT id,state FROM memory_proposals WHERE id=? AND bot_id=?').get(id,botId);
+    if (!row || (row.state!=='pending' && row.state!=='confirmed' && row.state!=='cancelled')) return null;
+    return {id:String(row.id),state:row.state};
+  }
+
   get #approvalGrants() { return new ApprovalGrants(this.db); }
   listApprovalGrants() { return this.#approvalGrants.list(); }
-  recordGrantedDecision(input:{work:WorkRef;boundary:GrantBoundary;id:string;fingerprint:string;callId:string;hop:number;scope:'bot'|'all-bots';lifetime:'task'|'remembered'}):void {
+  recordGrantedDecision(input:{work:WorkRef;boundary:GrantBoundary;id:string;fingerprint:string;scope:'bot'|'all-bots';lifetime:'task'|'remembered'} & ({kind:'registered'} | {kind?:'legacy';callId:string;hop:number})):void {
     if(this.db.isTransaction!==false)throw new BotConflict('Instance connection is busy');
     this.db.exec('BEGIN IMMEDIATE');try {
       this.validateGrantBoundary(input.boundary);
-      const identity=input.boundary.kind==='web'?this.webIdentity(input.work,input.callId,input.hop,input.boundary.url):input.boundary.kind==='search'?this.searchIdentity(input.work,input.callId,input.boundary.origin,input.boundary.revision,input.boundary.query):this.shellIdentity(input.work,input.callId,{revision:input.boundary.revision,dockerBinary:input.boundary.dockerBinary,dockerSocket:input.boundary.dockerSocket,imageId:input.boundary.imageId},input.boundary.command);
-      if(identity.id!==input.id || identity.fingerprint!==input.fingerprint)throw new BotConflict('Grant boundary does not match action');
+      const identity=input.kind==='registered' ? this.registeredAuthorityIdentity(input.work,input.id,input.fingerprint,input.boundary) : (input.boundary.kind==='web'?this.webIdentity(input.work,input.callId,input.hop,input.boundary.url):input.boundary.kind==='search'?this.searchIdentity(input.work,input.callId,input.boundary.origin,input.boundary.revision,input.boundary.query):this.shellIdentity(input.work,input.callId,{revision:input.boundary.revision,dockerBinary:input.boundary.dockerBinary,dockerSocket:input.boundary.dockerSocket,imageId:input.boundary.imageId},input.boundary.command));
+      if(!identity || identity.id!==input.id || identity.fingerprint!==input.fingerprint)throw new BotConflict('Grant boundary does not match action');
       const action=this.webJournal().get(input.id);
       if(!action || action.state!=='prepared' || action.fingerprint!==input.fingerprint || action.work.kind!==input.work.kind || action.work.id!==input.work.id)throw new BotConflict('Action changed');
       if(input.boundary.kind==='web')this.recordWebDecision(input.id,input.fingerprint,'approve');
@@ -321,7 +405,7 @@ export class Instance {
       const row=this.db.prepare('SELECT bot_id FROM main_bot WHERE id=1').get();
       if (row && typeof row.bot_id === 'string') { const bot=this.bots().find(item=>item.id===row.bot_id); if (!bot) throw Error('Main bot is missing'); this.db.exec('COMMIT'); return bot; }
       const id=randomUUID(), chatId=randomUUID(), defaults=this.creationDefaults();
-      this.configs.publish(id,{name:'Staf',description:'',provider:defaults.provider,model:defaults.model,reasoning:defaults.reasoning,instructions:starterSoul},false);
+      this.configs.publish(id,{name:'Staf',description:'',provider:defaults.provider,model:defaults.model,reasoning:defaults.reasoning,toolMode:defaults.toolMode,instructions:starterSoul},false);
       this.db.prepare('INSERT INTO bots VALUES (?, ?, ?, ?, ?, ?, ?)').run(id,chatId,'','','demo',null,null);
       this.db.prepare('INSERT INTO bot_profiles (bot_id,revision,soul,archived) VALUES (?, 1, ?, 0)').run(id,'');
       this.db.prepare('INSERT INTO main_bot VALUES (1,?)').run(id);
@@ -370,7 +454,7 @@ export class Instance {
     return {command:scope.command,dockerBinary:scope.docker_binary,dockerSocket:scope.docker_socket,imageId:scope.image_id,revision:scope.revision,scheduleId:String(origin.schedule_id),dueAt:Number(origin.due_at)};
   }
   shellCanOffer(work:WorkRef) {const record=work.kind==='task'?this.taskAttempt(work.id):this.command(work.id),config=this.shellConfig();if(!record||typeof record.botId!=='string'||record.state!==(work.kind==='task'?'running':'pending')||!config.dockerBinary||!config.dockerSocket||!config.imageId||!this.shellPermission('instance').enabled||!this.shellPermission('bot:'+record.botId).enabled||!this.botIdentity(record.botId)||this.botIdentity(record.botId)?.archived)return false;if(work.kind!=='task')return true;if(this.isHelperAttempt(work.id))return false;return !this.scheduleOrigin(work.id)||!!this.scheduleShellScope(work.id);}
-  shellAllowed(work:WorkRef,revision:number,command?:string) {if(!this.shellCanOffer(work)||this.shellConfig().revision!==revision||this.shellBusy())return false;if(work.kind!=='task')return true;const origin=this.scheduleOrigin(work.id);if(origin){const scope=this.scheduleShellScope(work.id),row=this.db.prepare('SELECT enabled FROM shell_permissions WHERE scope=?').get('task:'+work.id),config=this.shellConfig();if(!scope||row?.enabled===0||scope.revision!==revision||scope.dockerBinary!==config.dockerBinary||scope.dockerSocket!==config.dockerSocket||scope.imageId!==config.imageId||(command!==undefined && scope.command!==command)||this.db.prepare('SELECT 1 FROM schedule_shell_dispatches WHERE schedule_id=? AND due_at=?').get(scope.scheduleId,scope.dueAt))return false;}else if(!this.shellPermission('task:'+work.id).enabled)return false;return !this.taskHasPending(work.id);}
+  shellAllowed(work:WorkRef,revision:number,command?:string,actionId?:string) {const busy=this.db.prepare("SELECT 1 FROM action_journal a WHERE a.id<>? AND a.summary='Run scratch command' AND (a.state='started' OR (a.state='uncertain' AND NOT EXISTS (SELECT 1 FROM shell_reviews r WHERE r.action_id=a.id))) LIMIT 1").get(actionId ?? '');const lock=this.db.prepare('SELECT 1 FROM shell_lock WHERE action_id<>?').get(actionId ?? '');if(!this.shellCanOffer(work)||this.shellConfig().revision!==revision||busy||lock)return false;if(work.kind!=='task')return true;const origin=this.scheduleOrigin(work.id);if(origin){const scope=this.scheduleShellScope(work.id),row=this.db.prepare('SELECT enabled FROM shell_permissions WHERE scope=?').get('task:'+work.id),config=this.shellConfig();if(!scope||row?.enabled===0||scope.revision!==revision||scope.dockerBinary!==config.dockerBinary||scope.dockerSocket!==config.dockerSocket||scope.imageId!==config.imageId||(command!==undefined && scope.command!==command)||this.db.prepare('SELECT 1 FROM schedule_shell_dispatches WHERE schedule_id=? AND due_at=? AND action_id<>?').get(scope.scheduleId,scope.dueAt,actionId ?? ''))return false;}else if(!this.shellPermission('task:'+work.id).enabled)return false;return !this.taskHasPending(work.id);}
   shellIdentity(work:WorkRef,callId:string,config:{revision:number;dockerBinary:string;dockerSocket:string;imageId:string},command:string) {const hex=createHmac('sha256',this.fingerprintKey).update(JSON.stringify(['shell-id',work.kind,work.id,callId])).digest('hex').slice(0,32).split('');hex[12]='4';hex[16]=['8','9','a','b'][parseInt(hex[16] ?? '0',16)%4] ?? '8';const raw=hex.join(''),id=`${raw.slice(0,8)}-${raw.slice(8,12)}-${raw.slice(12,16)}-${raw.slice(16,20)}-${raw.slice(20)}`;return {id,fingerprint:createHmac('sha256',this.fingerprintKey).update(JSON.stringify(['shell-action',work.kind,work.id,callId,config,command,scratchLimits])).digest('hex')};}
   recordShellDecision(id:string,fingerprint:string,config:{dockerBinary:string;dockerSocket:string;imageId:string},decision:'approve'|'deny') {this.db.prepare('INSERT INTO shell_action_configs VALUES (?,?,?,?,?,?)').run(id,fingerprint,config.dockerBinary,config.dockerSocket,config.imageId,decision);}
   reserveShell(id:string) {this.db.exec('BEGIN IMMEDIATE');try{const other=this.db.prepare("SELECT 1 FROM action_journal a WHERE a.id<>? AND a.summary='Run scratch command' AND (a.state='started' OR (a.state='uncertain' AND NOT EXISTS (SELECT 1 FROM shell_reviews r WHERE r.action_id=a.id))) LIMIT 1").get(id);if(other||this.db.prepare('SELECT 1 FROM shell_lock').get()){this.db.exec('ROLLBACK');return false;}this.db.prepare('INSERT INTO shell_lock VALUES (1,?)').run(id);this.db.exec('COMMIT');return true;}catch(error){this.db.exec('ROLLBACK');throw error;}}
@@ -405,12 +489,119 @@ export class Instance {
     return {query:scope.query,origin:scope.origin,revision:scope.revision,scheduleId:String(origin.schedule_id),dueAt:Number(origin.due_at)};
   }
   searchCanOffer(work:WorkRef) {const record=work.kind==='task' ? this.taskAttempt(work.id) : this.command(work.id);if(!record || typeof record.botId!=='string' || record.state !== (work.kind==='task' ? 'running' : 'pending'))return false;if(!this.botIdentity(record.botId) || this.botIdentity(record.botId)?.archived || !this.searchConfig().origin || !this.searchPermission('instance').enabled || !this.searchPermission('bot:'+record.botId).enabled)return false;if(work.kind!=='task')return true;if(this.isHelperAttempt(work.id))return false;return !this.scheduleOrigin(work.id) || !!this.scheduleSearchScope(work.id);}
-  searchAllowed(work:WorkRef,origin:string,revision:number,query?:string) {if(!this.searchCanOffer(work) || this.searchConfig().origin!==origin || this.searchConfig().revision!==revision)return false;if(work.kind!=='task')return true;const scheduled=this.scheduleOrigin(work.id);if(scheduled){const scope=this.scheduleSearchScope(work.id),row=this.db.prepare('SELECT enabled FROM search_permissions WHERE scope=?').get('task:'+work.id);if(!scope || row?.enabled===0 || scope.origin!==origin || scope.revision!==revision || (query!==undefined && query!==scope.query) || this.db.prepare('SELECT 1 FROM schedule_search_dispatches WHERE schedule_id=? AND due_at=?').get(scope.scheduleId,scope.dueAt))return false;}else if(!this.searchPermission('task:'+work.id).enabled)return false;return !this.taskHasPending(work.id);}
+  searchAllowed(work:WorkRef,origin:string,revision:number,query?:string,actionId?:string) {if(!this.searchCanOffer(work) || this.searchConfig().origin!==origin || this.searchConfig().revision!==revision)return false;if(work.kind!=='task')return true;const scheduled=this.scheduleOrigin(work.id);if(scheduled){const scope=this.scheduleSearchScope(work.id),row=this.db.prepare('SELECT enabled FROM search_permissions WHERE scope=?').get('task:'+work.id);if(!scope || row?.enabled===0 || scope.origin!==origin || scope.revision!==revision || (query!==undefined && query!==scope.query) || this.db.prepare('SELECT 1 FROM schedule_search_dispatches WHERE schedule_id=? AND due_at=? AND action_id<>?').get(scope.scheduleId,scope.dueAt,actionId ?? ''))return false;}else if(!this.searchPermission('task:'+work.id).enabled)return false;return !this.taskHasPending(work.id);}
   claimScheduledSearchDispatch(work:WorkRef,origin:string,revision:number,query:string,actionId:string) {
     if(work.kind!=='task' || !this.scheduleOrigin(work.id))return true;
     if(this.db.isTransaction!==false)throw new BotConflict('Instance connection is busy');this.db.exec('BEGIN IMMEDIATE');try{const scope=this.scheduleSearchScope(work.id);if(!scope || !this.searchAllowed(work,origin,revision,query)){this.db.exec('ROLLBACK');return false;}this.db.prepare('INSERT INTO schedule_search_dispatches VALUES (?,?,?)').run(scope.scheduleId,scope.dueAt,actionId);this.db.exec('COMMIT');return true;}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   searchIdentity(work:WorkRef,callId:string,origin:string,revision:number,query:string) {return {id:createHmac('sha256',this.fingerprintKey).update(JSON.stringify(['search-id',work.kind,work.id,callId])).digest('hex'),fingerprint:createHmac('sha256',this.fingerprintKey).update(JSON.stringify(['search-action',work.kind,work.id,callId,origin,revision,query,{results:10,timeoutMs:10000}])).digest('hex')};}
+  bindRegisteredSearch(work:WorkRef,action:ActionIdentity,boundary:Extract<GrantBoundary,{kind:'search'}>) {
+    this.validateGrantBoundary(boundary);
+    const record=this.webJournal().get(action.id);
+    if(!record || record.state!=='prepared' || record.fingerprint!==action.fingerprint || record.work.kind!==work.kind || record.work.id!==work.id || !this.searchAllowed(work,boundary.origin,boundary.revision,boundary.query))throw new BotConflict('Search action changed');
+    this.db.prepare('INSERT INTO search_action_bindings VALUES (?,?,?,?,?,NULL,NULL)').run(action.id,action.fingerprint,work.kind,work.id,JSON.stringify(boundary));
+  }
+  private registeredAuthorityIdentity(work:WorkRef,id:string,fingerprint:string,boundary:GrantBoundary):ActionIdentity|null {
+    const row=this.db.prepare('SELECT fingerprint,work_kind,work_id,boundary FROM search_action_bindings WHERE action_id=?').get(id);
+    if(!row)return null;
+    if(row.fingerprint!==fingerprint || row.work_kind!==work.kind || row.work_id!==work.id || row.boundary!==JSON.stringify(boundary))throw new BotConflict('Search binding changed');
+    return {id,fingerprint};
+  }
+  registeredSearchBoundary(work:WorkRef,action:ActionIdentity,query:string) {
+    const row=this.db.prepare('SELECT boundary,grant_id,grant_revision FROM search_action_bindings WHERE action_id=?').get(action.id);
+    if(typeof row?.boundary!=='string')throw new BotConflict('Search binding unavailable');
+    const boundary:GrantBoundary=JSON.parse(row.boundary);this.validateGrantBoundary(boundary);
+    if(boundary.kind!=='search' || boundary.query!==query || !this.registeredAuthorityIdentity(work,action.id,action.fingerprint,boundary) || !this.searchAllowed(work,boundary.origin,boundary.revision,query,action.id))throw new BotConflict('Search scope changed');
+    if(typeof row.grant_id==='string') {
+      const botId=this.webWorkBotId(work),grant=this.#approvalGrants.list().find(g=>g.id===row.grant_id);
+      if(!botId || !grant || grant.revoked || grant.revision!==row.grant_revision || JSON.stringify(grant.boundary)!==row.boundary || (grant.scope.kind==='bot' && grant.scope.botId!==botId) || (grant.lifetime.kind==='task' && (work.kind!=='task' || grant.lifetime.taskId!==work.id)))throw new BotConflict('Search grant revoked');
+    }
+    return boundary;
+  }
+  assertRegisteredSearchDecision(work:WorkRef,action:ActionIdentity,query:string):void {
+    this.registeredSearchBoundary(work,action,query);
+    const decision=this.db.prepare('SELECT fingerprint,decision FROM search_action_decisions WHERE action_id=?').get(action.id);
+    if(decision?.fingerprint!==action.fingerprint || decision.decision!=='approve')throw new BotConflict('Search decision changed');
+  }
+  claimRegisteredSearchGrant(work:WorkRef,action:ActionIdentity,query:string,controller:AbortController):string {
+    if(!this.db.isTransaction || controller.signal.aborted)throw new BotConflict('Search claim requires active transaction');
+    const boundary=this.registeredSearchBoundary(work,action,query),botId=this.webWorkBotId(work);
+    if(!botId || !this.matchingApprovalGrant(work,boundary))throw new BotConflict('Search grant changed');
+    const grantId=this.#approvalGrants.matchingId(boundary,botId,work.kind==='task'?work.id:null);
+    const record=this.webJournal().get(action.id);
+    if(!grantId || !record || record.state!=='prepared')throw new BotConflict('Search grant or action changed');
+    const grant=this.#approvalGrants.list().find(item=>item.id===grantId);if(!grant)throw new BotConflict('Search grant changed');
+    this.db.prepare('UPDATE search_action_bindings SET grant_id=?,grant_revision=? WHERE action_id=?').run(grantId,grant.revision,action.id);
+    const controllers=this.grantControllers.get(grantId)??new Set<AbortController>();controllers.add(controller);this.grantControllers.set(grantId,controllers);
+    return grantId;
+  }
+  bindRegisteredShell(work:WorkRef,action:ActionIdentity,boundary:Extract<GrantBoundary,{kind:'shell'}>) {
+    this.validateGrantBoundary(boundary);
+    const record=this.webJournal().get(action.id);
+    if(!record || record.state!=='prepared' || record.fingerprint!==action.fingerprint || record.work.kind!==work.kind || record.work.id!==work.id || !this.shellAllowed(work,boundary.revision,boundary.command,action.id))throw new BotConflict('Shell action changed');
+    this.db.prepare('INSERT INTO search_action_bindings VALUES (?,?,?,?,?,NULL,NULL)').run(action.id,action.fingerprint,work.kind,work.id,JSON.stringify(boundary));
+  }
+  registeredShellBoundary(work:WorkRef,action:ActionIdentity,command:string) {
+    const row=this.db.prepare('SELECT boundary,grant_id,grant_revision FROM search_action_bindings WHERE action_id=?').get(action.id);
+    if(typeof row?.boundary!=='string')throw new BotConflict('Shell binding unavailable');
+    const boundary:GrantBoundary=JSON.parse(row.boundary);this.validateGrantBoundary(boundary);
+    if(boundary.kind!=='shell' || boundary.command!==command || !this.registeredAuthorityIdentity(work,action.id,action.fingerprint,boundary) || !this.shellAllowed(work,boundary.revision,command,action.id))throw new BotConflict('Shell scope changed');
+    if(typeof row.grant_id==='string') {
+      const botId=this.webWorkBotId(work),grant=this.#approvalGrants.list().find(g=>g.id===row.grant_id);
+      if(!botId || !grant || grant.revoked || grant.revision!==row.grant_revision || JSON.stringify(grant.boundary)!==row.boundary || (grant.scope.kind==='bot' && grant.scope.botId!==botId) || (grant.lifetime.kind==='task' && (work.kind!=='task' || grant.lifetime.taskId!==work.id)))throw new BotConflict('Shell grant revoked');
+    }
+    return boundary;
+  }
+  assertRegisteredShellDecision(work:WorkRef,action:ActionIdentity,command:string):void {
+    this.registeredShellBoundary(work,action,command);
+    const decision=this.db.prepare('SELECT fingerprint,decision FROM shell_action_configs WHERE action_id=?').get(action.id);
+    if(decision?.fingerprint!==action.fingerprint || decision.decision!=='approve')throw new BotConflict('Shell decision changed');
+  }
+  claimRegisteredShellGrant(work:WorkRef,action:ActionIdentity,command:string,controller:AbortController):string {
+    if(!this.db.isTransaction || controller.signal.aborted)throw new BotConflict('Shell claim requires active transaction');
+    const boundary=this.registeredShellBoundary(work,action,command),botId=this.webWorkBotId(work);
+    if(!botId || !this.matchingApprovalGrant(work,boundary))throw new BotConflict('Shell grant changed');
+    const grantId=this.#approvalGrants.matchingId(boundary,botId,work.kind==='task'?work.id:null),record=this.webJournal().get(action.id);
+    const grant=this.#approvalGrants.list().find(item=>item.id===grantId);
+    if(!grantId || !grant || !record || record.state!=='prepared')throw new BotConflict('Shell grant or action changed');
+    this.db.prepare('UPDATE search_action_bindings SET grant_id=?,grant_revision=? WHERE action_id=?').run(grantId,grant.revision,action.id);
+    this.recordShellDecision(action.id,action.fingerprint,boundary,'approve');
+    const controllers=this.grantControllers.get(grantId)??new Set<AbortController>();controllers.add(controller);this.grantControllers.set(grantId,controllers);
+    return grantId;
+  }
+  bindRegisteredWeb(work:WorkRef,action:ActionIdentity,boundary:Extract<GrantBoundary,{kind:'web'}>) {
+    this.validateGrantBoundary(boundary);const record=this.webJournal().get(action.id);
+    if(!record || record.state!=='prepared' || record.fingerprint!==action.fingerprint || record.work.kind!==work.kind || record.work.id!==work.id || !this.webAllowed(work,boundary.url,action.id))throw new BotConflict('Web action changed');
+    this.db.prepare('INSERT INTO search_action_bindings VALUES (?,?,?,?,?,NULL,NULL)').run(action.id,action.fingerprint,work.kind,work.id,JSON.stringify(boundary));
+  }
+  registeredWebBoundary(work:WorkRef,action:ActionIdentity,url:string) {
+    const row=this.db.prepare('SELECT boundary,grant_id,grant_revision FROM search_action_bindings WHERE action_id=?').get(action.id);
+    if(typeof row?.boundary!=='string')throw new BotConflict('Web binding unavailable');
+    const boundary:GrantBoundary=JSON.parse(row.boundary);this.validateGrantBoundary(boundary);
+    if(boundary.kind!=='web' || boundary.url!==url || !this.registeredAuthorityIdentity(work,action.id,action.fingerprint,boundary) || !this.webAllowed(work,url,action.id))throw new BotConflict('Web scope changed');
+    if(typeof row.grant_id==='string') {
+      const botId=this.webWorkBotId(work),grant=this.#approvalGrants.list().find(g=>g.id===row.grant_id);
+      if(!botId || !grant || grant.revoked || grant.revision!==row.grant_revision || JSON.stringify(grant.boundary)!==row.boundary || (grant.scope.kind==='bot' && grant.scope.botId!==botId) || (grant.lifetime.kind==='task' && (work.kind!=='task' || grant.lifetime.taskId!==work.id)))throw new BotConflict('Web grant revoked');
+    }
+    return boundary;
+  }
+  registeredWebChildren(work:WorkRef,parent:ActionIdentity):void {
+    const rows=this.db.prepare("SELECT i.action_id,i.input,a.fingerprint FROM work_action_invocations i JOIN action_journal a ON a.id=i.action_id WHERE i.kind=? AND i.work_id=? AND json_extract(i.source,'$.kind')='internal' AND json_extract(i.source,'$.parentId')=? ORDER BY i.rowid").all(work.kind,work.id,parent.id);
+    for(const row of rows) {const input=JSON.parse(String(row.input));if(typeof input.url!=='string')throw new BotConflict('Web hop binding unavailable');this.registeredWebBoundary(work,{id:String(row.action_id),fingerprint:String(row.fingerprint)},input.url);}
+  }
+  assertRegisteredWebDecision(work:WorkRef,action:ActionIdentity,url:string):void {
+    this.registeredWebBoundary(work,action,url);const decision=this.db.prepare('SELECT fingerprint,decision FROM web_action_decisions WHERE action_id=?').get(action.id);
+    if(decision?.fingerprint!==action.fingerprint || decision.decision!=='approve')throw new BotConflict('Web decision changed');
+  }
+  claimRegisteredWebGrant(work:WorkRef,action:ActionIdentity,url:string,controller:AbortController):string {
+    if(!this.db.isTransaction || controller.signal.aborted)throw new BotConflict('Web claim requires active transaction');
+    const boundary=this.registeredWebBoundary(work,action,url),botId=this.webWorkBotId(work);
+    if(!botId || !this.matchingApprovalGrant(work,boundary))throw new BotConflict('Web grant changed');
+    const grantId=this.#approvalGrants.matchingId(boundary,botId,work.kind==='task'?work.id:null),record=this.webJournal().get(action.id),grant=this.#approvalGrants.list().find(item=>item.id===grantId);
+    if(!grantId || !grant || !record || record.state!=='prepared')throw new BotConflict('Web grant or action changed');
+    this.db.prepare('UPDATE search_action_bindings SET grant_id=?,grant_revision=? WHERE action_id=?').run(grantId,grant.revision,action.id);
+    const controllers=this.grantControllers.get(grantId)??new Set<AbortController>();controllers.add(controller);this.grantControllers.set(grantId,controllers);return grantId;
+  }
   recordSearchDecision(id:string,fingerprint:string,decision:'approve'|'deny') {this.db.prepare('INSERT INTO search_action_decisions VALUES (?,?,?)').run(id,fingerprint,decision);}
   claimSearchDispatch(id:string,now:number) {this.db.exec('BEGIN IMMEDIATE');try{this.db.prepare('DELETE FROM search_dispatches WHERE started_ms<?').run(now-60000);const count=Number(this.db.prepare('SELECT count(*) AS count FROM search_dispatches').get()?.count);if(count>=10){this.db.exec('ROLLBACK');return false;}this.db.prepare('INSERT INTO search_dispatches VALUES (?,?)').run(id,now);this.db.exec('COMMIT');return true;}catch(error){this.db.exec('ROLLBACK');throw error;}}
   searchActions(work:WorkRef) {return this.db.prepare(`SELECT id,state,summary,result FROM action_journal WHERE ${work.kind==='task' ? 'task_attempt_id' : 'command_id'}=? AND summary='Search configured backend' ORDER BY rowid`).all(work.id);}
@@ -435,7 +626,7 @@ export class Instance {
   }
   scheduleOwnsAttempt(attemptId:string,scheduleId:string) {return this.scheduleOrigin(attemptId)?.schedule_id===scheduleId;}
   webCanOffer(work:WorkRef) {const record=work.kind==='task' ? this.taskAttempt(work.id) : this.command(work.id);if(!record || typeof record.botId!=='string' || record.state !== (work.kind==='task' ? 'running' : 'pending'))return false;if(!this.botIdentity(record.botId) || this.botIdentity(record.botId)?.archived || !this.webPermission('instance').enabled || !this.webPermission('bot:'+record.botId).enabled)return false;if(work.kind!=='task')return true;if(this.isHelperAttempt(work.id))return false;const origin=this.scheduleOrigin(work.id);return !origin || !!this.scheduleWebScope(work.id);}
-  webAllowed(work:WorkRef,url?:string) {if(!this.webCanOffer(work))return false;if(work.kind==='task'){const origin=this.scheduleOrigin(work.id);if(origin){const scope=this.scheduleWebScope(work.id);const setting=this.db.prepare('SELECT enabled FROM web_permissions WHERE scope=?').get('task:'+work.id);if(!scope || setting?.enabled===0 || (url!==undefined && url!==scope.url) || this.db.prepare('SELECT 1 FROM schedule_web_dispatches WHERE schedule_id=? AND due_at=?').get(scope.scheduleId,scope.dueAt))return false;}else if(!this.webPermission('task:'+work.id).enabled)return false;if(this.taskHasPending(work.id))return false;}return true;}
+  webAllowed(work:WorkRef,url?:string,actionId?:string) {if(!this.webCanOffer(work))return false;if(work.kind==='task'){const origin=this.scheduleOrigin(work.id);if(origin){const scope=this.scheduleWebScope(work.id);const setting=this.db.prepare('SELECT enabled FROM web_permissions WHERE scope=?').get('task:'+work.id);if(!scope || setting?.enabled===0 || (url!==undefined && url!==scope.url) || this.db.prepare('SELECT 1 FROM schedule_web_dispatches WHERE schedule_id=? AND due_at=? AND action_id<>?').get(scope.scheduleId,scope.dueAt,actionId ?? ''))return false;}else if(!this.webPermission('task:'+work.id).enabled)return false;if(this.taskHasPending(work.id))return false;}return true;}
   claimScheduledWebDispatch(work:WorkRef,url:string,actionId:string) {
     if(work.kind!=='task' || !this.scheduleOrigin(work.id))return true;
     if(this.db.isTransaction!==false)throw new BotConflict('Instance connection is busy');this.db.exec('BEGIN IMMEDIATE');try{const scope=this.scheduleWebScope(work.id);if(!scope || !this.webAllowed(work,url) || this.db.prepare('SELECT 1 FROM schedule_web_dispatches WHERE schedule_id=? AND due_at=?').get(scope.scheduleId,scope.dueAt)){this.db.exec('ROLLBACK');return false;}this.db.prepare('INSERT INTO schedule_web_dispatches VALUES (?,?,?)').run(scope.scheduleId,scope.dueAt,actionId);this.db.exec('COMMIT');return true;}catch(error){this.db.exec('ROLLBACK');throw error;}
@@ -495,10 +686,11 @@ export class Instance {
     const pair=current.providerChoices?.[provider]??this.providerDefaults().read().providers[provider]??{model:null,reasoning:null};
     return this.editBot(id,{...current,revision,provider,model:model===undefined?pair.model:model,reasoning:reasoning===undefined?pair.reasoning:reasoning});
   }
-  creationDefaults() {const row=this.db.prepare('SELECT revision,provider,model,reasoning FROM creation_defaults WHERE id=1').get();if(!row || typeof row.revision !== 'number' || typeof row.provider !== 'string' || !(row.model === null || typeof row.model === 'string') || !(row.reasoning === null || typeof row.reasoning === 'string'))throw Error('Invalid creation defaults');return {revision:row.revision,provider:row.provider,model:row.model,reasoning:row.reasoning};}
-  setCreationDefaults(input:{revision:number;provider:string;model:string|null;reasoning:string|null}) {
+  creationDefaults() {const row=this.db.prepare('SELECT revision,provider,model,reasoning,tool_mode FROM creation_defaults WHERE id=1').get();if(!row || typeof row.revision !== 'number' || typeof row.provider !== 'string' || !(row.model === null || typeof row.model === 'string') || !(row.reasoning === null || typeof row.reasoning === 'string'))throw Error('Invalid creation defaults');return {revision:row.revision,provider:row.provider,model:row.model,reasoning:row.reasoning,toolMode:parseToolMode(row.tool_mode)};}
+  setCreationDefaults(input:{revision:number;provider:string;model:string|null;reasoning:string|null;toolMode?:ToolMode}) {
     if(!Number.isSafeInteger(input.revision) || input.revision<1 || !['demo','codex','openrouter','lmstudio','live'].includes(input.provider) || !(input.model === null || typeof input.model === 'string' && input.model.length <= 200) || !(input.reasoning === null || typeof input.reasoning === 'string' && input.reasoning.length <= 100))throw Error('Invalid creation defaults');
-    const result=this.db.prepare('UPDATE creation_defaults SET revision=revision+1,provider=?,model=?,reasoning=? WHERE id=1 AND revision=?').run(input.provider,input.model,input.reasoning,input.revision);
+    const toolMode=input.toolMode===undefined?this.creationDefaults().toolMode:parseToolMode(input.toolMode);
+    const result=this.db.prepare('UPDATE creation_defaults SET revision=revision+1,provider=?,model=?,reasoning=?,tool_mode=? WHERE id=1 AND revision=?').run(input.provider,input.model,input.reasoning,toolMode,input.revision);
     if(!result.changes)throw new BotConflict('Creation defaults changed. Refresh before editing.');return this.creationDefaults();
   }
   private imageAssets() {return this.images??=new AgentImageAssets(join(dirname(dirname(this.configs.location('placeholder'))),'.images'));}
@@ -506,21 +698,22 @@ export class Instance {
   private requireStoredImage(image:AgentImage,previous?:AgentImage) {
     if(image.kind==='upload' && !(previous?.kind==='upload' && previous.assetId===image.assetId) && !this.imageAssets().read(image.assetId)) throw Error('The selected image is unavailable. Upload it again or choose another image.');
   }
-  createBot(input: {name: string; instructions: string; provider?: string; model?: string; reasoning?: string; operationId?: string;image?:AgentImageInput}, advertisedModel?:string) {
+  createBot(input: {name: string; instructions: string; provider?: string; model?: string; reasoning?: string; operationId?: string;toolMode?:ToolMode;image?:AgentImageInput}, advertisedModel?:string) {
     if (!input.name.trim() || (input.provider !== undefined && !input.provider.trim())) throw new Error('Name and provider are required');
+    if(input.toolMode!==undefined)parseToolMode(input.toolMode);
     const id = randomUUID(), chatId = randomUUID();
     this.db.exec('BEGIN IMMEDIATE');
     try {
       const image:AgentImage=input.image?.kind==='upload-data'?this.imageAssets().accept(input.image):input.image??{kind:'initials'};
       const savedImage=imageSetting(image);
-      const digest=input.operationId ? createHmac('sha256',this.fingerprintKey).update(JSON.stringify([input.name,input.instructions,input.provider ?? null,input.model ?? null,input.reasoning ?? null,...(savedImage===null?[]:[savedImage])])).digest('hex') : null;
+      const digest=input.operationId ? createHmac('sha256',this.fingerprintKey).update(JSON.stringify([input.name,input.instructions,input.provider ?? null,input.model ?? null,input.reasoning ?? null,...(savedImage===null?[]:[savedImage]),...(input.toolMode===undefined?[]:['toolMode',input.toolMode])])).digest('hex') : null;
       if(input.operationId) { const existing=this.db.prepare('SELECT digest,bot_id FROM bot_creation_operations WHERE id=?').get(input.operationId); if(existing) { if(existing.digest!==digest || typeof existing.bot_id!=='string') throw new BotConflict('Creation operation ID conflict'); const bot=this.bot(existing.bot_id); this.db.exec('COMMIT'); return bot; } }
       this.requireStoredImage(image);
       const defaults=this.creationDefaults();const provider=input.provider ?? defaults.provider;
       const first=this.providerDefaults().read().providers[provider];
       const chosenModel=input.model ?? (input.provider===undefined?defaults.model:first?.model??advertisedModel??null);
       const chosenReasoning=input.reasoning ?? (input.provider===undefined?defaults.reasoning:first?.reasoning??null);
-      this.configs.publish(id,{name:input.name,description:'',provider,model:chosenModel,reasoning:chosenReasoning,instructions:input.instructions,providerChoices:{[provider]:{model:chosenModel,reasoning:chosenReasoning}},image},false);
+      this.configs.publish(id,{name:input.name,description:'',provider,model:chosenModel,reasoning:chosenReasoning,toolMode:input.toolMode??defaults.toolMode,instructions:input.instructions,providerChoices:{[provider]:{model:chosenModel,reasoning:chosenReasoning}},image},false);
       this.db.prepare('INSERT INTO bots VALUES (?, ?, ?, ?, ?, ?, ?)').run(id, chatId, '', '', 'demo', null, null);
       this.db.prepare('INSERT INTO bot_profiles (bot_id,revision,soul,archived) VALUES (?, 1, ?, 0)').run(id, '');
       if(input.operationId && digest) this.db.prepare('INSERT INTO bot_creation_operations VALUES (?,?,?)').run(input.operationId,digest,id);
@@ -556,7 +749,7 @@ export class Instance {
       const providerChoices={...current.providerChoices,[current.provider]:{model:current.model,reasoning:current.reasoning},[edit.provider]:{model:edit.model,reasoning:edit.reasoning}};
       const image=edit.image?.kind==='upload-data'?this.imageAssets().accept(edit.image):edit.image??current.image;
       this.requireStoredImage(image,current.image);
-      const config=this.configs.publish(id,{name:edit.name,description:edit.description ?? current.description,instructions:edit.instructions,provider:edit.provider,model:edit.model,reasoning:edit.reasoning,providerChoices,image},current.archived,edit.revision);
+      const config=this.configs.publish(id,{name:edit.name,description:edit.description ?? current.description,instructions:edit.instructions,provider:edit.provider,model:edit.model,reasoning:edit.reasoning,toolMode:edit.toolMode===undefined?current.toolMode:parseToolMode(edit.toolMode),providerChoices,image},current.archived,edit.revision);
       try { this.db.exec('COMMIT'); } catch { throw new AgentConfigUncertain('Configuration save may have taken effect. Inspect the current configuration before retrying.'); }
       return {...current,...config};
     } catch (error) { try { this.db.exec('ROLLBACK'); } catch {} throw error; }
@@ -582,12 +775,12 @@ export class Instance {
   }
   taskAttempts(botId: string) {
     return this.db.prepare(`SELECT a.id, a.task_id AS taskId, a.bot_id AS botId, t.objective, a.predecessor,
-      a.state, a.outcome, a.limit_ms AS limitMs, a.delegation_clock AS delegationClock, json_extract(a.profile,'$.revision') AS profileRevision
-      FROM task_attempts a JOIN tasks t ON t.id=a.task_id WHERE a.bot_id=? ORDER BY a.rowid DESC`).all(botId);
+      a.state, a.outcome, a.limit_ms AS limitMs, a.delegation_clock AS delegationClock, json_extract(a.profile,'$.revision') AS profileRevision, a.profile AS capturedProfile
+      FROM task_attempts a JOIN tasks t ON t.id=a.task_id WHERE a.bot_id=? ORDER BY a.rowid DESC`).all(botId).map(({capturedProfile,...row})=>({...row,state:row.state,toolMode:parseToolModeFromProfile(capturedProfile)}));
   }
   taskAttempt(id: string) {
     const row = this.db.prepare(`SELECT a.id, a.task_id AS taskId, a.bot_id AS botId, t.objective, a.predecessor,
-      a.state, a.outcome, a.limit_ms AS limitMs, a.delegation_clock AS delegationClock, json_extract(a.profile,'$.revision') AS profileRevision
+      a.state, a.outcome, a.limit_ms AS limitMs, a.delegation_clock AS delegationClock, json_extract(a.profile,'$.revision') AS profileRevision, a.profile AS capturedProfile
       FROM task_attempts a JOIN tasks t ON t.id=a.task_id WHERE a.id=?`).get(id);
     if (!row) return undefined;
     const attempt = row as {id:string; taskId:string; botId:string; objective:string; predecessor:string | null; state:string; outcome:string | null; limitMs:number; profileRevision:string};
@@ -595,7 +788,8 @@ export class Instance {
     const session: Session | undefined=typeof saved?.session === 'string' ? JSON.parse(saved.session) : undefined;
     const inbox = new TaskInbox(this.db).inspect({botId:attempt.botId,attemptId:id});
     const waitReason=attempt.state === 'waiting' ? 'replacement' : inbox.questions.some(question=>question.state === 'open') ? 'owner-input' : this.db.prepare("SELECT 1 FROM approval_requests WHERE work_kind='task' AND work_id=? AND state='pending'").get(id) ? 'approval' : null;
-    return {...attempt, waitReason, inbox, usage:session?.usage ?? [], activity: this.db.prepare('SELECT seq,event FROM task_activity WHERE attempt_id=? ORDER BY seq').all(id).map(event => { const value = JSON.parse(String(event.event)); if (value.type === 'tool_result' && value.name === 'select_skill' && typeof value.content === 'string') { value.content = this.redactSkill(value.content); if (value.success) { try { const detail=JSON.parse(value.content); if (typeof detail.digest === 'string' && detail.sourceDigest === undefined) { detail.sourceDigest=detail.digest; delete detail.digest; value.content=JSON.stringify(detail); } } catch { /* Historical error text is not structured selection evidence. */ } } } return {seq:event.seq, ...value}; })};
+    const {capturedProfile,...visible}=row as typeof attempt & {capturedProfile:unknown};
+    return {...visible,toolMode:parseToolModeFromProfile(capturedProfile), workActions:this.workActions().inspectActions({kind:'task',id}),codeExecutions:this.workActions().inspect({kind:'task',id}), waitReason, inbox, usage:session?.usage ?? [], activity: this.db.prepare('SELECT seq,event FROM task_activity WHERE attempt_id=? ORDER BY seq').all(id).map(event => { const value = JSON.parse(String(event.event)); if (value.type === 'tool_result' && value.name === 'select_skill' && typeof value.content === 'string') { value.content = this.redactSkill(value.content); if (value.success) { try { const detail=JSON.parse(value.content); if (typeof detail.digest === 'string' && detail.sourceDigest === undefined) { detail.sourceDigest=detail.digest; delete detail.digest; value.content=JSON.stringify(detail); } } catch { /* Historical error text is not structured selection evidence. */ } } } return {seq:event.seq, ...value}; })};
   }
   acceptTask(input: {id:string; botId:string; objective:string; limitMs:number; predecessor?:string; delegateClock?:boolean}, visibleObjective=input.objective) {
     this.db.exec('BEGIN IMMEDIATE');
@@ -632,11 +826,15 @@ export class Instance {
         if ((prior?.delegation_clock === 1) !== (input.delegateClock === true)) throw new BotConflict('Retry must retain its delegation scope');
       }
       if (!this.db.prepare('SELECT 1 FROM tasks WHERE id=?').get(taskId)) this.db.prepare('INSERT INTO tasks VALUES (?,?,?)').run(taskId,input.botId,visibleObjective);
-      const context = isolated ? [] : this.taskContext(input.botId);
-      this.db.prepare("INSERT INTO task_attempts (id,task_id,bot_id,predecessor,profile,context,state,limit_ms) VALUES (?,?,?,?,?,?,'queued',?)").run(input.id,taskId,input.botId,input.predecessor ?? null,JSON.stringify(bot),JSON.stringify(context),input.limitMs);
+      const previousCapture=input.predecessor ? this.db.prepare('SELECT profile,context FROM task_attempts WHERE id=?').get(input.predecessor) : undefined;
+      const capturedProfile=typeof previousCapture?.profile==='string' ? previousCapture.profile : JSON.stringify(bot);
+      const capturedContext=typeof previousCapture?.context==='string' ? previousCapture.context : JSON.stringify(isolated ? [] : this.taskContext(input.botId));
+      this.db.prepare("INSERT INTO task_attempts (id,task_id,bot_id,predecessor,profile,context,state,limit_ms) VALUES (?,?,?,?,?,?,'queued',?)").run(input.id,taskId,input.botId,input.predecessor ?? null,capturedProfile,capturedContext,input.limitMs);
       if (input.delegateClock) this.db.prepare('UPDATE task_attempts SET delegation_clock=1 WHERE id=?').run(input.id);
       if (origin) { if (typeof origin.schedule_id !== 'string' || typeof origin.due_at !== 'number') throw Error('Invalid schedule origin'); this.db.prepare('INSERT INTO schedule_task_retries VALUES (?,?,?)').run(input.id,origin.schedule_id,origin.due_at); const scope=this.db.prepare('SELECT url FROM schedule_web_scopes WHERE attempt_id=?').get(input.predecessor ?? '');if(typeof scope?.url==='string'){this.db.prepare('INSERT INTO schedule_web_scopes VALUES (?,?)').run(input.id,scope.url);const priorPermission=this.db.prepare('SELECT enabled FROM web_permissions WHERE scope=?').get('task:'+(input.predecessor ?? ''));if(priorPermission?.enabled===0)this.db.prepare('INSERT INTO web_permissions VALUES (?,0)').run('task:'+input.id);}const search=this.db.prepare('SELECT query,origin,revision FROM schedule_search_scopes WHERE attempt_id=?').get(input.predecessor ?? '');if(typeof search?.query==='string' && typeof search.origin==='string' && typeof search.revision==='number'){this.db.prepare('INSERT INTO schedule_search_scopes VALUES (?,?,?,?)').run(input.id,search.query,search.origin,search.revision);const prior=this.db.prepare('SELECT enabled FROM search_permissions WHERE scope=?').get('task:'+(input.predecessor ?? ''));if(prior?.enabled===0)this.db.prepare('INSERT INTO search_permissions VALUES (?,0)').run('task:'+input.id);}const shell=this.db.prepare('SELECT command,docker_binary,docker_socket,image_id,revision FROM schedule_shell_scopes WHERE attempt_id=?').get(input.predecessor ?? '');if(typeof shell?.command==='string' && typeof shell.docker_binary==='string' && typeof shell.docker_socket==='string' && typeof shell.image_id==='string' && typeof shell.revision==='number'){this.db.prepare('INSERT INTO schedule_shell_scopes VALUES (?,?,?,?,?,?)').run(input.id,shell.command,shell.docker_binary,shell.docker_socket,shell.image_id,shell.revision);const prior=this.db.prepare('SELECT enabled FROM shell_permissions WHERE scope=?').get('task:'+(input.predecessor ?? ''));if(prior?.enabled===0)this.db.prepare('INSERT INTO shell_permissions VALUES (?,0)').run('task:'+input.id);} }
-      this.captureTaskSkills(input.id,input.botId);
+      this.bindWork({kind:'task',id:input.id},input.botId);
+      if(input.predecessor) this.db.prepare('INSERT INTO task_skill_catalog SELECT ?,skill_id,revision,name,description,digest FROM task_skill_catalog WHERE attempt_id=?').run(input.id,input.predecessor);
+      else this.captureTaskSkills(input.id,input.botId);
       this.db.prepare('INSERT INTO task_fingerprints VALUES (?,?)').run(input.id,digest);
       this.taskEvent(input.id,{type:'queued',message:'Task accepted'});
       this.taskAnnouncement(input.botId,`Task ${input.id} accepted: ${visibleObjective}`);
@@ -756,6 +954,7 @@ export class Instance {
       const taskId=randomUUID();this.db.prepare('INSERT INTO tasks VALUES (?,?,?)').run(taskId,previous.botId,visibleObjective);
       this.db.prepare("INSERT INTO task_attempts (id,task_id,bot_id,predecessor,profile,context,state,limit_ms) VALUES (?,?,?,?,?,?,'waiting',?)").run(input.id,taskId,previous.botId,input.predecessor,JSON.stringify(bot),JSON.stringify(this.taskContext(previous.botId)),input.limitMs);
       if (input.delegateClock) this.db.prepare('UPDATE task_attempts SET delegation_clock=1 WHERE id=?').run(input.id);
+      this.bindWork({kind:'task',id:input.id},previous.botId);
       this.captureTaskSkills(input.id,previous.botId);
       this.db.prepare('INSERT INTO task_fingerprints VALUES (?,?)').run(input.id,digest);
       this.taskEvent(input.id,{type:'waiting',message:'Waiting for previous attempt to settle'});
@@ -815,7 +1014,7 @@ export class Instance {
   taskExecution(id: string) {
     const row=this.db.prepare('SELECT a.profile,a.context,a.state,a.limit_ms AS limitMs,t.objective FROM task_attempts a JOIN tasks t ON t.id=a.task_id WHERE a.id=?').get(id);
     if (!row || row.state !== 'queued' || typeof row.profile !== 'string' || typeof row.context !== 'string') throw Error('Task is not queued');
-    const profile=JSON.parse(row.profile) as {provider:string; model:string | null; reasoning:string | null; instructions:string; chatId:string};
+    const profile=parseCapturedProfile(JSON.parse(row.profile));
     const context=JSON.parse(row.context) as Array<{role:string;content:string;isNotice:number}>;
     return {profile,context,objective:String(row.objective),limitMs:Number(row.limitMs)};
   }
@@ -898,7 +1097,7 @@ export class Instance {
   private taskContext(botId:string) { return this.db.prepare('SELECT m.id,m.role,m.content,EXISTS(SELECT 1 FROM task_notices n WHERE n.message_id=m.id) AS isNotice FROM messages m WHERE m.bot_id=? ORDER BY m.seq').all(botId); }
   messages(botId: string) { return this.db.prepare('SELECT id, role, content FROM messages WHERE bot_id=? ORDER BY seq').all(botId); }
   hasBot(botId:string) {return !!this.botIdentity(botId);}
-  command(id: string) { return this.db.prepare('SELECT id, bot_id AS botId, content, state, error FROM commands WHERE id=?').get(id); }
+  command(id: string) { const row=this.db.prepare('SELECT c.id,c.bot_id AS botId,c.content,c.state,c.error,p.profile AS capturedProfile FROM commands c LEFT JOIN command_profiles p ON p.command_id=c.id WHERE c.id=?').get(id);if(!row)return undefined;const {capturedProfile,...command}=row;return {id:command.id,botId:command.botId,content:command.content,state:command.state,error:command.error,toolMode:parseToolModeFromProfile(capturedProfile)}; }
   responseProgress(id:string) {return this.db.prepare("SELECT c.id,c.bot_id AS botId,CASE WHEN c.state='pending' THEN CASE WHEN EXISTS(SELECT 1 FROM response_stops s WHERE s.command_id=c.id) THEN 'stopping' WHEN p.command_id IS NULL THEN 'accepted' ELSE 'running' END ELSE c.state END AS state,COALESCE(p.text,'') AS text,c.error FROM commands c LEFT JOIN response_progress p ON p.command_id=c.id WHERE c.id=?").get(id);}
   latestResponse(botId:string) {const row=this.db.prepare('SELECT id FROM commands WHERE bot_id=? ORDER BY rowid DESC LIMIT 1').get(botId);return typeof row?.id==='string'?this.responseProgress(row.id):null;}
   updateResponse(id:string,text:string) {this.db.prepare("INSERT INTO response_progress(command_id,text) SELECT id,? FROM commands WHERE id=? AND state='pending' ON CONFLICT(command_id) DO UPDATE SET text=excluded.text").run(text,id);}
@@ -930,9 +1129,9 @@ export class Instance {
     const events=this.db.prepare('SELECT e.command_id,e.seq AS id,e.type,e.name,e.success,e.detail FROM command_runtime_events e JOIN commands c ON c.id=e.command_id WHERE c.bot_id=? ORDER BY e.seq').all(botId);
     const byCommand=new Map<string,typeof events>();
     for(const event of events){const id=String(event.command_id);const group=byCommand.get(id) ?? [];group.push(event);byCommand.set(id,group);}
-    const requests=this.db.prepare('SELECT id FROM commands WHERE bot_id=? ORDER BY rowid').all(botId).map(row=>{
+    const requests=this.db.prepare('SELECT c.id,p.profile AS capturedProfile FROM commands c LEFT JOIN command_profiles p ON p.command_id=c.id WHERE c.bot_id=? ORDER BY c.rowid').all(botId).map(row=>{
       const id=String(row.id);
-      return {id,progress:this.responseProgress(id),events:byCommand.get(id) ?? []};
+      return {id,toolMode:parseToolModeFromProfile(row.capturedProfile),progress:this.responseProgress(id),events:byCommand.get(id) ?? [],codeExecutions:this.workActions().inspect({kind:'command',id}),processes:this.processes().forWork({kind:'command',id})};
     });
     return {requests,messages:this.db.prepare('SELECT id,role,content FROM messages WHERE bot_id=? AND id NOT IN (SELECT message_id FROM task_notices) ORDER BY seq').all(botId)};
   }
@@ -966,18 +1165,17 @@ export class Instance {
       this.db.prepare("INSERT INTO commands VALUES (?, ?, ?, 'pending', NULL)").run(input.id, input.botId, visibleContent);
       this.db.prepare('INSERT INTO command_fingerprints VALUES (?, ?)').run(input.id, digest);
       this.db.prepare('INSERT INTO command_profiles VALUES (?, ?)').run(input.id, JSON.stringify(bot));
+      this.bindWork({kind:'command',id:input.id},input.botId);
       this.db.prepare('INSERT INTO command_notices SELECT ?,message_id FROM task_notices WHERE bot_id=? AND delivered=0').run(input.id,input.botId);
       this.db.prepare("INSERT INTO messages VALUES (?, ?, 'user', ?, (SELECT COALESCE(MAX(seq),0)+1 FROM messages WHERE bot_id=?))").run('command-user-'+input.id, input.botId, visibleContent, input.botId);
-      this.db.exec('COMMIT'); return {kind: 'accepted' as const};
+      this.db.exec('COMMIT'); return {kind: 'accepted' as const,toolMode:bot.toolMode};
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
   }
   execution(id: string) {
     const command = this.command(id);
     const row = this.db.prepare('SELECT profile FROM command_profiles WHERE command_id=?').get(id);
     if (!command || command.state !== 'pending' || typeof command.botId !== 'string' || typeof command.content !== 'string' || typeof row?.profile !== 'string') throw Error('Command is not pending');
-    const profile: unknown = JSON.parse(row.profile);
-    if (!profile || typeof profile !== 'object' || !('provider' in profile) || typeof profile.provider !== 'string' || !('model' in profile) || !(profile.model === null || typeof profile.model === 'string') || !('reasoning' in profile) || !(profile.reasoning === null || typeof profile.reasoning === 'string') || !('instructions' in profile) || typeof profile.instructions !== 'string' || !('chatId' in profile) || typeof profile.chatId !== 'string') throw Error('Invalid captured profile');
-    const captured = profile as {provider:string;model:string | null;reasoning:string | null;instructions:string;chatId:string};
+    const captured = parseCapturedProfile(JSON.parse(row.profile));
     const saved = this.db.prepare('SELECT session FROM sessions WHERE bot_id=?').get(command.botId);
     let session: Session;
     if (typeof saved?.session === 'string') {
@@ -1004,7 +1202,7 @@ export class Instance {
       if (typeof command.botId !== 'string' || typeof command.content !== 'string') throw Error('Invalid command');
       if (input) this.memories.create(input);
       if (proposal?.kind === 'propose') {
-        this.db.prepare("INSERT INTO memory_proposals VALUES (?,?,?,'pending')").run(id,command.botId,proposal.text);
+        this.proposeSharedMemory(command.botId,proposal.text,id);
         reply=`Proposed shared user memory: ${JSON.stringify(proposal.text)}\nALL agents will see this memory. Nothing has been saved to active memory yet. To save exactly this text, say: Confirm shared memory ${id}\nTo discard it, say: Cancel shared memory ${id}`;
       } else if (proposal) {
         const row=this.db.prepare('SELECT text,state FROM memory_proposals WHERE id=? AND bot_id=?').get(proposal.id,command.botId);

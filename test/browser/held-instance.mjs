@@ -15,9 +15,49 @@ return {
   name: 'controlled-offline',
   capabilities: { toolCalls: true, incrementalText: false, transport: 'demo' },
   async complete(messages, tools, options) {
+    const prompt=options?.currentUserInput ?? '';
+    const scripted=tools.some(tool=>tool.function.name==='code_mode');
+    const calls=items=>({role:'assistant',content:null,tool_calls:items.map(([name,input])=>({id:name,type:'function',function:{name,arguments:JSON.stringify(input)}}))});
+    if (prompt.startsWith('Basic tools fixture ') || prompt.startsWith('Revise basic tools fixture ')) {
+      const revise=prompt.startsWith('Revise');
+      const results=messages.slice(messages.findLastIndex(message=>message.role==='user')+1).filter(message=>message.role==='tool');
+      const result=name=>JSON.parse(results.findLast(message=>message.tool_call_id===name).content);
+      if (scripted) {
+        if(results.length)return {role:'assistant',content:prompt+' completed.'};
+        const source=revise?`
+          const file=(await capabilities.file_read({path:'basic-acceptance.txt'})).value;
+          const memory=(await capabilities.memory_search({scope:{kind:'agent'},query:'browser acceptance'})).value.items[0];
+          await capabilities.file_edit({path:'basic-acceptance.txt',expectedHash:file.sha256,oldText:'before',newText:'after'});
+          const updated=(await capabilities.memory_update({scope:{kind:'agent'},id:memory.id,version:memory.version,text:'updated browser acceptance'})).value;
+          const found=(await capabilities.file_search({path:'basic-acceptance.txt',query:'after'})).value;
+          await capabilities.memory_forget({scope:{kind:'agent'},id:updated.id,version:updated.version});
+          return found;
+        `:`await capabilities.file_write({path:'basic-acceptance.txt',content:'before'}); return (await capabilities.memory_remember({scope:{kind:'agent'},text:'browser acceptance'})).value;`;
+        return calls([['code_mode',{source}]]);
+      }
+      if(!revise && !results.length)return calls([['file_write',{path:'basic-acceptance.txt',content:'before'}],['memory_remember',{scope:{kind:'agent'},text:'browser acceptance'}]]);
+      if(revise && !results.length)return calls([['file_read',{path:'basic-acceptance.txt'}],['memory_search',{scope:{kind:'agent'},query:'browser acceptance'}]]);
+      if(revise && results.length===2){const memory=result('memory_search').items[0];return calls([['file_edit',{path:'basic-acceptance.txt',expectedHash:result('file_read').sha256,oldText:'before',newText:'after'}],['memory_update',{scope:{kind:'agent'},id:memory.id,version:memory.version,text:'updated browser acceptance'}]]);}
+      if(revise && results.length===4){const memory=result('memory_update');return calls([['file_search',{path:'basic-acceptance.txt',query:'after'}],['memory_forget',{scope:{kind:'agent'},id:memory.id,version:memory.version}]]);}
+      return {role:'assistant',content:prompt+' completed.'};
+    }
+    if (options?.currentUserInput==='Interactive process fixture') {
+      if(messages.at(-1)?.role==='tool')return {role:'assistant',content:'Interactive fixture started.'};
+      const input={command:'printf "interactive ready\\n"; read answer; printf "answer:%s\\n" "$answer"; exec sleep 30',mode:'pty',retain:true};
+      return calls([[scripted?'code_mode':'terminal_run',scripted?{source:`return (await capabilities.terminal_run(${JSON.stringify(input)})).value;`}:input]]);
+    }
+    if (options?.currentUserInput==='Native process fixture') {
+      if (messages.at(-1)?.role==='tool') return {role:'assistant',content:'Native fixture started.'};
+      return {role:'assistant',content:null,tool_calls:[{id:'native-fixture',type:'function',function:{name:'terminal_run',arguments:JSON.stringify({retain:true,command:"printf 'native browser output'; exec sleep 30"})}}]};
+    }
+    if (options?.currentUserInput==='Scripted clock fixture') {
+      if (messages.at(-1)?.role==='tool') return {role:'assistant',content:'Scripted clock completed.'};
+      const scripted=tools.some(tool=>tool.function.name==='code_mode');
+      return {role:'assistant',content:null,tool_calls:[{id:'script-clock',type:'function',function:{name:scripted?'code_mode':'clock',arguments:JSON.stringify(scripted?{source:'return (await capabilities.clock({})).value;'}:{})}}]};
+    }
     if (options?.currentUserInput==='Blocked synthetic shell') {if(tools.some(tool=>tool.function.name==='run_scratch_shell')) throw Error('Shell offered while disabled');return {role:'assistant',content:'Scratch shell unavailable by default'};}
     if (['Run synthetic shell','Different synthetic shell','Deny synthetic shell','Revoke synthetic shell','Uncertain synthetic shell'].includes(options?.currentUserInput)) {
-      if (shellCalls++===0) {if(!tools.some(tool=>tool.function.name==='run_scratch_shell'))throw Error('Shell tool not offered');const command=options.currentUserInput==='Uncertain synthetic shell'?'simulate uncertainty':options.currentUserInput==='Different synthetic shell'?'printf different':'printf synthetic';return {role:'assistant',content:null,tool_calls:[{id:'shell-run',type:'function',function:{name:'run_scratch_shell',arguments:JSON.stringify({command})}}]};}
+      if (shellCalls++===0) {const direct=tools.some(tool=>tool.function.name==='run_scratch_shell');if(!direct && !tools.some(tool=>tool.function.name==='code_mode'))throw Error('Shell tool not offered');const command=options.currentUserInput==='Uncertain synthetic shell'?'simulate uncertainty':options.currentUserInput==='Different synthetic shell'?'printf different':'printf synthetic';return {role:'assistant',content:null,tool_calls:[{id:'shell-run',type:'function',function:{name:direct?'run_scratch_shell':'code_mode',arguments:JSON.stringify(direct?{command}:{source:`return (await capabilities.run_scratch_shell(${JSON.stringify({command})})).value;`})}}]};}
       const result=messages.at(-1)?.content ?? '';if(result.includes('Untrusted scratch output') && result.includes('hello from fake executor'))return {role:'assistant',content:'Synthetic shell output: hello from fake executor'};
       return {role:'assistant',content:'Synthetic shell action settled'};
     }
@@ -34,8 +74,8 @@ return {
     if (options?.currentUserInput==='Blocked synthetic web') {if(tools.some(tool=>tool.function.name==='read_web')) throw Error('Web tool offered while disabled');return {role:'assistant',content:'Web tool unavailable by default'};}
     if (['Read synthetic web','Deny synthetic web','Revoke synthetic web'].includes(options?.currentUserInput)) {
       if (webCalls++===0) {
-        if (!tools.some(tool=>tool.function.name==='read_web')) throw Error('Web tool not offered');
-        return {role:'assistant',content:null,tool_calls:[{id:'web-read',type:'function',function:{name:'read_web',arguments:JSON.stringify({url:'https://one.example/private-path'})}}]};
+        const direct=tools.some(tool=>tool.function.name==='read_web');if(!direct && !tools.some(tool=>tool.function.name==='code_mode'))throw Error('Web tool not offered');
+        return {role:'assistant',content:null,tool_calls:[{id:'web-read',type:'function',function:{name:direct?'read_web':'code_mode',arguments:JSON.stringify(direct?{url:'https://one.example/private-path'}:{source:'return (await capabilities.read_web({url:"https://one.example/private-path"})).value;'})}}]};
       }
       return {role:'assistant',content:'Synthetic web action settled'};
     }
@@ -142,5 +182,8 @@ const app = startInstance(path, Number(port), { env: {}, modelRequest:async()=>n
 const responseStreams=new Set();
 app.server.on('request',(req,res)=>{if(req.url?.endsWith('/response/stream')){responseStreams.add(res);res.on('close',()=>responseStreams.delete(res));}});
 await app.listen();
+let stopping=false;
+async function stopFixture(){if(stopping)return;stopping=true;await app.close();process.exit(0);}
+process.once('SIGTERM',stopFixture);process.once('SIGINT',stopFixture);
 console.log(`Listening on http://127.0.0.1:${port}\nPairing code: ${app.code}`);
 createInterface({input:process.stdin}).on('line', async line => { if(line==='ask-clock'){const origin='http://127.0.0.1:'+port;const paired=await (await fetch(origin+'/api/pair',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:app.issueCode()})})).json();await fetch(origin+'/api/approval-settings/instance',{method:'POST',headers:{Authorization:'Bearer '+paired.token,'Content-Type':'application/json'},body:JSON.stringify({mode:'ask-every-time',clockEnabled:true})});console.log('Clock approvals enabled');return;} if(line==='release') releaseInputTask?.(); else if(line==='stream-next')releaseStream?.();else if(line==='router-next')releaseRouter?.();else if(line==='drop-response-streams')for(const response of responseStreams)response.destroy();else console.log(`Pairing code: ${app.issueCode()}`); });

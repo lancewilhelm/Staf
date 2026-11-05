@@ -32,15 +32,15 @@ as an operating-system service.
 `staf --help` lists launch options. `staf --data-dir PATH` selects the local
 instance directory. `staf --instance URL --credential FILE` connects to a paired
 loopback instance. `staf instance help` lists one-shot instance commands. `staf settings show`,
-`staf settings defaults`, `staf settings set provider|model|reasoning VALUE`,
-`staf settings set-default provider|model|reasoning VALUE`, and `staf auth chatgpt
+`staf settings defaults`, `staf settings set provider|model|reasoning|toolMode VALUE`,
+`staf settings set-default provider|model|reasoning|toolMode VALUE`, and `staf auth chatgpt
 login|status|cancel|logout` operate through the same shared instance. These
 commands accept the same trailing connection options. A one-shot provider change requires `--confirm-provider-change`, acknowledging that future requests may send conversation history to the new provider. Use `staf settings unset model|reasoning` or `staf settings unset-default model|reasoning` to clear saved values.
 
 The terminal supports `/help`, `/settings`, `/settings show`, `/settings models`, `/settings reasoning`, `/set provider
-NAME`, `/set model ID`, `/set reasoning LEVEL`, `/models`, `/auth chatgpt
+NAME`, `/set model ID`, `/set reasoning LEVEL`, `/set toolMode MODE`, `/models`, `/auth chatgpt
 login|status|cancel|logout`, `/usage [details|help]`, `/context [refresh|help]`,
-`/confirm-provider`, `/cancel-provider`, `/unset model|reasoning`, `/unset-default model|reasoning`, `/stop`, `/status ID`, `/edit ID TEXT`, `/retry ID`, `/discard ID`, `/defaults`, `/set-default provider|model|reasoning VALUE`, `/approvals`, `/approve ID`, `/deny ID`, and `/quit`. Settings
+`/confirm-provider`, `/cancel-provider`, `/unset model|reasoning`, `/unset-default model|reasoning`, `/stop`, `/status ID`, `/edit ID TEXT`, `/retry ID`, `/discard ID`, `/defaults`, `/set-default provider|model|reasoning|toolMode VALUE`, `/approvals`, `/approve ID`, `/deny ID`, and `/quit`. Settings
 commands edit the current bot profile; creation defaults are separate. See
 [settings](settings.md) for behavior and controls.
 
@@ -219,9 +219,9 @@ An optional profile description is directory metadata visible to other bots. A p
 `GET /api/bots/ID` returns `configDir`, `instructions`, and the current
 configuration `revision`. `POST /api/bots/ID/profile` accepts `revision`,
 `name`, optional `description`, `instructions`, `provider`, `model`, and
-`reasoning`, and optional `image`. `instructions` is the content of `soul.md`; `soul` is not a
+`reasoning`, and optional `image` and `toolMode`. `instructions` is the content of `soul.md`; `soul` is not a
 separate editable field. `agent.toml` accepts only `name`, `description`,
-`provider`, optional `model`, `reasoning`, and `image`, and optional `providerChoices` tables. Direct edits are validated on
+`provider`, optional `model`, `reasoning`, `image`, and `toolMode`, and optional `providerChoices` tables. Direct edits are validated on
 read and valid changes apply to subsequent work. Invalid content and late edits to a previous revision return
 HTTP 422 with `code` `invalid_agent_configuration` and block new work without
 changing the files. Agent settings and credentials have separate storage.
@@ -246,7 +246,16 @@ A paired client can inspect and update copied bot defaults with `GET` and `POST 
 
 ### Shared-instance skills API
 
-Authenticated clients use `GET` and `POST /api/skills` to list or import. Imports require `name`, `description`, `provenance` and literal `body` strings. `GET /api/skills/ID` inspects the current revision. `POST /api/skills/ID/update` adds a revision with those fields and the expected `revision`. `POST /api/skills/ID/enabled` takes a boolean `enabled`; `POST /api/skills/ID/availability` takes `botId` and boolean `available`. `GET /api/bots/BOT_ID/skills` lists currently enabled skills available to that bot. Known configured credentials are redacted before storage and from returned skill content. The catalog `digest` identifies the original submitted bytes, before redaction. Load evidence identifies this as `sourceDigest` and adds `loadedContentDigest`, the SHA-256 of the UTF-8 redacted body placed in the tool result. Older load evidence lacks a loaded-content digest. Existing stored records and backups are not rewritten. See [usage](usage.md#skills-in-the-shared-instance) for CLI syntax, selection and revocation limits.
+Authenticated clients use `GET` and `POST /api/skills` to list or import. Imports require `name`, `description`, `provenance` and literal `body` strings. `GET /api/skills/ID` inspects the current revision. `POST /api/skills/ID/update` adds a revision with those fields and the expected `revision`. `POST /api/skills/ID/enabled` takes a boolean `enabled`; `POST /api/skills/ID/availability` takes `botId` and boolean `available`. `GET /api/bots/BOT_ID/skills` lists currently enabled skills available to that bot. Known configured credentials are redacted before storage and from returned skill content. The catalog `digest` identifies the original submitted bytes, before redaction. Load evidence identifies this as `sourceDigest` and adds `loadedContentDigest`, the SHA-256 of the UTF-8 redacted body placed in the tool result. A registered `select_skill` action uses the work item’s captured catalog and current availability. A completed action can be resumed without another load after availability is rechecked. Older load evidence lacks a loaded-content digest. Existing stored records and backups are not rewritten. See [usage](usage.md#skills-in-the-shared-instance) for CLI syntax, selection and revocation limits.
+
+### Model memory action contract
+
+Every registered model capability shares an input-fidelity check: the instance
+redactor must leave both raw and parsed JSON unchanged before private invocation
+or journal persistence. Rejected input is never executed with substituted text.
+This includes invalid identifiers and normalized inputs, not only memory writes.
+
+The shared action registry exports `memory_search`, `memory_read`, `memory_remember`, `memory_update`, `memory_forget`, and `memory_proposal_status`. Both individual calls and QuickJS child calls use these registrations. Scope is `{ "kind": "agent" }` or `{ "kind": "user" }`; agent identity comes only from accepted work. Search accepts `query` and an optional cursor and returns at most 20 matching items and `nextCursor`. Read returns an item with its ID, stored scope and version. Update and forget require the ID, scope and version. A stale or wrong-scope mutation is a definite failed action. Text requiring current instance credential redaction is rejected during input parsing, before invocation inputs, action records, creation, proposal or update, so confirmation cannot save hidden text that differs from the review. Shared remember returns a pending, agent-bound proposal ID, never an active shared memory; only the owner chat confirmation or cancellation can resolve it. Proposal status is readable by the originating agent. Helpers are ineligible. These adapters use the common command/task context. The Code Mode description includes the eligible registered names and input schemas.
 
 ### Shared-instance memory API
 
@@ -265,7 +274,7 @@ The shared instance schedule preview exposes `schedule-create`, `schedule-list`,
 
 ### Shared-instance web reading
 
-`GET` and `POST /api/web-permissions/{instance|bot:ID|task:ID}` inspect or set an explicit boolean `enabled`. Reads require instance and bot permission; ordinary tasks also require task permission. A scheduled web attempt receives its exact captured URL scope, subject to an explicit task disable; helpers are blocked. Task readback includes `override`, `inheritedSchedule`, `scopeEnabled`, `effective` and `scheduledUrl`. `GET /api/web-approvals` returns pending exact hop targets only to paired clients, and `POST /api/web-approvals/ID/approve|deny` decides a pending hop. Decisions and action records store keyed fingerprints and generic status, not the target. The version 18 migration installs disabled-by-default permissions and action recovery. URL and source content can still be retained in conversation or provider replay as described in [usage](usage.md#public-web-reading). Known configured secrets are redacted where implemented; arbitrary chat, source and model output may retain unknown secrets that cannot be reliably detected. The feature has synthetic, not live, verification.
+`GET` and `POST /api/web-permissions/{instance|bot:ID|task:ID}` inspect or set an explicit boolean `enabled`. Reads require instance and bot permission; ordinary tasks also require task permission. A scheduled web attempt receives its exact captured URL scope, subject to an explicit task disable; helpers are blocked. Task readback includes `override`, `inheritedSchedule`, `scopeEnabled`, `effective` and `scheduledUrl`. `GET /api/web-approvals` returns pending exact hop targets only to paired clients, and `POST /api/web-approvals/ID/approve|deny` decides a pending hop. Decisions and journal records store keyed fingerprints and generic status; the registered action binding also retains the canonical target URL and may appear in database backups. The version 18 migration installs disabled-by-default permissions and action recovery. URL and source content can still be retained in conversation or provider replay as described in [usage](usage.md#public-web-reading). Known configured secrets are redacted where implemented; arbitrary chat, source and model output may retain unknown secrets that cannot be reliably detected. The feature has synthetic, not live, verification.
 
 ### Shared-instance search
 
@@ -391,3 +400,112 @@ This extension needs no database schema migration. Older checkouts do not
 recognize the new configuration field: remove `image` fields or restore a
 compatible backup before running one. Retain accepted assets if you intend to
 use those images again.
+
+## Saved tool mode contract
+
+`src/tool-mode.ts` exports `ToolMode` (`direct`, `hybrid`, or `code`) and
+`parseToolMode(value: unknown)`. The parser returns `direct` for `undefined`
+and rejects other invalid values, including `null`. Agent create, agent profile,
+agent list, and creation-default API objects use the `toolMode` field. Omission
+on profile and defaults updates preserves the existing value. Omission at creation
+copies the creation default, initially `hybrid`; explicit input wins. A creation
+operation fingerprint includes an explicit mode and remains stable when defaults
+change. Agent TOML without the field reads as `direct`.
+
+Accepted chat and task profiles capture `toolMode` at acceptance. The command, chat-work request,
+and task snapshots expose it as `toolMode`, and `Instance.execution(id).profile`
+and `Instance.taskExecution(id).profile` return the validated value. A captured
+profile without the field reads as `direct`; invalid explicit values fail. Task
+profiles use the existing task attempt identity, without a synthetic command ID.
+Version 31 adds `creation_defaults.tool_mode` after the existing migration backup.
+
+Chat and tasks open `WorkActions` for the captured command or actual attempt. Modes apply to eligible clock, scoped memory, configured search, web reading, scratch shell, skill selection, host files, native processes, task controls, and `code_mode`. Helpers use their captured profiles and existing restrictions. `GET /api/commands/ID` returns `codeExecutions`
+(source, SHA-256 source identity, outcome, selected result, and linked action
+IDs) and `workActions` journal records. `GET /api/tasks/ID` and the paired `instance task` command expose the same fields for an attempt. Chat-work returns code execution details
+for the owning agent. The `code_mode` definition includes the eligible registered
+guest catalog and schemas; child capability progress uses the registered name.
+Version 33 adds execution records and marks running records
+interrupted on restart without replay. See the [action service](work-actions.md)
+for limits, recovery and adapter entry points.
+
+## Host file actions
+
+`file_read({path, offset?, limit?})` returns at most 32,768 bytes (default 8,192) and returns base64 data, byte offset, size, next offset and, for files up to 1 MiB, a SHA-256. `file_write({path, content})` writes UTF-8. `file_edit({path, expectedHash, oldText, newText})` requires valid UTF-8, a file at most 1 MiB, the current hash and one exact match. `file_search({path, query, offset?, limit?})` returns byte offsets in a file, scanning up to 65,536 bytes per page, or matching names in a single directory. A page has at most 100 matches; a directory over 10,000 entries is rejected. Paths are at most 4,096 characters; write content is at most 131,072 UTF-16 code units, each edit string at most 65,536, and search queries at most 1,024. The shared 256 KiB serialized invocation limit also applies. Follow `nextOffset` until null. Concurrent host changes can invalidate a page or race an edit; the hash check is not an atomic compare-and-swap.
+
+Paths resolve against the captured working directory unless absolute and use ordinary host permissions. Inputs changed by redaction are rejected before journal preparation. Shared action admission, Stop, recovery, and uncertain-effect handling apply. Helper and scheduled task restrictions remain in force; task mode applies to eligible actions.
+
+Random file pages check the complete known-credential overlap and up to 64 KiB
+of preceding token context (or the larger known-credential overlap). Recognized
+token patterns cannot be exposed by selecting their middle. If an unbroken token
+extends beyond that context, the read fails with a credential-boundary error
+instead of returning unchecked bytes. This can also reject very long benign
+tokens. The returned page limit does not include this bounded privacy lookback
+or the existing hash calculation.
+
+### Action reconciliation
+
+`POST /api/work-actions/command/WORK_ID/ACTION_ID/reconcile` and
+`POST /api/work-actions/task/ATTEMPT_ID/ACTION_ID/reconcile` accept
+`{"evidence": OBJECT}` from a paired owner. The work must be active; task scope
+includes its predecessor lineage. Ordinary authority, Stop and denial checks
+still apply. A successful response is the recovery manifest, including resolved
+action IDs under `resolutions`. It never reruns the effect or changes the original
+observed outcome. Matching completed or resolved changes still require a repeat
+challenge; a previously blocked invocation needs a fresh call identity.
+
+Supported evidence is feature-specific:
+
+| Action | Evidence checked against the actual service |
+| --- | --- |
+| `terminal_run` | `{"processId":"ID","observedCursor":N}`; the same agent/action owns the process, its state is exited/failed, output is complete and the cursor matches. Live or lost observations cannot resolve. |
+| `file_write` | `{"sha256":"HASH"}`; bounded current file bytes match both this hash and the recorded write content. |
+| `memory_update` | `{"version":N}`; the scoped entry has the exact requested text and version immediately after the recorded version. |
+| `memory_forget` | `{"absent":true}`; the entry is absent in the recorded scope. |
+
+Other actions have no generic override. Process input submission does not prove
+application consumption. A settled process observation does not establish
+exactly-once external shell effects. The owner reviews the observed result before
+requesting resolution; later calls still pass their normal preconditions.
+
+CLI: `instance reconcile-action URL CREDENTIAL_FILE command|task WORK_ID ACTION_ID EVIDENCE_FILE`.
+The evidence file contains only the feature evidence object, without an outer
+`evidence` field. This is an owner control, not a model capability.
+
+Read receipts used for recovery stay in memory only while work is open. Their
+invocation rows have no private payload; selected output and conversation history
+remain retained. An expired read resume reports its completed status without
+re-executing it. A new read can fetch current data.
+
+### Native process API
+
+Paired clients can list `GET /api/processes`, inspect `GET /api/processes/ID`,
+read `GET /api/processes/ID/output?cursor=N`, and request termination with
+`POST /api/processes/ID/stop`. Cursors count output chunks. Chunks contain
+base64-encoded bytes, optional UTF-8 text, and a stdout/stderr label; `gap` indicates that earlier
+chunks expired. `outputComplete` becomes true after output pipes close and the supervised group is observed settled. Output retention is 128 KiB per process, pages are at most 48 KiB, with at most 16 live
+handles. The returned limits describe Staf's buffers, not OS memory limits.
+Terminal command and working-path inputs requiring credential redaction are
+rejected before invocation journaling or execution. Process output replaces known
+configured credential bytes before storage, including matches split across
+observations in the same stream. Text and base64 encode the same filtered bytes;
+unrelated binary bytes are preserved. Pages identify this with
+`redaction: "known-credentials"`. Unfinished credential prefixes can be delayed
+until the next observation or stream closure. This does not detect unknown or
+deliberately transformed credentials or rewrite older stored output and backups.
+The process record identifies its originating agent, accepted work and action.
+`unknown` means the service lost observation; it does not mean the OS process
+exited, and Stop cannot signal a process without its live handle.
+
+The `read_web` and `run_scratch_shell` registered actions accept only `{ "url": "..." }` and `{ "command": "..." }`, respectively. Direct, Hybrid and Code Mode use the same action registrations in chat and eligible tasks. Each web redirect is a separately authorized action. The parent action checks every hop and any reused grants before releasing a result, including on resume. A redirect action exposes `parentActionId` in `workActions`. Scratch actions bind the command, Docker binary, socket, image, revision and fixed limits. Scratch reservation and uncertain-action review remain in force. Approval waits pause the task timer.
+
+The `search_web` registered action accepts only `{ "query": "..." }`. In chat and eligible tasks, Direct, Hybrid and Code Mode share its configured backend, exact-query approval, action identity and result. Model input cannot select an origin, revision or identity. Completed-result release checks the captured backend and any reused grant again. Task approvals pause the attempt timer.
+
+### Interactive process contract
+
+`terminal_run` additionally accepts optional `mode` (`pipe` or `pty`), `retain` (default false), and PTY `cols`/`rows` (defaults 80/24, each 1–1000). The process record exposes `retained`, `inputClosed`, `inputBytes`, `cols`, and `rows`. `terminal_write`, `terminal_eof` and `terminal_resize` are changing actions with normal invocation identity, completed-result recovery and uncertainty handling. They check the executing accepted agent against recorded process ownership. A completed input resume returns its receipt without resubmission.
+
+Paired owners can POST `/api/processes/ID/input` with `{ "data": "text\n" }`, `/api/processes/ID/eof` with `{}`, or `/api/processes/ID/resize` with `{ "cols": 80, "rows": 24 }`. These explicit owner resource controls use the same process manager as model actions and remain usable after the originating work ends. Secret-altered input is rejected before submission; model input is rejected before invocation persistence. Text is not stored in process metadata.
+
+`limits.inputBytes` is 16,384 per request, `pendingInputs` is eight per process, and `ptyInputBytes` is a cumulative 1,048,576 bytes per PTY lifetime. Input and resize requests are serialized per process. Stop closes interaction admission and interrupts queued input; it does not wait behind a blocked write. A receipt proves submission, not consumption. Pipe EOF closes input permanently; PTY EOF submits Ctrl-D. PTY output uses the `terminal` stream. Output bounds and redaction are shared with pipe mode.
+
+Schema 36 adds process retention, input counters/closure and PTY dimensions through the protected migration process, preserving combined native/search schema 35. Old records default to nonretained. Unknown handles cannot receive input, EOF, resize or signals after restart.

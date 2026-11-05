@@ -184,3 +184,19 @@ test('denied clock records exactly one outcome in chat and task execution', asyn
   assert.equal(events.find(event=>event.type==='tool_result').success,false);
  }
 });
+
+test('registered action outcomes that do not complete are reported as unsuccessful', async t => {
+  for (const result of [
+    {kind:'status',action:{id:'a',state:'failed'}},
+    {kind:'status',action:{id:'b',state:'uncertain'}},
+    {kind:'blocked',reason:'Opaque prior change requires reconciliation'},
+    {kind:'repeat-required',actions:[],truncated:false,challenge:'c'},
+  ]) {
+    const {store,session}=await fixture(t);
+    const definition={type:'function',function:{name:'fixture_action',description:'Fixture',parameters:{type:'object',properties:{},additionalProperties:false}}};
+    const actions={context:{mode:'direct'},closedReason:()=>null,offers:route=>route==='direct'?[structuredClone(definition)]:[],recognizes:name=>name==='fixture_action',invoke:async()=>result};
+    const provider={name:'fixture',complete:async messages=>messages.at(-1).role==='tool'?{role:'assistant',content:'done'}:{role:'assistant',content:null,tool_calls:[{id:'call',function:{name:'fixture_action',arguments:'{}'}}]}};
+    await runTurn({store,session,provider,actions,text:'exercise'});
+    assert.equal(session.events.find(event=>event.type==='tool_result').success,false);
+  }
+});

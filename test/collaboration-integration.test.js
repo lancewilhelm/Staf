@@ -122,8 +122,8 @@ test('denied request cannot create a helper task or disclose a forged private br
  try {const token=(await call('/api/pair','',{code:app.code}))[1].token,owner=(await call('/api/bots',token,{name:'Owner'}))[1];helperId=(await call('/api/bots',token,{name:'Helper'}))[1].id;
   await call('/api/tasks',token,{id:'root',botId:owner.id,objective:'Investigate'});let disclosure;for(let i=0;i<200;i++){disclosure=(await call('/api/disclosures',token))[1].find(item=>item.state==='pending');if(disclosure)break;await new Promise(resolve=>setTimeout(resolve,10));}
   assert.ok(disclosure);assert.match(disclosure.content,/private transcript secret/);assert.equal(helperCalls,0);assert.equal((await call(`/api/bots/${helperId}/tasks`,token))[1].length,0);assert.equal((await call('/api/tasks/root',token))[1].collaborations.length,0);
-  await call(`/api/disclosures/${disclosure.id}/deny`,token,{});let root;for(let i=0;i<200;i++){root=(await call('/api/tasks/root',token))[1];if(root.state==='completed')break;await new Promise(resolve=>setTimeout(resolve,10));}
-  assert.equal(root.state,'completed');assert.equal(helperCalls,0);assert.equal((await call(`/api/bots/${helperId}/tasks`,token))[1].length,0);
+  await call(`/api/disclosures/${disclosure.id}/deny`,token,{});let root;for(let i=0;i<200;i++){root=(await call('/api/tasks/root',token))[1];if(root.state==='failed')break;await new Promise(resolve=>setTimeout(resolve,10));}
+  assert.equal(root.state,'failed');assert.equal(rootCalls,1);assert.equal(helperCalls,0);assert.equal((await call(`/api/bots/${helperId}/tasks`,token))[1].length,0);
  }finally{await app.close();}
 });
 

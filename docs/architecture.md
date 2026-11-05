@@ -167,7 +167,7 @@ The background-task preview stores tasks, linked attempts, captured profiles and
 
 ### Shared-instance skills
 
-Database version 8 adds the immutable skill catalog, per-bot availability, task catalog snapshots and command load evidence in the migration transaction after a protected backup. Configured credential values are redacted from new catalog records before storage and from existing records on read; catalog digests identify the original submitted bytes. Load evidence labels that value `sourceDigest` and records `loadedContentDigest` for the exact redacted UTF-8 body in the tool result. Older records do not contain the latter. Earlier database records and backups are not rewritten. The runtime offers at most 32 metadata records to tool-capable providers. A structured selection validates the captured ID and revision and current availability before returning untrusted text as a tool result. The task Activity and command status record successful loads. Availability is rechecked before later provider calls and actions. Clock authorization remains independent. Prior skill tool results are replaced before the next turn's provider request; stored history, backups and already-sent provider data are not erased. Synthetic provider tests do not establish live model selection or resistance to prompt injection.
+Database version 8 adds the immutable skill catalog, per-bot availability, task catalog snapshots and command load evidence in the migration transaction after a protected backup. Configured credential values are redacted from new catalog records before storage and from existing records on read; catalog digests identify the original submitted bytes. Load evidence labels that value `sourceDigest` and records `loadedContentDigest` for the exact redacted UTF-8 body in the tool result. Older records do not contain the latter. Earlier database records and backups are not rewritten. The runtime offers at most 32 metadata records to tool-capable providers. A structured selection validates the captured ID and revision and current availability before returning untrusted text as a tool result. The task Activity and command status record successful loads. Availability is rechecked before later provider calls and actions. Clock authorization remains independent. Prior direct skill results and code results linked to actual skill child actions are replaced in the next turn's provider request; stored history, backups and already-sent provider data are not erased. Synthetic provider tests do not establish live model selection or resistance to prompt injection.
 
 ### Shared-instance memory
 
@@ -179,7 +179,7 @@ Pairing loss unmounts settings and memory views. Archived agents remain
 inspectable without restoration. No memory mutation or provider call is added.
 
 
-Version 6 adds scoped memory in the instance database transaction after a protected migration backup. The store enforces bot and user scopes and optimistic versions. Provider calls receive bounded keyword-matched memories as untrusted request-only data. The session retains ordinary messages rather than the injected memory. Main-chat saves use only directly recognized owner input; provider output cannot invoke a memory mutation. Version 7 adds durable, bot-bound shared-memory proposals. A separate explicit owner confirmation atomically saves the proposed text once, and cancellation clears the pending proposal text without creating memory. The original text and proposal response remain in chat history and may be sent in future model requests or task context; cancellation does not erase backups or already-sent data. This is an offline-tested preview and not a general intent interpreter.
+Version 6 adds scoped memory in the instance database transaction after a protected migration backup. The store enforces bot and user scopes and optimistic versions. Provider calls receive bounded keyword-matched memories as untrusted request-only data. The session retains ordinary messages rather than the injected memory. Main-chat owner phrases and registered model actions can change agent memory or existing shared entries. Shared creation by a model creates a proposal, which requires separate owner confirmation. Version 7 adds durable, bot-bound shared-memory proposals. A separate explicit owner confirmation atomically saves the proposed text once, and cancellation clears the pending proposal text without creating memory. The original text and proposal response remain in chat history and may be sent in future model requests or task context; cancellation does not erase backups or already-sent data. This is an offline-tested preview and not a general intent interpreter.
 
 ### Shared-instance clock dispatch
 
@@ -197,11 +197,11 @@ The shared main-chat runtime may request one background task per command through
 
 Public web reads use a per-hop action broker. The action journal records generic summaries and keyed fingerprints; an authenticated owner sees the exact pending hop in memory and approves or denies it before DNS. Current permissions are checked again before dispatch, and permission revocation or task stop aborts the operation. The read path pins a validated public IPv4 address, validates each redirect, and bounds the returned untrusted text. Started actions become uncertain on restart and are not automatically replayed. Conversation and provider replay retention remains separate from the generic action journal; unknown secrets in source text cannot be reliably detected. The integration has synthetic coverage only.
 
-The search tool sends only an approved literal query to the owner-configured loopback origin. The model cannot select the backend. Search uses a separate permission boundary and a keyed action journal, checks current configuration and permissions before dispatch, and aborts affected requests on revocation or task stop. It limits a single instance process to two concurrent dispatches and limits its database to ten per rolling minute, with rate history in the instance database. Separate instance processes do not share a concurrency limit. Search previews are untrusted, and result URLs are not fetched automatically. Queries can be retained by the selected service, its upstreams and the provider/session history. Synthetic tests include the production HTTP transport against a disposable loopback server; live SearXNG and provider behavior remain unverified.
+The search tool sends only an approved literal query to the owner-configured loopback origin. The model cannot select the backend. Search uses a separate permission boundary and a keyed action journal, checks current configuration and permissions before dispatch, and aborts affected requests on revocation or task stop. It limits a single instance process to two concurrent dispatches and limits its database to ten per rolling minute, with rate history in the instance database. Separate instance processes do not share a concurrency limit. Search previews are untrusted, and result URLs are not fetched automatically. Queries can be retained by the selected service, its upstreams and the provider/session history. For chat and tasks the shared action service captures the backend, revision and query in a durable action binding and rechecks that binding and any claimed grant before start and result release. Task approvals pause the corresponding attempt timer. Synthetic tests include the production HTTP transport against a disposable loopback server; live SearXNG and provider behavior remain unverified.
 
 Scratch shell uses only an owner-configured Docker CLI, daemon socket and pinned image, and always supplies a fixed bounded tmpfs workspace without an explicit host bind. A keyed action identity and exact-command owner decision precede daemon work. A durable lock and unresolved-action gate serialize execution; started work is marked uncertain on restart. The recorded endpoint configuration is retained for manual inspection. The owner must independently verify daemon identity because matching paths do not prove that the binary or socket still identifies the same daemon. Explicit owner review acknowledges that an absent observation cannot rule out a late create; it neither retries nor removes the old action. The CLI process and daemon can observe the command, tmpfs can use swap, and unknown output secrets can be retained. Integration tests use a synthetic executor; the component itself has separate disposable-container coverage.
 
-Descriptive memory language is parsed before the broad memory fallback. It lists a bounded set of candidates from the explicitly resolved scope and never mutates an entry. Mutations remain separate exact-ID and version-checked owner commands; shared-save confirmation is unchanged.
+Descriptive memory language is parsed before the broad memory fallback. It lists a bounded set of candidates from the explicitly resolved scope and never mutates an entry. Model actions and owner commands use the same version-checked store; shared-save confirmation is unchanged.
 
 
 OpenRouter key entry, replacement, status and disconnect use authenticated
@@ -279,3 +279,90 @@ unchanged asset identities do not recreate image URLs on every poll. No image
 metadata or bytes are added to model prompts. See the
 [image reference](reference.md#agent-image-configuration-and-api) for limits and
 transport details, and [usage](usage.md#agent-images) for owner controls.
+
+
+The configuration slice for basic tools stores `toolMode` in agent TOML and
+captures it in accepted chat and task profiles. `src/tool-mode.ts` owns the
+shared type and boundary parser. Database version 31 adds the creation default
+with the existing backup and migration process. Database version 32 adds accepted-work folder bindings and action-service records
+through the protected migration process. `src/work-actions.ts` coordinates
+registered actions and uses the existing action journal. The internal clock
+registration uses the existing clock authority callback. See the
+[accepted-work action service reference](work-actions.md) for its callable API.
+Ordinary `runTurn` opens the captured command or actual task attempt and sends direct clock, memory, configured search, web, scratch, skill selection, file and native process calls and QuickJS child calls through the same registrations. `src/memory-actions.ts` binds agent scope to captured work and calls the existing store and proposal workflow; store updates and deletes enforce versions at the atomic effect. Version 35 protects upgrades from either version 34 predecessor and creates any missing native-process or search-binding tables. Version 33 retains source,
+source hash, execution outcome and selected results; child linkage joins the
+existing invocation journal, which remains authoritative if a guest disappears.
+The provider receives the eligible guest definitions as a catalog, and child
+calls publish their registered names and outcomes through command progress.
+On restart a running guest is marked interrupted and is not rerun. Ordinary
+script errors create a recovery epoch and return the manifest to the same
+provider loop. Task controls use the executing attempt, helper mode and existing restrictions; pending owner input defers new actions until the inbox is drained. Web redirect hops use internal child actions under the same coordinator; each hop checks its exact URL and grant, and the parent checks all hop bindings before result release. Scratch binds the exact command and Docker configuration to its coordinator action and retains its separate reservation and review rules. The worker's
+QuickJS limits do not establish OS/container isolation or a total host RSS cap.
+
+### Registered skill selection
+
+The service installs a tracker keyed by the actual command or task attempt while work runs. The shared registration loads exact captured revisions from the skill store and records evidence only after a load. It checks live availability before releasing cached results and before later child actions start. Completed recovery adopts the existing selection without recording another load. Replay scrubbing uses the saved execution and action linkage, while persisted history and native reasoning replay remain intact. The worker can receive a skill through its bounded cache; selected output keeps the normal output limit.
+
+### Registered host files
+
+The host file capability registration supplies read, write, exact-match edit and bounded search to the existing work-action coordinator. Both chat calling styles use the accepted working directory and the same invocation identity and journal. Hash checks run within the edit effect so a completed-action resume returns its recorded result. An external writer may still race the check and the filesystem write; Staf does not claim atomic compare-and-swap. Effects with unknown outcomes remain uncertain rather than being automatically retried. File data uses service-account filesystem access, not QuickJS isolation.
+
+### Native process slice
+
+`NativeProcesses` owns host child handles independently of the guest worker.
+The native capability rejects redaction-altered command and working-path input
+before journal preparation. Each output stream has a byte-preserving credential
+filter ahead of SQLite retention, so text and base64 cannot expose different
+versions. The filter retains unfinished prefixes across observations and flushes
+them on closure or lost observation; it does not decode arbitrary binary as UTF-8.
+The coordinator supplies the immutable action ID and fingerprint to capability
+`authorize` and `execute` callbacks; existing two-argument callbacks remain
+valid. The manager records `starting` and accepted-work ownership before spawn,
+retains bounded pipe output, records the shell exit status when observed, and reports the resource exited after the backend closes.
+Work Stop requests process termination while the work remains active. Service
+shutdown requests termination and records an unobserved result as unknown;
+startup marks previously live observations unknown without replay or PID-based
+reattachment. Both backends start the shell under a Node supervisor that remains
+its process-group leader. After the shell exits, the supervisor waits for its
+pipes to close and uses `/bin/ps` to observe that no non-zombie group members
+remain. It accepts termination requests over live IPC (a private Unix socket for the PTY) and signals
+its own group, so the service never signals a stored process-group number. A
+failed process listing retains the handle rather than claiming completion. The
+record can show the shell's observed exit status while the resource is still
+running or stopping. If the supervisor or observation is lost, the resource is
+unknown. Descendants that change group or detach may survive and are not covered
+by group observation or Stop. SIGKILL escalation can lose the supervisor's final
+observation and is reported as unknown rather than proof of termination.
+
+`startBackend(work, action, {cwd, mode, backend})` records ownership before
+calling `ProcessBackend.launch(cwd, observers)`. Backends return a
+`ProcessHandle` for termination and detachment and deliver asynchronous started,
+output, failed, exited, closed and lost observations, including a combined
+`terminal` stream. The manager retains live handles through `handle(id)` and
+owns output, Stop, shutdown and restart accounting. Handles also implement input,
+EOF and optional PTY resize. `native-pty.ts` uses pinned node-pty with byte output,
+a live supervisor and a private control socket; it never signals a stored group ID.
+Interactions share a bounded per-process queue. Pipe writes await backpressure;
+PTY submission has a cumulative byte budget because node-pty exposes no write
+receipt or drain callback. A submitted receipt does not prove application consumption.
+
+`WorkContext.signal` fences action admission; `workSignal` is the original accepted
+work cancellation signal. The process lifetime listens to the latter, so closing a
+guest does not kill a retained process. Work completion stops nonretained processes;
+actual Stop, expiry, agent archive and shutdown request termination as applicable.
+Later work checks the recorded owning agent, not the selected chat pointer.
+
+The coordinator retains read receipts only in work-scoped memory, clearing them
+when the last work handle is released; only changing-action receipts remain in
+private SQLite results. Guest/internal read records keep completion metadata,
+while selected output and ordinary provider history retain their existing
+lifecycle. Random-access file reads include a credential-length byte overlap
+when checking known secrets, so page boundaries cannot expose credential pieces. A bounded token lookback also checks pattern-recognized credentials; an unestablished boundary rejects the read.
+
+Paired owner reconciliation uses the active command/task controller and its
+immutable context. Feature hooks verify actual settled process observations,
+file-write bytes or scoped memory state before recording a resolution and a new
+recovery epoch. Task retries can resolve eligible predecessor actions. Original
+outcomes remain unchanged, closed work stays closed, and a matching resolved
+uncertain change still requires a repeat challenge. There is no generic force
+resolution or model reconciliation tool. See [the contract](work-actions.md).

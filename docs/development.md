@@ -205,6 +205,22 @@ drafts, cross-tab Stop, long Markdown responses, scroll following, code Copy,
 and narrow Light/Dark/System layouts. Docker-specific tests may be skipped without Docker;
 report those skips separately.
 
+The combined basic-tool checks use the same disposable-instance boundary:
+
+```sh
+node --test test/basic-tools-acceptance.test.js test/basic-tools-review.test.js
+```
+
+These checks combine real files, scoped memory, skill loading and retained native
+input in each mode, then reopen SQLite and retry completed work without replay.
+A controlled SQLite failure preserves an actual memory change but loses its
+receipt; subsequent paired calls must remain fenced pending reconciliation.
+The served GUI smoke also saves all three modes, edits and searches a file,
+updates and forgets memory, and controls a retained PTY using the browser and an
+independently paired CLI. It checks keyboard input, resize, cross-client Stop,
+source/result inspection and a narrow viewport. Providers are controlled; these
+checks do not establish live-provider or remote-host behavior.
+
 ## Review chat locally without a provider
 
 After building, run the existing controlled fixture in a terminal:
@@ -265,6 +281,33 @@ for **Clock approvals enabled**. Expect a clock request below that message,
 exact-action Approve once/Deny controls, and a retained tool outcome. Refresh or
 use another paired client to decide; the original conversation updates on its
 next poll.
+
+For an offline basic-tool review, use a Demo agent and repeat these steps with
+**Agent settings → Tool mode** set to Direct, Hybrid and Code Mode:
+
+1. Send `Scripted clock fixture`. Expect the time and an action record. Hybrid
+   and Code Mode also expose source, result and linked action IDs under
+   **Code execution**.
+2. Send `Basic tools fixture direct`, then `Revise basic tools fixture direct`
+   (replace `direct` with the selected mode). The first request creates
+   `work/basic-acceptance.txt` containing `before` and an agent memory. The
+   second reads, edits and searches the file, updates the memory and forgets it.
+   Expect the file to contain `after` and no `browser acceptance` memory to remain.
+3. Send `Interactive process fixture`. Open its **Process** detail after the
+   response finishes. Expect a retained PTY and `interactive ready`. Send a line;
+   **Refresh output** shows `answer:` followed by that line. Change Columns/Rows
+   and select **Resize terminal**. Select **Stop process** before its 30-second
+   fixture sleep ends; expect an observed exit.
+4. Open a private window or another browser at the same address. Enter `pair`
+   in the fixture terminal for a new code, then pair this client and inspect
+   or stop the same process. For CLI controls, use the
+   [process reference](reference.md#native-process-api) with that instance and a separate paired
+   credential file. Both clients should show the same process ID and outcome.
+
+These prompts execute actual local commands and modify only this fixture's
+agent work files and memory. They exercise controlled responses; they are not
+prompts for a live provider. General project management and automatic
+self-improvement remain outside this feature.
 
 To finish a held response normally, enter `stream-next` twice in the fixture
 terminal. Stop the fixture with Ctrl+C when finished.
@@ -363,3 +406,21 @@ fixture pattern. It uses generated JPEG input, two independently paired browser
 contexts, a real service restart, and blocked external networking. It proves
 cropping, saved identity, and supported UI interactions without a live provider.
 The broader workspace and memory browser journeys remain relevant regressions.
+
+The native process fixture uses disposable paired instances, a controlled
+provider and real host commands. Run `node --test test/native-process.test.js test/native-process-lifecycle.test.js`
+after building. In the controlled chat fixture above, send `Native process fixture`;
+open its process detail to see `native browser output`, then select **Stop process**
+and expect the process to reach an observed exited state. This is a controlled provider with a real host command; it does not establish live-provider behavior.
+
+### Task action verification
+
+`node --test test/task-work-actions.test.js` after `corepack pnpm exec tsc -p tsconfig.json` exercises paired disposable tasks with controlled providers and the real QuickJS worker. It covers all modes, owner input and a differently configured helper. Existing `test/background-task.test.js`, `test/clock-approval.test.js`, and `test/collaboration-integration.test.js` exercise task lifecycle and CLI behavior. These are local synthetic-provider checks; they do not establish GUI, live-provider, Docker or production behavior.
+
+For a manual CLI check, start the controlled fixture as described in [Review chat locally without a provider](#review-chat-locally-without-a-provider). Pair the CLI with `node dist/cli.js instance pair http://127.0.0.1:3211 .staf/chat-review/client.json PAIRING_CODE`. Create a Demo agent in the workspace and select a tool mode. Use `node dist/cli.js instance bots http://127.0.0.1:3211 .staf/chat-review/client.json` to find its ID, then run `node dist/cli.js instance task-start http://127.0.0.1:3211 .staf/chat-review/client.json AGENT_ID "Scripted clock fixture"`. Inspect the printed attempt ID with `instance task` using the same URL and credential path. Expect a completed task and a succeeded clock action. Hybrid and Code Mode also show a returned code execution. Repeat after changing the agent mode; each new attempt uses the selected mode.
+
+### Interactive terminal verification
+
+After one build, run `node --test test/native-interactive.test.js` for the paired real pipe/PTY, retained-work, EOF/resize, cross-client/CLI, Stop, privacy and input-recovery checks. Reuse these disposable fixtures for focused development; run the required check/full suite at completed integration and the combined GUI/CLI journey at final feature acceptance. No extra test environment or live provider is needed. The distribution test packs Staf, installs production dependencies, and executes a real PTY command using the installed native binding. Linux runtime is separate from macOS arm64 evidence.
+
+For a manual offline check, use the existing controlled instance above, create a Hybrid Demo agent and send `Interactive process fixture`. Its process should remain running after the response. Open process details, set a size and select Resize terminal, type `hello` and select Send line, then refresh output. Expect `answer:hello` in the terminal stream. Select Stop process and expect an observed exit. The same resource is inspectable and controllable from the paired CLI.

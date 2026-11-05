@@ -41,8 +41,8 @@ Evergreen/Ink palettes, a Focus agent rail, font, text size, spacing, corners, a
 Instructions live in its `soul.md` file; settings live in `agent.toml`. You can
 [edit these files directly](docs/usage.md#agent-configuration-files) on the instance host.
 Connect an instance-wide OpenRouter key in global Settings or through the paired CLI; saved presence does not verify account or model access. New agent opens a modal; you can create an agent with just a name before connecting a provider. Agent settings
-offer Demo and configured shared connections, retain disconnected selections, and ask for confirmation before switching providers. Review the agent's model after a switch. Open full agent settings from the chat header avatar. Agent settings include archive; reveal Archived agents in the Agents sidebar to restore them. Tool requests, observed outcomes, and exact-action approvals appear in the chat conversation. The previous Advanced page has been retired;
-other management features remain available through the service and CLI while
+offer a saved tool mode, Demo and configured shared connections, retain disconnected selections, and ask for confirmation before switching providers. Review the agent's model after a switch. Open full agent settings from the chat header avatar. Agent settings include archive; reveal Archived agents in the Agents sidebar to restore them. Tool requests, observed outcomes, and exact-action approvals appear in the chat conversation. The previous Advanced page has been retired.
+Tool mode controls clock, scoped memory, configured search, web reading, scratch shell, skill selection, host file actions, and native host commands in chat and eligible tasks: Direct offers individual capabilities, Hybrid offers them and code, and Code Mode offers code with those capabilities. Native commands run with the service account’s host access; known credentials are filtered before process output storage, and pipe and PTY backends support input, EOF, resize, retained processes and cross-client Stop. Recovery keeps uncertain effects fenced until supported service evidence is reconciled through the paired owner API/CLI; it never automatically repeats them. Unselected read receipts expire with work. See [tool mode usage](docs/usage.md#save-a-tool-mode). Other management features remain available through the service and CLI while
 their GUI is developed. Shared-instance ChatGPT sign-in has synthetic coverage
 but is not live verified. Background-task creation from main chat is deferred. Explicit task API and CLI operations remain available.
 Public web reading, owner-configured local search and scratch-only shell are off
@@ -53,7 +53,7 @@ only to loopback; it does not support LAN access. See [usage](docs/usage.md#loca
 The loopback instance retains the background-task engine; its separate Activity and task-update workspace is deferred. It is an offline-tested preview with important permission and recovery limitations; see [usage](docs/usage.md#background-task-preview).
 
 
-The shared instance supports owner-imported [skills](docs/usage.md#skills-in-the-shared-instance) as an offline-tested preview.
+The shared instance supports owner-imported [skills](docs/usage.md#skills-in-the-shared-instance) as an offline-tested preview. Eligible chat and task work can select them in Direct, Hybrid, or Code Mode.
 
 The shared instance supports [scoped memory](docs/usage.md#scoped-memory-in-the-shared-instance) in an offline-tested preview, with read-only agent and shared user memory pages in Settings.
 

@@ -59,6 +59,27 @@ export function streamingRedactor(env: Environment, additionalSecrets: () => rea
     return safe.slice(0,safe.length-possibleSecretSuffixLength(safe,secrets));
   };
 }
+export type ByteRedactor = {write(data:Buffer):Buffer;finish():Buffer};
+/** Byte overlap needed to check a random-access page against complete known credentials. */
+export function credentialRedactionOverlap(env:Environment, additionalSecrets:readonly string[]=[]):number {
+  return Math.max(16,...[...credentialValues(env),...additionalSecrets].flatMap(value=>[value,JSON.stringify(value).slice(1,-1)]).map(value=>Buffer.byteLength(value,'utf8')));
+}
+/** Preserve noncredential bytes, retaining unfinished secret prefixes between observations. */
+export function byteStreamRedactor(env:Environment, additionalSecrets:()=>readonly string[]=()=>[]):ByteRedactor {
+  let pending='',token=false;
+  const consume=(data:Buffer,final:boolean):Buffer=>{
+    let text=pending+data.toString('latin1');pending='';
+    if(token){const end=text.search(/[^A-Za-z0-9_-]/);if(end<0){if(final)token=false;return Buffer.alloc(0);}text=text.slice(end);token=false;}
+    const secrets=[...credentialValues(env),...additionalSecrets()].filter(value=>value.length>0)
+      .flatMap(value=>[value,JSON.stringify(value).slice(1,-1)]).map(value=>Buffer.from(value,'utf8').toString('latin1'));
+    for(const secret of secrets)text=text.split(secret).join('[REDACTED]');
+    text=text.replace(/sk-or-v1-[A-Za-z0-9_-]+/g,(match:string,offset:number)=>{if(!final && offset+match.length===text.length)token=true;return '[REDACTED]';});
+    const held=final?0:possibleSecretSuffixLength(text,[...secrets,'sk-or-v1-A']);
+    pending=text.slice(text.length-held);
+    return Buffer.from(text.slice(0,text.length-held),'latin1');
+  };
+  return {write:data=>consume(data,false),finish:()=>consume(Buffer.alloc(0),true)};
+}
 export function redactor(env: Environment): (text: string) => string {
   const secrets = credentialValues(env);
   return text => secrets.reduce((result, value) => result.split(value).join('[REDACTED]')

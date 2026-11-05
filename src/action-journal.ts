@@ -54,6 +54,15 @@ export class ActionJournal {
 
   prepare(input: { id: string; fingerprint: string; work: WorkRef; summary: string }): PrepareResult {
     this.requireAutocommit();
+    return this.prepareRecord(input);
+  }
+
+  prepareInInstanceTransaction(input: { id: string; fingerprint: string; work: WorkRef; summary: string }, db: DatabaseSync): PrepareResult {
+    if (db !== this.db || db.isTransaction !== true) throw new ActionConflict('Instance-owned transaction required');
+    return this.prepareRecord(input);
+  }
+
+  private prepareRecord(input: { id: string; fingerprint: string; work: WorkRef; summary: string }): PrepareResult {
     if (!input.id || !input.fingerprint || !input.work.id || !input.summary) throw new Error('Action fields must be nonempty');
     const identity = randomUUID();
     const inserted = this.db.prepare(`INSERT INTO action_journal (id,fingerprint,identity,task_attempt_id,command_id,state,summary)

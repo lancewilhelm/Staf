@@ -2,6 +2,8 @@
 import { onMounted, ref, shallowRef, watch } from 'vue';
 import type { Controller } from '../controller';
 import { useWorkspace } from '../workspace';
+import type {ToolMode} from '../../src/tool-mode';
+import ToolModeSelect from './ToolModeSelect.vue';
 import ChoiceFields from './ChoiceFields.vue';
 const { app } = useWorkspace();
 const state = shallowRef<Awaited<ReturnType<Controller['providerDefaults']>> | null>(null);
@@ -9,6 +11,12 @@ const provider = ref('codex');
 const model = ref('');
 const reasoning = ref('default');
 const status = ref('');
+const creation = shallowRef<Awaited<ReturnType<Controller['creationDefaults']>> | null>(null);
+const toolMode = ref<ToolMode>('hybrid');
+const modeStatus = ref('');
+onMounted(async()=>{try {creation.value=await app.creationDefaults();toolMode.value=creation.value.toolMode;}catch(error){modeStatus.value=String(error)}});
+async function saveMode(){if(!creation.value)return;try{await app.saveCreationMode(creation.value,toolMode.value);creation.value=await app.creationDefaults();modeStatus.value='Tool mode default saved. Existing agents are unchanged.';}catch(error){modeStatus.value='Could not save. Your choice is retained. '+String(error)}}
+async function compareMode(){try{creation.value=await app.creationDefaults();modeStatus.value='Current saved tool mode: '+creation.value.toolMode+'. Your choice is retained.'}catch(error){modeStatus.value=String(error)}}
 onMounted(async () => {
   try {
     const value = await app.providerDefaults();
@@ -47,6 +55,7 @@ async function compare() {
 <template>
   <section aria-label="Provider defaults" class="setting-card">
     <h2 class="section-title">Creation defaults</h2><p>Copied into new agents. Existing agents keep their own settings.</p><details class="defaults-editor"><summary>Edit defaults</summary>
+    <ToolModeSelect v-model="toolMode" /><div class="row"><button :disabled="!creation" @click="saveMode">Save tool mode default</button><button class="quiet" @click="compareMode">Compare latest tool mode</button></div><p role="status">{{ modeStatus }}</p>
     <ChoiceFields :provider="provider" :model="model" :reasoning="reasoning" @change="change" />
     <div class="row provider-default-actions"><button :disabled="!state" @click="save">Save provider defaults</button><button class="quiet" @click="compare">Compare latest defaults</button></div>
     <p role="status">{{ status }}</p>

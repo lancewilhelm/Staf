@@ -1,0 +1,251 @@
+# Accepted-work action service
+
+`src/work-actions.ts` implements the instance-owned action service. Chat and task execution open it once per accepted command or task attempt. Direct and QuickJS calls share registered clock, memory, configured search, web, scratch, skill selection, host file, native process, and eligible task-control actions. Code Mode offers only `code_mode`. Dispatch rejects individual calls that were not offered.
+
+## Open accepted work
+
+`instance.workActions()` returns the one registry and coordinator owned by the
+instance. Register each capability once. Call `open(work, signal)` with the
+actual command ID or task attempt ID and the service's live controller signal.
+The returned `WorkActions.context` contains the accepted bot, conversation,
+mode, absolute working directory, and signal. Dispose the handle after the work
+settles with `actions.dispose()`; shared closure interrupts pending authorization
+across all open handles. The directory is
+`agents/<bot-id>/work` beside the revisioned configuration. Acceptance stores
+the path with the work. Migration 32 backfills the same path for older work; a
+legacy command without a captured profile cannot open an action context.
+Missing captured modes still mean Direct.
+
+`WorkActions.offers('direct' | 'guest')` returns eligible registered definitions
+for that route and captured mode. The chat bridge adds `code_mode` to its
+provider offer where appropriate. The action service never registers or invokes
+`code_mode` as a child capability.
+
+## Register and invoke clock
+
+The following code belongs in the existing instance service, where
+`authorizeClock` and the work's `controller` already exist. Register the clock
+once when constructing that service; do not register it for every turn. The
+callback uses the existing clock policy and approval path.
+
+```ts
+import { clockCapability } from './clock-action.js';
+
+const registry = instance.workActions();
+registry.register(clockCapability(instance, work =>
+	authorizeClock(work.botId, work.work.kind, work.work.id, work.signal)
+));
+
+// In the guest bridge, after the command has been accepted:
+const actions = registry.open({kind: 'command', id: commandId}, controller.signal);
+const outcome = await actions.invoke({
+	source: {kind: 'guest', executionId, sequence: message.seq},
+	name: message.name,
+	input: message.input,
+	intent: {kind: 'new'},
+});
+```
+
+For a direct provider call, use
+`source: {kind: 'provider', responseId, callId}`. Reusing a source with the
+same input returns its recorded outcome. Reusing it with changed input or intent
+raises `ActionConflict`. Source identifiers never become action IDs. The service
+allocates those IDs and commits the invocation and the journal preparation in
+one transaction.
+
+A `Capability<I, O>` supplies its tool definition, input and result parsers,
+safe description, eligibility and live precondition checks, authorization,
+execution, and a safe result for inspection. `execute` returns a JSON-compatible
+result. An input parser may throw `ActionFailed` with a safe reason to reject
+input before any invocation or journal record is written. An execution may throw
+it only for a definite failed effect. Other execution exceptions produce an uncertain journal outcome. Throw
+`ActionDenied` for a denied authorization. The clock adapter translates the
+existing clock denial into that error. Feature code must keep `summary`,
+`resource`, and `visibleResult` safe for inspection. Inputs and private results
+remain in instance-owned records and are not part of the inspection manifest.
+
+The instance also supplies its input redactor to the coordinator. Both raw and
+parsed JSON are checked before any invocation, request or journal row is written.
+Input that would change under redaction is rejected without substitution, even
+when a feature later rejects an invalid ID. This check applies to every registered
+capability, so a new adapter cannot omit it. Standalone coordinator fixtures use
+the default identity redactor unless they explicitly supply configured secrets.
+
+Validation error text is data, including words such as `limit` or `authorized`.
+The runtime and guest bridge consult the coordinator's recorded closure state.
+Trusted live precondition and result-release checks close admission when they
+fail; pending owner input remains a typed deferral. An ordinary schema error
+does not become a work-wide restriction because of its wording.
+
+Authorization and execution receive the same frozen, coordinator-created
+`ActionIdentity` (`id` and `fingerprint`). Existing two-argument callbacks remain
+valid. An authorizer can return an `AuthorityClaim` whose synchronous `start`
+checks or claims feature authority inside the journal start transaction. Its
+`release` runs after the effect or if authorization, start, or work admission
+fails after the claim was returned. A claim does not prepare or finish a journal
+record. Adapters remain responsible for binding their exact target and checking
+live authority again when a recorded result is released. `check` receives the trusted identity on checks after authorization and on recovery; its initial eligibility check has no identity.
+
+The coordinator admits at most 32 new invocations per work item and at most
+eight pending invocations. Both routes share those limits. It checks active
+work and live feature restrictions after authorization, immediately before the
+journal start, and before releasing a result. A completed effect remains
+recorded when Stop prevents its result from being released. The journal marks
+started effects uncertain on restart and never re-executes them automatically.
+These guarantees do not make external effects exactly once.
+
+## Configured search adapter
+
+The service registers `search_web` with a query-only schema. Authorization binds the coordinator action ID and fingerprint to the exact work, query, backend origin and revision in `search_action_bindings`. Explicit decisions and optional remembered grants use the existing search approval endpoints and grant store. A reused grant is claimed synchronously in the coordinator start transaction; its controller is released on exit. Checks at start, result release and resume validate the captured boundary and claimed grant revision. The shared search effect enforces the existing rate, concurrency and scheduled-dispatch limits and uses the production loopback transport. Tasks use their actual attempt identity and pause the attempt timer during approval. Migration 35 creates missing search and native tables after the normal protected backup, including upgrades from either version 34 predecessor. Queries can be retained in this binding and its backups.
+
+## Skill selection adapter
+
+The service registers `select_skill` once and installs a tracker for the actual command or task attempt. The tracker owns the captured catalog, current availability checks, selected IDs, and load evidence. Both calling styles use the same operation. A completed result is released only after the captured ID, revision, source digest, and current availability are checked. Recovery adopts a completed selection without recording another load. Admission and guest receipt reuse check the selected skills before continuing.
+
+Code execution records link each guest child to the service invocation. On later turns, the runtime uses that linkage to remove the entire prior code result from provider replay when it contains a skill child. Direct selection results receive the same treatment. Stored history and native reasoning items are retained. A guest declaration does not create load evidence or replay linkage. Skill results can use the 2 MiB guest cache; emitted and returned output retains its 256 KiB limit.
+
+## Memory adapter
+
+`registerMemoryCapabilities(instance, registry, redact)` registers search, read, remember, update, forget and proposal-status actions for accepted command or task contexts. The adapter rejects helper attempts and derives agent scope from the captured bot ID. Search is bounded to 20 items and exposes a continuation cursor. Store update and delete perform their version and scope checks at the effect, not in `check`: `check` also runs when releasing a completed retry. `MemoryConflict` becomes `ActionFailed`, so the journal records a definite failure. Shared creation inserts a pending proposal through the existing instance workflow; only the separate owner command confirms it. Reads return private results through the coordinator. Memory input parsing rejects creation and update text that the instance credential redactor would change, before invocation inputs, action records, store entries or proposals are written. The shared-proposal action record therefore shows the exact text that owner confirmation saves, together with its ID; inspection and recovery still use structured redaction. The common runtime supplies the eligible memory catalog, progress and outcome reporting.
+
+## Recovery
+
+After an ordinary script failure, the bridge calls `beginRecovery()`. It returns
+up to 32 safe action records, a `truncated` flag, and continuation instructions.
+`manifest()` returns the same inspection shape without starting a new recovery
+epoch. Use `invoke` with `{kind: 'resume', actionId}` and the matching
+capability and input to retrieve a completed private result without execution.
+
+During recovery, a matching completed change returns `repeat-required` with a
+single-use challenge, up to 32 matching actions, and a `truncated` flag. A new invocation with `{kind: 'repeat', challenge}` can
+start a separate action after the service consumes the challenge. A changed
+matching set produces a fresh challenge. A new ordinary command has a separate
+work identity and may make the same change without this recovery challenge.
+
+A started or uncertain change fences potentially overlapping changes. During recovery, a
+completed opaque change also fences a different change until reconciliation. A capability can
+supply `recovery.overlaps` and `recovery.reconcile`; the latter must verify
+feature-owned evidence. `actions.reconcile(actionId, evidence)` clears the
+fence for an uncertain action or a completed opaque change only when that hook
+succeeds. Opaque changes and uncertain older journal
+actions without a registration use a conservative fence. The latter need a
+feature adapter and reconciliation path before a later bridge can clear them.
+Task retries include unresolved predecessor actions. A declaration that a call
+is new does not reconcile an uncertain effect.
+
+The paired owner can call
+`POST /api/work-actions/command|task/WORK_ID/ACTION_ID/reconcile` with
+`{"evidence": ...}`. It uses the active command or task controller and captured
+context, including task predecessor lineage. It cannot reopen ended work, clear
+Stop/denial, or resolve an unrelated action. The callback receives the immutable
+action identity as its fourth argument and independently checks the resource.
+Current hooks verify a settled `terminal_run` process and its observed output
+cursor, a `file_write` hash against actual bytes, an updated memory's exact
+text/version, or a forgotten memory's absence. Unsupported or unobservable
+outcomes remain fenced; there is no force option. Resolution records the action
+ID and advances the recovery epoch without rewriting the observed outcome or
+replaying its effect. A matching resolved uncertain change still requires a
+repeat challenge. A blocked invocation stays blocked; a later attempt uses a
+fresh invocation identity. The returned manifest includes `resolutions`.
+
+The focused disposable-instance checks are in `test/work-actions.test.js`.
+They use a real SQLite journal and local fixture effects. They do not establish
+paired API, real-worker chat, live-provider, Docker, or remote-host behavior.
+
+## Chat bridge and inspection
+
+`src/code-mode/bridge.ts` exports `runCode({actions,responseId,callId,source,redact})`.
+`runTurn` generates the response identity, opens no guest for text, and dispatches
+only names in the captured mode's offers. Guest sequence numbers come from the
+worker; execution and action IDs are service-generated. A child call returns
+`{receipt, actionId, value}`; `staf.reuse(receipt)` retrieves that guest's safe
+cached value, and `staf.emit(value)` selects visible output. The optional second
+argument to `capabilities.clock(input, intent)` carries `new`, `resume` or
+`repeat` intent. Direct calls use an optional `_staf` intent field outside the
+capability input. A recovery result contains the manifest and instructions.
+
+The `code_mode` tool description includes the currently eligible guest catalog,
+including each registered name, description and input schema. Guest calls emit
+capability start and result events in the existing command progress stream; their
+inspection records remain owned by the action coordinator. Direct action outcomes
+that are blocked, uncertain, failed, or require a repeat are reported as
+unsuccessful progress rather than completed calls.
+
+Before starting a worker, the service records exact safe source, SHA-256 identity,
+work and provider call. Child mapping and action preparation are committed by
+the action service before the effect. `WorkActionService.inspect(work)` and
+`inspectActions(work)` feed the paired command API and chat work details. The
+journal owns child outcomes, including after a failure or restart. Selected
+results are redacted and retained. Guest-local receipts disappear at guest end;
+read receipts needed for same-work recovery stay in coordinator memory until
+the last work handle is released. They are never written to `private_result`.
+Opening the service clears older persisted read receipts. Guest/internal read
+action records retain completion metadata rather than unselected payloads.
+Selected output and ordinary provider conversation history remain inspectable.
+A resume after read-receipt expiry returns the completed action status without
+rerunning it; a deliberate new read can obtain current data. Changing-action
+receipts remain durable for recovery and duplicate-effect protection.
+
+Per accepted command: at most four guest executions and 32 action invocations,
+with eight pending actions. Each source is at most 32 KiB, selected output at
+most 256 KiB, guest CPU time at most 5,000 ms per execution, QuickJS heap at most
+32 MiB and stack at most 512 KiB. A worker message is bounded to 256 KiB.
+Direct tool arguments that credential redaction would alter are rejected before dispatch; the runtime never executes their redacted replacement.
+
+Ordinary `Error` messages, including words such as `interrupted` or `limit`,
+remain recoverable. Exception values, including guest-created `InternalError`
+objects, do not establish that a shared budget was exhausted. The worker tracks
+actual interrupt and bridge-limit events instead of interpreting exception text
+or prototypes.
+
+The [approved recovery contract](design/basic-tools/checkpoint.md#recovery-and-repeated-commands)
+closes admission across both styles for exhausted **shared work budgets**.
+QuickJS's allocation and stack guards apply to each program. A program may catch
+an allocation or stack exception and continue within those guards and its
+remaining work budget. An uncaught exception enters ordinary recovery; it does
+not imply that the shared action or execution allowance has been consumed.
+Observed host stack, CPU, bridge and output limit events, shared budget exhaustion, denial,
+Stop and live restrictions close admission. Hybrid can use direct calls after
+ordinary failures; Code Mode remains selected. These are QuickJS and protocol
+bounds, not OS/container isolation or a total host RSS limit.
+
+## Host files
+
+`src/file-actions.ts` registers the same four host operations for direct calls and guest calls. Relative paths resolve against captured `workingDirectory`; absolute paths retain service-account access. Read and search return bounded pages and continuation offsets. The edit hash is checked in the effect, not in the replay authorization check, so a resume returns the original outcome. External filesystem writers can race the check and write; this is not atomic compare-and-swap. The action journal records uncertain I/O outcomes without replay. See [host file actions](reference.md#host-file-actions) for limits.
+
+Capabilities may take a third `ActionIdentity` argument in `authorize` and
+`execute`. The coordinator creates and freezes its `{id, fingerprint}` after
+preparing the existing journal action; the provider and guest cannot choose it.
+Existing callbacks that accept only input and work remain valid. Native process
+registration uses this identity to link process observations to the accepted
+action before spawning. The process-manager exports and pipe limitations are in
+[architecture](architecture.md#native-process-slice).
+
+Native command parsing receives the instance redactor and rejects altered input
+before invocation persistence. The service supplies `NativeProcesses` with a
+fresh `byteStreamRedactor` per output stream. Filtering precedes SQLite retention
+and applies equally to text, base64, model reads and paired owner reads. The
+filter preserves other binary bytes and holds incomplete credential prefixes;
+output pages declare the credential-redaction policy.
+
+## Task adapters and temporary input
+
+The task service opens `registry.open({kind:'task',id:attemptId}, signal)` after the attempt starts and disposes it on settlement. `registerTaskCapabilities` installs one set of task-control definitions; the attempt-keyed hooks provide `clarify`, optional `discover`, `delegate`, and `answerBot`. Hooks retain the existing task inbox and disclosure paths. Clock authorization uses the attempt-keyed pause and resume functions in `taskTimers`; adapters for other approval flows should use those same hooks rather than another timer. Hooks are removed on settlement.
+
+New dispatches are deferred while accepted task input is pending. Deferral does not close admission; completed action results and recovery bookkeeping remain available and the next provider iteration drains the inbox. Stop, denial, expiry, archive and live authority failures still close shared admission. Task inspection includes `workActions` and `codeExecutions`, alongside existing activity and usage.
+
+## Process interaction and lifetime
+
+`nativeInteractionCapabilities` registers `terminal_write`, `terminal_eof` and `terminal_resize` through the same coordinator. Each changing call gets its own action ID; completed resume never resubmits input. Input parsing rejects credential-altered text before journaling. The process manager serializes controls per resource, caps queued requests and input bytes, and lets Stop preempt them. `workSignal` carries actual accepted-work cancellation; the existing `signal` also includes admission closure. Retained resources listen to `workSignal`, survive guest bounds and remain accessible to later work for their recorded agent. `finishWork` stops nonretained resources and `stopAgent` handles archive. PTY and pipe controls share output filtering, storage, inspection and shutdown.
+
+## Web and scratch authority
+
+`read_web` binds the canonical URL to the coordinator identity in the existing `search_action_bindings` table, whose unchanged schema also stores scratch bindings; those exact boundaries can be retained in database backups. The first hop uses that action and records a successful redirect as soon as the response is received. Each redirect uses a host-created internal child action with a separate exact URL decision, journal start, and outcome. Internal actions are not model capabilities. Command and task inspection exposes their `parentActionId`. The parent checks every hop binding and reused grant before releasing text or returning a saved result on resume. Scheduled work retains its one-dispatch and exact-URL scope.
+
+`run_scratch_shell` binds the exact command, backend binary, socket, image, configuration revision, and fixed limits. The start transaction checks the owner decision or claims a matching grant. The effect reserves the existing scratch lock and schedule dispatch before using the configured sandbox executor. An uncertain result retains the lock until owner review. Both adapters use attempt timer hooks for approval waits, reject inputs changed by credential redaction, and preserve live permission and grant checks.
+
+File reads validate known-credential overlap and the preceding contiguous token
+context. The pattern check has a 64 KiB lookback, expanded when a known credential
+requires more. An unestablished boundary fails closed, including on a long benign
+ASCII token. No unchecked token fragment is returned merely because its prefix
+lies outside the requested page.

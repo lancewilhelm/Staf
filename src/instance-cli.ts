@@ -7,7 +7,7 @@ import { startInstance } from './instance-service.js';
 export async function instanceCommand(args: string[]) {
   const [requested,...rest]=args;
   const action=requested?.startsWith('chatgpt-auth-') ? requested.replace('chatgpt-auth-','codex-auth-') : requested;
-  if (!action || action === 'help' || action === '--help') {console.log('Usage: instance serve [DATABASE_PATH] [PORT]\n       instance COMMAND URL CREDENTIAL_FILE [ARGUMENTS]\nCommands: pair, clients, revoke, bots, create, inspect, edit, archive, restore, read, send, status, response-follow, response-stop, discover, defaults, defaults-set, provider-defaults, provider-defaults-set, select, tasks, task, task-follow, task-start, task-stop, task-retry, task-replace, task-direct, task-answer, approvals, approve, deny, approval-settings, set-approval-settings, disclosures, disclosure-approve, disclosure-deny, web-permission, web-permission-set, web-approvals, web-approve, web-deny, search-config, search-config-set, search-permission, search-permission-set, search-approvals, search-approve, search-deny, shell-config, shell-config-set, shell-permission, shell-permission-set, shell-approvals, shell-approve, shell-deny, shell-uncertain, shell-review, approval-grants, approval-grant-revoke, approval-grant-edit, openrouter-status, openrouter-set, openrouter-disconnect, chatgpt-auth-start, chatgpt-auth-current, chatgpt-auth-status, chatgpt-auth-cancel, chatgpt-auth-credential, chatgpt-auth-logout, memory-*, skill-*, schedule-*\nProvider changes with select require --confirm-provider-change after reviewing the history-disclosure warning.\nSee docs/usage.md for arguments and examples.');return;}
+  if (!action || action === 'help' || action === '--help') {console.log('Usage: instance serve [DATABASE_PATH] [PORT]\n       instance COMMAND URL CREDENTIAL_FILE [ARGUMENTS]\nCommands: processes, process, process-output, process-input, process-eof, process-resize, process-stop, reconcile-action, pair, clients, revoke, bots, create, inspect, edit, archive, restore, read, send, status, response-follow, response-stop, discover, defaults, defaults-set, provider-defaults, provider-defaults-set, select, tasks, task, task-follow, task-start, task-stop, task-retry, task-replace, task-direct, task-answer, approvals, approve, deny, approval-settings, set-approval-settings, disclosures, disclosure-approve, disclosure-deny, web-permission, web-permission-set, web-approvals, web-approve, web-deny, search-config, search-config-set, search-permission, search-permission-set, search-approvals, search-approve, search-deny, shell-config, shell-config-set, shell-permission, shell-permission-set, shell-approvals, shell-approve, shell-deny, shell-uncertain, shell-review, approval-grants, approval-grant-revoke, approval-grant-edit, openrouter-status, openrouter-set, openrouter-disconnect, chatgpt-auth-start, chatgpt-auth-current, chatgpt-auth-status, chatgpt-auth-cancel, chatgpt-auth-credential, chatgpt-auth-logout, memory-*, skill-*, schedule-*\nProvider changes with select require --confirm-provider-change after reviewing the history-disclosure warning.\nSee docs/usage.md for arguments and examples.');return;}
   if (action === 'serve') {
     const path=resolve(rest[0] || '.staf/instance.sqlite'); const port=Number(rest[1] || 3210);
     if (!Number.isInteger(port) || port<1 || port>65535) throw Error('Invalid port');
@@ -29,7 +29,7 @@ export async function instanceCommand(args: string[]) {
     const result=await request('/api/pair','',{code:values[0]});
     await mkdir(dirname(resolve(credential)),{recursive:true,mode:0o700}); await writeFile(credential,JSON.stringify(result),{mode:0o600,flag:'wx'}); console.log('Paired.'); return;
   }
-  let create: {name:string; instructions:string; operationId:string; provider?:string; model?:string} | undefined;
+  let create: {name:string; instructions:string; operationId:string; provider?:string; model?:string; toolMode?:string} | undefined;
   if (action === 'create') {
     const option=values.findIndex(value=>value.startsWith('--'));
     const names=option < 0 ? values : values.slice(0,option);
@@ -37,7 +37,7 @@ export async function instanceCommand(args: string[]) {
     const options:Record<string,string>={};
     for(let i=option < 0 ? values.length : option;i<values.length;i+=2) {
       const key=values[i],value=values[i+1];
-      if (!key || !['--instructions','--operation-id','--provider','--model'].includes(key)) throw Error('Unknown create option. Use --instructions TEXT, --operation-id ID, --provider PROVIDER or --model MODEL');
+      if (!key || !['--instructions','--operation-id','--provider','--model','--tool-mode'].includes(key)) throw Error('Unknown create option. Use --instructions TEXT, --operation-id ID, --provider PROVIDER, --model MODEL or --tool-mode MODE');
       if (value === undefined || value.startsWith('--')) throw Error(`${key} requires TEXT`);
       if (key in options) throw Error(`${key} must appear once`);
       options[key]=value;
@@ -45,7 +45,7 @@ export async function instanceCommand(args: string[]) {
     const operationId=options['--operation-id'] ?? randomUUID();
     if(!/^[\w-]{1,100}$/.test(operationId))throw Error('Invalid creation operation ID');
     console.error(`Creation operation ID: ${operationId}`);
-    create={name:names.join(' '),instructions:options['--instructions'] ?? '',operationId,...(options['--provider'] !== undefined ? {provider:options['--provider']} : {}),...(options['--model'] !== undefined ? {model:options['--model']} : {})};
+    create={name:names.join(' '),instructions:options['--instructions'] ?? '',operationId,...(options['--provider'] !== undefined ? {provider:options['--provider']} : {}),...(options['--model'] !== undefined ? {model:options['--model']} : {}),...(options['--tool-mode'] !== undefined ? {toolMode:options['--tool-mode']} : {})};
   }
   const saved: unknown=JSON.parse(await readFile(credential,'utf8'));
   if (!saved || typeof saved !== 'object' || !('token' in saved) || typeof saved.token !== 'string') throw Error('Invalid client credential');
@@ -60,7 +60,18 @@ export async function instanceCommand(args: string[]) {
     if(values.length!==4 || values[3]!=='--acknowledge-stored-action' || !['bot','all-bots'].includes(values[1]??'') || !['task','remembered'].includes(values[2]??''))throw Error('Use ID [bot|all-bots task|remembered --acknowledge-stored-action]');
     return {grant:{scope:values[1],lifetime:values[2],retentionAcknowledged:true}};
   };
-  if(action==='openrouter-status' && values.length===0) result=await request('/api/openrouter-connection',token);
+  if(action==='processes' && values.length===0) result=await request('/api/processes',token);
+  else if(action==='process' && values.length===1 && values[0]) result=await request(`/api/processes/${encodeURIComponent(values[0])}`,token);
+  else if(action==='process-output' && (values.length===1 || values.length===2) && values[0]) result=await request(`/api/processes/${encodeURIComponent(values[0])}/output${values[1] ? `?cursor=${encodeURIComponent(values[1])}` : ''}`,token);
+  else if(action==='process-input' && values.length===2 && values[0]) result=await request(`/api/processes/${encodeURIComponent(values[0])}/input`,token,{data:values[1]});
+  else if(action==='process-eof' && values.length===1 && values[0]) result=await request(`/api/processes/${encodeURIComponent(values[0])}/eof`,token,{});
+  else if(action==='process-resize' && values.length===3 && values[0]) result=await request(`/api/processes/${encodeURIComponent(values[0])}/resize`,token,{cols:Number(values[1]),rows:Number(values[2])});
+  else if(action==='process-stop' && values.length===1 && values[0]) result=await request(`/api/processes/${encodeURIComponent(values[0])}/stop`,token,{});
+  else if(action==='reconcile-action' && values.length===4 && (values[0]==='command'||values[0]==='task') && values[1] && values[2] && values[3]) {
+    const evidence:unknown=JSON.parse(await readFile(values[3],'utf8'));
+    result=await request(`/api/work-actions/${values[0]}/${encodeURIComponent(values[1])}/${encodeURIComponent(values[2])}/reconcile`,token,{evidence});
+  }
+  else if(action==='openrouter-status' && values.length===0) result=await request('/api/openrouter-connection',token);
   else if(action==='openrouter-disconnect' && values.length===0) result=await request('/api/openrouter-connection/disconnect',token,{});
   else if(action==='openrouter-set' && values.length===0) {
     if(process.stdin.isTTY) throw Error('Provide the OpenRouter key on standard input; see docs/usage.md');
@@ -104,7 +115,7 @@ export async function instanceCommand(args: string[]) {
     result=await request(`/api/bots/${encodeURIComponent(values[0])}/selection`,token,{revision:values[1],provider:values[2],...(args[3]?{model:args[3]==='-'?null:args[3]}:{}),...(args[4]?{reasoning:args[4]==='-'?null:args[4]}:{})});
   }
   else if(action==='defaults') result=await request('/api/creation-defaults',token);
-  else if(action==='defaults-set' && values.length===4) result=await request('/api/creation-defaults',token,{revision:Number(values[0]),provider:values[1],model:values[2]==='-'?null:values[2],reasoning:values[3]==='-'?null:values[3]});
+  else if(action==='defaults-set' && (values.length===4 || values.length===5)) result=await request('/api/creation-defaults',token,{revision:Number(values[0]),provider:values[1],model:values[2]==='-'?null:values[2],reasoning:values[3]==='-'?null:values[3],...(values[4]===undefined?{}:{toolMode:values[4]})});
   else if(action==='codex-auth-start') result=await request('/api/codex-auth/start',token,{});
   else if(action==='codex-auth-current') result=await request('/api/codex-auth/current',token);
   else if(action==='codex-auth-credential') result=await request('/api/codex-auth/credential',token);
