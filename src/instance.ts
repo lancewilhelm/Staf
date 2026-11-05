@@ -244,7 +244,7 @@ export class Instance {
       work=>{
         const record=work.kind==='command' ? this.command(work.id) : this.taskAttempt(work.id);
         if (!record || typeof record.botId !== 'string' || record.state!==(work.kind==='command' ? 'pending' : 'running') || this.botIdentity(record.botId)?.archived !== false || (work.kind==='command' && this.responseStopping(work.id)) || (work.kind==='task' && this.scheduleOrigin(work.id)?.revoked === 1)) throw Error('Work is no longer active or authorized');
-      },32,work=>work.kind==='task' && this.taskHasPending(work.id));
+      },32,work=>work.kind==='task' && this.taskHasPending(work.id),this.redactSkill);
     return this.actionService;
   }
   private scheduleOrigin(attemptId:string) {

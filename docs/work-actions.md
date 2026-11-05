@@ -1,6 +1,6 @@
 # Accepted-work action service
 
-`src/work-actions.ts` implements the instance-owned action service. Chat and task execution open it once per accepted command or task attempt. Direct and QuickJS calls share registered clock, memory, configured search, web, scratch, host file, native process, and eligible task-control actions. Skill selection remains on its earlier path in Direct and Hybrid. Code Mode offers only `code_mode`. Dispatch rejects individual calls that were not offered.
+`src/work-actions.ts` implements the instance-owned action service. Chat and task execution open it once per accepted command or task attempt. Direct and QuickJS calls share registered clock, memory, configured search, web, scratch, skill selection, host file, native process, and eligible task-control actions. Code Mode offers only `code_mode`. Dispatch rejects individual calls that were not offered.
 
 ## Open accepted work
 
@@ -64,6 +64,19 @@ existing clock denial into that error. Feature code must keep `summary`,
 `resource`, and `visibleResult` safe for inspection. Inputs and private results
 remain in instance-owned records and are not part of the inspection manifest.
 
+The instance also supplies its input redactor to the coordinator. Both raw and
+parsed JSON are checked before any invocation, request or journal row is written.
+Input that would change under redaction is rejected without substitution, even
+when a feature later rejects an invalid ID. This check applies to every registered
+capability, so a new adapter cannot omit it. Standalone coordinator fixtures use
+the default identity redactor unless they explicitly supply configured secrets.
+
+Validation error text is data, including words such as `limit` or `authorized`.
+The runtime and guest bridge consult the coordinator's recorded closure state.
+Trusted live precondition and result-release checks close admission when they
+fail; pending owner input remains a typed deferral. An ordinary schema error
+does not become a work-wide restriction because of its wording.
+
 Authorization and execution receive the same frozen, coordinator-created
 `ActionIdentity` (`id` and `fingerprint`). Existing two-argument callbacks remain
 valid. An authorizer can return an `AuthorityClaim` whose synchronous `start`
@@ -71,7 +84,7 @@ checks or claims feature authority inside the journal start transaction. Its
 `release` runs after the effect or if authorization, start, or work admission
 fails after the claim was returned. A claim does not prepare or finish a journal
 record. Adapters remain responsible for binding their exact target and checking
-live authority again when a recorded result is released; this seam does not by itself migrate skill selection. `check` receives the trusted identity on checks after authorization and on recovery; its initial eligibility check has no identity.
+live authority again when a recorded result is released. `check` receives the trusted identity on checks after authorization and on recovery; its initial eligibility check has no identity.
 
 The coordinator admits at most 32 new invocations per work item and at most
 eight pending invocations. Both routes share those limits. It checks active
@@ -84,6 +97,12 @@ These guarantees do not make external effects exactly once.
 ## Configured search adapter
 
 The service registers `search_web` with a query-only schema. Authorization binds the coordinator action ID and fingerprint to the exact work, query, backend origin and revision in `search_action_bindings`. Explicit decisions and optional remembered grants use the existing search approval endpoints and grant store. A reused grant is claimed synchronously in the coordinator start transaction; its controller is released on exit. Checks at start, result release and resume validate the captured boundary and claimed grant revision. The shared search effect enforces the existing rate, concurrency and scheduled-dispatch limits and uses the production loopback transport. Tasks use their actual attempt identity and pause the attempt timer during approval. Migration 35 creates missing search and native tables after the normal protected backup, including upgrades from either version 34 predecessor. Queries can be retained in this binding and its backups.
+
+## Skill selection adapter
+
+The service registers `select_skill` once and installs a tracker for the actual command or task attempt. The tracker owns the captured catalog, current availability checks, selected IDs, and load evidence. Both calling styles use the same operation. A completed result is released only after the captured ID, revision, source digest, and current availability are checked. Recovery adopts a completed selection without recording another load. Admission and guest receipt reuse check the selected skills before continuing.
+
+Code execution records link each guest child to the service invocation. On later turns, the runtime uses that linkage to remove the entire prior code result from provider replay when it contains a skill child. Direct selection results receive the same treatment. Stored history and native reasoning items are retained. A guest declaration does not create load evidence or replay linkage. Skill results can use the 2 MiB guest cache; emitted and returned output retains its 256 KiB limit.
 
 ## Memory adapter
 
@@ -198,6 +217,6 @@ New dispatches are deferred while accepted task input is pending. Deferral does 
 
 ## Web and scratch authority
 
-`read_web` binds the canonical URL to the coordinator identity. The first hop uses that action and records a successful redirect as soon as the response is received. Each redirect uses a host-created internal child action with a separate exact URL decision, journal start, and outcome. Internal actions are not model capabilities. Command and task inspection exposes their `parentActionId`. The parent checks every hop binding and reused grant before releasing text or returning a saved result on resume. Scheduled work retains its one-dispatch and exact-URL scope.
+`read_web` binds the canonical URL to the coordinator identity in the existing `search_action_bindings` table, whose unchanged schema also stores scratch bindings; those exact boundaries can be retained in database backups. The first hop uses that action and records a successful redirect as soon as the response is received. Each redirect uses a host-created internal child action with a separate exact URL decision, journal start, and outcome. Internal actions are not model capabilities. Command and task inspection exposes their `parentActionId`. The parent checks every hop binding and reused grant before releasing text or returning a saved result on resume. Scheduled work retains its one-dispatch and exact-URL scope.
 
 `run_scratch_shell` binds the exact command, backend binary, socket, image, configuration revision, and fixed limits. The start transaction checks the owner decision or claims a matching grant. The effect reserves the existing scratch lock and schedule dispatch before using the configured sandbox executor. An uncertain result retains the lock until owner review. Both adapters use attempt timer hooks for approval waits, reject inputs changed by credential redaction, and preserve live permission and grant checks.

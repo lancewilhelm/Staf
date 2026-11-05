@@ -56,4 +56,15 @@ test('the offline review fixture keeps sign-in local and simulates a saved conne
   assert.equal(callback.status, 200);
   const credential = await (await fetch(origin + '/api/codex-auth/credential', {headers})).json();
   assert.equal(credential.signedIn, true);
+  const call=async(path,body)=>{const response=await fetch(origin+path,{method:body?'POST':'GET',headers,...(body?{body:JSON.stringify(body)}:{})});assert.ok(response.ok);return response.json();};
+  const bot=await call('/api/bots',{name:'Interactive fixture',provider:'demo',toolMode:'hybrid'});
+  await call('/api/commands',{id:'interactive-fixture',botId:bot.id,content:'Interactive process fixture'});
+  let command;for(let i=0;i<300;i++){command=await call('/api/commands/interactive-fixture');if(command.state!=='pending')break;await new Promise(resolve=>setTimeout(resolve,10));}
+  assert.equal(command.state,'completed',command.error);
+  const processes=(await call('/api/processes')).filter(p=>p.work.id==='interactive-fixture');
+  assert.equal(processes.length,1,'the manual fixture starts one retained terminal');
+  await call(`/api/processes/${processes[0].id}/input`,{data:'hello\n'});
+  let processOutput;for(let i=0;i<300;i++){processOutput=await call(`/api/processes/${processes[0].id}/output`);if(processOutput.chunks.some(c=>c.text?.includes('answer:hello')))break;await new Promise(resolve=>setTimeout(resolve,10));}
+  assert.match(processOutput.chunks.map(c=>c.text??'').join(''),/answer:hello/);
+  await call(`/api/processes/${processes[0].id}/stop`,{});
 });

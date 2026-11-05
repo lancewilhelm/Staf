@@ -16,6 +16,7 @@ return {
   capabilities: { toolCalls: true, incrementalText: false, transport: 'demo' },
   async complete(messages, tools, options) {
     if (options?.currentUserInput==='Interactive process fixture') {
+      if(messages.at(-1)?.role==='tool')return {role:'assistant',content:'Interactive fixture started.'};
       return {role:'assistant',content:null,tool_calls:[{id:'interactive',type:'function',function:{name:'terminal_run',arguments:JSON.stringify({command:'printf "interactive ready\\n"; read answer; printf "answer:%s\\n" "$answer"; exec sleep 30',mode:'pty',retain:true})}}]};
     }
     if (options?.currentUserInput==='Native process fixture') {
@@ -154,5 +155,8 @@ const app = startInstance(path, Number(port), { env: {}, modelRequest:async()=>n
 const responseStreams=new Set();
 app.server.on('request',(req,res)=>{if(req.url?.endsWith('/response/stream')){responseStreams.add(res);res.on('close',()=>responseStreams.delete(res));}});
 await app.listen();
+let stopping=false;
+async function stopFixture(){if(stopping)return;stopping=true;await app.close();process.exit(0);}
+process.once('SIGTERM',stopFixture);process.once('SIGINT',stopFixture);
 console.log(`Listening on http://127.0.0.1:${port}\nPairing code: ${app.code}`);
 createInterface({input:process.stdin}).on('line', async line => { if(line==='ask-clock'){const origin='http://127.0.0.1:'+port;const paired=await (await fetch(origin+'/api/pair',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:app.issueCode()})})).json();await fetch(origin+'/api/approval-settings/instance',{method:'POST',headers:{Authorization:'Bearer '+paired.token,'Content-Type':'application/json'},body:JSON.stringify({mode:'ask-every-time',clockEnabled:true})});console.log('Clock approvals enabled');return;} if(line==='release') releaseInputTask?.(); else if(line==='stream-next')releaseStream?.();else if(line==='router-next')releaseRouter?.();else if(line==='drop-response-streams')for(const response of responseStreams)response.destroy();else console.log(`Pairing code: ${app.issueCode()}`); });

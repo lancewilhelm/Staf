@@ -37,9 +37,14 @@ function localChange({authorize=async()=>{},execute}={}) {
     describe:()=>({summary:'Change fixture',resource:'fixture',effect:'change',opaque:true}),eligible:()=>true,check:()=>{},authorize,
     execute:execute ?? (async (input,work)=>{const path=join(work.workingDirectory,'fixture');let before='';try{before=readFileSync(path,'utf8');}catch{}writeFileSync(path,before+input.value);return before+input.value;}),visibleResult:()=> 'Fixture updated'};
 }
-function fixture() {
-  const instance=new Instance(':memory:');const bot=instance.createBot({name:'Test',instructions:'',toolMode:'hybrid'});instance.claim({id:'c',botId:bot.id,content:'hello'});const controller=new AbortController();return {instance,bot,controller,actions:instance.workActions().open({kind:'command',id:'c'},controller.signal)};
+function fixture(redact) {
+  const instance=new Instance(':memory:',redact);const bot=instance.createBot({name:'Test',instructions:'',toolMode:'hybrid'});instance.claim({id:'c',botId:bot.id,content:'hello'});const controller=new AbortController();return {instance,bot,controller,actions:instance.workActions().open({kind:'command',id:'c'},controller.signal)};
 }
+
+test('input normalization cannot introduce a credential before the shared journal boundary',async()=>{
+  const {redactor}=await import('../dist/config.js'),secret='syntheticnormalizedcredential';const {instance,actions}=fixture(redactor({OPENROUTER_API_KEY:secret}));let effects=0;
+  try{instance.workActions().register({...localChange({execute:async()=>{effects++;return 'changed';}}),parseInput:value=>({value:value.value.replaceAll(' ','')})});for(const src of [source('normalized'),guest(1)])assert.equal((await invoke(actions,src,'local_change',{value:[...secret].join(' ')})).kind,'blocked');assert.equal(effects,0);assert.deepEqual(instance.workActions().inspectActions({kind:'command',id:'c'}),[]);}finally{actions.dispose();instance.close();}
+});
 
 test('authority claim starts inside the journal transaction and releases after the effect',async()=>{
   const {instance,actions}=fixture();try {

@@ -53,12 +53,16 @@ skill restrictions when registering them. #82 and #84 consume
 task attempt with its live signal and retain pause/resume of approval timers,
 questions and task restrictions. These later adapters must expand the guest
 catalog and provider offers together; no second journal or provider loop is
-needed. The current registered catalog includes clock, memory, host files, native processes, configured search, web reading, scratch shell, and eligible task controls. Skill selection still requires its #81 adapter.
+needed. The registered catalog includes clock, memory, host files, native processes, configured search, web reading, scratch shell, skill selection, and eligible task controls.
 
 ## Task lifecycle handoff
 
-The task caller opens the real attempt through `workActions.open` and installs attempt-keyed task-control callbacks for the lifetime of `runTurn`. Clock, configured-search, web, and scratch registrations resolve that attempt's `taskTimers` pause/resume functions for approval. The existing `skillAccess` callback remains responsible for selected-skill validation; the shared adapter migration must preserve it and use the same attempt context and timer hooks for approval waits. Pending inbox input defers new action admission without closing recovery or discarding completed results.
+The task caller opens the real attempt through `workActions.open` and installs attempt-keyed task-control callbacks for the lifetime of `runTurn`. Clock, configured-search, web, and scratch registrations resolve that attempt's `taskTimers` pause/resume functions for approval. A work-scoped skill tracker retains the existing `skillAccess` checks and records actual service loads. Both routes use the captured attempt context. The tracker fences later child calls and completed-result release after live revocation. Pending inbox input defers new action admission without closing recovery or discarding completed results.
 
 ### Interactive process adoption
 
 The process registry now offers pipe/PTY mode, explicit retention, write/EOF/resize and existing read/Stop. `WorkContext.workSignal` is accepted-work cancellation; `signal` additionally fences admission. Keep them distinct in new adapters. Process input is a changing action with its own identity, byte budget and recovery receipt. `finishWork` releases nonretained processes; retained ownership remains bound to the originating agent/work/action. See the usage and process contract for limits and platform evidence.
+
+## Skill selection handoff
+
+`src/skill-actions.ts` registers one operation and shares selection logic with standalone runtime callers. The service installs its tracker under the actual `WorkRef` for each command or task attempt. The action service calls the tracker at admission and on completed-result release. Existing execution and invocation records identify code results to scrub from later provider replay. This slice does not change web or scratch authority, schema 36, or task approval timers.
