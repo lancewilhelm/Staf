@@ -71,3 +71,13 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
+
+## Code Mode worker dependencies (MIT)
+
+The worker uses quickjs-emscripten 0.32.0 and Zod 4.6.7. Their packages
+include their MIT licenses. QuickJS/Wasm variants also retain their engine
+licenses. These licenses remain in the installed dependencies when Staf is
+distributed.
+
+- [quickjs-emscripten license](https://github.com/justjake/quickjs-emscripten/blob/v0.32.0/LICENSE)
+- [Zod license](https://github.com/colinhacks/zod/blob/v4.6.7/LICENSE)
