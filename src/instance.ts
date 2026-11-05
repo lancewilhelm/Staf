@@ -236,8 +236,8 @@ export class Instance {
       (work,signal)=>this.workContext(work,signal),
       work=>{
         const record=work.kind==='command' ? this.command(work.id) : this.taskAttempt(work.id);
-        if (!record || typeof record.botId !== 'string' || record.state!==(work.kind==='command' ? 'pending' : 'running') || this.botIdentity(record.botId)?.archived !== false || (work.kind==='command' && this.responseStopping(work.id)) || (work.kind==='task' && this.taskHasPending(work.id))) throw Error('Work is no longer active or authorized');
-      });
+        if (!record || typeof record.botId !== 'string' || record.state!==(work.kind==='command' ? 'pending' : 'running') || this.botIdentity(record.botId)?.archived !== false || (work.kind==='command' && this.responseStopping(work.id)) || (work.kind==='task' && this.scheduleOrigin(work.id)?.revoked === 1)) throw Error('Work is no longer active or authorized');
+      },32,work=>work.kind==='task' && this.taskHasPending(work.id));
     return this.actionService;
   }
   private scheduleOrigin(attemptId:string) {
@@ -246,6 +246,7 @@ export class Instance {
       WHERE o.task_id=? OR EXISTS (SELECT 1 FROM schedule_task_retries r WHERE r.attempt_id=? AND r.schedule_id=o.schedule_id AND r.due_at=o.due_at)`).get(attemptId,attemptId);
   }
   datasetIdentity() { return createHmac('sha256',this.datasetKey).update('staf-dataset-identity-v1').digest('hex'); }
+  isScheduledAttempt(attemptId:string) {return !!this.scheduleOrigin(attemptId);}
   scheduleClockAllowed(attemptId:string) {
     const row=this.scheduleOrigin(attemptId);
     if (!row) return true;
@@ -670,7 +671,7 @@ export class Instance {
     const inbox = new TaskInbox(this.db).inspect({botId:attempt.botId,attemptId:id});
     const waitReason=attempt.state === 'waiting' ? 'replacement' : inbox.questions.some(question=>question.state === 'open') ? 'owner-input' : this.db.prepare("SELECT 1 FROM approval_requests WHERE work_kind='task' AND work_id=? AND state='pending'").get(id) ? 'approval' : null;
     const {capturedProfile,...visible}=row as typeof attempt & {capturedProfile:unknown};
-    return {...visible,toolMode:parseToolModeFromProfile(capturedProfile), waitReason, inbox, usage:session?.usage ?? [], activity: this.db.prepare('SELECT seq,event FROM task_activity WHERE attempt_id=? ORDER BY seq').all(id).map(event => { const value = JSON.parse(String(event.event)); if (value.type === 'tool_result' && value.name === 'select_skill' && typeof value.content === 'string') { value.content = this.redactSkill(value.content); if (value.success) { try { const detail=JSON.parse(value.content); if (typeof detail.digest === 'string' && detail.sourceDigest === undefined) { detail.sourceDigest=detail.digest; delete detail.digest; value.content=JSON.stringify(detail); } } catch { /* Historical error text is not structured selection evidence. */ } } } return {seq:event.seq, ...value}; })};
+    return {...visible,toolMode:parseToolModeFromProfile(capturedProfile), workActions:this.workActions().inspectActions({kind:'task',id}),codeExecutions:this.workActions().inspect({kind:'task',id}), waitReason, inbox, usage:session?.usage ?? [], activity: this.db.prepare('SELECT seq,event FROM task_activity WHERE attempt_id=? ORDER BY seq').all(id).map(event => { const value = JSON.parse(String(event.event)); if (value.type === 'tool_result' && value.name === 'select_skill' && typeof value.content === 'string') { value.content = this.redactSkill(value.content); if (value.success) { try { const detail=JSON.parse(value.content); if (typeof detail.digest === 'string' && detail.sourceDigest === undefined) { detail.sourceDigest=detail.digest; delete detail.digest; value.content=JSON.stringify(detail); } } catch { /* Historical error text is not structured selection evidence. */ } } } return {seq:event.seq, ...value}; })};
   }
   acceptTask(input: {id:string; botId:string; objective:string; limitMs:number; predecessor?:string; delegateClock?:boolean}, visibleObjective=input.objective) {
     this.db.exec('BEGIN IMMEDIATE');
@@ -707,12 +708,15 @@ export class Instance {
         if ((prior?.delegation_clock === 1) !== (input.delegateClock === true)) throw new BotConflict('Retry must retain its delegation scope');
       }
       if (!this.db.prepare('SELECT 1 FROM tasks WHERE id=?').get(taskId)) this.db.prepare('INSERT INTO tasks VALUES (?,?,?)').run(taskId,input.botId,visibleObjective);
-      const context = isolated ? [] : this.taskContext(input.botId);
-      this.db.prepare("INSERT INTO task_attempts (id,task_id,bot_id,predecessor,profile,context,state,limit_ms) VALUES (?,?,?,?,?,?,'queued',?)").run(input.id,taskId,input.botId,input.predecessor ?? null,JSON.stringify(bot),JSON.stringify(context),input.limitMs);
+      const previousCapture=input.predecessor ? this.db.prepare('SELECT profile,context FROM task_attempts WHERE id=?').get(input.predecessor) : undefined;
+      const capturedProfile=typeof previousCapture?.profile==='string' ? previousCapture.profile : JSON.stringify(bot);
+      const capturedContext=typeof previousCapture?.context==='string' ? previousCapture.context : JSON.stringify(isolated ? [] : this.taskContext(input.botId));
+      this.db.prepare("INSERT INTO task_attempts (id,task_id,bot_id,predecessor,profile,context,state,limit_ms) VALUES (?,?,?,?,?,?,'queued',?)").run(input.id,taskId,input.botId,input.predecessor ?? null,capturedProfile,capturedContext,input.limitMs);
       if (input.delegateClock) this.db.prepare('UPDATE task_attempts SET delegation_clock=1 WHERE id=?').run(input.id);
       if (origin) { if (typeof origin.schedule_id !== 'string' || typeof origin.due_at !== 'number') throw Error('Invalid schedule origin'); this.db.prepare('INSERT INTO schedule_task_retries VALUES (?,?,?)').run(input.id,origin.schedule_id,origin.due_at); const scope=this.db.prepare('SELECT url FROM schedule_web_scopes WHERE attempt_id=?').get(input.predecessor ?? '');if(typeof scope?.url==='string'){this.db.prepare('INSERT INTO schedule_web_scopes VALUES (?,?)').run(input.id,scope.url);const priorPermission=this.db.prepare('SELECT enabled FROM web_permissions WHERE scope=?').get('task:'+(input.predecessor ?? ''));if(priorPermission?.enabled===0)this.db.prepare('INSERT INTO web_permissions VALUES (?,0)').run('task:'+input.id);}const search=this.db.prepare('SELECT query,origin,revision FROM schedule_search_scopes WHERE attempt_id=?').get(input.predecessor ?? '');if(typeof search?.query==='string' && typeof search.origin==='string' && typeof search.revision==='number'){this.db.prepare('INSERT INTO schedule_search_scopes VALUES (?,?,?,?)').run(input.id,search.query,search.origin,search.revision);const prior=this.db.prepare('SELECT enabled FROM search_permissions WHERE scope=?').get('task:'+(input.predecessor ?? ''));if(prior?.enabled===0)this.db.prepare('INSERT INTO search_permissions VALUES (?,0)').run('task:'+input.id);}const shell=this.db.prepare('SELECT command,docker_binary,docker_socket,image_id,revision FROM schedule_shell_scopes WHERE attempt_id=?').get(input.predecessor ?? '');if(typeof shell?.command==='string' && typeof shell.docker_binary==='string' && typeof shell.docker_socket==='string' && typeof shell.image_id==='string' && typeof shell.revision==='number'){this.db.prepare('INSERT INTO schedule_shell_scopes VALUES (?,?,?,?,?,?)').run(input.id,shell.command,shell.docker_binary,shell.docker_socket,shell.image_id,shell.revision);const prior=this.db.prepare('SELECT enabled FROM shell_permissions WHERE scope=?').get('task:'+(input.predecessor ?? ''));if(prior?.enabled===0)this.db.prepare('INSERT INTO shell_permissions VALUES (?,0)').run('task:'+input.id);} }
       this.bindWork({kind:'task',id:input.id},input.botId);
-      this.captureTaskSkills(input.id,input.botId);
+      if(input.predecessor) this.db.prepare('INSERT INTO task_skill_catalog SELECT ?,skill_id,revision,name,description,digest FROM task_skill_catalog WHERE attempt_id=?').run(input.id,input.predecessor);
+      else this.captureTaskSkills(input.id,input.botId);
       this.db.prepare('INSERT INTO task_fingerprints VALUES (?,?)').run(input.id,digest);
       this.taskEvent(input.id,{type:'queued',message:'Task accepted'});
       this.taskAnnouncement(input.botId,`Task ${input.id} accepted: ${visibleObjective}`);

@@ -414,11 +414,9 @@ profile without the field reads as `direct`; invalid explicit values fail. Task
 profiles use the existing task attempt identity, without a synthetic command ID.
 Version 31 adds `creation_defaults.tool_mode` after the existing migration backup.
 
-Ordinary chat opens the captured command's `WorkActions` and applies its mode
-to clock, scoped memory, and `code_mode`; background tasks and other existing tool adapters
-remain on their previous paths. `GET /api/commands/ID` returns `codeExecutions`
+Chat and tasks open `WorkActions` using the captured command or actual task attempt. Their mode applies to registered capabilities including clock, scoped memory and task controls; existing web, search, scratch and skill adapters remain on their previous paths until migrated. Helpers use their own captured profile and their existing restrictions. An explicit task retry retains the predecessor profile, context and skill catalog while live authority is rechecked. `GET /api/commands/ID` returns `codeExecutions`
 (source, SHA-256 source identity, outcome, selected result, and linked action
-IDs) and `workActions` journal records. Chat-work returns code execution details
+IDs) and `workActions` journal records. `GET /api/tasks/ID` and the paired `instance task` command expose the same fields for an attempt. Chat-work returns code execution details
 for the owning agent. The `code_mode` definition includes the eligible registered
 guest catalog and schemas; child capability progress uses the registered name.
 Version 33 adds execution records and marks running records

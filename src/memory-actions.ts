@@ -24,7 +24,7 @@ export function registerMemoryCapabilities(instance:Instance, registry:WorkActio
   });
   function capability<I>(name:string, description:string, schema:z.ZodType<I>, properties:Record<string,ToolParameter>, required:string[], effect:'read'|'change', execute:(input:I,work:WorkContext)=>Json):Capability<I,Json> {
     const definition:ToolDefinition={type:'function',function:{name,description,parameters:{type:'object',properties,required,additionalProperties:false}}};
-    const allowed=(work:WorkContext)=>work.work.kind!=='task' || !instance.isHelperAttempt(work.work.id);
+    const allowed=(work:WorkContext)=>work.work.kind!=='task' || (!instance.isHelperAttempt(work.work.id) && !instance.isScheduledAttempt(work.work.id));
     return {name,definition,parseInput:value=>schema.parse(value),parseResult:value=>jsonValue.parse(value),
       describe:()=>({summary:description,resource:'memory',effect}),eligible:allowed,
       check:(_input,work)=>{if(!allowed(work))throw Error('Memory is no longer authorized');},authorize:async()=>{},

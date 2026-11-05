@@ -617,9 +617,7 @@ creation. The paired defaults command accepts a final mode argument.
 In ordinary chat, Direct offers the eligible clock and memory tools, Hybrid offers those individual tools and `code_mode`, and Code Mode offers `code_mode` with the same registered clock and memory capabilities inside it. The code tool description lists eligible registered capability names and input schemas. Existing web, search, scratch and skill tools keep their current individual
 behavior in Direct and Hybrid until their adapters are migrated. They are not
 offered in Code Mode yet, and fabricated individual calls are rejected.
-Background tasks do not yet use the selected mode. Plain text does not start a guest. A mode or other ordinary
-settings edit applies to new work; an accepted command and its exact retry keep
-its captured profile. Clock permissions and applicable approvals remain live.
+Background tasks use their captured mode for eligible registered capabilities, including clock and task questions, discovery and helper exchanges. A helper uses its own captured mode; helper and scheduled-work restrictions still apply. Pending owner input defers queued actions until the task drains its inbox. Plain text does not start a guest. Settings edits apply to new work; an accepted task and its retries retain their captured profile and task context. Clock permissions and applicable approvals remain live.
 
 The code tool runs a bounded QuickJS program. For example,
 `return (await capabilities.clock({})).value;` returns the UTC time. Child calls

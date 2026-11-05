@@ -54,3 +54,7 @@ task attempt with its live signal and retain pause/resume of approval timers,
 questions and task restrictions. These later adapters must expand the guest
 catalog and provider offers together; no second journal or provider loop is
 needed. Current production chat guest coverage is clock only.
+
+## Task lifecycle handoff
+
+The task caller opens the real attempt through `workActions.open` and installs attempt-keyed task-control callbacks for the lifetime of `runTurn`. The clock registration resolves that attempt's `taskTimers` pause/resume functions for approval. The existing `skillAccess` callback remains responsible for selected-skill validation; the shared adapter migration must preserve it and use the same attempt context and timer hooks for approval waits. Pending inbox input defers new action admission without closing recovery or discarding completed results.

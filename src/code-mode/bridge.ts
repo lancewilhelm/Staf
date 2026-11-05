@@ -2,14 +2,15 @@ import {randomUUID} from 'node:crypto';
 import {startQuickJSGuest} from './executor.js';
 import {limits} from './protocol.js';
 import type {Json} from './json.js';
-import {closesAdmission, type WorkActions} from '../work-actions.js';
+import {ActionDeferred, closesAdmission, type WorkActions} from '../work-actions.js';
 import type {RuntimeEvent} from '../types.js';
 
 /** Runs one provider-requested program against the accepted work's action coordinator. */
 export async function runCode(input:{actions:WorkActions;responseId:string;callId:string;source:string;redact:(text:string)=>string;emit?:(event:RuntimeEvent)=>void}):Promise<string> {
   const {actions,source,redact}=input;
   if(Buffer.byteLength(source,'utf8')>limits.sourceBytes || redact(source)!==source) throw Error('Source cannot be retained safely or exceeds 32 KiB');
-  const id=actions.startExecution(input.responseId,input.callId,source);
+  let id:string;
+  try {id=actions.startExecution(input.responseId,input.callId,source);} catch(error) {if(error instanceof ActionDeferred)return JSON.stringify({outcome:'deferred',notice:error.message});throw error;}
   const receipts=new Map<string,Json>(), emitted:Json[]=[];
   const persist=()=>actions.updateExecution(id,JSON.stringify({emitted}));
   let outputBytes=0, fatal:string|undefined;

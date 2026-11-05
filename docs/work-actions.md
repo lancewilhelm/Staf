@@ -159,3 +159,9 @@ Observed host stack, CPU, bridge and output limit events, shared budget exhausti
 Stop and live restrictions close admission. Hybrid can use direct calls after
 ordinary failures; Code Mode remains selected. These are QuickJS and protocol
 bounds, not OS/container isolation or a total host RSS limit.
+
+## Task adapters and temporary input
+
+The task service opens `registry.open({kind:'task',id:attemptId}, signal)` after the attempt starts and disposes it on settlement. `registerTaskCapabilities` installs one set of task-control definitions; the attempt-keyed hooks provide `clarify`, optional `discover`, `delegate`, and `answerBot`. Hooks retain the existing task inbox and disclosure paths. Clock authorization uses the attempt-keyed pause and resume functions in `taskTimers`; adapters for other approval flows should use those same hooks rather than another timer. Hooks are removed on settlement.
+
+New dispatches are deferred while accepted task input is pending. Deferral does not close admission; completed action results and recovery bookkeeping remain available and the next provider iteration drains the inbox. Stop, denial, expiry, archive and live authority failures still close shared admission. Task inspection includes `workActions` and `codeExecutions`, alongside existing activity and usage.
