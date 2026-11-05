@@ -67,7 +67,7 @@ test('crash loses observations without replay or PID-based reattachment',async()
     const [{port,code}]=await once(child,'message');let token;
     const call=async(route,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});assert.ok(r.ok);return r.json();};
     token=(await call('/api/pair',{code})).token;const bot=await call('/api/bots',{name:'crash',toolMode:'direct'});await call('/api/commands',{id:'crash',botId:bot.id,content:'Run fixture'});
-    let processRecord;for(let i=0;i<500;i++){processRecord=(await call('/api/processes')).find(p=>p.state==='running');if(processRecord)break;await new Promise(resolve=>setTimeout(resolve,10));}assert.ok(processRecord);pid=processRecord.pid;for(let i=0;i<500 && !existsSync(marker);i++)await new Promise(resolve=>setTimeout(resolve,10));assert.ok(existsSync(marker));
+    let processRecord;for(let i=0;i<500;i++){processRecord=(await call('/api/processes')).find(p=>p.state==='running');if(processRecord)break;await new Promise(resolve=>setTimeout(resolve,10));}assert.ok(processRecord);pid=processRecord.pid;for(let i=0;i<500 && (!existsSync(marker) || readFileSync(marker,'utf8')!=='x');i++)await new Promise(resolve=>setTimeout(resolve,10));assert.equal(readFileSync(marker,'utf8'),'x');
     child.kill('SIGKILL');await once(child,'exit');process.kill(-pid,'SIGKILL');pid=undefined;
     app=startInstance(path,0,{env:{},providerFactory:async()=>{throw Error('must not replay');}});const restartedPort=await app.listen();const response=await fetch(`http://127.0.0.1:${restartedPort}/api/processes/${processRecord.id}`,{headers:{Authorization:`Bearer ${token}`}});const restored=await response.json();assert.equal(restored.state,'unknown');assert.equal(restored.exitCode,null);assert.equal(readFileSync(marker,'utf8'),'x');const stop=await fetch(`http://127.0.0.1:${restartedPort}/api/processes/${processRecord.id}/stop`,{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:'{}'});assert.equal(stop.status,400);
   } finally {if(pid)try{process.kill(-pid,'SIGKILL');}catch{}if(child.exitCode===null && child.signalCode===null){if(pid)child.kill('SIGKILL');else child.send('shutdown');await once(child,'exit');}if(app)await app.close();rmSync(dir,{recursive:true,force:true});}
@@ -104,7 +104,9 @@ test('all modes preserve arbitrary shell text and observe stdout, stderr and non
   finally{await app.close();}
 });
 
-for(const [description,command] of [['pipe-holding child','sleep 30 & echo $!; exit 0'],['child with redirected pipes','sleep 30 >/dev/null 2>&1 & echo $!; exit 0']]) test(`another client stopping active work terminates a ${description} after the shell exits`,async()=>{
+for(const [description,redirect] of [['pipe-holding child',''],['child with redirected pipes',' >/dev/null 2>&1']]) test(`another client stopping active work terminates a ${description} after the shell exits`,async()=>{
+  const {randomUUID}=await import('node:crypto');const {spawnSync}=await import('node:child_process');const marker='staf-fixture-'+randomUUID();
+  const command=`${JSON.stringify(process.execPath)} -e 'setTimeout(()=>{},30000)' ${marker}${redirect} & echo $!; exit 0`;
   let entered,release;const ready=new Promise(resolve=>{entered=resolve;}),gate=new Promise(resolve=>{release=resolve;});
   const app=startInstance(':memory:',0,{env:{},providerFactory:async()=>({name:'fixture',capabilities:{toolCalls:true},async complete(messages){if(messages.at(-1).role==='tool'){entered();await gate;return {role:'assistant',content:'done'};}return tool('terminal_run',{command});}})});
   const port=await app.listen();let token,childPid;
@@ -119,5 +121,5 @@ for(const [description,command] of [['pipe-holding child','sleep 30 & echo $!; e
     await until(()=>!alive());childPid=undefined;
     const ended=await until(async()=>{const p=await call(`/api/processes/${resource.id}`,undefined,second);return p.outputComplete&&p;});assert.equal(ended.stopRequested,true);
     const work=await until(async()=>{const c=await call('/api/commands/orphan-work',undefined,second);return c.state!=='pending'&&c;});assert.equal(work.state,'stopped');
-  } finally {release();if(childPid)try{process.kill(childPid,'SIGKILL');}catch{}await app.close();}
+  } finally {release();if(childPid){const ps=spawnSync('/bin/ps',['-p',String(childPid),'-o','command='],{encoding:'utf8'});if(ps.status===0 && ps.stdout.includes(marker))try{process.kill(childPid,'SIGKILL');}catch{}}await app.close();}
 });

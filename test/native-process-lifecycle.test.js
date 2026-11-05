@@ -40,3 +40,15 @@ test('graceful shutdown records unknown when a real child exit is not observed',
     const record=manager.get(started.id);assert.equal(record.state,'unknown');assert.equal(record.outputComplete,false);assert.equal(record.stopRequested,true);assert.equal(child.signalCode,'SIGTERM');
   } finally {if(child && child.exitCode===null && child.signalCode===null)child.kill('SIGKILL');db.close();}
 });
+
+test('Stop while the native supervisor is starting settles its real group',async()=>{
+  const {db,controller,manager,work}=setup();
+  try {
+    const starting=manager.start(work,{id:'action',fingerprint:'fixture'},{command:'exec sleep 30'});
+    const record=manager.list()[0];assert.equal(record.state,'starting');controller.abort();
+    await starting;
+    for(let i=0;i<500 && manager.handle(record.id);i++)await new Promise(resolve=>setTimeout(resolve,10));
+    const ended=manager.get(record.id);assert.equal(ended.stopRequested,true);assert.equal(ended.state,'exited');assert.equal(ended.exitSignal,'SIGTERM');
+    assert.throws(()=>process.kill(ended.pid,0),{code:'ESRCH'});
+  } finally {await manager.shutdown();db.close();}
+});

@@ -15,6 +15,10 @@ return {
   name: 'controlled-offline',
   capabilities: { toolCalls: true, incrementalText: false, transport: 'demo' },
   async complete(messages, tools, options) {
+    if (options?.currentUserInput==='Native process fixture') {
+      if (messages.at(-1)?.role==='tool') return {role:'assistant',content:'Native fixture started.'};
+      return {role:'assistant',content:null,tool_calls:[{id:'native-fixture',type:'function',function:{name:'terminal_run',arguments:JSON.stringify({command:"printf 'native browser output'; exec sleep 30"})}}]};
+    }
     if (options?.currentUserInput==='Scripted clock fixture') {
       if (messages.at(-1)?.role==='tool') return {role:'assistant',content:'Scripted clock completed.'};
       return {role:'assistant',content:null,tool_calls:[{id:'script-clock',type:'function',function:{name:'code_mode',arguments:JSON.stringify({source:'return (await capabilities.clock({})).value;'})}}]};

@@ -500,6 +500,13 @@ try{
  await evaluate("[...document.querySelectorAll('.chat-work details summary')].find(e=>e.textContent.includes('Code execution · return')).click()");
  assert.equal(await evaluate("[...document.querySelectorAll('.chat-work details[open]')].some(e=>e.innerText.includes('capabilities.clock') && e.innerText.includes('Action IDs:'))"),true,'source and linked action are inspectable');
  console.log('PASS real QuickJS source and action inspection');
+ await act("testInput('[aria-label=Message]','Native process fixture');testClick('Send')","document.querySelector('.messages').innerText.includes('Native fixture started.')",'native process starts in chat');
+ await until(()=>evaluate("[...document.querySelectorAll('.chat-work details summary')].some(e=>e.textContent.includes('Process · running'))"),'native process is visible');
+ await evaluate("[...document.querySelectorAll('.chat-work details summary')].find(e=>e.textContent.includes('Process · running')).click()");
+ await until(()=>evaluate("[...document.querySelectorAll('.chat-work details[open]')].some(e=>e.innerText.includes('native browser output'))"),'native process output appears');
+ await evaluate("[...document.querySelectorAll('.chat-work details[open]')].find(e=>e.innerText.includes('native browser output')).querySelector('button').click()");
+ await until(()=>evaluate("[...document.querySelectorAll('.chat-work details summary')].some(e=>e.textContent.includes('Process · exited'))"),'native process Stop settles');
+ console.log('PASS native output and Stop in chat');
  await act("testInput('[aria-label=Message]','Start synthetic background work');testClick('Send')","document.querySelector('.messages').innerText.includes('Background tasks are deferred')",'unsolicited background creation rejected');
  assert.equal(await evaluate("[...document.querySelectorAll('.side button')].some(b=>b.textContent.includes('Updates'))"),false,'task update navigation absent');
  const duplicate=await evaluate("(async()=>{const t=localStorage.getItem('staf-token');return await (await fetch('/api/bots',{method:'POST',headers:{Authorization:'Bearer '+t,'Content-Type':'application/json'},body:JSON.stringify({name:'Mira',instructions:'Another role'})})).json()})()");
