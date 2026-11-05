@@ -414,7 +414,7 @@ profile without the field reads as `direct`; invalid explicit values fail. Task
 profiles use the existing task attempt identity, without a synthetic command ID.
 Version 31 adds `creation_defaults.tool_mode` after the existing migration backup.
 
-Chat and tasks open `WorkActions` for the captured command or actual attempt. Modes apply to eligible clock, scoped memory, configured search, host files, native processes, task controls, and `code_mode`; web, scratch and skill adapters remain on their previous paths. Helpers use their captured profiles and existing restrictions. `GET /api/commands/ID` returns `codeExecutions`
+Chat and tasks open `WorkActions` for the captured command or actual attempt. Modes apply to eligible clock, scoped memory, configured search, web reading, scratch shell, host files, native processes, task controls, and `code_mode`; skill selection remains on its previous path. Helpers use their captured profiles and existing restrictions. `GET /api/commands/ID` returns `codeExecutions`
 (source, SHA-256 source identity, outcome, selected result, and linked action
 IDs) and `workActions` journal records. `GET /api/tasks/ID` and the paired `instance task` command expose the same fields for an attempt. Chat-work returns code execution details
 for the owning agent. The `code_mode` definition includes the eligible registered
@@ -448,6 +448,8 @@ deliberately transformed credentials or rewrite older stored output and backups.
 The process record identifies its originating agent, accepted work and action.
 `unknown` means the service lost observation; it does not mean the OS process
 exited, and Stop cannot signal a process without its live handle.
+
+The `read_web` and `run_scratch_shell` registered actions accept only `{ "url": "..." }` and `{ "command": "..." }`, respectively. Direct, Hybrid and Code Mode use the same action registrations in chat and eligible tasks. Each web redirect is a separately authorized action. The parent action checks every hop and any reused grants before releasing a result, including on resume. A redirect action exposes `parentActionId` in `workActions`. Scratch actions bind the command, Docker binary, socket, image, revision and fixed limits. Scratch reservation and uncertain-action review remain in force. Approval waits pause the task timer.
 
 The `search_web` registered action accepts only `{ "query": "..." }`. In chat and eligible tasks, Direct, Hybrid and Code Mode share its configured backend, exact-query approval, action identity and result. Model input cannot select an origin, revision or identity. Completed-result release checks the captured backend and any reused grant again. Task approvals pause the attempt timer.
 

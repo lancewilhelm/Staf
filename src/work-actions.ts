@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS work_action_resolutions (action_id TEXT PRIMARY KEY R
 
 export type WorkContext = Readonly<{work:WorkRef; botId:string; conversation:{kind:'chat';conversationId:string} | {kind:'task';conversationId:string;context:unknown}; mode:ToolMode; workingDirectory:string; signal:AbortSignal;workSignal:AbortSignal}>;
 export type InvocationSource = {kind:'provider';responseId:string;callId:string} | {kind:'guest';executionId:string;sequence:number};
+type InternalInvocationSource = {kind:'internal';parentId:string;sequence:number};
 export type ActionIntent = {kind:'new'} | {kind:'resume';actionId:string} | {kind:'repeat';challenge:string};
 export type Description = {summary:string;resource:string;effect:'read'|'change';opaque?:boolean};
 export type ActionIdentity = Readonly<{id:string;fingerprint:string}>;
@@ -24,6 +25,7 @@ export type ActionIdentity = Readonly<{id:string;fingerprint:string}>;
 export type AuthorityClaim = {start():void;release():void};
 export type Capability<I,O> = {
   name:string;
+  internal?:boolean;
   definition:ToolDefinition;
   parseInput(input:unknown):I;
   parseResult(output:unknown):O;
@@ -51,14 +53,15 @@ function stable(value:Json):string {
   return JSON.stringify(value);
 }
 function encoded(value:unknown):string {return stable(jsonValue.parse(value));}
-function sourceKey(source:InvocationSource):string {
+function sourceKey(source:InvocationSource|InternalInvocationSource):string {
   if (source.kind==='provider' && source.responseId && source.callId) return encoded(source);
   if (source.kind==='guest' && source.executionId && Number.isSafeInteger(source.sequence) && source.sequence>0) return encoded(source);
+  if (source.kind==='internal' && source.parentId && Number.isSafeInteger(source.sequence) && source.sequence>0) return encoded(source);
   throw Error('Invalid invocation source');
 }
 
 type ErasedCapability = {
-  name:string;definition:ToolDefinition;eligible(work:WorkContext):boolean;
+  name:string;internal:boolean;definition:ToolDefinition;eligible(work:WorkContext):boolean;
   parse(input:unknown):Json;describe(input:Json,work:WorkContext):Description;
   check(input:Json,work:WorkContext,action?:ActionIdentity):void;authorize(input:Json,work:WorkContext,action:ActionIdentity):Promise<void|AuthorityClaim>;
   execute(input:Json,work:WorkContext,action:ActionIdentity):Promise<Json>;visible(output:Json):string;
@@ -73,6 +76,7 @@ export class WorkActionService {
   private readonly queueDepth=new Map<string,number>();
   private readonly journal:ActionJournal;
   private readonly closures=new Map<string,{controller:AbortController;refs:number}>();
+  private readonly completedHopParents=new Set<string>();
   constructor(private readonly db:DatabaseSync, private readonly key:Uint8Array,
     private readonly context:(work:WorkRef,signal:AbortSignal)=>WorkContext,
     private readonly active:(work:WorkRef)=>void, private readonly budget=32, private readonly deferred:(work:WorkRef)=>boolean=()=>false) {
@@ -82,7 +86,7 @@ export class WorkActionService {
     if (!capability.name || capability.name==='code_mode' || this.capabilities.has(capability.name) || capability.definition.function.name!==capability.name) throw Error('Invalid or duplicate capability');
     const parse=(input:unknown)=>capability.parseInput(input);
     this.capabilities.set(capability.name,{
-      name:capability.name,definition:structuredClone(capability.definition),eligible:capability.eligible,
+      name:capability.name,internal:capability.internal===true,definition:structuredClone(capability.definition),eligible:capability.eligible,
       parse:input=>jsonValue.parse(parse(input)),
       describe:(input,work)=>capability.describe(parse(input),work),
       check:(input,work,action)=>capability.check(parse(input),work,action),
@@ -103,9 +107,9 @@ export class WorkActionService {
   }
   offers(context:WorkContext,route:'direct'|'guest'):ToolDefinition[] {
     if ((route==='direct' && context.mode==='code') || (route==='guest' && context.mode==='direct')) return [];
-    return [...this.capabilities.values()].filter(cap=>cap.eligible(context)).map(cap=>structuredClone(cap.definition));
+    return [...this.capabilities.values()].filter(cap=>!cap.internal && cap.eligible(context)).map(cap=>structuredClone(cap.definition));
   }
-  recognizes(name:string):boolean {return this.capabilities.has(name);}
+  recognizes(name:string):boolean {const cap=this.capabilities.get(name);return !!cap && !cap.internal;}
   private digest(value:string):string {return createHmac('sha256',this.key).update(value).digest('hex');}
   private state(work:WorkRef) {const recovery=work.kind==='task' && !!this.db.prepare('SELECT 1 FROM task_attempts WHERE id=? AND predecessor IS NOT NULL').get(work.id);this.db.prepare('INSERT OR IGNORE INTO work_action_state(kind,work_id,epoch) VALUES (?,?,?)').run(work.kind,work.id,recovery?1:0);return this.db.prepare('SELECT used,closed,epoch FROM work_action_state WHERE kind=? AND work_id=?').get(work.kind,work.id)!;}
   private admit(context:WorkContext, allowPending=false):void {
@@ -158,7 +162,11 @@ export class WorkActionService {
   }
   inspectActions(work:WorkRef) {
     const column=work.kind==='command'?'command_id':'task_attempt_id';
-    return this.db.prepare(`SELECT id FROM action_journal WHERE ${column}=? ORDER BY rowid`).all(work.id).map(row=>this.journal.get(String(row.id)));
+    return this.db.prepare(`SELECT id FROM action_journal WHERE ${column}=? ORDER BY rowid`).all(work.id).map(row=>{
+      const action=this.journal.get(String(row.id));
+      const child=this.db.prepare("SELECT json_extract(source,'$.parentId') AS parent FROM work_action_invocations WHERE action_id=? AND json_extract(source,'$.kind')='internal' LIMIT 1").get(String(row.id));
+      return child && typeof child.parent==='string' ? {...action,parentActionId:child.parent} : action;
+    });
   }
   async invoke(context:WorkContext,request:{source:InvocationSource;name:string;input:unknown;intent:ActionIntent}):Promise<InvocationResult> {
     const snapshot=structuredClone(request);
@@ -167,11 +175,21 @@ export class WorkActionService {
     let release!:()=>void;const next=new Promise<void>(resolve=>{release=resolve;});this.queues.set(queueKey,next);
     try {await prior;try{return await this.dispatch(context,snapshot);}catch(error){if(error instanceof ActionDeferred)return {kind:'blocked',reason:error.message};throw error;}} finally {release();const remaining=(this.queueDepth.get(queueKey)??1)-1;if(remaining)this.queueDepth.set(queueKey,remaining);else this.queueDepth.delete(queueKey);if(this.queues.get(queueKey)===next)this.queues.delete(queueKey);}
   }
-  private async dispatch(context:WorkContext,request:{source:InvocationSource;name:string;input:unknown;intent:ActionIntent}):Promise<InvocationResult> {
+  completeWebRedirect(context:WorkContext,action:ActionIdentity):void {
+    const record=this.journal.get(action.id),invocation=this.db.prepare("SELECT capability FROM work_action_invocations WHERE action_id=? LIMIT 1").get(action.id);
+    if(!record || record.state!=='started' || record.fingerprint!==action.fingerprint || record.work.kind!==context.work.kind || record.work.id!==context.work.id || invocation?.capability!=='read_web')throw Error('Invalid redirect action');
+    this.journal.finish(action.id,'succeeded','Redirect received');this.completedHopParents.add(action.id);
+  }
+  async invokeChild(context:WorkContext,parent:ActionIdentity,sequence:number,name:string,input:unknown):Promise<InvocationResult> {
+    const record=this.journal.get(parent.id),cap=this.capabilities.get(name);
+    if(!record || (record.state!=='started' && !(record.state==='succeeded' && this.completedHopParents.has(parent.id))) || record.fingerprint!==parent.fingerprint || record.work.kind!==context.work.kind || record.work.id!==context.work.id || !cap?.internal)throw Error('Invalid child action');
+    return this.dispatch(context,{source:{kind:'internal',parentId:parent.id,sequence},name,input,intent:{kind:'new'}});
+  }
+  private async dispatch(context:WorkContext,request:{source:InvocationSource|InternalInvocationSource;name:string;input:unknown;intent:ActionIntent}):Promise<InvocationResult> {
     this.admit(context);
-    const route=request.source.kind==='provider'?'direct':'guest';
+    const route=request.source.kind==='provider'?'direct':request.source.kind==='guest'?'guest':'internal';
     const cap=this.capabilities.get(request.name);
-    if (!cap || (route==='direct' && context.mode==='code') || (route==='guest' && context.mode==='direct')) throw Error('Capability is not offered for this work');
+    if (!cap || (route==='internal' ? !cap.internal : cap.internal) || (route==='direct' && context.mode==='code') || (route==='guest' && context.mode==='direct')) throw Error('Capability is not offered for this work');
     if(!cap.eligible(context)) {this.close(context,'authority');throw Error('Capability is no longer authorized');}
     const source=sourceKey(request.source),rawInput=jsonValue.parse(request.input),raw=encoded(rawInput);
     if(Buffer.byteLength(source)>2048 || Buffer.byteLength(raw)>256*1024)throw Error('Invocation input exceeds the limit');
@@ -265,12 +283,12 @@ export class WorkActionService {
     try {this.admit(context);cap.check(input,context,action);claim?.start();this.journal.startInInstanceTransaction(prepared.permit,this.db,{id:actionId,fingerprint,work:context.work});this.db.exec('COMMIT');this.journal.finalizeInstanceStart(prepared.permit);}
     catch(error){this.db.exec('ROLLBACK');this.journal.cancel(actionId);if(error instanceof ActionDeferred)return {kind:'blocked',reason:error.message};this.close(context,'authority');return {kind:'blocked',reason:context.signal.aborted?'Work stopped':'Action could not start'};}
     let output:Json;let visible:string;
-    try {output=await cap.execute(input,context,action);if(Buffer.byteLength(encoded(output))>256*1024)throw Error('Result exceeds the limit');visible=cap.visible(output).slice(0,16000);} catch(error) {this.journal.finish(actionId,error instanceof ActionFailed || error instanceof ActionDenied?'failed':'uncertain',error instanceof ActionFailed?error.safeResult.slice(0,16000):error instanceof ActionDenied?'Action denied':'Outcome unknown');if(error instanceof ActionDenied){this.close(context,'denied');return {kind:'blocked',reason:'Action denied'};}this.admit(context,true);cap.check(input,context,action);return {kind:'status',action:this.journal.get(actionId)!};}
+    try {output=await cap.execute(input,context,action);if(Buffer.byteLength(encoded(output))>256*1024)throw Error('Result exceeds the limit');visible=cap.visible(output).slice(0,16000);} catch(error) {if(!this.completedHopParents.has(actionId))this.journal.finish(actionId,error instanceof ActionFailed || error instanceof ActionDenied?'failed':'uncertain',error instanceof ActionFailed?error.safeResult.slice(0,16000):error instanceof ActionDenied?'Action denied':'Outcome unknown');if(error instanceof ActionDenied){this.close(context,'denied');return {kind:'blocked',reason:'Action denied'};}this.admit(context,true);cap.check(input,context,action);return {kind:'status',action:this.journal.get(actionId)!};}
     this.db.prepare('UPDATE work_action_invocations SET private_result=? WHERE action_id=?').run(encoded(output),actionId);
-    this.journal.finish(actionId,'succeeded',visible);
+    if(!this.completedHopParents.has(actionId))this.journal.finish(actionId,'succeeded',visible);
     this.admit(context,true);cap.check(input,context,action);
     return {kind:'completed',actionId,value:output};
-    } finally {claim?.release();}
+    } finally {this.completedHopParents.delete(actionId);claim?.release();}
   }
 }
 

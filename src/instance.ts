@@ -302,7 +302,7 @@ export class Instance {
     if(this.db.isTransaction!==false)throw new BotConflict('Instance connection is busy');
     this.db.exec('BEGIN IMMEDIATE');try {
       this.validateGrantBoundary(input.boundary);
-      const identity=input.kind==='registered' ? this.registeredSearchIdentity(input.work,input.id,input.fingerprint,input.boundary) : (input.boundary.kind==='web'?this.webIdentity(input.work,input.callId,input.hop,input.boundary.url):input.boundary.kind==='search'?this.searchIdentity(input.work,input.callId,input.boundary.origin,input.boundary.revision,input.boundary.query):this.shellIdentity(input.work,input.callId,{revision:input.boundary.revision,dockerBinary:input.boundary.dockerBinary,dockerSocket:input.boundary.dockerSocket,imageId:input.boundary.imageId},input.boundary.command));
+      const identity=input.kind==='registered' ? this.registeredAuthorityIdentity(input.work,input.id,input.fingerprint,input.boundary) : (input.boundary.kind==='web'?this.webIdentity(input.work,input.callId,input.hop,input.boundary.url):input.boundary.kind==='search'?this.searchIdentity(input.work,input.callId,input.boundary.origin,input.boundary.revision,input.boundary.query):this.shellIdentity(input.work,input.callId,{revision:input.boundary.revision,dockerBinary:input.boundary.dockerBinary,dockerSocket:input.boundary.dockerSocket,imageId:input.boundary.imageId},input.boundary.command));
       if(!identity || identity.id!==input.id || identity.fingerprint!==input.fingerprint)throw new BotConflict('Grant boundary does not match action');
       const action=this.webJournal().get(input.id);
       if(!action || action.state!=='prepared' || action.fingerprint!==input.fingerprint || action.work.kind!==input.work.kind || action.work.id!==input.work.id)throw new BotConflict('Action changed');
@@ -454,7 +454,7 @@ export class Instance {
     return {command:scope.command,dockerBinary:scope.docker_binary,dockerSocket:scope.docker_socket,imageId:scope.image_id,revision:scope.revision,scheduleId:String(origin.schedule_id),dueAt:Number(origin.due_at)};
   }
   shellCanOffer(work:WorkRef) {const record=work.kind==='task'?this.taskAttempt(work.id):this.command(work.id),config=this.shellConfig();if(!record||typeof record.botId!=='string'||record.state!==(work.kind==='task'?'running':'pending')||!config.dockerBinary||!config.dockerSocket||!config.imageId||!this.shellPermission('instance').enabled||!this.shellPermission('bot:'+record.botId).enabled||!this.botIdentity(record.botId)||this.botIdentity(record.botId)?.archived)return false;if(work.kind!=='task')return true;if(this.isHelperAttempt(work.id))return false;return !this.scheduleOrigin(work.id)||!!this.scheduleShellScope(work.id);}
-  shellAllowed(work:WorkRef,revision:number,command?:string) {if(!this.shellCanOffer(work)||this.shellConfig().revision!==revision||this.shellBusy())return false;if(work.kind!=='task')return true;const origin=this.scheduleOrigin(work.id);if(origin){const scope=this.scheduleShellScope(work.id),row=this.db.prepare('SELECT enabled FROM shell_permissions WHERE scope=?').get('task:'+work.id),config=this.shellConfig();if(!scope||row?.enabled===0||scope.revision!==revision||scope.dockerBinary!==config.dockerBinary||scope.dockerSocket!==config.dockerSocket||scope.imageId!==config.imageId||(command!==undefined && scope.command!==command)||this.db.prepare('SELECT 1 FROM schedule_shell_dispatches WHERE schedule_id=? AND due_at=?').get(scope.scheduleId,scope.dueAt))return false;}else if(!this.shellPermission('task:'+work.id).enabled)return false;return !this.taskHasPending(work.id);}
+  shellAllowed(work:WorkRef,revision:number,command?:string,actionId?:string) {const busy=this.db.prepare("SELECT 1 FROM action_journal a WHERE a.id<>? AND a.summary='Run scratch command' AND (a.state='started' OR (a.state='uncertain' AND NOT EXISTS (SELECT 1 FROM shell_reviews r WHERE r.action_id=a.id))) LIMIT 1").get(actionId ?? '');const lock=this.db.prepare('SELECT 1 FROM shell_lock WHERE action_id<>?').get(actionId ?? '');if(!this.shellCanOffer(work)||this.shellConfig().revision!==revision||busy||lock)return false;if(work.kind!=='task')return true;const origin=this.scheduleOrigin(work.id);if(origin){const scope=this.scheduleShellScope(work.id),row=this.db.prepare('SELECT enabled FROM shell_permissions WHERE scope=?').get('task:'+work.id),config=this.shellConfig();if(!scope||row?.enabled===0||scope.revision!==revision||scope.dockerBinary!==config.dockerBinary||scope.dockerSocket!==config.dockerSocket||scope.imageId!==config.imageId||(command!==undefined && scope.command!==command)||this.db.prepare('SELECT 1 FROM schedule_shell_dispatches WHERE schedule_id=? AND due_at=? AND action_id<>?').get(scope.scheduleId,scope.dueAt,actionId ?? ''))return false;}else if(!this.shellPermission('task:'+work.id).enabled)return false;return !this.taskHasPending(work.id);}
   shellIdentity(work:WorkRef,callId:string,config:{revision:number;dockerBinary:string;dockerSocket:string;imageId:string},command:string) {const hex=createHmac('sha256',this.fingerprintKey).update(JSON.stringify(['shell-id',work.kind,work.id,callId])).digest('hex').slice(0,32).split('');hex[12]='4';hex[16]=['8','9','a','b'][parseInt(hex[16] ?? '0',16)%4] ?? '8';const raw=hex.join(''),id=`${raw.slice(0,8)}-${raw.slice(8,12)}-${raw.slice(12,16)}-${raw.slice(16,20)}-${raw.slice(20)}`;return {id,fingerprint:createHmac('sha256',this.fingerprintKey).update(JSON.stringify(['shell-action',work.kind,work.id,callId,config,command,scratchLimits])).digest('hex')};}
   recordShellDecision(id:string,fingerprint:string,config:{dockerBinary:string;dockerSocket:string;imageId:string},decision:'approve'|'deny') {this.db.prepare('INSERT INTO shell_action_configs VALUES (?,?,?,?,?,?)').run(id,fingerprint,config.dockerBinary,config.dockerSocket,config.imageId,decision);}
   reserveShell(id:string) {this.db.exec('BEGIN IMMEDIATE');try{const other=this.db.prepare("SELECT 1 FROM action_journal a WHERE a.id<>? AND a.summary='Run scratch command' AND (a.state='started' OR (a.state='uncertain' AND NOT EXISTS (SELECT 1 FROM shell_reviews r WHERE r.action_id=a.id))) LIMIT 1").get(id);if(other||this.db.prepare('SELECT 1 FROM shell_lock').get()){this.db.exec('ROLLBACK');return false;}this.db.prepare('INSERT INTO shell_lock VALUES (1,?)').run(id);this.db.exec('COMMIT');return true;}catch(error){this.db.exec('ROLLBACK');throw error;}}
@@ -501,7 +501,7 @@ export class Instance {
     if(!record || record.state!=='prepared' || record.fingerprint!==action.fingerprint || record.work.kind!==work.kind || record.work.id!==work.id || !this.searchAllowed(work,boundary.origin,boundary.revision,boundary.query))throw new BotConflict('Search action changed');
     this.db.prepare('INSERT INTO search_action_bindings VALUES (?,?,?,?,?,NULL,NULL)').run(action.id,action.fingerprint,work.kind,work.id,JSON.stringify(boundary));
   }
-  private registeredSearchIdentity(work:WorkRef,id:string,fingerprint:string,boundary:GrantBoundary):ActionIdentity|null {
+  private registeredAuthorityIdentity(work:WorkRef,id:string,fingerprint:string,boundary:GrantBoundary):ActionIdentity|null {
     const row=this.db.prepare('SELECT fingerprint,work_kind,work_id,boundary FROM search_action_bindings WHERE action_id=?').get(id);
     if(!row)return null;
     if(row.fingerprint!==fingerprint || row.work_kind!==work.kind || row.work_id!==work.id || row.boundary!==JSON.stringify(boundary))throw new BotConflict('Search binding changed');
@@ -511,7 +511,7 @@ export class Instance {
     const row=this.db.prepare('SELECT boundary,grant_id,grant_revision FROM search_action_bindings WHERE action_id=?').get(action.id);
     if(typeof row?.boundary!=='string')throw new BotConflict('Search binding unavailable');
     const boundary:GrantBoundary=JSON.parse(row.boundary);this.validateGrantBoundary(boundary);
-    if(boundary.kind!=='search' || boundary.query!==query || !this.registeredSearchIdentity(work,action.id,action.fingerprint,boundary) || !this.searchAllowed(work,boundary.origin,boundary.revision,query,action.id))throw new BotConflict('Search scope changed');
+    if(boundary.kind!=='search' || boundary.query!==query || !this.registeredAuthorityIdentity(work,action.id,action.fingerprint,boundary) || !this.searchAllowed(work,boundary.origin,boundary.revision,query,action.id))throw new BotConflict('Search scope changed');
     if(typeof row.grant_id==='string') {
       const botId=this.webWorkBotId(work),grant=this.#approvalGrants.list().find(g=>g.id===row.grant_id);
       if(!botId || !grant || grant.revoked || grant.revision!==row.grant_revision || JSON.stringify(grant.boundary)!==row.boundary || (grant.scope.kind==='bot' && grant.scope.botId!==botId) || (grant.lifetime.kind==='task' && (work.kind!=='task' || grant.lifetime.taskId!==work.id)))throw new BotConflict('Search grant revoked');
@@ -534,6 +534,73 @@ export class Instance {
     this.db.prepare('UPDATE search_action_bindings SET grant_id=?,grant_revision=? WHERE action_id=?').run(grantId,grant.revision,action.id);
     const controllers=this.grantControllers.get(grantId)??new Set<AbortController>();controllers.add(controller);this.grantControllers.set(grantId,controllers);
     return grantId;
+  }
+  bindRegisteredShell(work:WorkRef,action:ActionIdentity,boundary:Extract<GrantBoundary,{kind:'shell'}>) {
+    this.validateGrantBoundary(boundary);
+    const record=this.webJournal().get(action.id);
+    if(!record || record.state!=='prepared' || record.fingerprint!==action.fingerprint || record.work.kind!==work.kind || record.work.id!==work.id || !this.shellAllowed(work,boundary.revision,boundary.command,action.id))throw new BotConflict('Shell action changed');
+    this.db.prepare('INSERT INTO search_action_bindings VALUES (?,?,?,?,?,NULL,NULL)').run(action.id,action.fingerprint,work.kind,work.id,JSON.stringify(boundary));
+  }
+  registeredShellBoundary(work:WorkRef,action:ActionIdentity,command:string) {
+    const row=this.db.prepare('SELECT boundary,grant_id,grant_revision FROM search_action_bindings WHERE action_id=?').get(action.id);
+    if(typeof row?.boundary!=='string')throw new BotConflict('Shell binding unavailable');
+    const boundary:GrantBoundary=JSON.parse(row.boundary);this.validateGrantBoundary(boundary);
+    if(boundary.kind!=='shell' || boundary.command!==command || !this.registeredAuthorityIdentity(work,action.id,action.fingerprint,boundary) || !this.shellAllowed(work,boundary.revision,command,action.id))throw new BotConflict('Shell scope changed');
+    if(typeof row.grant_id==='string') {
+      const botId=this.webWorkBotId(work),grant=this.#approvalGrants.list().find(g=>g.id===row.grant_id);
+      if(!botId || !grant || grant.revoked || grant.revision!==row.grant_revision || JSON.stringify(grant.boundary)!==row.boundary || (grant.scope.kind==='bot' && grant.scope.botId!==botId) || (grant.lifetime.kind==='task' && (work.kind!=='task' || grant.lifetime.taskId!==work.id)))throw new BotConflict('Shell grant revoked');
+    }
+    return boundary;
+  }
+  assertRegisteredShellDecision(work:WorkRef,action:ActionIdentity,command:string):void {
+    this.registeredShellBoundary(work,action,command);
+    const decision=this.db.prepare('SELECT fingerprint,decision FROM shell_action_configs WHERE action_id=?').get(action.id);
+    if(decision?.fingerprint!==action.fingerprint || decision.decision!=='approve')throw new BotConflict('Shell decision changed');
+  }
+  claimRegisteredShellGrant(work:WorkRef,action:ActionIdentity,command:string,controller:AbortController):string {
+    if(!this.db.isTransaction || controller.signal.aborted)throw new BotConflict('Shell claim requires active transaction');
+    const boundary=this.registeredShellBoundary(work,action,command),botId=this.webWorkBotId(work);
+    if(!botId || !this.matchingApprovalGrant(work,boundary))throw new BotConflict('Shell grant changed');
+    const grantId=this.#approvalGrants.matchingId(boundary,botId,work.kind==='task'?work.id:null),record=this.webJournal().get(action.id);
+    const grant=this.#approvalGrants.list().find(item=>item.id===grantId);
+    if(!grantId || !grant || !record || record.state!=='prepared')throw new BotConflict('Shell grant or action changed');
+    this.db.prepare('UPDATE search_action_bindings SET grant_id=?,grant_revision=? WHERE action_id=?').run(grantId,grant.revision,action.id);
+    this.recordShellDecision(action.id,action.fingerprint,boundary,'approve');
+    const controllers=this.grantControllers.get(grantId)??new Set<AbortController>();controllers.add(controller);this.grantControllers.set(grantId,controllers);
+    return grantId;
+  }
+  bindRegisteredWeb(work:WorkRef,action:ActionIdentity,boundary:Extract<GrantBoundary,{kind:'web'}>) {
+    this.validateGrantBoundary(boundary);const record=this.webJournal().get(action.id);
+    if(!record || record.state!=='prepared' || record.fingerprint!==action.fingerprint || record.work.kind!==work.kind || record.work.id!==work.id || !this.webAllowed(work,boundary.url,action.id))throw new BotConflict('Web action changed');
+    this.db.prepare('INSERT INTO search_action_bindings VALUES (?,?,?,?,?,NULL,NULL)').run(action.id,action.fingerprint,work.kind,work.id,JSON.stringify(boundary));
+  }
+  registeredWebBoundary(work:WorkRef,action:ActionIdentity,url:string) {
+    const row=this.db.prepare('SELECT boundary,grant_id,grant_revision FROM search_action_bindings WHERE action_id=?').get(action.id);
+    if(typeof row?.boundary!=='string')throw new BotConflict('Web binding unavailable');
+    const boundary:GrantBoundary=JSON.parse(row.boundary);this.validateGrantBoundary(boundary);
+    if(boundary.kind!=='web' || boundary.url!==url || !this.registeredAuthorityIdentity(work,action.id,action.fingerprint,boundary) || !this.webAllowed(work,url,action.id))throw new BotConflict('Web scope changed');
+    if(typeof row.grant_id==='string') {
+      const botId=this.webWorkBotId(work),grant=this.#approvalGrants.list().find(g=>g.id===row.grant_id);
+      if(!botId || !grant || grant.revoked || grant.revision!==row.grant_revision || JSON.stringify(grant.boundary)!==row.boundary || (grant.scope.kind==='bot' && grant.scope.botId!==botId) || (grant.lifetime.kind==='task' && (work.kind!=='task' || grant.lifetime.taskId!==work.id)))throw new BotConflict('Web grant revoked');
+    }
+    return boundary;
+  }
+  registeredWebChildren(work:WorkRef,parent:ActionIdentity):void {
+    const rows=this.db.prepare("SELECT i.action_id,i.input,a.fingerprint FROM work_action_invocations i JOIN action_journal a ON a.id=i.action_id WHERE i.kind=? AND i.work_id=? AND json_extract(i.source,'$.kind')='internal' AND json_extract(i.source,'$.parentId')=? ORDER BY i.rowid").all(work.kind,work.id,parent.id);
+    for(const row of rows) {const input=JSON.parse(String(row.input));if(typeof input.url!=='string')throw new BotConflict('Web hop binding unavailable');this.registeredWebBoundary(work,{id:String(row.action_id),fingerprint:String(row.fingerprint)},input.url);}
+  }
+  assertRegisteredWebDecision(work:WorkRef,action:ActionIdentity,url:string):void {
+    this.registeredWebBoundary(work,action,url);const decision=this.db.prepare('SELECT fingerprint,decision FROM web_action_decisions WHERE action_id=?').get(action.id);
+    if(decision?.fingerprint!==action.fingerprint || decision.decision!=='approve')throw new BotConflict('Web decision changed');
+  }
+  claimRegisteredWebGrant(work:WorkRef,action:ActionIdentity,url:string,controller:AbortController):string {
+    if(!this.db.isTransaction || controller.signal.aborted)throw new BotConflict('Web claim requires active transaction');
+    const boundary=this.registeredWebBoundary(work,action,url),botId=this.webWorkBotId(work);
+    if(!botId || !this.matchingApprovalGrant(work,boundary))throw new BotConflict('Web grant changed');
+    const grantId=this.#approvalGrants.matchingId(boundary,botId,work.kind==='task'?work.id:null),record=this.webJournal().get(action.id),grant=this.#approvalGrants.list().find(item=>item.id===grantId);
+    if(!grantId || !grant || !record || record.state!=='prepared')throw new BotConflict('Web grant or action changed');
+    this.db.prepare('UPDATE search_action_bindings SET grant_id=?,grant_revision=? WHERE action_id=?').run(grantId,grant.revision,action.id);
+    const controllers=this.grantControllers.get(grantId)??new Set<AbortController>();controllers.add(controller);this.grantControllers.set(grantId,controllers);return grantId;
   }
   recordSearchDecision(id:string,fingerprint:string,decision:'approve'|'deny') {this.db.prepare('INSERT INTO search_action_decisions VALUES (?,?,?)').run(id,fingerprint,decision);}
   claimSearchDispatch(id:string,now:number) {this.db.exec('BEGIN IMMEDIATE');try{this.db.prepare('DELETE FROM search_dispatches WHERE started_ms<?').run(now-60000);const count=Number(this.db.prepare('SELECT count(*) AS count FROM search_dispatches').get()?.count);if(count>=10){this.db.exec('ROLLBACK');return false;}this.db.prepare('INSERT INTO search_dispatches VALUES (?,?)').run(id,now);this.db.exec('COMMIT');return true;}catch(error){this.db.exec('ROLLBACK');throw error;}}
@@ -559,7 +626,7 @@ export class Instance {
   }
   scheduleOwnsAttempt(attemptId:string,scheduleId:string) {return this.scheduleOrigin(attemptId)?.schedule_id===scheduleId;}
   webCanOffer(work:WorkRef) {const record=work.kind==='task' ? this.taskAttempt(work.id) : this.command(work.id);if(!record || typeof record.botId!=='string' || record.state !== (work.kind==='task' ? 'running' : 'pending'))return false;if(!this.botIdentity(record.botId) || this.botIdentity(record.botId)?.archived || !this.webPermission('instance').enabled || !this.webPermission('bot:'+record.botId).enabled)return false;if(work.kind!=='task')return true;if(this.isHelperAttempt(work.id))return false;const origin=this.scheduleOrigin(work.id);return !origin || !!this.scheduleWebScope(work.id);}
-  webAllowed(work:WorkRef,url?:string) {if(!this.webCanOffer(work))return false;if(work.kind==='task'){const origin=this.scheduleOrigin(work.id);if(origin){const scope=this.scheduleWebScope(work.id);const setting=this.db.prepare('SELECT enabled FROM web_permissions WHERE scope=?').get('task:'+work.id);if(!scope || setting?.enabled===0 || (url!==undefined && url!==scope.url) || this.db.prepare('SELECT 1 FROM schedule_web_dispatches WHERE schedule_id=? AND due_at=?').get(scope.scheduleId,scope.dueAt))return false;}else if(!this.webPermission('task:'+work.id).enabled)return false;if(this.taskHasPending(work.id))return false;}return true;}
+  webAllowed(work:WorkRef,url?:string,actionId?:string) {if(!this.webCanOffer(work))return false;if(work.kind==='task'){const origin=this.scheduleOrigin(work.id);if(origin){const scope=this.scheduleWebScope(work.id);const setting=this.db.prepare('SELECT enabled FROM web_permissions WHERE scope=?').get('task:'+work.id);if(!scope || setting?.enabled===0 || (url!==undefined && url!==scope.url) || this.db.prepare('SELECT 1 FROM schedule_web_dispatches WHERE schedule_id=? AND due_at=? AND action_id<>?').get(scope.scheduleId,scope.dueAt,actionId ?? ''))return false;}else if(!this.webPermission('task:'+work.id).enabled)return false;if(this.taskHasPending(work.id))return false;}return true;}
   claimScheduledWebDispatch(work:WorkRef,url:string,actionId:string) {
     if(work.kind!=='task' || !this.scheduleOrigin(work.id))return true;
     if(this.db.isTransaction!==false)throw new BotConflict('Instance connection is busy');this.db.exec('BEGIN IMMEDIATE');try{const scope=this.scheduleWebScope(work.id);if(!scope || !this.webAllowed(work,url) || this.db.prepare('SELECT 1 FROM schedule_web_dispatches WHERE schedule_id=? AND due_at=?').get(scope.scheduleId,scope.dueAt)){this.db.exec('ROLLBACK');return false;}this.db.prepare('INSERT INTO schedule_web_dispatches VALUES (?,?,?)').run(scope.scheduleId,scope.dueAt,actionId);this.db.exec('COMMIT');return true;}catch(error){this.db.exec('ROLLBACK');throw error;}

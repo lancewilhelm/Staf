@@ -289,14 +289,14 @@ through the protected migration process. `src/work-actions.ts` coordinates
 registered actions and uses the existing action journal. The internal clock
 registration uses the existing clock authority callback. See the
 [accepted-work action service reference](work-actions.md) for its callable API.
-Ordinary `runTurn` opens the captured command or actual task attempt and sends direct clock, memory, configured search, file and native process calls and QuickJS child calls through the same registrations. `src/memory-actions.ts` binds agent scope to captured work and calls the existing store and proposal workflow; store updates and deletes enforce versions at the atomic effect. Version 35 protects upgrades from either version 34 predecessor and creates any missing native-process or search-binding tables. Version 33 retains source,
+Ordinary `runTurn` opens the captured command or actual task attempt and sends direct clock, memory, configured search, web, scratch, file and native process calls and QuickJS child calls through the same registrations. `src/memory-actions.ts` binds agent scope to captured work and calls the existing store and proposal workflow; store updates and deletes enforce versions at the atomic effect. Version 35 protects upgrades from either version 34 predecessor and creates any missing native-process or search-binding tables. Version 33 retains source,
 source hash, execution outcome and selected results; child linkage joins the
 existing invocation journal, which remains authoritative if a guest disappears.
 The provider receives the eligible guest definitions as a catalog, and child
 calls publish their registered names and outcomes through command progress.
 On restart a running guest is marked interrupted and is not rerun. Ordinary
 script errors create a recovery epoch and return the manifest to the same
-provider loop. Task controls use the executing attempt, helper mode and existing restrictions; pending owner input defers new actions until the inbox is drained. Web, scratch and skill adapters remain later slices for Code Mode. The worker's
+provider loop. Task controls use the executing attempt, helper mode and existing restrictions; pending owner input defers new actions until the inbox is drained. Skill selection remains a later slice for Code Mode. Web redirect hops use internal child actions under the same coordinator; each hop checks its exact URL and grant, and the parent checks all hop bindings before result release. Scratch binds the exact command and Docker configuration to its coordinator action and retains its separate reservation and review rules. The worker's
 QuickJS limits do not establish OS/container isolation or a total host RSS cap.
 
 ### Registered host files

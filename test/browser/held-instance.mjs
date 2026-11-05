@@ -29,7 +29,7 @@ return {
     }
     if (options?.currentUserInput==='Blocked synthetic shell') {if(tools.some(tool=>tool.function.name==='run_scratch_shell')) throw Error('Shell offered while disabled');return {role:'assistant',content:'Scratch shell unavailable by default'};}
     if (['Run synthetic shell','Different synthetic shell','Deny synthetic shell','Revoke synthetic shell','Uncertain synthetic shell'].includes(options?.currentUserInput)) {
-      if (shellCalls++===0) {if(!tools.some(tool=>tool.function.name==='run_scratch_shell'))throw Error('Shell tool not offered');const command=options.currentUserInput==='Uncertain synthetic shell'?'simulate uncertainty':options.currentUserInput==='Different synthetic shell'?'printf different':'printf synthetic';return {role:'assistant',content:null,tool_calls:[{id:'shell-run',type:'function',function:{name:'run_scratch_shell',arguments:JSON.stringify({command})}}]};}
+      if (shellCalls++===0) {const direct=tools.some(tool=>tool.function.name==='run_scratch_shell');if(!direct && !tools.some(tool=>tool.function.name==='code_mode'))throw Error('Shell tool not offered');const command=options.currentUserInput==='Uncertain synthetic shell'?'simulate uncertainty':options.currentUserInput==='Different synthetic shell'?'printf different':'printf synthetic';return {role:'assistant',content:null,tool_calls:[{id:'shell-run',type:'function',function:{name:direct?'run_scratch_shell':'code_mode',arguments:JSON.stringify(direct?{command}:{source:`return (await capabilities.run_scratch_shell(${JSON.stringify({command})})).value;`})}}]};}
       const result=messages.at(-1)?.content ?? '';if(result.includes('Untrusted scratch output') && result.includes('hello from fake executor'))return {role:'assistant',content:'Synthetic shell output: hello from fake executor'};
       return {role:'assistant',content:'Synthetic shell action settled'};
     }
@@ -46,8 +46,8 @@ return {
     if (options?.currentUserInput==='Blocked synthetic web') {if(tools.some(tool=>tool.function.name==='read_web')) throw Error('Web tool offered while disabled');return {role:'assistant',content:'Web tool unavailable by default'};}
     if (['Read synthetic web','Deny synthetic web','Revoke synthetic web'].includes(options?.currentUserInput)) {
       if (webCalls++===0) {
-        if (!tools.some(tool=>tool.function.name==='read_web')) throw Error('Web tool not offered');
-        return {role:'assistant',content:null,tool_calls:[{id:'web-read',type:'function',function:{name:'read_web',arguments:JSON.stringify({url:'https://one.example/private-path'})}}]};
+        const direct=tools.some(tool=>tool.function.name==='read_web');if(!direct && !tools.some(tool=>tool.function.name==='code_mode'))throw Error('Web tool not offered');
+        return {role:'assistant',content:null,tool_calls:[{id:'web-read',type:'function',function:{name:direct?'read_web':'code_mode',arguments:JSON.stringify(direct?{url:'https://one.example/private-path'}:{source:'return (await capabilities.read_web({url:"https://one.example/private-path"})).value;'})}}]};
       }
       return {role:'assistant',content:'Synthetic web action settled'};
     }

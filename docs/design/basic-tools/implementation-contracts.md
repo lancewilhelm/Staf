@@ -53,11 +53,11 @@ skill restrictions when registering them. #82 and #84 consume
 task attempt with its live signal and retain pause/resume of approval timers,
 questions and task restrictions. These later adapters must expand the guest
 catalog and provider offers together; no second journal or provider loop is
-needed. The current registered catalog includes clock, memory, host files, native processes, configured search, and eligible task controls. Web, scratch, and skill selection still require their #81 adapters.
+needed. The current registered catalog includes clock, memory, host files, native processes, configured search, web reading, scratch shell, and eligible task controls. Skill selection still requires its #81 adapter.
 
 ## Task lifecycle handoff
 
-The task caller opens the real attempt through `workActions.open` and installs attempt-keyed task-control callbacks for the lifetime of `runTurn`. Clock and configured-search registrations resolve that attempt's `taskTimers` pause/resume functions for approval. The existing `skillAccess` callback remains responsible for selected-skill validation; the shared adapter migration must preserve it and use the same attempt context and timer hooks for approval waits. Pending inbox input defers new action admission without closing recovery or discarding completed results.
+The task caller opens the real attempt through `workActions.open` and installs attempt-keyed task-control callbacks for the lifetime of `runTurn`. Clock, configured-search, web, and scratch registrations resolve that attempt's `taskTimers` pause/resume functions for approval. The existing `skillAccess` callback remains responsible for selected-skill validation; the shared adapter migration must preserve it and use the same attempt context and timer hooks for approval waits. Pending inbox input defers new action admission without closing recovery or discarding completed results.
 
 ### Interactive process adoption
 

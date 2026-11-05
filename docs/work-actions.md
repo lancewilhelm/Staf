@@ -1,10 +1,6 @@
 # Accepted-work action service
 
-`src/work-actions.ts` implements the instance-owned action service. Chat and task execution open it once per accepted command or task attempt; direct and QuickJS clock, memory, configured search, host file, and native process calls use the
-same registrations and authorization. Web, scratch and skill tools remain on their earlier paths pending their adapters. In ordinary chat, those
-other individual tools are available in Direct and Hybrid only; Code Mode offers
-only `code_mode`, with clock, scoped memory, configured search, host file, native process, and eligible task-control actions as guest capabilities. Dispatch rejects
-individual calls that were not offered.
+`src/work-actions.ts` implements the instance-owned action service. Chat and task execution open it once per accepted command or task attempt. Direct and QuickJS calls share registered clock, memory, configured search, web, scratch, host file, native process, and eligible task-control actions. Skill selection remains on its earlier path in Direct and Hybrid. Code Mode offers only `code_mode`. Dispatch rejects individual calls that were not offered.
 
 ## Open accepted work
 
@@ -75,8 +71,7 @@ checks or claims feature authority inside the journal start transaction. Its
 `release` runs after the effect or if authorization, start, or work admission
 fails after the claim was returned. A claim does not prepare or finish a journal
 record. Adapters remain responsible for binding their exact target and checking
-live authority again when a recorded result is released; this seam does not by
-itself migrate web, scratch, or skill selection. `check` receives the trusted identity on checks after authorization and on recovery; its initial eligibility check has no identity.
+live authority again when a recorded result is released; this seam does not by itself migrate skill selection. `check` receives the trusted identity on checks after authorization and on recovery; its initial eligibility check has no identity.
 
 The coordinator admits at most 32 new invocations per work item and at most
 eight pending invocations. Both routes share those limits. It checks active
@@ -200,3 +195,9 @@ New dispatches are deferred while accepted task input is pending. Deferral does 
 ## Process interaction and lifetime
 
 `nativeInteractionCapabilities` registers `terminal_write`, `terminal_eof` and `terminal_resize` through the same coordinator. Each changing call gets its own action ID; completed resume never resubmits input. Input parsing rejects credential-altered text before journaling. The process manager serializes controls per resource, caps queued requests and input bytes, and lets Stop preempt them. `workSignal` carries actual accepted-work cancellation; the existing `signal` also includes admission closure. Retained resources listen to `workSignal`, survive guest bounds and remain accessible to later work for their recorded agent. `finishWork` stops nonretained resources and `stopAgent` handles archive. PTY and pipe controls share output filtering, storage, inspection and shutdown.
+
+## Web and scratch authority
+
+`read_web` binds the canonical URL to the coordinator identity. The first hop uses that action and records a successful redirect as soon as the response is received. Each redirect uses a host-created internal child action with a separate exact URL decision, journal start, and outcome. Internal actions are not model capabilities. Command and task inspection exposes their `parentActionId`. The parent checks every hop binding and reused grant before releasing text or returning a saved result on resume. Scheduled work retains its one-dispatch and exact-URL scope.
+
+`run_scratch_shell` binds the exact command, backend binary, socket, image, configuration revision, and fixed limits. The start transaction checks the owner decision or claims a matching grant. The effect reserves the existing scratch lock and schedule dispatch before using the configured sandbox executor. An uncertain result retains the lock until owner review. Both adapters use attempt timer hooks for approval waits, reject inputs changed by credential redaction, and preserve live permission and grant checks.
