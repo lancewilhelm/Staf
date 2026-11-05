@@ -74,10 +74,33 @@ test('Code Mode excludes legacy individual tools and rejects their forged calls'
       await f.submit('skill-'+mode,bot.id);const command=await f.wait('skill-'+mode);
       assert.equal(command.state,'completed',command.error);
       assert.deepEqual(f.seen[index].offers,mode==='direct'?['clock','select_skill']:mode==='hybrid'?['clock','code_mode','select_skill']:['code_mode']);
+      assert.equal(f.seen[index].messages.some(message=>typeof message.content==='string' && message.content.includes('Available skill catalog')),mode!=='code');
       assert.equal(command.skillActivity.length,mode==='code'?0:1);
       const result=command.runtimeEvents.find(event=>event.type==='tool_result' && event.name==='select_skill');
       assert.equal(result.success,mode!=='code');
       if(mode==='code') assert.match(f.seen.at(-1).messages.at(-1).content,/not offered/);
+    }
+  } finally {await f.app.close();}
+});
+
+test('ordinary errors mentioning limits keep Hybrid recovery available',async()=>{
+  const f=await fixture(messages=>{
+    const results=messages.filter(message=>message.role==='tool');
+    if(!results.length) return tool('code_mode',{source:messages.findLast(message=>message.role==='user').content},'script');
+    if(results.length===1) return tool('clock',{},'direct');
+    return {role:'assistant',content:'continued'};
+  });
+  try {
+    const programs=['interrupted','out of memory','stack overflow','JSON limit','JSON nesting limit','Bridge limit'].map(message=>`await capabilities.clock({}); throw Error(${JSON.stringify(message)});`);
+    programs.push('await capabilities.clock({}); throw Object.assign(new Error("stack overflow"), {name:"InternalError"});');
+    for(const [index,source] of programs.entries()) {
+      const bot=await f.call('/api/bots',{name:'error-'+index,toolMode:'hybrid'});
+      await f.submit('ordinary-'+index,bot.id,source);const command=await f.wait('ordinary-'+index);
+      assert.equal(command.state,'completed',command.error);
+      assert.equal(command.codeExecutions[0].outcome,'error');
+      assert.equal(command.codeExecutions[0].actions.length,1);
+      assert.equal(command.workActions.length,2);
+      assert.ok(command.workActions.every(action=>action.state==='succeeded'));
     }
   } finally {await f.app.close();}
 });

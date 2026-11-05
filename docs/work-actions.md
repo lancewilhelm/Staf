@@ -129,7 +129,11 @@ Per accepted command: at most four guest executions and 32 action invocations,
 with eight pending actions. Each source is at most 32 KiB, selected output at
 most 256 KiB, guest CPU time at most 5,000 ms per execution, QuickJS heap at most
 32 MiB and stack at most 512 KiB. A worker message is bounded to 256 KiB.
-Denial, Stop, live restriction and exhausted shared or guest limits close
+Ordinary `Error` messages, including words such as `interrupted` or `limit`,
+remain recoverable. The worker tracks actual interrupt and bridge-limit events
+and captures QuickJS's native engine-error prototype before running the program;
+it does not infer exhaustion from an error's message or mutable name.
+Denial, Stop, live restriction and observed shared or guest resource exhaustion close
 admission. Ordinary syntax/runtime errors enter recovery; Hybrid can use direct
 calls and Code Mode remains selected. These are QuickJS and protocol bounds,
 not OS/container isolation or a total host RSS limit.

@@ -5,7 +5,9 @@ import {jsonValue} from './json.js';
 
 let context: QuickJSContext | undefined;
 let result: QuickJSHandle | undefined;
+let engineErrorTest: QuickJSHandle | undefined;
 let started = false, ended = false, sequence = 0, guestMs = 0, allowance = 0;
+let resourceExhausted = false;
 let segmentStart = 0;
 const pending = new Map<number, QuickJSDeferredPromise>();
 function send(message: WorkerMessage): void { process.stdout.write(JSON.stringify(message) + '\n'); }
@@ -17,7 +19,14 @@ function end(outcome: 'error' | 'syntax' | 'limit'): void {
 function phase(busy: boolean): void { send({type: 'phase', busy, guestMs}); }
 function hostExhausted(error:unknown):boolean {return error instanceof RangeError && /call stack/i.test(error.message);}
 function exhausted(vm:QuickJSContext,error:QuickJSHandle):boolean {
-  try {const message=vm.getProp(error,'message');try {return /out of memory|stack overflow|interrupted|JSON limit|JSON nesting limit|Bridge limit/i.test(vm.getString(message));} finally {message.dispose();}} catch {return false;}
+  if (resourceExhausted || guestMs >= allowance) return true;
+  const test = engineErrorTest;
+  if (!test) return false;
+  const inspected = runGuest(() => vm.callFunction(test, vm.undefined, error));
+  if (inspected.error) {inspected.error.dispose(); return true;}
+  const engineFailure = vm.getNumber(inspected.value) === 1;
+  inspected.value.dispose();
+  return engineFailure || resourceExhausted || guestMs >= allowance;
 }
 function runGuest<T>(fn: () => T): T {
   phase(true); segmentStart = performance.now();
@@ -35,7 +44,7 @@ function pump(): void {
       }
     });
     if(ended)return;
-    if (guestMs >= allowance) { end('limit'); return; }
+    if (resourceExhausted || guestMs >= allowance) { end('limit'); return; }
     const state = vm.getPromiseState(promise);
     if (state.type === 'fulfilled') {
       const encoded = vm.getString(state.value); state.value.dispose();
@@ -55,10 +64,24 @@ async function start(source: string, names: string[], budget: number, heapBytes:
   const runtime = module.newRuntime();
   runtime.setMemoryLimit(heapBytes);
   runtime.setMaxStackSize(stackBytes);
-  runtime.setInterruptHandler(() => guestMs + performance.now() - segmentStart >= allowance);
+  runtime.setInterruptHandler(() => {
+    if (guestMs + performance.now() - segmentStart >= allowance) resourceExhausted = true;
+    return resourceExhausted;
+  });
   const vm = runtime.newContext(); context = vm;
+  // Capture the engine's prototype before user code can change names or globals.
+  // Ordinary Error text is never evidence that a resource limit was reached.
+  const detector = runGuest(() => vm.evalCode(`(() => {
+    const prototype = InternalError.prototype, getPrototypeOf = Object.getPrototypeOf;
+    return error => { try {return getPrototypeOf(error) === prototype ? 1 : 0;} catch {return 0;} };
+  })()`));
+  if (detector.error) {detector.error.dispose(); end(resourceExhausted ? 'limit' : 'error'); return;}
+  engineErrorTest = detector.value;
+  const hitLimit = vm.newFunction('__limit', () => {resourceExhausted = true;});
+  vm.setProp(vm.global, '__limit', hitLimit); hitLimit.dispose();
   const bridge = vm.newFunction('__bridge', handle => {
-    if (ended || pending.size >= limits.pending + 2) return {error: vm.newError('Bridge limit')};
+    if (ended || resourceExhausted) return {error: vm.newError('Guest closed')};
+    if (pending.size >= limits.pending + 2) {resourceExhausted = true; return {error: vm.newError('Bridge limit')};}
     const payload: unknown = JSON.parse(vm.getString(handle));
     const parsed = jsonValue.parse(payload);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {error: vm.newError('Invalid bridge request')};
@@ -78,10 +101,11 @@ async function start(source: string, names: string[], budget: number, heapBytes:
   vm.setProp(vm.global, '__bridge', bridge); bridge.dispose();
   const bootstrap = `(() => {
     const bridge = globalThis.__bridge; delete globalThis.__bridge;
+    const hitLimit = globalThis.__limit; delete globalThis.__limit;
     const pack = value => {
       const seen = new Set();
       const visit = (v, depth) => {
-        if (depth > 64) throw Error('JSON nesting limit');
+        if (depth > 64) {hitLimit(); throw Error('JSON nesting limit');}
         if (v === null || typeof v === 'string' || typeof v === 'boolean' || typeof v === 'number' && Number.isFinite(v)) return;
         if (typeof v !== 'object' || seen.has(v)) throw Error('Expected JSON data');
         const proto = Object.getPrototypeOf(v);
@@ -97,7 +121,7 @@ async function start(source: string, names: string[], budget: number, heapBytes:
         seen.delete(v);
       };
       visit(value, 0); const text = JSON.stringify(value);
-      if (text.length > ${limits.childBytes}) throw Error('JSON limit');
+      if (text.length > ${limits.childBytes}) {hitLimit(); throw Error('JSON limit');}
       return text;
     };
     const request = async payload => {

@@ -41,3 +41,15 @@ test('guest stack exhaustion closes as a limit', async () => {
   const guest=run('function recurse(){ return recurse(); } return recurse();',async()=>({ok:false,error:'unexpected'}));
   assert.equal((await guest.finished).outcome,'limit');
 });
+
+test('guest heap exhaustion closes as a limit', async () => {
+  const guest=startQuickJSGuest({source:'const values=[]; for (;;) values.push(new Array(65536).fill("data"));',names:[],guestMs:5000,heapBytes:4*1024*1024,request:async()=>({ok:false,error:'unexpected'}),phase:()=>{}});
+  assert.equal((await guest.finished).outcome,'limit');
+});
+
+test('actual JSON bounds close the guest even if its program catches the error', async () => {
+  for(const source of ['return "x".repeat(300000);','try { await staf.emit("x".repeat(300000)); } catch {} return "caught";']) {
+    const guest=run(source,async()=>({ok:true,value:null}));
+    assert.equal((await guest.finished).outcome,'limit');
+  }
+});
