@@ -241,8 +241,9 @@ node test/browser/held-instance.mjs .staf/chat-review/instance.sqlite 3211
 ```
 
 Open `http://127.0.0.1:3211`, pair with the code printed by that process,
-and create a Demo agent from **New agent**. This fixture uses synthetic providers
-and stores review data separately under `.staf/chat-review`.
+and create an agent from **New agent** with provider `lmstudio` and model
+`fixture-model`. This fixture supplies a synthetic provider and stores review
+data separately under `.staf/chat-review`; it does not contact LM Studio.
 
 **Connect ChatGPT** opens a loopback page labeled **Simulated ChatGPT sign-in**.
 Choose **Complete simulated sign-in** to exercise the connected state. This does
@@ -276,8 +277,9 @@ registration remains unverified by the offline checks. See
   Reload to check persistence. Collapse the sidebar: the agent rail stays visible
   and the expand icon moves to the header. Open the composer model popup; check
   arrow/Home/End navigation, Tab/Escape dismissal with focus return,
-  selection checkmarks, and outside-click dismissal. Open New agent and expect
-  the Name field to receive focus. Cancel to discard the unsaved form.
+  selection checkmarks, and outside-click dismissal. New agent opens the shared
+  editor with Name focused. Navigate away and return to check draft retention.
+  Cancel to discard the unsaved form.
   The agent name and avatar open agent settings. Archive and ChatGPT sign-out
   open in-app confirmations; Escape cancels and returns focus. The message
   composer shows a focus indicator for keyboard navigation without a border
@@ -296,7 +298,7 @@ exact-action Approve once/Deny controls, and a retained tool outcome. Refresh or
 use another paired client to decide; the original conversation updates on its
 next poll.
 
-For an offline basic-tool review, use a Demo agent and repeat these steps with
+For an offline basic-tool review, use the controlled fixture agent and repeat these steps with
 **Agent settings → Tool mode** set to Direct, Hybrid and Code Mode:
 
 1. Send `Scripted clock fixture`. Expect the time and an action record. Hybrid
@@ -448,14 +450,17 @@ and expect the process to reach an observed exited state. This is a controlled p
 
 `node --test test/task-work-actions.test.js` after `corepack pnpm exec tsc -p tsconfig.json` exercises paired disposable tasks with controlled providers and the real QuickJS worker. It covers all modes, owner input and a differently configured helper. Existing `test/background-task.test.js`, `test/clock-approval.test.js`, and `test/collaboration-integration.test.js` exercise task lifecycle and CLI behavior. These are local synthetic-provider checks; they do not establish GUI, live-provider, Docker or production behavior.
 
-For a manual CLI check, start the controlled fixture as described in [Review chat locally without a provider](#review-chat-locally-without-a-provider). Pair the CLI with `node dist/cli.js instance pair http://127.0.0.1:3211 .staf/chat-review/client.json PAIRING_CODE`. Create a Demo agent in the workspace and select a tool mode. Use `node dist/cli.js instance bots http://127.0.0.1:3211 .staf/chat-review/client.json` to find its ID, then run `node dist/cli.js instance task-start http://127.0.0.1:3211 .staf/chat-review/client.json AGENT_ID "Scripted clock fixture"`. Inspect the printed attempt ID with `instance task` using the same URL and credential path. Expect a completed task and a succeeded clock action. Hybrid and Code Mode also show a returned code execution. Repeat after changing the agent mode; each new attempt uses the selected mode.
+For a manual CLI check, start the controlled fixture as described in [Review chat locally without a provider](#review-chat-locally-without-a-provider). Pair the CLI with `node dist/cli.js instance pair http://127.0.0.1:3211 .staf/chat-review/client.json PAIRING_CODE`. Create a controlled fixture agent in the workspace and select a tool mode. Use `node dist/cli.js instance bots http://127.0.0.1:3211 .staf/chat-review/client.json` to find its ID, then run `node dist/cli.js instance task-start http://127.0.0.1:3211 .staf/chat-review/client.json AGENT_ID "Scripted clock fixture"`. Inspect the printed attempt ID with `instance task` using the same URL and credential path. Expect a completed task and a succeeded clock action. Hybrid and Code Mode also show a returned code execution. Repeat after changing the agent mode; each new attempt uses the selected mode.
 
 ### Interactive terminal verification
 
 After one build, run `node --test test/native-interactive.test.js` for the paired real pipe/PTY, retained-work, EOF/resize, cross-client/CLI, Stop, privacy and input-recovery checks. Reuse these disposable fixtures for focused development; run the required check/full suite at completed integration and the combined GUI/CLI journey at final feature acceptance. No extra test environment or live provider is needed. The distribution test packs Staf, installs production dependencies, and executes a real PTY command using the installed native binding. Linux runtime is separate from macOS arm64 evidence.
 
-For a manual offline check, use the existing controlled instance above, create a Hybrid Demo agent and send `Interactive process fixture`. Its process should remain running after the response. Open process details, set a size and select Resize terminal, type `hello` and select Send line, then refresh output. Expect `answer:hello` in the terminal stream. Select Stop process and expect an observed exit. The same resource is inspectable and controllable from the paired CLI.
+For a manual offline check, use the existing controlled instance above, create a Hybrid fixture agent and send `Interactive process fixture`. Its process should remain running after the response. Open process details, set a size and select Resize terminal, type `hello` and select Send line, then refresh output. Expect `answer:hello` in the terminal stream. Select Stop process and expect an observed exit. The same resource is inspectable and controllable from the paired CLI.
 
+## Creation defaults and legacy Demo data
+
+Use a disposable instance when testing default selection or migration. Set a real provider and synthetic model in Settings without signing in. Saving the choice migrates Demo agents, including archived records. To test a failed migration, make a disposable agent configuration invalid, save the default, repair the file, and reload the defaults. The migration retries without replacing agents already moved to a real provider. The seed still contains Demo fixtures for compatibility with the remaining provider removal work.
 ## Verify shared core guidance
 
 After building, run `node --test test/instance-core.test.js`. The disposable

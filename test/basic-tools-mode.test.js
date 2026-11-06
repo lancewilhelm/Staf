@@ -16,7 +16,7 @@ test('a new agent exposes the saved Hybrid tool mode through the paired service'
   };
   try {
     const {token}=await call('/api/pair',{code:app.code});
-    const agent=await call('/api/bots',{name:'Clock agent'},token);
+    const agent=await call('/api/bots',{name:'Clock agent',provider:'demo'},token);
     assert.equal(agent.toolMode,'hybrid');
     assert.equal((await call(`/api/bots/${agent.id}`,undefined,token)).toolMode,'hybrid');
   } finally {await app.close();}
@@ -35,7 +35,7 @@ test('defaults, explicit choices, creation retry and profile conflicts retain th
   try {
     const defaults=instance.creationDefaults();
     assert.equal(defaults.toolMode,'hybrid');
-    instance.setCreationDefaults({...defaults,toolMode:'code'});
+    instance.setCreationDefaults({...defaults,provider:'codex',model:'fixture-model',toolMode:'code'});
     const input={name:'A',instructions:'',operationId:'creation'};
     const agent=instance.createBot(input);
     assert.equal(agent.toolMode,'code');
@@ -56,7 +56,7 @@ test('defaults, explicit choices, creation retry and profile conflicts retain th
 test('direct file edits preserve comments and legacy modes, and reject invalid values', () => {
   const instance=new Instance(':memory:');
   try {
-    const agent=instance.createBot({name:'File',instructions:'',toolMode:'code'});
+    const agent=instance.createBot({name:'File',provider:'demo',instructions:'',toolMode:'code'});
     const path=join(agent.configDir,'agent.toml');
     let source=readFileSync(path,'utf8').replace('toolMode = "code"','toolMode = "direct" # keep this comment');
     writeFileSync(path,source);
@@ -76,7 +76,7 @@ test('direct file edits preserve comments and legacy modes, and reject invalid v
 test('accepted command and task profiles keep their mode and validate legacy and invalid captures', () => {
   const instance=new Instance(':memory:');
   try {
-    let agent=instance.createBot({name:'Capture',instructions:'',toolMode:'code'});
+    let agent=instance.createBot({name:'Capture',provider:'demo',instructions:'',toolMode:'code'});
     instance.claim({id:'chat',botId:agent.id,content:'Hello'});
     instance.acceptTask({id:'task',botId:agent.id,objective:'Work',limitMs:1000});
     agent=instance.editBot(agent.id,{...agent,toolMode:'direct'});
@@ -102,11 +102,11 @@ test('accepted command and task profiles keep their mode and validate legacy and
 test('version 30 databases migrate with backup and preserve existing configuration', () => {
   const dir=mkdtempSync(join(tmpdir(),'staf-mode-migration-')),path=join(dir,'instance.sqlite');
   try {
-    let instance=new Instance(path);const agent=instance.createBot({name:'Existing',instructions:''});instance.close();
+    let instance=new Instance(path);const agent=instance.createBot({name:'Existing',provider:'demo',instructions:''});instance.close();
     let db=new DatabaseSync(path);db.exec('ALTER TABLE creation_defaults DROP COLUMN tool_mode; PRAGMA user_version=30');db.close();
     instance=new Instance(path);assert.ok(instance.migrationBackup && existsSync(instance.migrationBackup));
     assert.equal(instance.creationDefaults().toolMode,'hybrid');assert.equal(instance.bot(agent.id).name,'Existing');
-    assert.equal(INSTANCE_SCHEMA_VERSION,37);instance.close();
+    assert.equal(INSTANCE_SCHEMA_VERSION,38);instance.close();
     db=new DatabaseSync(path);assert.equal(db.prepare('PRAGMA user_version').get().user_version,INSTANCE_SCHEMA_VERSION);db.close();
   } finally {rmSync(dir,{recursive:true,force:true});}
 });
@@ -123,7 +123,7 @@ test('paired CLI and service share creation defaults and agent mode', async () =
     const response=await fetch(url+'/api/pair',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:app.code})});
     const paired=await response.json();writeFileSync(credential,JSON.stringify(paired));
     const defaults=await cli('defaults',url,credential);assert.equal(defaults.toolMode,'hybrid');
-    await cli('defaults-set',url,credential,String(defaults.revision),'demo','-','-','code');
+    await cli('defaults-set',url,credential,String(defaults.revision),'codex','fixture-model','-','code');
     const agent=await cli('create',url,credential,'CLI agent','--tool-mode','direct','--operation-id','cli-mode');
     assert.equal(agent.toolMode,'direct');
     const inspected=await cli('inspect',url,credential,agent.id);assert.equal(inspected.toolMode,'direct');

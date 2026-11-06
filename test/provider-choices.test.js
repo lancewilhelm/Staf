@@ -13,7 +13,7 @@ test('shared provider choices use first-use defaults, remember pairs and preserv
  token=(await call('pair',{code:app.code})).body.token;
  let defaults=await call('provider-defaults');assert.equal(defaults.status,200);
  assert.equal((await call('provider-defaults',{revision:defaults.body.revision,provider:'codex',model:'first',reasoning:'high'})).status,200);
- let a=(await call('bots',{name:'A'})).body;const b=(await call('bots',{name:'B'})).body;
+ let a=(await call('bots',{provider:'demo',name:'A'})).body;const b=(await call('bots',{provider:'demo',name:'B'})).body;
  const choose=async(provider,model,reasoning)=>call(`bots/${a.id}/selection`,{revision:a.revision,provider,...(model===undefined?{}:{model}),...(reasoning===undefined?{}:{reasoning})});
  a=(await choose('codex')).body;assert.equal(a.model,'first');assert.equal(a.reasoning,'high');
  const stale=a; a=(await choose('codex','mine','low')).body;
@@ -43,7 +43,7 @@ test('metadata handles explicit advertised defaults, unknown reasoning and outag
  try{token=(await call('pair',{code:app.code})).body.token;
  assert.equal((await call('models',{provider:'openrouter'})).status,200);
  const created=(await call('bots',{operationId:'metadata-create',name:'Created from metadata',provider:'openrouter'})).body;assert.equal(created.model,'advertised');assert.equal(created.reasoning,null);
- let a=(await call('bots',{name:'Metadata'})).body;
+ let a=(await call('bots',{provider:'demo',name:'Metadata'})).body;
  const choose=async(edit)=>{const result=await call(`bots/${a.id}/selection`,{revision:a.revision,provider:'openrouter',...edit});assert.equal(result.status,200,JSON.stringify(result.body));a=result.body;return a};
  await choose({});assert.equal(a.model,'advertised');
  await choose({reasoning:'high'});await choose({model:'plain'});assert.equal(a.reasoning,null);
@@ -89,5 +89,5 @@ test('bot model discovery supplies reasoning metadata to subsequent selection',a
 test('provider history edits preserve comments or reject unsafe TOML without changing files',async()=>{
  const dir=mkdtempSync(join(tmpdir(),'staf-choice-format-'));const app=startInstance(join(dir,'db'));const port=await app.listen();let token='';
  const call=async(path,body)=>{const r=await fetch(`http://127.0.0.1:${port}/api/`+path,{method:body?'POST':'GET',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});return {status:r.status,body:await r.json()}};
- try{token=(await call('pair',{code:app.code})).body.token;for(const layout of ['[providerChoices.openrouter]\nmodel = "old" # model comment\nreasoning = "high" # reasoning comment\n','providerChoices.openrouter.model = "old" # dotted comment\nproviderChoices.openrouter.reasoning = "high"\n','providerChoices = { openrouter = { model = "old", reasoning = "high" } } # inline comment\n']){let a=(await call('bots',{name:'Format'})).body;const file=join(a.configDir,'agent.toml');const original='name = "Format"\ndescription = ""\nprovider = "openrouter"\nmodel = "old"\nreasoning = "high"\n'+layout;writeFileSync(file,original);a=(await call('bots/'+a.id)).body;const result=await call(`bots/${a.id}/selection`,{revision:a.revision,provider:'openrouter',model:'new'});if(result.status===200){const text=readFileSync(file,'utf8');assert.match(text,/# (?:model|dotted|inline) comment/);assert.equal(result.body.model,'new')}else{assert.equal(result.status,409,JSON.stringify(result.body));assert.equal(readFileSync(file,'utf8'),original)}}}finally{await app.close();rmSync(dir,{recursive:true,force:true})}
+ try{token=(await call('pair',{code:app.code})).body.token;for(const layout of ['[providerChoices.openrouter]\nmodel = "old" # model comment\nreasoning = "high" # reasoning comment\n','providerChoices.openrouter.model = "old" # dotted comment\nproviderChoices.openrouter.reasoning = "high"\n','providerChoices = { openrouter = { model = "old", reasoning = "high" } } # inline comment\n']){let a=(await call('bots',{provider:'demo',name:'Format'})).body;const file=join(a.configDir,'agent.toml');const original='name = "Format"\ndescription = ""\nprovider = "openrouter"\nmodel = "old"\nreasoning = "high"\n'+layout;writeFileSync(file,original);a=(await call('bots/'+a.id)).body;const result=await call(`bots/${a.id}/selection`,{revision:a.revision,provider:'openrouter',model:'new'});if(result.status===200){const text=readFileSync(file,'utf8');assert.match(text,/# (?:model|dotted|inline) comment/);assert.equal(result.body.model,'new')}else{assert.equal(result.status,409,JSON.stringify(result.body));assert.equal(readFileSync(file,'utf8'),original)}}}finally{await app.close();rmSync(dir,{recursive:true,force:true})}
 });
