@@ -70,7 +70,7 @@ Appearance and layout are browser-local preferences (`web/appearance.ts` and
 `web/design.ts`); the default is Light/Evergreen with an expanded sidebar.
 The bundled DM Sans font needs no external request. The composer popup renders grouped menu choices through the existing choice and
 save boundary, while agent settings use the full form. Both keep service-backed
-discovery, manual model entry, reasoning and conflict recovery. Creation uses the same fields and layout as agent settings. Editor drafts stay in
+automatic metadata discovery, manual model entry, reasoning and conflict recovery. Discovery results never save a choice. Concurrent catalog requests cannot replace newer metadata with an older response, and a failed refresh clears metadata used for later selection decisions. Creation uses the same fields and layout as agent settings. Editor drafts stay in
 the browser tab across navigation, including their original profile revisions.
 Explicit Cancel discards unsaved edits; creation operation recovery remains in
 the controller.
@@ -93,7 +93,12 @@ sending. The obsolete `staf-draft` and `staf-pending` pre-journal keys are delet
 under Web Locks without importing or backing them up. The `staf-workspace-v1:`
 journal is retained, including unclaimed closed-tab drafts and uncertain commands;
 the retired manual picker also listed these current records. No journal-wide
-legacy cleanup is safe. Clearing browser storage removes the journal.
+legacy cleanup is safe. Earlier records without a dataset identity migrate only
+when a stored command or creation operation establishes their origin. Otherwise,
+Settings offers Copy and confirmed Discard for each record. Discard takes the
+record's Web Lock and compares its saved value and dataset again before removal.
+It leaves changed records, records owned by another tab, and scoped journals in
+place. Clearing browser storage removes the journal.
  A keyed
 bot-creation operation stores its fingerprint and result with the bot in one
 transaction. Version 27 backs up an existing database before adding the journal.

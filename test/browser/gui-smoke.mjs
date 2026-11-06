@@ -216,7 +216,7 @@ try{
    await until(()=>evaluate("!!document.querySelector('.composer-picker:not([hidden])')"),'popup at '+width);
    if(process.env.STAF_GUI_SCREENSHOTS) await writeFile(join(process.env.STAF_GUI_SCREENSHOTS,'staf-'+width+'.png'),Buffer.from((await cdp('Page.captureScreenshot',{format:'png'})).data,'base64'));
    assert.equal(await evaluate("(()=>{const r=document.querySelector('.composer-picker:not([hidden])').getBoundingClientRect();return r.left>=0 && r.right<=innerWidth && r.top>=0 && document.documentElement.scrollWidth<=innerWidth})()"),true,'picker and page fit '+width);
-   await evaluate("document.querySelector('[aria-label=\"Close picker\"]').click()");
+   await evaluate("document.querySelector('.model-button').click()");
  }
  await cdp('Emulation.clearDeviceMetricsOverride');
  await evaluate("testInput('[aria-label=Message]','')");
@@ -261,7 +261,7 @@ try{
  await cdp('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13,nativeVirtualKeyCode:13});
  assert.equal(await evaluate("document.querySelector('[aria-label=Message]').value"),'');assert.equal(await evaluate("document.querySelector('.messages').innerText.includes('Keep this draft') && document.body.innerText.includes('Connect ChatGPT in Settings to send.')"),true);const beforeConnect=await evaluate(`(async()=>{const t=localStorage.getItem('staf-token');return await (await fetch('/api/bots/${bot.id}/messages',{headers:{Authorization:'Bearer '+t}})).json()})()`);assert.equal(beforeConnect.length,0);console.log('PASS missing connection preserves the draft and explains setup');
  await evaluate("testInput('[aria-label=Message]','Newer setup draft')");
- await act("document.querySelector('.model-button').click();setTimeout(()=>testClick('Agent settings'),0)","!!document.querySelector('.setup .provider-choices select')",'open disconnected agent settings');
+ await act("document.querySelector('.header-agent-name').click()","!!document.querySelector('.setup .provider-choices select')",'open disconnected agent settings');
  assert.equal(await evaluate("document.querySelector('.setup .provider-choices select').value"),'codex');
  assert.equal(await evaluate("document.querySelector('.setup .provider-choices select option:checked').textContent"),'ChatGPT');
  assert.equal(await evaluate("!!document.querySelector('.setup .provider-choices select option[value=demo]')"),false);
@@ -444,7 +444,7 @@ try{
  console.log('PASS busy recovery observes a late original without duplicate work');
 
 
- await act("document.querySelector('.model-button').click();setTimeout(()=>testClick('Agent settings'),0)","document.body.innerText.includes('AGENT SETTINGS')",'open agent-specific model settings');
+ await act("document.querySelector('.header-agent-name').click()","document.body.innerText.includes('AGENT SETTINGS')",'open agent-specific model settings');
  await until(()=>evaluate("document.querySelectorAll('.setup textarea').length===1 && document.body.innerText.includes('Configuration:')"),'settings loaded');console.log('PASS one Instructions editor and configuration location');
  await cdp('Emulation.setDeviceMetricsOverride',{width:600,height:300,deviceScaleFactor:1,mobile:false});
  assert.equal(await evaluate("(()=>{const n=document.querySelector('.settings-scroll');n.scrollTop=n.scrollHeight;return n.scrollHeight>n.clientHeight && n.scrollTop>0})()"),true,'settings remain scrollable in a short viewport');
@@ -459,7 +459,7 @@ try{
  await evaluate("window.testFailSave=false;window.testSaveGate=new Promise(resolve=>window.releaseTestSave=resolve);testClick('Save settings')");await until(()=>evaluate("document.querySelector('.setup textarea')?.disabled && [...document.querySelectorAll('.side button')].every(element=>element.matches(':disabled'))"),'settings retry pending');
  await act("window.releaseTestSave();window.fetch=window.testFetch","!!document.querySelector('[aria-label=Message]')",'save agent settings');
  const updated=await evaluate(`(async()=>{const t=localStorage.getItem('staf-token');return await (await fetch('/api/bots/${bot.id}',{headers:{Authorization:'Bearer '+t}})).json()})()`);assert.equal(updated.model,'fixture-model-v2');assert.equal(updated.reasoning,'high');assert.equal(updated.instructions,'Help me plan with care');assert.equal(await readFile(join(updated.configDir,'soul.md'),'utf8'),'Help me plan with care');console.log('PASS model and instructions are saved in the agent configuration');
- await act("document.querySelector('.model-button').click();setTimeout(()=>testClick('Agent settings'),0)","!!document.querySelector('.setup textarea')",'reopen agent settings');
+ await act("document.querySelector('.header-agent-name').click()","!!document.querySelector('.setup textarea')",'reopen agent settings');
  await evaluate("testInput('.setup textarea','My unsaved instructions')");
  await writeFile(join(updated.configDir,'soul.md'),'Instructions from disk');
  await evaluate("testClick('Save settings')");
@@ -607,7 +607,7 @@ try{
  assert.equal(await evaluate("document.querySelector('[aria-label=Message]').value"),'');
  assert.equal(await evaluate("document.querySelector('.messages').innerText.includes('Hello from GUI')"),false);
  const firstBeforeSwitch=await evaluate(`(async()=>{const t=localStorage.getItem('staf-token');return await (await fetch('/api/bots/${bot.id}',{headers:{Authorization:'Bearer '+t}})).json()})()`);
- await act("document.querySelector('.model-button').click();setTimeout(()=>testClick('Agent settings'),0)","!!document.querySelector('.setup .provider-choices select')",'open second agent settings');
+ await act("document.querySelector('.header-agent-name').click()","!!document.querySelector('.setup .provider-choices select')",'open second agent settings');
  await evaluate("document.querySelector('.setup .provider-choices select').value='codex';document.querySelector('.setup .provider-choices select').dispatchEvent(new Event('change',{bubbles:true}));testClick('Save settings')");
  await until(()=>evaluate("document.querySelector('dialog')?.innerText.includes('Change provider?')"),'provider confirmation appears on Save');
  assert.equal((await evaluate(`(async()=>{const t=localStorage.getItem('staf-token');return await (await fetch('/api/bots/${duplicate.id}',{headers:{Authorization:'Bearer '+t}})).json()})()`)).provider,'live');

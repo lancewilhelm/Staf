@@ -48,6 +48,16 @@ import { loadOpenRouterKey, saveOpenRouterKey, disconnectOpenRouter } from './op
 export function startInstance(path: string, port = 0, options: {dataDir?: string; publicOrigin?: string; maintenanceToken?:string; env?: Environment; enableCollaboration?: boolean; enableReusableApprovals?: boolean; localBootstrapToken?: string; authNow?:()=>number; authLifetimeMs?:number; webDependencies?:WebDependencies; searchTransport?:SearchTransport; shellExecutor?:typeof executeShellSandbox; modelRequest?:typeof fetch; authHooks?: {prepare:typeof prepareDirectLogin; complete:typeof completeDirectLogin; authorizationUrl?:typeof authorizationUrl}; providerFactory?: (profile: {provider:string; model:string | null; reasoning:string | null; instructions:string; chatId:string}, instructions:string) => Promise<Provider>} = {}) {
   assertDatasetAvailable(path,options.maintenanceToken);
   const selectionCatalogs=new Map<string,ModelCatalog>();
+  const catalogRequests=new Map<string,number>();
+  async function selectionCatalog(settings:Parameters<typeof discoverModels>[0], discoveryOptions:Parameters<typeof discoverModels>[1]) {
+    const provider=settings.provider.value;
+    const request=(catalogRequests.get(provider)??0)+1;
+    catalogRequests.set(provider,request);
+    selectionCatalogs.delete(provider);
+    const catalog=await discoverModels(settings,discoveryOptions);
+    if(catalogRequests.get(provider)===request) selectionCatalogs.set(provider,catalog);
+    return catalog;
+  }
   const env = options.env ?? process.env;
   const dataDir = options.dataDir ?? resolve(dirname(path));
   const knownKeys = new Set<string>();
@@ -590,7 +600,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
         if(typeof value.provider!=='string'||!isProviderId(value.provider))return json(400,{error:'Invalid provider'});
         if(loggingOut)return json(409,{error:'Sign-out in progress'});
         const settings=resolveSettings({saved:{},file:{},shell:env,cli:{provider:value.provider},session:{}});
-        const catalog=await discoverModels(settings,{env,dataDir,refresh:true,request:options.modelRequest});selectionCatalogs.set(value.provider,catalog);return json(200,redactValue(catalog,redact));
+        const catalog=await selectionCatalog(settings,{env,dataDir,refresh:true,request:options.modelRequest});return json(200,redactValue(catalog,redact));
       }
       const selection=req.url?.match(/^\/api\/bots\/([\w-]+)\/selection$/);
       if(selection?.[1]&&req.method==='POST') {
@@ -645,7 +655,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
           if(loggingOut)return json(409,{error:'Sign-out in progress'});
           const provider=String(bot.provider),model=typeof bot.model === 'string' ? bot.model : undefined;
           const settings=resolveSettings({saved:{},file:{},shell:env,cli:{provider,...(model ? {model} : {})},session:{}});
-          const controller=new AbortController();active.add(controller);try{const catalog=await discoverModels(settings,{env,dataDir,refresh:true,request:options.modelRequest});selectionCatalogs.set(provider,catalog);return json(200,redactValue(catalog,redact));}finally{active.delete(controller);}
+          const controller=new AbortController();active.add(controller);try{const catalog=await selectionCatalog(settings,{env,dataDir,refresh:true,request:options.modelRequest});return json(200,redactValue(catalog,redact));}finally{active.delete(controller);}
         }
       }
       const botSkillsMatch = req.url?.match(/^\/api\/bots\/([\w-]+)\/skills$/);

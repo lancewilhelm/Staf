@@ -1,12 +1,19 @@
 <script setup lang="ts">
 import { providerLabel } from '../provider-label';
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
+import type { BotProfile } from '../controller';
 import { useWorkspace } from '../workspace';
 import ProviderPicker from './ProviderPicker.vue';
 import UiIcon from './UiIcon.vue';
 const emit = defineEmits<{settings: [id: string]}>();
 const {app, state: s} = useWorkspace();
 const selected = computed(() => s.value.bots.find(agent => agent.id === s.value.selected));
+const profile = ref<BotProfile | null>(null);
+watch(() => [selected.value?.id, selected.value?.revision], ([id], _, onCleanup) => {
+  let active = true; onCleanup(() => { active = false; });
+  if (typeof id !== 'string') { profile.value = null; return; }
+  void app.botProfile(id).then(value => { if (active) profile.value = value; }).catch(() => { if (active) profile.value = null; });
+}, {immediate: true});
 const textarea = ref<HTMLTextAreaElement | null>(null);
 const picker = ref(false);
 const pickerOpened = ref(false);
@@ -31,6 +38,7 @@ async function openPicker(edge: 'selected' | 'first' | 'last' = 'selected') {
   picker.value = true;
   await focusPicker();
 }
+function catalogReady() { if (document.activeElement === popup.value) void focusPicker(); }
 function togglePicker() { if (picker.value) closePicker(true); else void openPicker(); }
 function outside(event: MouseEvent) { if (event.target instanceof Node && !popup.value?.contains(event.target) && !trigger.value?.contains(event.target)) closePicker(); }
 function popupKey(event: KeyboardEvent) {
@@ -57,11 +65,6 @@ function edit(event: Event) { if (event.target instanceof HTMLTextAreaElement) a
 function keydown(event: KeyboardEvent) {
   if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); void app.send(); }
 }
-function openSettings() {
-  if (!selected.value) return;
-  picker.value = false;
-  emit('settings', selected.value.id);
-}
 </script>
 
 <template>
@@ -69,11 +72,10 @@ function openSettings() {
     <textarea ref="textarea" :rows="2" :disabled="!s.draftReady" aria-label="Message" :placeholder="'Message ' + selected.name + '…'" :value="s.draft.text" @input="edit" @keydown="keydown" />
     <div class="actions"><div class="model-control">
     <div v-if="pickerOpened" :hidden="!picker" id="composer-picker" ref="popup" class="composer-picker model-menu" role="menu" aria-label="Provider, model and reasoning" tabindex="-1" @keydown="popupKey" @focusout="leavePopup">
-      <ProviderPicker compact @ready="focusPicker" @selected="closePicker(true)" :key="selected.id" :id="selected.id" />
-      <button class="text-action" @click="openSettings">Agent settings</button><button class="text-action" aria-label="Close picker" @click="closePicker(true)">Close picker</button>
+      <ProviderPicker compact :active="picker" @ready="focusPicker" @catalog-ready="catalogReady" @profile="value => profile = value" :key="selected.id" :id="selected.id" />
     </div>
 
-      <button ref="trigger" class="model-button" aria-haspopup="menu" aria-controls="composer-picker" @keydown.down.prevent="openPicker('first')" @keydown.up.prevent="openPicker('last')" :aria-expanded="picker" aria-label="Choose provider, model and reasoning" @click="togglePicker"><span class="provider-name">{{ providerLabel(selected.provider) }}</span><span> / </span><span class="model-name">{{ selected.model || 'Choose model' }}</span><UiIcon name="down" /></button>
+      <button ref="trigger" class="model-button" aria-haspopup="menu" aria-controls="composer-picker" @keydown.down.prevent="openPicker('first')" @keydown.up.prevent="openPicker('last')" :aria-expanded="picker" aria-label="Choose provider, model and reasoning" @click="togglePicker"><span class="provider-name">{{ providerLabel(selected.provider) }}</span><span> / </span><span class="model-name">{{ selected.model || 'Choose model' }}</span><span> / </span><span>{{ profile?.id === selected.id ? profile.reasoning || 'Automatic' : '…' }}</span><UiIcon name="down" /></button>
       </div><button class="composer-control" :aria-label="responding ? stopping ? 'Stopping response' : 'Stop' : 'Send'"
         :title="responding ? stopping ? 'Stopping response' : 'Stop response' : 'Send (Enter)'"
         :disabled="responding ? stopping : !s.draftReady || !!s.draft.submission" @click="responding ? app.stopResponse() : app.send()">

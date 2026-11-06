@@ -108,9 +108,10 @@ with a new launcher code. Browser drafts and pending creations are scoped to a
 dataset; records from a prior dataset stay separate. On an ordinary upgrade,
 older unscoped drafts with a matching stored command and agent, and creations
 with a matching stored operation, can recover automatically. Other unscoped
-records remain in browser storage. Open **Earlier browser records** to inspect
-and copy their text and operation IDs; Staf cannot establish their origin or
-submit them automatically. Copy needed text before resetting. Normal backend
+records remain in browser storage. Open **Settings > Earlier browser records**
+to copy their text and operation IDs or discard an individual record. Staf cannot
+establish their origin or submit them automatically. Discard leaves changed or
+locked records in place. Copy needed text before resetting. Normal backend
 restarts keep the dataset identity and recover current records.
 
 Staf writes a backup under the development data directory before reset and before
@@ -466,3 +467,7 @@ After building, run `node --test test/instance-core.test.js`. The disposable
 fixture exercises paired CLI and API saves, direct edits, revision conflicts,
 late writes, reset, and captured chat and task instructions. It uses controlled
 providers and does not measure live model behavior or cache reuse.
+
+## Verify the model picker
+
+For model picker changes, build the application and run `node test/browser/provider-picker-smoke.mjs` and `node test/browser/gui-smoke.mjs`. The picker journey uses a disposable paired instance and controlled metadata. It does not verify live provider access or inference.
