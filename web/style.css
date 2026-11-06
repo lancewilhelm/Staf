@@ -740,6 +740,24 @@ summary {
   border-radius: var(--corner);
 }
 
+.chat-work details.tool-call {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 2px 0;
+}
+
+.working-indicator {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: response-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes response-pulse { 50% { opacity: .3; } }
+@media (prefers-reduced-motion: reduce) { .working-indicator { animation: none; } }
+
 .chat-work pre {
   white-space: pre-wrap;
   overflow-wrap: anywhere;

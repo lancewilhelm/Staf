@@ -212,7 +212,7 @@ instance and uses synthetic provider and sign-in fixtures. It does not verify
 live provider access. The chat journey covers the circular Send/Stop action,
 keyboard submission and Stop, delayed cancellation settlement, editable next
 drafts, cross-tab Stop, long Markdown responses, scroll following, code Copy,
-and narrow Light/Dark/System layouts. Docker-specific tests may be skipped without Docker;
+repeated tool calls, response element continuity, and narrow Light/Dark/System layouts. Docker-specific tests may be skipped without Docker;
 report those skips separately.
 
 The combined basic-tool checks use the same disposable-instance boundary:

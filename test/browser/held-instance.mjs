@@ -50,6 +50,10 @@ return {
       if (messages.at(-1)?.role==='tool') return {role:'assistant',content:'Native fixture started.'};
       return {role:'assistant',content:null,tool_calls:[{id:'native-fixture',type:'function',function:{name:'terminal_run',arguments:JSON.stringify({retain:true,command:"printf 'native browser output'; exec sleep 30"})}}]};
     }
+    if (options?.currentUserInput==='Repeated clock fixture') {
+      if(messages.at(-1)?.role==='tool')return {role:'assistant',content:'Repeated clocks completed.'};
+      return {role:'assistant',content:null,tool_calls:['first-clock','second-clock'].map(id=>({id,type:'function',function:{name:'clock',arguments:'{}'}}))};
+    }
     if (options?.currentUserInput==='Scripted clock fixture') {
       if (messages.at(-1)?.role==='tool') return {role:'assistant',content:'Scripted clock completed.'};
       const scripted=tools.some(tool=>tool.function.name==='code_mode');
