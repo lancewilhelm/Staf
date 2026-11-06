@@ -57,6 +57,7 @@ export async function runCode(input:{actions:WorkActions;responseId:string;callI
   let result:Json={emitted};
   if(end.outcome==='return' && !fatal) {try {result={emitted,value:keep(end.value)};} catch { /* limit closed admission */ }}
   actions.finishExecution(id,fatal?'closed':end.outcome,JSON.stringify(result));
+  if(fatal==='Action denied' && !actions.context.workSignal.aborted) return JSON.stringify({executionId:id,outcome:'denied',notice:'Action denied. No further actions are admitted for this work.'});
   if(fatal) throw Error(fatal);
   if(end.outcome!=='return') {
     const manifest=actions.beginRecovery();

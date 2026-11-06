@@ -171,6 +171,13 @@ Accepted chat and task profiles capture the effective core separately from the
 agent soul. Retries preserve their predecessor's profile. Existing profiles
 without a captured core use the earlier clock instruction. Tool definitions,
 context, permissions, approval checks, and cancellation remain service-owned.
+For an ordinary tool failure or explicit denial, the runtime records a matching
+result and can ask the provider to continue. Denial closes action admission,
+including for a Code Mode guest; a later provider step cannot reopen it. Stop,
+fatal guest errors and provider errors retain their termination behavior.
+Live authority failures close admission and can terminate the turn. A completed reply is persisted only after the
+provider returns it. Scripted service and browser checks cover these paths;
+they do not reproduce the owner's reported greeting or establish model behavior.
 The Advanced Settings editor uses the paired core API and retains its draft
 across workspace navigation. A failed or uncertain save requires a fresh read
 before retry. Cache-impact feedback compares committed request-relevant settings:
