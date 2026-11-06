@@ -65,6 +65,9 @@ Settings. Images are shared across paired clients and survive restarts. See
 
 The shared instance supports per-action approval and permission controls for its clock tool. See [clock approvals](docs/usage.md#clock-approvals-in-the-shared-instance) for setup and current limits.
 
+Ordinary tool failures and denials can be followed by a provider reply; a denial
+does not authorize further actions. See [tool outcomes](docs/usage.md#local-shared-instance-offline-preview) for response and failure status.
+
 The shared instance includes a provisional daily and weekly schedule preview for UTC clock reads, one exact separately approved public web read, one exact separately approved search, or one exact separately approved scratch command per occurrence. See [recurring schedules](docs/usage.md#recurring-schedules-preview) for authorization, recovery, and availability limits.
 
 ## Use Staf

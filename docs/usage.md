@@ -280,6 +280,13 @@ In the shared terminal, `/stop` requests cancellation of the current main-chat r
 
 Actual tool requests and success/failure outcomes appear below the corresponding user message. Expand an outcome to read bounded, redacted output. Pending chat approvals show the exact action and scope with **Approve once** and **Deny**. Decisions from other clients disappear on the next refresh. Observed outcomes remain visible after response failure or Stop. These are tool records, not hidden reasoning.
 
+After an ordinary tool error or an explicit denial, the provider can receive the
+matching result and produce a reply. A denied action closes admission for the
+rest of that work, so a follow-up cannot execute another action. Stop still
+ends the response. A provider failure or the four-step tool iteration limit can
+leave no completed reply; inspect the response status and tool outcomes. A
+provider decides its own wording, so a useful explanation is not guaranteed.
+
 While a response runs, the workspace receives provisional text and progress over a shared-instance event stream. If the connection drops, the workspace reconnects and shows the latest saved progress.
 Tool calls appear as compact rows. Open a row to inspect its retained arguments and result. Approval requests and process controls remain available in the conversation. Older tool events without a call identity appear separately because their request and result cannot be paired reliably.
 The composer has one circular action: an up arrow labeled **Send** when ready, and a square labeled **Stop** during an active response. You can type a next draft while the response runs. Select **Stop** to request cancellation; the response shows **stopping** until the provider and pending operations settle. The circular action stays disabled and labeled **Stopping response** until settlement, then returns to Send. The draft remains editable throughout; Enter cannot submit it during generation or stopping, and nothing is queued. Send it explicitly after the response settles. Stopped partial output stays in the conversation labeled **stopped** and is not treated as a completed provider reply. A provider that does not promptly honor cancellation can keep the agent in stopping until it returns.

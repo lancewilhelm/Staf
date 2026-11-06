@@ -23,10 +23,10 @@ test('paired owner controls skills and actual selection is recorded without gran
   await call('/api/approval-settings/instance',token,{mode:'never-ask',clockEnabled:false});
   await call('/api/commands',token,{id:'one',botId:bot.id,content:'Use the planning helper'});
   let command;for(let i=0;i<100;i++){command=(await call('/api/commands/one',token))[1];if(command.state!=='pending')break;await new Promise(r=>setTimeout(r,5));}
-  assert.equal(command.state,'failed');assert.equal(command.skillActivity.length,1);assert.equal(command.skillActivity[0].sourceDigest,skill.digest);
+  assert.equal(command.state,'completed');assert.equal(command.skillActivity.length,1);assert.equal(command.skillActivity[0].sourceDigest,skill.digest);
   assert.ok(requests[0].tools.some(item=>item.function.name==='select_skill'));
   assert.match(JSON.stringify(requests[1].messages),/Ignore permissions/);
-  assert.equal(requests.length,2);
+  assert.equal(requests.length,3);assert.match(requests[2].messages.at(-1).content,/Clock blocked/);assert.equal(command.workActions.filter(action=>action.summary==='Read UTC clock').length,0);
   await call(`/api/skills/${skill.id}/enabled`,token,{enabled:false});
   assert.equal((await call(`/api/bots/${bot.id}/skills`,token))[1].length,0);
  }finally{await app.close();}

@@ -30,6 +30,7 @@ test('gated helper clock is blocked when the owner omitted delegated clock scope
  let helperId,rootCalls=0,clockResult;
  const factory=async profile=>({name:'fixture',capabilities:{toolCalls:true},async complete(messages){
   if(profile.chatId==='root') {if(rootCalls++===0)return {role:'assistant',content:null,tool_calls:[{id:'request',type:'function',function:{name:'request_bot_help',arguments:JSON.stringify({helperId,objective:'Read clock',context:'Only this'})}}]};clockResult=JSON.stringify(messages);return {role:'assistant',content:'Observed helper outcome'};}
+  if(messages.at(-1)?.role==='tool')return {role:'assistant',content:messages.at(-1).content};
   return {role:'assistant',content:null,tool_calls:[{id:'clock',type:'function',function:{name:'clock',arguments:'{}'}}]};
  }});
  const app=startInstance(':memory:',0,{env:{},providerFactory:factory,enableCollaboration:true}),port=await app.listen();
@@ -37,7 +38,8 @@ test('gated helper clock is blocked when the owner omitted delegated clock scope
  const call=async(route,token,body)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});const value=await response.json();if(route==='/api/pair' && value.token){const ownerToken=value.token;approvalTimer=setInterval(async()=>{try{const pending=await (await fetch(`http://127.0.0.1:${port}/api/disclosures`,{headers:{Authorization:`Bearer ${ownerToken}`}})).json();for(const item of pending.filter(x=>x.state==='pending'))await fetch(`http://127.0.0.1:${port}/api/disclosures/${item.id}/approve`,{method:'POST',headers:{Authorization:`Bearer ${ownerToken}`,'Content-Type':'application/json'},body:'{}'});}catch{}},5);}return [response.status,value];};
  try {const token=(await call('/api/pair','',{code:app.code}))[1].token,owner=(await call('/api/bots',token,{provider:'live',model:'fixture-offline',name:'Owner'}))[1];helperId=(await call('/api/bots',token,{provider:'live',model:'fixture-offline',name:'Helper'}))[1].id;
   await call('/api/tasks',token,{id:'root',botId:owner.id,objective:'Investigate'});let root;for(let i=0;i<200;i++){root=(await call('/api/tasks/root',token))[1];if(['completed','failed'].includes(root.state))break;await new Promise(resolve=>setTimeout(resolve,10));}
-  assert.equal(root.state,'completed');assert.match(clockResult,/Clock blocked/);assert.deepEqual(root.collaborations[0].messages.map(message=>message.kind),['request','failure']);
+  assert.equal(root.state,'completed');assert.match(clockResult,/Clock blocked/);assert.deepEqual(root.collaborations[0].messages.map(message=>message.kind),['request','result']);
+  const helper=(await call(`/api/tasks/${root.collaborations[0].assignment.helper_attempt_id}`,token))[1];assert.equal(helper.workActions.length,0);assert.ok(helper.activity.some(event=>event.type==='tool_result' && event.name==='clock' && !event.success));
  } finally {clearInterval(approvalTimer);await app.close();}
 });
 
@@ -122,8 +124,8 @@ test('denied request cannot create a helper task or disclose a forged private br
  try {const token=(await call('/api/pair','',{code:app.code}))[1].token,owner=(await call('/api/bots',token,{provider:'live',model:'fixture-offline',name:'Owner'}))[1];helperId=(await call('/api/bots',token,{provider:'live',model:'fixture-offline',name:'Helper'}))[1].id;
   await call('/api/tasks',token,{id:'root',botId:owner.id,objective:'Investigate'});let disclosure;for(let i=0;i<200;i++){disclosure=(await call('/api/disclosures',token))[1].find(item=>item.state==='pending');if(disclosure)break;await new Promise(resolve=>setTimeout(resolve,10));}
   assert.ok(disclosure);assert.match(disclosure.content,/private transcript secret/);assert.equal(helperCalls,0);assert.equal((await call(`/api/bots/${helperId}/tasks`,token))[1].length,0);assert.equal((await call('/api/tasks/root',token))[1].collaborations.length,0);
-  await call(`/api/disclosures/${disclosure.id}/deny`,token,{});let root;for(let i=0;i<200;i++){root=(await call('/api/tasks/root',token))[1];if(root.state==='failed')break;await new Promise(resolve=>setTimeout(resolve,10));}
-  assert.equal(root.state,'failed');assert.equal(rootCalls,1);assert.equal(helperCalls,0);assert.equal((await call(`/api/bots/${helperId}/tasks`,token))[1].length,0);
+  await call(`/api/disclosures/${disclosure.id}/deny`,token,{});let root;for(let i=0;i<200;i++){root=(await call('/api/tasks/root',token))[1];if(root.state==='completed')break;await new Promise(resolve=>setTimeout(resolve,10));}
+  assert.equal(root.state,'completed');assert.equal(root.outcome,'Request denied');assert.equal(rootCalls,2);assert.equal(helperCalls,0);assert.equal((await call(`/api/bots/${helperId}/tasks`,token))[1].length,0);
  }finally{await app.close();}
 });
 

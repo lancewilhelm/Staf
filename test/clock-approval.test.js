@@ -60,7 +60,8 @@ test('denial, stop and restart interrupt clock requests without retrying them', 
    const state=await until(async()=>{const [,x]=await call('/api/tasks/attempt',undefined,token);return ['failed','stopped','interrupted'].includes(x.state)&&x;});
    assert.equal(state.state,disposition==='deny'?'failed':disposition==='stop'?'stopped':'interrupted');
    assert.equal((await call(`/api/approvals/${request.id}/approve`,{},token))[0],409);
-   assert.equal(calls,1);
+   assert.equal(calls,disposition==='deny'?4:1);
+   if(disposition==='deny') assert.equal(state.activity.filter(event=>event.type==='tool_result' && event.success===false).length,4);
   } finally {await app.close();rmSync(dir,{recursive:true,force:true});}
  }
 });
@@ -79,8 +80,10 @@ test('chat clock uses live mode overrides and disabled instance clock wins over 
   assert.equal((await call('/api/approvals',undefined,token))[1].length,0);
   await call('/api/approval-settings/instance',{mode:'never-ask',clockEnabled:false},token);
   await call('/api/commands',{id:'two',botId:bot.id,content:'time'},token);
-  const failed=await until(async()=>{const x=(await call('/api/commands/two',undefined,token))[1];return x.state==='failed'&&x;});
-  assert.match(failed.error,/instance-permission/);
+  const completed=await until(async()=>{const x=(await call('/api/commands/two',undefined,token))[1];return x.state==='completed'&&x;});
+  assert.equal(completed.workActions.length,0);
+  const work=await call(`/api/bots/${bot.id}/chat-work`,undefined,token);
+  assert.match(work[1].requests.find(request=>request.id==='two').events.find(event=>event.type==='tool_result').detail,/instance-permission/);
  } finally {await app.close();}
 });
 

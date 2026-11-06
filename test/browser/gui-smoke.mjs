@@ -511,7 +511,7 @@ try{
  server.stdin.write('drop-response-streams\n');
  await sleep(1300);
  assert.equal(await evaluate("document.querySelectorAll('.chat-work details').length"),eventCount,'reconnect does not duplicate outcomes');
- await act("testInput('[aria-label=Message]','What time is it in UTC?');testClick('Send')","!!document.querySelector('.messages .item')",'second exact approval');
+ await act("testInput('[aria-label=Message]','Denied greeting fixture');testClick('Send')","!!document.querySelector('.messages .item')",'second exact approval');
  const denyId=await evaluate("(async()=>{const headers={Authorization:'Bearer '+localStorage.getItem('staf-token')};return (await (await fetch('/api/approvals',{headers})).json()).find(a=>a.state==='pending').id})()");
  const approvalCopy=await openCopy();
  await until(()=>approvalCopy.eval("!!document.querySelector('.messages .item')"),'pending approval in another client');
@@ -519,12 +519,10 @@ try{
  await until(()=>approvalCopy.eval("!!document.querySelector('.messages .item')"),'pending approval survives refresh');
  server.stdin.write('drop-response-streams\n');
  await approvalCopy.eval("[...document.querySelectorAll('.item button')].find(b=>b.textContent==='Deny').click()");
- await until(()=>evaluate("!document.querySelector('.messages .item') && [...document.querySelectorAll('.chat-work')].some(e=>e.innerText.includes('Failed'))"),'cross-client denial and failure');
+ await until(()=>evaluate("!document.querySelector('.messages .item') && document.querySelector('.messages').innerText.includes('Hello after the denied clock.') && [...document.querySelectorAll('.chat-work')].some(e=>e.innerText.includes('Failed'))"),'cross-client denial and useful follow-up');
  assert.equal(await evaluate("document.querySelectorAll('.chat-work details').length"),eventCount+1,'success and denied call each have one row');
  assert.equal(await evaluate(`(async()=>{const headers={Authorization:'Bearer '+localStorage.getItem('staf-token'),'Content-Type':'application/json'};return (await fetch('/api/approvals/${denyId}/approve',{method:'POST',headers,body:'{}'})).status})()`),409,'stale denial cannot approve another action');
  await browserCdp('Target.closeTarget',{targetId:approvalCopy.id});
- await until(()=>evaluate("!![...document.querySelectorAll('.submission button')].find(b=>b.textContent==='Dismiss')"),'failed request has explicit recovery');
- await evaluate("[...document.querySelectorAll('.submission button')].find(b=>b.textContent==='Dismiss').click()");
  await until(()=>evaluate("document.querySelector('.composer-control')?.getAttribute('aria-label')==='Send' && !document.querySelector('.composer-control').disabled"),'denied response settles after stream recovery');
 
  await evaluate("(async()=>{const t=localStorage.getItem('staf-token');await fetch('/api/approval-settings/instance',{method:'POST',headers:{Authorization:'Bearer '+t,'Content-Type':'application/json'},body:JSON.stringify({mode:'never-ask',clockEnabled:true})})})()");

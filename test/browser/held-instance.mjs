@@ -58,6 +58,13 @@ return {
       if(messages.at(-1)?.role==='tool')return {role:'assistant',content:'Repeated clocks completed.'};
       return {role:'assistant',content:null,tool_calls:['first-clock','second-clock'].map(id=>({id,type:'function',function:{name:'clock',arguments:'{}'}}))};
     }
+    if (options?.currentUserInput==='Denied greeting fixture') {
+      if(messages.at(-1)?.role==='tool') {
+        if(!messages.at(-1).content.includes('denied'))throw Error('Expected a denied clock result');
+        return {role:'assistant',content:'Hello after the denied clock.'};
+      }
+      return calls([['clock',{}]]);
+    }
     if (options?.currentUserInput==='Scripted clock fixture') {
       if (messages.at(-1)?.role==='tool') return {role:'assistant',content:'Scripted clock completed.'};
       const scripted=tools.some(tool=>tool.function.name==='code_mode');

@@ -79,8 +79,10 @@ is saved. Direct Codex converts the tool message to a Responses API
 This is a bounded loop, not a promise of a final answer. The default is four
 provider steps, including the first. On the last step, another tool call can
 execute and the loop can then end with `Tool iteration limit reached` without a
-further model call. Some unavailable or authorization-failed clock paths throw;
-other tool errors are returned to the model. Cancellation, a provider or stream
+further model call. An explicit clock denial or unavailable clock call can now
+return a matching unsuccessful result for provider continuation, while action
+admission stays closed. Unexpected authorization failures and live restriction
+failures still terminate work. Cancellation, a provider or stream
 error, invalid replay, unavailable skills, and persistence failure are other
 possible interruptions. Failed main-chat turns roll message history back while
 attempting to retain accounting and events. See [limits and errors](../../src/runtime.ts#L232),

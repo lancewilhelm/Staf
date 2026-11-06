@@ -137,13 +137,13 @@ test('a caught per-program allocation rejection preserves the shared work budget
 });
 
 test('approval denial and Stop close queued guest calls',async()=>{
-  const f=await fixture(messages=>messages.at(-1).role==='tool'?{role:'assistant',content:'unexpected'}:tool('code_mode',{source:'await Promise.all([capabilities.clock({}),capabilities.clock({})]);'}));
+  const f=await fixture(messages=>messages.at(-1).role==='tool'?{role:'assistant',content:'Denial acknowledged'}:tool('code_mode',{source:'await Promise.all([capabilities.clock({}),capabilities.clock({})]);'}));
   try {await f.call('/api/approval-settings/instance',{mode:'ask-every-time',clockEnabled:true});
     for(const disposition of ['deny','stop']){
       const bot=await f.call('/api/bots',{provider:'live',model:'fixture-offline',name:disposition,toolMode:'hybrid'});await f.submit(disposition,bot.id);
       const approval=await f.until(async()=>(await f.call('/api/approvals')).find(x=>x.workId===disposition && x.state==='pending'));
       if(disposition==='deny')await f.call(`/api/approvals/${approval.id}/deny`,{});else await f.call(`/api/commands/${disposition}/stop`,{});
-      const c=await f.wait(disposition);assert.equal(c.state,disposition==='stop'?'stopped':'failed');assert.equal(c.workActions.length,1);assert.equal(c.codeExecutions[0].outcome,'closed');
+      const c=await f.wait(disposition);assert.equal(c.state,disposition==='stop'?'stopped':'completed');assert.equal(c.workActions.length,1);assert.equal(c.codeExecutions[0].outcome,'closed');
       assert.equal((await f.call('/api/approvals')).filter(x=>x.workId===disposition).length,1);
     }
   } finally {await f.app.close();}
