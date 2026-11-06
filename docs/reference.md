@@ -164,10 +164,10 @@ values use Light. System follows the device color scheme. This preference is
 not an instance configuration or a shared API setting.
 `staf-design` stores browser-local sidebar (`expanded`/`focus`), palette
 (`green`/`ink`), font (`sans`/`system`), body (13–17px), space (14–32px),
-corner (0–22px), and logo (0–4) choices. Defaults are expanded, green, sans,
-14, 20, 10, and 1 (Orbit). Invalid fields use their defaults; existing saved
-appearance choices remain honored. Storage failure still allows changes for the
-current page. Reset appearance restores these seven defaults and Light.
+and corner (0–22px) choices. Defaults are expanded, green, sans,
+14, 20, and 10. Invalid fields use their defaults. An old logo preference is
+ignored; Staf uses the fixed pentagon-dot logo. Storage failure still allows
+changes for the current page. Reset appearance restores these defaults and Light.
 Authenticated `GET /api/inbox` projects pending questions and approvals.
 `GET /api/task-updates` returns task summaries for the inbox. `POST /api/bots`
 requires a nonblank `name` and accepts optional `instructions`, `provider`,

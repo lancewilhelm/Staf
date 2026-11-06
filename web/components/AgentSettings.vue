@@ -7,6 +7,7 @@ import ProviderPicker from './ProviderPicker.vue';
 import InstructionsHelp from './InstructionsHelp.vue';
 import AgentImageChooser from './AgentImageChooser.vue';
 import AgentImage from './AgentImage.vue';
+import ConfirmAction from './ConfirmAction.vue';
 import type {ToolMode} from '../../src/tool-mode';
 import ToolModeSelect from './ToolModeSelect.vue';
 import type {AgentImageInput} from '../../src/agent-image';
@@ -20,6 +21,7 @@ const name = ref('');
 const instructions = ref('');
 const toolMode = ref<ToolMode>('direct');
 const status = ref('');
+const confirmingArchive = ref(false);
 const compareAvailable = ref(false);
 const latest = shallowRef<BotProfile | null>(null);
 watch(() => props.id, (id, _, onCleanup) => {
@@ -62,7 +64,8 @@ function providerSaved(value:BotProfile,baseRevision:string|null) {
   }
 }
 async function archive() {
-  if (!profile.value || !window.confirm('Archive this agent? Its configuration and conversation will be retained.')) return;
+  confirmingArchive.value = false;
+  if (!profile.value) return;
   emit('update:saving', true);
   status.value = '';
   try { await app.setArchived(profile.value, true); emit('close'); }
@@ -84,8 +87,8 @@ async function archive() {
       <ProviderPicker :id="id" :disabled="saving" @profile="providerSaved" />
       <button :disabled="saving" class="quiet" @click="emit('providers')">Open provider settings</button>
       <p class="meta">Configuration: <code>{{ profile.configDir }}</code></p>
-      <div class="row"><button :disabled="saving||!imageValid" @click="save">Save settings</button><button :disabled="saving" class="quiet" @click="emit('close')">Cancel</button></div>
-      <button v-if="!profile.archived" :disabled="saving" class="quiet" @click="archive">Archive agent</button>
+      <div class="row agent-settings-actions"><button :disabled="saving||!imageValid" @click="save">Save settings</button><button :disabled="saving" class="quiet" @click="emit('close')">Cancel</button><button v-if="!profile.archived" :disabled="saving" class="quiet archive-action" @click="confirmingArchive = true">Archive agent</button></div>
+      <ConfirmAction v-if="confirmingArchive" title="Archive agent?" message="Its configuration and conversation will be retained." action="Archive agent" @cancel="confirmingArchive = false" @confirm="archive" />
     </template>
     <p role="status">{{ saving ? 'Loading or saving…' : status }}</p>
     <button v-if="compareAvailable" :disabled="saving" class="quiet" @click="compare">Compare latest settings</button>
