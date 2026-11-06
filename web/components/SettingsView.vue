@@ -3,15 +3,16 @@ import { useWorkspace } from '../workspace';
 import { type Appearance, saveAppearance } from '../appearance';
 import ProviderDefaults from './ProviderDefaults.vue';
 import AppearanceOptions from './AppearanceOptions.vue';
+import ConfirmAction from './ConfirmAction.vue';
+import { ref } from 'vue';
 const props = defineProps<{appearance: Appearance; hasAgentSettings: boolean; routerForm: {key: string; status: string; busy: boolean}}>();
 const form = props.routerForm;
 const emit = defineEmits<{'update:appearance': [value: Appearance]; agentSettings: []; chat: []; memory: []}>();
 const {app, state: s} = useWorkspace();
 const appearances: Appearance[] = ['light', 'dark', 'system'];
 function chooseAppearance(value: Appearance) { emit('update:appearance', value); saveAppearance(value); }
-function signOut() {
-  if (window.confirm('Sign out of ChatGPT for this Staf instance? All agents using it will need a new sign-in.')) void app.signOutAuth();
-}
+const confirmingSignOut = ref(false);
+function signOut() { confirmingSignOut.value = false; void app.signOutAuth(); }
 async function saveRouter() {
   form.busy = true;
   form.status = '';
@@ -61,7 +62,8 @@ async function disconnectRouter() {
         <button :disabled="s.authStarting || !!s.authAttempt && ['waiting', 'exchanging', 'committing'].includes(s.authAttempt.phase)" @click="app.startAuth()">{{ s.credential === 'signed-in' ? 'Sign in again' : 'Connect ChatGPT' }}</button>
         <a v-if="s.authUrl && s.authAttempt?.phase === 'waiting' && s.authUrlAttemptId === s.authAttempt.id" :href="s.authUrl" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer">Continue sign-in</a>
         <button v-if="s.authAttempt && ['waiting', 'exchanging'].includes(s.authAttempt.phase)" class="quiet" @click="app.cancelAuth()">Cancel sign-in</button>
-        <button v-if="s.credential === 'signed-in'" class="quiet" @click="signOut">Sign out</button>
+        <button v-if="s.credential === 'signed-in'" class="quiet" @click="confirmingSignOut = true">Sign out</button>
+        <ConfirmAction v-if="confirmingSignOut" title="Sign out of ChatGPT?" message="All agents using ChatGPT on this instance will need a new sign-in." action="Sign out" @cancel="confirmingSignOut = false" @confirm="signOut" />
       </div>
     </div>
     <div class="provider provider-settings provider-card">

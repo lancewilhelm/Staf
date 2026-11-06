@@ -19,9 +19,8 @@ function agentName(agent: {name: string; id: string}) {
 <template>
   <aside class="side" id="agent-sidebar">
     <div class="sidebar-head"><button class="brand" :disabled="saving" aria-label="Staf, return to chat" @click="s.selected && emit('select', s.selected)"><BrandMark /><span>staf</span></button><PanelToggle :disabled="saving" v-if="design.sidebar === 'expanded'" /></div>
-    <div id="agents-label" class="caption">Agents</div>
-    <button :disabled="saving" @click="emit('create')" class="new-agent" aria-label="New agent" title="New agent"><UiIcon name="plus" /><span>New agent</span></button>
-    <nav aria-labelledby="agents-label">
+    <div class="agent-divider" aria-hidden="true"></div>
+    <nav aria-label="Agents">
       <button v-for="agent in s.bots.filter(b => !b.archived)" class="agent-nav" :key="agent.id" :disabled="saving" :title="agentName(agent)" :aria-label="agentName(agent)"
         :aria-current="agent.id === s.selected && view === 'chat' && s.setup.kind === 'closed' ? 'page' : undefined"
         :class="{active: agent.id === s.selected && view === 'chat' && s.setup.kind === 'closed'}" @click="emit('select', agent.id)">
@@ -32,6 +31,6 @@ function agentName(agent: {name: string; id: string}) {
       <summary>Archived agents</summary>
       <ArchivedAgent v-for="agent in s.bots.filter(b => b.archived)" :key="agent.id" :agent="agent" :saving="saving" @memory="emit('memory', agent.id)" />
     </details>
-    <div class="minor"><button :disabled="saving" :class="{active: view === 'settings'}" @click="emit('settings')" aria-label="Settings" title="Settings"><UiIcon name="gear" /><span>Settings</span></button><div class="workspace-caption">Personal workspace</div></div>
+    <div class="minor"><button :disabled="saving" @click="emit('create')" class="new-agent" aria-label="New agent" title="New agent"><UiIcon name="plus" /><span>New agent</span></button><button :disabled="saving" :class="{active: view === 'settings'}" @click="emit('settings')" aria-label="Settings" title="Settings"><UiIcon name="gear" /><span>Settings</span></button><div class="workspace-caption">Personal workspace</div></div>
   </aside>
 </template>

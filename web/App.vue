@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import AgentImage from './components/AgentImage.vue';
-import { computed, nextTick, reactive, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { provideWorkspace } from './workspace';
 import { readAppearance, applyAppearance } from './appearance';
 import AgentSidebar from './components/AgentSidebar.vue';
@@ -28,6 +28,10 @@ const sharedReturn = ref<'settings' | 'agent-memory'>('settings');
 const agentSaving = ref(false);
 const selected = computed(() => s.value.bots.find(agent => agent.id === s.value.selected));
 const headerAgent = computed(() => s.value.bots.find(agent => agent.id === (view.value === 'agent-memory' ? memoryAgentId.value : view.value === 'agent' ? settingsAgentId.value : s.value.selected)));
+function pointerFocus() { document.documentElement.dataset.keyboardFocus = 'false'; }
+function keyboardFocus(event: KeyboardEvent) { if (event.key === 'Tab') document.documentElement.dataset.keyboardFocus = 'true'; }
+onMounted(() => { document.addEventListener('pointerdown', pointerFocus); document.addEventListener('keydown', keyboardFocus); });
+onUnmounted(() => { document.removeEventListener('pointerdown', pointerFocus); document.removeEventListener('keydown', keyboardFocus); });
 let firstRun = false;
 watch([() => s.value.connection.kind, () => s.value.bots.length, () => s.value.credential], () => {
   if (!firstRun && s.value.connection.kind === 'ready') {
@@ -91,11 +95,10 @@ function legacyContent(raw: string) {
         <button v-if="selected && view === 'chat' && s.setup.kind === 'closed'" class="header-agent-image" aria-label="Open agent settings" title="Open agent settings" :disabled="agentSaving" @click="openAgentSettings(selected.id)"><AgentImage :image="selected.image" :name="selected.name" /></button>
         <div v-else :class="headerAgent && view !== 'user-memory' ? 'header-agent-image' : 'avatar'"><AgentImage v-if="headerAgent && view !== 'user-memory'" :image="headerAgent.image" :name="headerAgent.name" /><BrandMark v-else /></div>
         <div>
-          <div class="title"><template v-if="view === 'settings'">Settings</template><template v-else-if="view === 'user-memory'">User memory</template><AgentLabel v-else-if="headerAgent" :agent="headerAgent" /><template v-else>Welcome to Staf</template></div>
+          <div class="title"><template v-if="view === 'settings'">Settings</template><template v-else-if="view === 'user-memory'">User memory</template><button v-else-if="selected && view === 'chat' && s.setup.kind === 'closed'" class="header-agent-name" :disabled="agentSaving" @click="openAgentSettings(selected.id)"><AgentLabel :agent="selected" /></button><AgentLabel v-else-if="headerAgent" :agent="headerAgent" /><template v-else>Welcome to Staf</template></div>
         </div>
         <div class="spacer" />
-        <button v-if="selected && view === 'chat'" class="header-action" aria-label="Agent settings" :disabled="agentSaving" @click="openAgentSettings(selected.id)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M9 3h6l1 3 3 1 2 5-2 5-3 1-1 3H9l-1-3-3-1-2-5 2-5 3-1 1-3Z"/><circle cx="12" cy="12" r="3"/></svg></button>
-        <button v-else-if="view !== 'chat'" class="header-action" :disabled="agentSaving" aria-label="Back to chat" @click="closeAgentSettings"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="m6 6 12 12M6 18 18 6"/></svg></button>
+        <button v-if="view !== 'chat'" class="header-action" :disabled="agentSaving" aria-label="Back to chat" @click="closeAgentSettings"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="m6 6 12 12M6 18 18 6"/></svg></button>
       </header>
       <Toasts />
       <details v-if="s.connection.kind === 'ready' && s.legacyRecords.length" class="connection-recovery">
