@@ -1,4 +1,5 @@
 import {parseToolMode,type ToolMode} from './tool-mode.js';
+import {InstanceCore} from './instance-core.js';
 import {ProviderDefaultsStore} from './provider-choices.js';
 import { DatabaseSync } from 'node:sqlite';
 import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
@@ -46,7 +47,9 @@ function parseToolModeFromProfile(raw:unknown) {
 }
 function parseCapturedProfile(profile:unknown) {
   if (!profile || typeof profile !== 'object' || !('provider' in profile) || typeof profile.provider !== 'string' || !('model' in profile) || !(profile.model === null || typeof profile.model === 'string') || !('reasoning' in profile) || !(profile.reasoning === null || typeof profile.reasoning === 'string') || !('instructions' in profile) || typeof profile.instructions !== 'string' || !('chatId' in profile) || typeof profile.chatId !== 'string') throw Error('Invalid captured profile');
-  return {provider:profile.provider,model:profile.model,reasoning:profile.reasoning,instructions:profile.instructions,chatId:profile.chatId,toolMode:parseToolMode('toolMode' in profile ? profile.toolMode : undefined)};
+  const core='core' in profile ? profile.core : 'You are Staf, a helpful assistant. Use clock for the current time.';
+  if (typeof core !== 'string') throw Error('Invalid captured profile');
+  return {provider:profile.provider,model:profile.model,reasoning:profile.reasoning,instructions:profile.instructions,core,chatId:profile.chatId,toolMode:parseToolMode('toolMode' in profile ? profile.toolMode : undefined)};
 }
 
 function freezeCaptured(value:unknown):void {
@@ -76,6 +79,7 @@ function upgradeVersion(path:string, token:string|undefined):number|undefined {
 export class Instance {
   private readonly db: DatabaseSync;
   private readonly configs: AgentConfigStore;
+  private readonly coreStore: InstanceCore;
   private images:AgentImageAssets|undefined;
   private readonly temporaryConfigRoot: string | undefined;
   private readonly agentRoot: string;
@@ -90,6 +94,7 @@ export class Instance {
     this.temporaryConfigRoot = path === ':memory:' ? mkdtempSync(join(tmpdir(),'staf-config-')) : undefined;
     this.agentRoot = resolve(this.temporaryConfigRoot ?? join(dirname(resolve(path)),'agents'));
     this.configs = new AgentConfigStore(this.agentRoot);
+    this.coreStore = new InstanceCore(this.temporaryConfigRoot ?? dirname(resolve(path)));
     if (path !== ':memory:') {
       try { closeSync(openSync(path, 'wx', 0o600)); }
       catch (error) { if (!hasCode(error, 'EEXIST')) throw error; }
@@ -698,6 +703,8 @@ export class Instance {
   private requireStoredImage(image:AgentImage,previous?:AgentImage) {
     if(image.kind==='upload' && !(previous?.kind==='upload' && previous.assetId===image.assetId) && !this.imageAssets().read(image.assetId)) throw Error('The selected image is unavailable. Upload it again or choose another image.');
   }
+  core() { return this.coreStore.read(); }
+  saveCore(input:{revision:string;content:string|null}) { return this.coreStore.save(input.revision,input.content); }
   createBot(input: {name: string; instructions: string; provider?: string; model?: string; reasoning?: string; operationId?: string;toolMode?:ToolMode;image?:AgentImageInput}, advertisedModel?:string) {
     if (!input.name.trim() || (input.provider !== undefined && !input.provider.trim())) throw new Error('Name and provider are required');
     if(input.toolMode!==undefined)parseToolMode(input.toolMode);
@@ -827,7 +834,8 @@ export class Instance {
       }
       if (!this.db.prepare('SELECT 1 FROM tasks WHERE id=?').get(taskId)) this.db.prepare('INSERT INTO tasks VALUES (?,?,?)').run(taskId,input.botId,visibleObjective);
       const previousCapture=input.predecessor ? this.db.prepare('SELECT profile,context FROM task_attempts WHERE id=?').get(input.predecessor) : undefined;
-      const capturedProfile=typeof previousCapture?.profile==='string' ? previousCapture.profile : JSON.stringify(bot);
+      const effectiveCore=this.core().content;
+      const capturedProfile=typeof previousCapture?.profile==='string' ? previousCapture.profile : JSON.stringify({...bot,core:effectiveCore});
       const capturedContext=typeof previousCapture?.context==='string' ? previousCapture.context : JSON.stringify(isolated ? [] : this.taskContext(input.botId));
       this.db.prepare("INSERT INTO task_attempts (id,task_id,bot_id,predecessor,profile,context,state,limit_ms) VALUES (?,?,?,?,?,?,'queued',?)").run(input.id,taskId,input.botId,input.predecessor ?? null,capturedProfile,capturedContext,input.limitMs);
       if (input.delegateClock) this.db.prepare('UPDATE task_attempts SET delegation_clock=1 WHERE id=?').run(input.id);
@@ -952,7 +960,7 @@ export class Instance {
       if(this.db.prepare("SELECT 1 FROM task_attempts WHERE bot_id=? AND state='waiting'").get(previous.botId)) throw new BotConflict('A replacement is already waiting');
       const bot=this.bot(previous.botId);if(!bot || bot.archived) throw new BotConflict('Agent unavailable');
       const taskId=randomUUID();this.db.prepare('INSERT INTO tasks VALUES (?,?,?)').run(taskId,previous.botId,visibleObjective);
-      this.db.prepare("INSERT INTO task_attempts (id,task_id,bot_id,predecessor,profile,context,state,limit_ms) VALUES (?,?,?,?,?,?,'waiting',?)").run(input.id,taskId,previous.botId,input.predecessor,JSON.stringify(bot),JSON.stringify(this.taskContext(previous.botId)),input.limitMs);
+      this.db.prepare("INSERT INTO task_attempts (id,task_id,bot_id,predecessor,profile,context,state,limit_ms) VALUES (?,?,?,?,?,?,'waiting',?)").run(input.id,taskId,previous.botId,input.predecessor,JSON.stringify({...bot,core:this.core().content}),JSON.stringify(this.taskContext(previous.botId)),input.limitMs);
       if (input.delegateClock) this.db.prepare('UPDATE task_attempts SET delegation_clock=1 WHERE id=?').run(input.id);
       this.bindWork({kind:'task',id:input.id},previous.botId);
       this.captureTaskSkills(input.id,previous.botId);
@@ -1164,7 +1172,7 @@ export class Instance {
       }
       this.db.prepare("INSERT INTO commands VALUES (?, ?, ?, 'pending', NULL)").run(input.id, input.botId, visibleContent);
       this.db.prepare('INSERT INTO command_fingerprints VALUES (?, ?)').run(input.id, digest);
-      this.db.prepare('INSERT INTO command_profiles VALUES (?, ?)').run(input.id, JSON.stringify(bot));
+      this.db.prepare('INSERT INTO command_profiles VALUES (?, ?)').run(input.id, JSON.stringify({...bot,core:this.core().content}));
       this.bindWork({kind:'command',id:input.id},input.botId);
       this.db.prepare('INSERT INTO command_notices SELECT ?,message_id FROM task_notices WHERE bot_id=? AND delivered=0').run(input.id,input.botId);
       this.db.prepare("INSERT INTO messages VALUES (?, ?, 'user', ?, (SELECT COALESCE(MAX(seq),0)+1 FROM messages WHERE bot_id=?))").run('command-user-'+input.id, input.botId, visibleContent, input.botId);

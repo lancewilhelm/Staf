@@ -156,6 +156,19 @@ Archive state and operational records remain in SQLite. Unpublished revision dir
 remain after an interrupted save; they are not read as active configuration.
 Old database-owned profiles are not migrated by this feature.
 
+The shared core override lives at `core/current/core.md` beside the instance
+database. The `current` link selects a revision directory. An absent file uses
+the built-in core; an empty file is an intentional override. Direct edits are
+validated when read. Publication fsyncs a new revision and switches the link.
+Staf checks retired revisions for late edits and blocks acceptance for owner
+reconciliation. Direct writes can overwrite changes that Staf never observed.
+Accepted chat and task profiles capture the effective core separately from the
+agent soul. Retries preserve their predecessor's profile. Existing profiles
+without a captured core use the earlier clock instruction. Tool definitions,
+context, permissions, approval checks, and cancellation remain service-owned.
+Controlled-provider tests cover request construction, not model behavior or
+provider cache reuse.
+
 Discovery uses names and owner-edited descriptions. Each accepted command and
 task captures its settings and instructions. The offline demo does not follow
 instructions. The private execution session retains tool history, usage and
