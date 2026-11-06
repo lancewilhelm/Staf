@@ -7,6 +7,11 @@ import type { Memory, MemoryScope } from '../src/memory-types';
 export type ModelCatalog={models:Array<{id:string;label:string;reasoning:string[]|null;reasoningStatus:string}>;defaultModel?:string};
 export type Bot={revision?:string;id:string;name:string;provider:string;model:string|null;archived:boolean;image?:AgentImage};
 export type BotProfile=Bot & {image:AgentImage;revision:string;instructions:string;description:string;reasoning:string|null;configDir:string;toolMode:ToolMode;providerChoices?:Record<string,{model:string|null;reasoning:string|null}>};
+export type Core = {source:'default'|'override';content:string;defaultContent:string;path:string;revision:string};
+function parseCore(value:unknown):Core {
+  if (!isRecord(value) || (value.source!=='default' && value.source!=='override') || typeof value.content!=='string' || typeof value.defaultContent!=='string' || typeof value.path!=='string' || typeof value.revision!=='string' || !/^[a-f0-9]{64}$/.test(value.revision)) throw Error('Invalid core response');
+  return {source:value.source,content:value.content,defaultContent:value.defaultContent,path:value.path,revision:value.revision};
+}
 export type Message={id:string;role:string;content:string};
 export type ResponseProgress={id:string;botId:string;state:'accepted'|'running'|'stopping'|'stopped'|'completed'|'failed'|'interrupted';text:string;error:string|null};
 export type ChatWork={id:string;processes:Array<{id:string;state:string;mode:string;retained:boolean;inputClosed:boolean;cols:number|null;rows:number|null;exitCode:number|null;exitSignal:string|null}>;progress:ResponseProgress;codeExecutions:Array<{id:string;source:string;sourceHash:string;outcome:string;result:unknown;actions:string[]}>;events:Array<{id:number;type:string;name:string;success:number|null;detail:string|null;arguments:string|null;callId:string|null}>};
@@ -330,6 +335,8 @@ export class Controller {
   }
   async cancelAuth(){const attempt=this.state.authAttempt;if(!attempt)return;try{await this.api('/api/codex-auth/'+attempt.id+'/cancel',{});this.update({authUrl:'',authUrlAttemptId:'',authStatus:''});await this.refresh()}catch{const message='Could not cancel sign-in. Check connection and retry.';this.update({authStatus:message});this.notify(message,'error','auth')}}
   async signOutAuth(){try{await this.api('/api/codex-auth/logout',{});this.update({authUrl:'',authUrlAttemptId:'',authStatus:'',notices:this.state.notices.filter(n=>n.topic!=='auth')});await this.refresh();this.notify('ChatGPT sign-in removed from this instance.','success','auth')}catch(e){this.update({authStatus:'Could not sign out. Check connection and retry.'});this.notify('Could not sign out. Check connection and retry.','error','auth')}}
+  async core() { return parseCore(await this.api<unknown>('/api/core')); }
+  async saveCore(revision:string,content:string|null) { return parseCore(await this.api<unknown>('/api/core',{revision,content})); }
   async creationDefaults(){const value=await this.api<unknown>('/api/creation-defaults');if(!isRecord(value)||typeof value.revision!=='number'||typeof value.provider!=='string'||!isNullableString(value.model)||!isNullableString(value.reasoning))throw Error('Invalid creation defaults');return {revision:value.revision,provider:value.provider,model:value.model,reasoning:value.reasoning,toolMode:parseToolMode(value.toolMode)}}
   async saveCreationMode(defaults:Awaited<ReturnType<Controller['creationDefaults']>>,toolMode:ToolMode){return this.api('/api/creation-defaults',{...defaults,toolMode})}
   async providerDefaults(){return parseProviderDefaults(await this.api<unknown>('/api/provider-defaults'))}

@@ -2730,3 +2730,9 @@ button {
 .info-help button { display: grid; place-items: center; width: 16px; height: 16px; border: 1px solid var(--muted-ink); border-radius: 50%; cursor: pointer; list-style: none; }
 .info-help span { position: absolute; z-index: 4; top: 20px; left: 0; width: 240px; padding: 10px; background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: var(--corner); box-shadow: 0 4px 12px #0002; font-weight: 400; visibility: hidden; }
 .info-help:hover span, .info-help:focus-within span, .info-help[data-open=true] span { visibility: visible; }
+.settings-content.core-settings textarea,
+.settings-content .core-settings textarea {
+  height: 240px;
+  min-height: 160px;
+  resize: vertical;
+}
