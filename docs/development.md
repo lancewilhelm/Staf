@@ -185,6 +185,16 @@ For a workspace change, run the served GUI smoke journey after building:
 node test/browser/gui-smoke.mjs
 ```
 
+For shared core settings changes, also run the disposable paired browser and CLI
+journey after building:
+
+```sh
+node test/browser/core-settings-smoke.mjs
+```
+
+It uses synthetic settings and a controlled provider. It does not verify live
+provider behavior or cache reuse.
+
 For memory settings changes, also run the focused read-only browser journey:
 
 ```sh
@@ -269,6 +279,7 @@ registration remains unverified by the offline checks. See
   arrow/Home/End navigation, Tab/Escape dismissal with focus return,
   selection checkmarks, and outside-click dismissal. New agent opens the shared
   editor with Name focused. Navigate away and return to check draft retention.
+  Cancel to discard the unsaved form.
   The agent name and avatar open agent settings. Archive and ChatGPT sign-out
   open in-app confirmations; Escape cancels and returns focus. The message
   composer shows a focus indicator for keyboard navigation without a border

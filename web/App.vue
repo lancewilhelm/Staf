@@ -116,8 +116,10 @@ function legacyContent(raw: string) {
       <KeepAlive :key="editorDataset">
         <AgentSettings v-if="view === 'agent' && settingsAgentId && s.connection.kind !== 'pairing'" :key="settingsAgentId + ':' + (editorVersions[settingsAgentId] ?? 0)" :id="settingsAgentId" v-model:saving="agentSaving" @providers="openSettings" @memory="openAgentMemory(settingsAgentId)" @close="discardAgentSettings(settingsAgentId)" />
       </KeepAlive>
-      <div v-if="s.connection.kind !== 'pairing' && (view === 'settings' || view === 'user-memory' && sharedReturn === 'settings')" :style="{display: view === 'settings' ? 'contents' : 'none'}">
-        <SettingsView v-model:appearance="appearance" :router-form="routerForm" :has-agent-settings="!!settingsAgentId" @agent-settings="view = 'agent'" @chat="closeAgentSettings" @memory="openUserMemory" />
+      <div v-if="s.datasetIdentity" :key="s.datasetIdentity" :style="{display: view === 'settings' && s.connection.kind !== 'pairing' ? 'contents' : 'none'}">
+        <KeepAlive>
+          <SettingsView v-if="s.connection.kind !== 'pairing' && (view === 'settings' || view === 'user-memory' && sharedReturn === 'settings')" v-model:appearance="appearance" :router-form="routerForm" :has-agent-settings="!!settingsAgentId" @agent-settings="view = 'agent'" @chat="closeAgentSettings" @memory="openUserMemory" />
+        </KeepAlive>
       </div>
       <template v-if="s.connection.kind === 'pairing' || !(view === 'agent' && settingsAgentId)">
         <div v-if="s.connection.kind === 'pairing'" class="setup">

@@ -227,7 +227,10 @@ revision returns 409. An unreadable or invalid file and an edit to a retired
 revision return 422 with `invalid_core_configuration`. An uncertain publication
 returns 503 with `configuration_save_uncertain`. New work is rejected while
 core configuration is invalid. A lost response also requires inspection before
-retrying. The paired CLI uses `core`, `core-save`, and `core-reset`; see
+retrying. Advanced Settings uses these same endpoints. It retains the draft on
+failure and requires comparison before another save. Reset removes the override;
+it does not write a copy of the default. The paired CLI uses `core`, `core-save`,
+and `core-reset`; see
 [shared core guidance](usage.md#shared-core-guidance).
 
 `GET /api/bots/ID` returns `configDir`, `instructions`, and the current
