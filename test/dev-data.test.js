@@ -1,15 +1,53 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fork, spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Instance, INSTANCE_SCHEMA_VERSION } from '../dist/instance.js';
 import { startInstance } from './fixtures/controlled-instance.mjs';
 import { DatabaseSync } from 'node:sqlite';
 import { prepareUpgrade, finishUpgrade } from '../scripts/dev-upgrade.mjs';
+import { saveBackup } from '../scripts/dev-storage.mjs';
 
 const command = (root, action) => spawnSync(process.execPath, ['scripts/dev-data.mjs', action], {cwd:process.cwd(), env:{...process.env,STAF_DEV_DATA_DIR:root}, encoding:'utf8'});
+test('restore replaces core guidance with the backed-up revision history', () => {
+  const root=realpathSync(mkdtempSync(join(tmpdir(),'staf-core-restore-'))),path=join(root,'instance.sqlite');let instance;
+  try {
+    instance=new Instance(path);instance.saveCore({revision:instance.core().revision,content:'Earlier'});instance.saveCore({revision:instance.core().revision,content:'Core A'});instance.close();
+    const originalRevisions=readdirSync(join(root,'core','revisions')).sort(),originalLink=readlinkSync(join(root,'core','current'));
+    const db=new DatabaseSync(path);const backup=saveBackup({dataRoot:root,db,existed:true,reason:'core-test'});db.close();
+    instance=new Instance(path);instance.saveCore({revision:instance.core().revision,content:'Core B'});instance.close();instance=undefined;
+    const result=spawnSync(process.execPath,['scripts/dev-data.mjs','restore',backup],{cwd:process.cwd(),env:{...process.env,STAF_DEV_DATA_DIR:root},encoding:'utf8'});assert.equal(result.status,0,result.stderr);
+    instance=new Instance(path);assert.equal(instance.core().content,'Core A');assert.deepEqual(readdirSync(join(root,'core','revisions')).sort(),originalRevisions);assert.equal(readlinkSync(join(root,'core','current')),originalLink);instance.close();instance=undefined;
+    const undo=result.stdout.match(/Backup: (.+)/)?.[1];assert.ok(undo);
+    const undoResult=spawnSync(process.execPath,['scripts/dev-data.mjs','restore',undo],{cwd:process.cwd(),env:{...process.env,STAF_DEV_DATA_DIR:root},encoding:'utf8'});assert.equal(undoResult.status,0,undoResult.stderr);
+    instance=new Instance(path);assert.equal(instance.core().content,'Core B');instance.close();instance=undefined;
+  } finally {instance?.close();rmSync(root,{recursive:true,force:true});}
+});
+test('reset and older backups without core select the shipped default, and upgrade captures an empty override', () => {
+  const root=realpathSync(mkdtempSync(join(tmpdir(),'staf-core-legacy-'))),path=join(root,'instance.sqlite');let instance;
+  try {
+    instance=new Instance(path);instance.saveCore({revision:instance.core().revision,content:''});instance.close();instance=undefined;
+    const db=new DatabaseSync(path);db.exec('PRAGMA user_version=29');db.close();
+    const upgrade=prepareUpgrade(root);assert.ok(upgrade);assert.ok(existsSync(join(upgrade.backup,'core','current')));
+    assert.equal(command(root,'recover').status,0);instance=new Instance(path);assert.equal(instance.core().source,'override');assert.equal(instance.core().content,'');instance.close();instance=undefined;
+    const reset=command(root,'reset');assert.equal(reset.status,0,reset.stderr);const backup=reset.stdout.match(/Backup: (.+)/)?.[1];assert.ok(backup);
+    instance=new Instance(path);assert.equal(instance.core().source,'default');instance.close();instance=undefined;
+    rmSync(join(backup,'core'),{recursive:true,force:true});
+    const restore=spawnSync(process.execPath,['scripts/dev-data.mjs','restore',backup],{cwd:process.cwd(),env:{...process.env,STAF_DEV_DATA_DIR:root},encoding:'utf8'});assert.equal(restore.status,0,restore.stderr);
+    instance=new Instance(path);assert.equal(instance.core().source,'default');instance.close();instance=undefined;
+  } finally {instance?.close();rmSync(root,{recursive:true,force:true});}
+});
+test('backup does not bless a late edit to a retired core revision', () => {
+  const root=realpathSync(mkdtempSync(join(tmpdir(),'staf-core-late-backup-'))),path=join(root,'instance.sqlite');let instance;
+  try {
+    instance=new Instance(path);instance.saveCore({revision:instance.core().revision,content:'First'});const retired=realpathSync(instance.core().path);instance.saveCore({revision:instance.core().revision,content:'Second'});writeFileSync(retired,'Late edit');instance.close();instance=undefined;
+    const reset=command(root,'reset');assert.equal(reset.status,0,reset.stderr);const backup=reset.stdout.match(/Backup: (.+)/)?.[1];assert.ok(backup);
+    const restored=spawnSync(process.execPath,['scripts/dev-data.mjs','restore',backup],{cwd:process.cwd(),env:{...process.env,STAF_DEV_DATA_DIR:root},encoding:'utf8'});assert.equal(restored.status,0,restored.stderr);
+    instance=new Instance(path);assert.throws(()=>instance.core(),/previous core revision was edited/i);
+  } finally {instance?.close();rmSync(root,{recursive:true,force:true});}
+});
 test('reset creates an unconfigured dataset while retaining connections and a complete backup', () => {
   const root=mkdtempSync(join(tmpdir(),'staf-dev-data-')), path=join(root,'instance.sqlite');
   try {
@@ -47,12 +85,21 @@ test('published SQLite journal stays beside its database during maintenance', as
   }
 });
 
-async function interrupt(root, action) {
-  const child=fork('scripts/dev-data.mjs',[action],{cwd:process.cwd(),env:{...process.env,STAF_DEV_DATA_DIR:root,STAF_DEV_TEST_PAUSE:'database-published'},stdio:['ignore','ignore','pipe','ipc']});
+async function interrupt(root, action, checkpoint='database-published') {
+  const child=fork('scripts/dev-data.mjs',[action],{cwd:process.cwd(),env:{...process.env,STAF_DEV_DATA_DIR:root,STAF_DEV_TEST_PAUSE:checkpoint},stdio:['ignore','ignore','pipe','ipc']});
   let errors='';child.stderr.on('data',data=>errors+=data);
   await new Promise((resolve,reject)=>{child.once('message',resolve);child.once('exit',()=>reject(Error('Exited before checkpoint: '+errors)));});
   child.kill('SIGKILL');await new Promise(resolve=>child.once('exit',resolve));
 }
+test('interrupted reset recovers the original core revision tree', async () => {
+  const root=realpathSync(mkdtempSync(join(tmpdir(),'staf-core-interrupted-'))),path=join(root,'instance.sqlite');let instance;
+  try {
+    instance=new Instance(path);instance.saveCore({revision:instance.core().revision,content:'Original core'});instance.saveCore({revision:instance.core().revision,content:'Current core'});instance.close();instance=undefined;
+    const revisions=readdirSync(join(root,'core','revisions')).sort();
+    await interrupt(root,'reset','files-published');const result=command(root,'recover');assert.equal(result.status,0,result.stderr);
+    instance=new Instance(path);assert.equal(instance.core().content,'Current core');assert.deepEqual(readdirSync(join(root,'core','revisions')).sort(),revisions);instance.close();instance=undefined;
+  } finally {instance?.close();rmSync(root,{recursive:true,force:true});}
+});
 // Models the older constructor's schema gate; actual older-build startup is
 // checked separately so this test does not depend on Git history in CI.
 function legacySchemaGate(path) {

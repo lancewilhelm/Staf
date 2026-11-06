@@ -115,7 +115,8 @@ locked records in place. Copy needed text before resetting. Normal backend
 restarts keep the dataset identity and recover current records.
 
 Staf writes a backup under the development data directory before reset and before
-a supported schema upgrade. It includes SQLite and authoritative agent files,
+a supported schema upgrade. It includes SQLite, authoritative agent files, and the
+complete core revision tree,
 but not provider credentials. Protect the backup like the original conversations.
 If startup reports interrupted maintenance, stop all instances and run:
 
@@ -140,6 +141,8 @@ Restore saves the current dataset first. It retains current provider connections
 clears restored client authorizations, and assigns a fresh browser dataset identity.
 When the backup predates the first database, restore leaves an empty SQLite database
 ready for initialization, so the database path remains protected during publication.
+Backups without a core tree restore the current built-in core. An empty core
+override in a newer backup remains empty. Reset also selects the built-in core.
 Use code compatible with the restored schema. The command does not automatically
 start Staf. If restore is interrupted, `dev:recover` restores the state from before
 that restore. Keep backups until you have checked the restored content. An abrupt
@@ -460,7 +463,7 @@ For a manual offline check, use the existing controlled instance above, create a
 
 ## Creation defaults and legacy Demo data
 
-Use a disposable instance when testing default selection or migration. Set a real provider and synthetic model in Settings without signing in. Saving the choice migrates Demo agents, including archived records. To test a failed migration, make a disposable agent configuration invalid, save the default, repair the file, and reload the defaults. The migration retries without replacing agents already moved to a real provider.
+Use a disposable instance when testing default selection or migration. Set a real provider and synthetic model in Settings without signing in. Saving the choice migrates Demo agents, including archived records. To test a failed migration, make a disposable agent configuration invalid, save the default, repair the file, and reload the defaults. Other valid agents can still accept work. The migration retries without replacing agents already moved to a real provider.
 ## Verify shared core guidance
 
 After building, run `node --test test/instance-core.test.js`. The disposable

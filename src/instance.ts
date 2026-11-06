@@ -701,19 +701,24 @@ export class Instance {
   creationDefaults() {const row=this.db.prepare('SELECT revision,provider,model,reasoning,tool_mode FROM creation_defaults WHERE id=1').get();if(!row || typeof row.revision !== 'number' || typeof row.provider !== 'string' || !(row.model === null || typeof row.model === 'string') || !(row.reasoning === null || typeof row.reasoning === 'string'))throw Error('Invalid creation defaults');return {revision:row.revision,provider:row.provider,model:row.model,reasoning:row.reasoning,toolMode:parseToolMode(row.tool_mode)};}
   resumeDemoMigration() {
     if (!this.db.prepare('SELECT 1 FROM demo_migration WHERE id=1').get()) return;
+    let failure:unknown;
     try {
       this.db.exec('BEGIN IMMEDIATE');
       const defaults=this.creationDefaults();
       for (const row of this.db.prepare('SELECT id FROM bots ORDER BY rowid').all()) {
-        const bot=this.bot(String(row.id));
-        if (!bot || bot.provider!=='demo') continue;
-        this.configs.publish(bot.id,{...bot,provider:defaults.provider,model:defaults.model,reasoning:defaults.reasoning,providerChoices:{...bot.providerChoices,[defaults.provider]:{model:defaults.model,reasoning:defaults.reasoning}}},bot.archived,bot.revision);
+        try {
+          const bot=this.bot(String(row.id));
+          if (!bot || bot.provider!=='demo') continue;
+          this.configs.publish(bot.id,{...bot,provider:defaults.provider,model:defaults.model,reasoning:defaults.reasoning,providerChoices:{...bot.providerChoices,[defaults.provider]:{model:defaults.model,reasoning:defaults.reasoning}}},bot.archived,bot.revision);
+        } catch(error) {failure ??= error;}
       }
-      this.db.exec('DELETE FROM demo_migration WHERE id=1; COMMIT');
+      if(!failure)this.db.exec('DELETE FROM demo_migration WHERE id=1');
+      this.db.exec('COMMIT');
     } catch(error) {
       try { this.db.exec('ROLLBACK'); } catch {}
-      throw new BotConflict(`Demo migration incomplete. Resolve the agent configuration error and retry saving the same defaults: ${error instanceof Error ? error.message : 'unknown error'}`);
+      failure=error;
     }
+    if(failure)throw new BotConflict(`Demo migration incomplete. Resolve the agent configuration error and retry saving the same defaults: ${failure instanceof Error ? failure.message : 'unknown error'}`);
   }
   setCreationDefaults(input:{revision:number;provider:string;model:string|null;reasoning:string|null;toolMode?:ToolMode}) {
     if(!Number.isSafeInteger(input.revision) || input.revision<1 || !['','codex','openrouter','lmstudio','live'].includes(input.provider) || (input.provider!=='' && !(typeof input.model==='string' && input.model.trim() && input.model.length<=200)) || (input.provider==='' && input.model!==null) || !(input.reasoning === null || typeof input.reasoning === 'string' && input.reasoning.length <= 100))throw Error('Choose a real provider and model for creation defaults');
@@ -735,8 +740,7 @@ export class Instance {
   }
   core() { return this.coreStore.read(); }
   saveCore(input:{revision:string;content:string|null}) { return this.coreStore.save(input.revision,input.content); }
-  createBot(input: {name: string; instructions: string; provider?: string; model?: string; reasoning?: string; operationId?: string;toolMode?:ToolMode;image?:AgentImageInput}, advertisedModel?:string) {
-    this.resumeDemoMigration();
+  createBot(input: {name: string; instructions: string; provider?: string; model?: string|null; reasoning?: string|null; operationId?: string;toolMode?:ToolMode;image?:AgentImageInput}, advertisedModel?:string) {
     if (!input.name.trim() || (input.provider !== undefined && !input.provider.trim())) throw new Error('Name and provider are required');
     if(input.toolMode!==undefined)parseToolMode(input.toolMode);
     const id = randomUUID(), chatId = randomUUID();
@@ -744,15 +748,15 @@ export class Instance {
     try {
       const image:AgentImage=input.image?.kind==='upload-data'?this.imageAssets().accept(input.image):input.image??{kind:'initials'};
       const savedImage=imageSetting(image);
-      const digest=input.operationId ? createHmac('sha256',this.fingerprintKey).update(JSON.stringify([input.name,input.instructions,input.provider ?? null,input.model ?? null,input.reasoning ?? null,...(savedImage===null?[]:[savedImage]),...(input.toolMode===undefined?[]:['toolMode',input.toolMode])])).digest('hex') : null;
+      const digest=input.operationId ? createHmac('sha256',this.fingerprintKey).update(JSON.stringify([input.name,input.instructions,input.provider ?? null,input.model ?? null,input.reasoning ?? null,...(savedImage===null?[]:[savedImage]),...(input.toolMode===undefined?[]:['toolMode',input.toolMode]),...(input.model===null?['explicit-null-model']:[]),...(input.reasoning===null?['explicit-null-reasoning']:[])])).digest('hex') : null;
       if(input.operationId) { const existing=this.db.prepare('SELECT digest,bot_id FROM bot_creation_operations WHERE id=?').get(input.operationId); if(existing) { if(existing.digest!==digest || typeof existing.bot_id!=='string') throw new BotConflict('Creation operation ID conflict'); const bot=this.bot(existing.bot_id); this.db.exec('COMMIT'); return bot; } }
       this.requireStoredImage(image);
       const defaults=this.creationDefaults();const provider=input.provider ?? defaults.provider;
       if (!provider) throw Error('Choose a creation-default provider and model in Settings first.');
       if (!isProviderId(provider)) throw Error('Unsupported provider. Choose a supported provider.');
       const first=this.providerDefaults().read().providers[provider];
-      const chosenModel=input.model ?? (input.provider===undefined?defaults.model:first?.model??advertisedModel??null);
-      const chosenReasoning=input.reasoning ?? (input.provider===undefined?defaults.reasoning:first?.reasoning??null);
+      const chosenModel=input.model !== undefined ? input.model : (input.provider===undefined?defaults.model:first?.model??advertisedModel??null);
+      const chosenReasoning=input.reasoning !== undefined ? input.reasoning : (input.provider===undefined?defaults.reasoning:first?.reasoning??null);
       this.configs.publish(id,{name:input.name,description:'',provider,model:chosenModel,reasoning:chosenReasoning,toolMode:input.toolMode??defaults.toolMode,instructions:input.instructions,providerChoices:{[provider]:{model:chosenModel,reasoning:chosenReasoning}},image},false);
       this.db.prepare('INSERT INTO bots VALUES (?, ?, ?, ?, ?, ?, ?)').run(id, chatId, '', '', provider, null, null);
       this.db.prepare('INSERT INTO bot_profiles (bot_id,revision,soul,archived) VALUES (?, 1, ?, 0)').run(id, '');
@@ -833,7 +837,6 @@ export class Instance {
     return {...visible,toolMode:parseToolModeFromProfile(capturedProfile), workActions:this.workActions().inspectActions({kind:'task',id}),codeExecutions:this.workActions().inspect({kind:'task',id}), waitReason, inbox, usage:session?.usage ?? [], activity: this.db.prepare('SELECT seq,event FROM task_activity WHERE attempt_id=? ORDER BY seq').all(id).map(event => { const value = JSON.parse(String(event.event)); if (value.type === 'tool_result' && value.name === 'select_skill' && typeof value.content === 'string') { value.content = this.redactSkill(value.content); if (value.success) { try { const detail=JSON.parse(value.content); if (typeof detail.digest === 'string' && detail.sourceDigest === undefined) { detail.sourceDigest=detail.digest; delete detail.digest; value.content=JSON.stringify(detail); } } catch { /* Historical error text is not structured selection evidence. */ } } } return {seq:event.seq, ...value}; })};
   }
   acceptTask(input: {id:string; botId:string; objective:string; limitMs:number; predecessor?:string; delegateClock?:boolean}, visibleObjective=input.objective) {
-    this.resumeDemoMigration();
     this.db.exec('BEGIN IMMEDIATE');
     try {
       const result=this.acceptTaskInTransaction(input,visibleObjective);
@@ -842,7 +845,6 @@ export class Instance {
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
   }
   private acceptTaskInTransaction(input: {id:string; botId:string; objective:string; limitMs:number; predecessor?:string; delegateClock?:boolean}, visibleObjective=input.objective, isolated=false) {
-    if (this.db.prepare('SELECT 1 FROM demo_migration WHERE id=1').get()) throw new BotConflict('Demo migration is incomplete. Repair the reported configuration and reload creation defaults.');
     const digest=createHmac('sha256',this.fingerprintKey).update(JSON.stringify([input.id,input.botId,input.objective,input.limitMs,input.predecessor ?? null,...(input.delegateClock ? ['delegate-clock'] : [])])).digest('hex');
       const existing = this.taskAttempt(input.id);
       if (existing) {
@@ -851,6 +853,7 @@ export class Instance {
       }
       const bot = this.bot(input.botId);
       if (!bot) throw Error('Agent not found');
+      if (bot.provider==='demo' && this.db.prepare('SELECT 1 FROM demo_migration WHERE id=1').get()) throw new BotConflict('Demo migration is incomplete for this agent. Repair its configuration and reload creation defaults.');
       if (bot.archived) throw new BotConflict('Agent is archived');
       const active = this.taskAttempts(input.botId).find(a => ['queued','running','stopping','waiting'].includes(String(a.state)));
       if (active) return {kind:'busy' as const, attempt:active};
@@ -1190,7 +1193,6 @@ export class Instance {
   commandSkillLoaded(id:string,event:object) { this.db.prepare('INSERT INTO command_skill_activity VALUES (?,?)').run(id,JSON.stringify(event)); }
   /** Claims and persists the user message together; retries only inspect the existing command. */
   claim(input: {id: string; botId: string; content: string}, visibleContent = input.content) {
-    this.resumeDemoMigration();
     if (!input.id.trim() || !input.content.trim()) throw new Error('Command ID and content are required');
     const digest = createHmac('sha256', this.fingerprintKey).update(JSON.stringify([input.id,input.botId,input.content])).digest('hex');
     this.db.exec('BEGIN IMMEDIATE');
@@ -1203,6 +1205,7 @@ export class Instance {
       }
       const bot = this.bot(input.botId);
       if (!bot) throw new Error('Agent not found');
+      if (bot.provider==='demo' && this.db.prepare('SELECT 1 FROM demo_migration WHERE id=1').get()) throw new BotConflict('Demo migration is incomplete for this agent. Repair its configuration and reload creation defaults.');
       if (bot.archived) throw new BotConflict('Agent is archived');
       if (this.db.prepare("SELECT id FROM commands WHERE bot_id=? AND state='pending'").get(input.botId)) {
         this.db.exec('COMMIT'); return {kind: 'busy' as const};

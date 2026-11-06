@@ -25,8 +25,8 @@ export function prepareUpgrade(dataRoot) {
   } finally {db.close();}
 }
 export function finishUpgrade(dataRoot, releaseFence) {
-  const path=join(dataRoot,'instance.sqlite'),agents=join(dataRoot,'agents');
-  sync(path);if(existsSync(agents))syncTree(agents);sync(dataRoot);
+  const path=join(dataRoot,'instance.sqlite'),agents=join(dataRoot,'agents'),core=join(dataRoot,'core');
+  sync(path);if(existsSync(agents))syncTree(agents);if(existsSync(core))syncTree(core);sync(dataRoot);
   const record=JSON.parse(readFileSync(path+'.maintenance.json','utf8'));
   if(record.version!==1||record.phase!=='upgrading'||typeof record.backup!=='string'||typeof record.token!=='string'||!Number.isSafeInteger(record.schemaVersion))throw Error('Invalid upgrade maintenance marker.');
   writeMarker({dataRoot,backup:record.backup,token:record.token,schemaVersion:record.schemaVersion,publishedVersion:INSTANCE_SCHEMA_VERSION});

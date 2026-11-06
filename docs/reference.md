@@ -185,6 +185,9 @@ For retry-safe creation, clients supply an `operationId`;
 operation ID with different input conflicts. The transaction copies remaining
 creation defaults into the new bot. The version 27 migration adds the creation
 journal after a database backup. Saving a real creation default migrates Demo agents, including archived agents; existing real-provider agents remain unchanged. The migration is resumable after interruption and preserves accepted-work snapshots.
+For `POST /api/bots`, omitted model and reasoning fields use the applicable
+defaults; explicit `null` leaves the corresponding value unset. Reusing an
+operation ID with a different choice, including omission instead of `null`, conflicts.
 The workspace automatically restores an unfinished creation using its original
 operation ID, guarded by a browser Web Lock. Check creation and Retry same creation
 use that ID. Unscoped legacy records are adopted only with matching durable command
