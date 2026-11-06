@@ -299,6 +299,15 @@ test('chat work keeps repeated tool calls distinct even when a provider reuses a
  }finally{await app.close();rmSync(dir,{recursive:true,force:true});}
 });
 
+test('concurrent guest calls keep their own durable tool outcomes', async () => {
+ const dir=mkdtempSync(join(tmpdir(),'staf-concurrent-calls-')),path=join(dir,'db');let step=0;
+ const factory=async()=>({name:'fixture',capabilities:{toolCalls:true,incrementalText:false,transport:'demo'},async complete(){return step++ ? {role:'assistant',content:'finished'} : {role:'assistant',content:null,tool_calls:[{id:'program',type:'function',function:{name:'code_mode',arguments:JSON.stringify({source:'return await Promise.all([capabilities.clock({}), capabilities.clock({})]);'})}}]};}});
+ const app=startInstance(path,0,{providerFactory:factory}),port=await app.listen();
+ const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return r.json()};
+ try {const token=(await call('/api/pair','',{code:app.code})).token,bot=await call('/api/bots',token,{provider:'demo',name:'Concurrent',toolMode:'code'});await call('/api/approval-settings/instance',token,{mode:'never-ask',clockEnabled:true});await call('/api/commands',token,{id:'concurrent',botId:bot.id,content:'Use clocks'});let work;for(let i=0;i<400;i++){work=(await call(`/api/bots/${bot.id}/chat-work`,token)).requests[0];if(work && ['completed','failed'].includes(work.progress.state))break;await new Promise(r=>setTimeout(r,10));}assert.equal(work.progress.state,'completed',JSON.stringify(work));const clocks=work.events.filter(event=>event.name==='clock');assert.equal(clocks.length,4);const starts=clocks.filter(event=>event.type==='tool_start'),results=clocks.filter(event=>event.type==='tool_result');assert.equal(new Set(starts.map(event=>event.callId)).size,2);assert.deepEqual(new Set(results.map(event=>event.callId)),new Set(starts.map(event=>event.callId)));assert.ok(results.every(event=>event.success===1));}
+ finally {await app.close();rmSync(dir,{recursive:true,force:true});}
+});
+
 test('pre-identity tool events survive migration without invented call IDs', async () => {
  const {DatabaseSync}=await import('node:sqlite');const dir=mkdtempSync(join(tmpdir(),'staf-legacy-calls-')),path=join(dir,'db');
  let instance=new Instance(path);const bot=instance.createBot({name:'Legacy',instructions:'',provider:'demo'});instance.claim({id:'old',botId:bot.id,content:'hello'});instance.close();
