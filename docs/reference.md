@@ -352,6 +352,8 @@ An explicitly advertised catalog `default_model` may seed a first selection afte
 discovery; list order is never a default. Without a remembered pair, owner default
 or advertised default, the model remains unset and chatting requires a choice.
 
+Browser choice controls load model metadata on open and provider change. The composer saves explicit selections immediately; agent editors and provider defaults stage changes until saved. **Automatic** sends no explicit reasoning effort. Discovery does not authenticate or verify model access.
+
 ### Chat work records
 
 Paired `GET /api/bots/{id}/chat-work` returns `messages` (excluding background-task notices) and ordered `requests`. Each request contains its command `id`, service-owned response `progress`, and ordered `events` with stable numeric `id`, `type`, `name`, nullable numeric `success`, nullable `detail`, nullable `arguments`, nullable `callId`, and its `command_id`. New start and result events share a service-generated call ID. Older events have a null call ID and cannot be reliably paired. Argument and result details are redacted and capped at 16,000 characters. Re-fetch replaces the snapshot; clients must not append duplicate events. Pending chat approvals come from `/api/inbox` and are matched by bot and command ID. Existing exact-ID approval decision endpoints and permission enforcement are unchanged. Background tasks remain available through explicit task endpoints and CLI operations, but are not offered to ordinary chat providers.

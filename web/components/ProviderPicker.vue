@@ -1,18 +1,20 @@
 <script setup lang="ts">
 import { profileAffectsCache } from '../../src/cache-impact';
-import { computed, ref, shallowRef, watch } from 'vue';
+import { computed, nextTick, ref, shallowRef, watch } from 'vue';
 import type { BotProfile } from '../controller';
 import { useWorkspace } from '../workspace';
 import ChoiceFields from './ChoiceFields.vue';
-const props = withDefaults(defineProps<{id: string; disabled?: boolean; compact?: boolean}>(), {disabled: false});
-const emit = defineEmits<{profile: [profile: BotProfile, baseRevision: string | null]; selected: []; ready: []}>();
+const props = withDefaults(defineProps<{id: string; disabled?: boolean; compact?: boolean; active?: boolean}>(), {disabled: false, active: true});
+const emit = defineEmits<{profile: [profile: BotProfile, baseRevision: string | null]; ready: []; catalogReady: []}>();
 const { app, state } = useWorkspace();
 const profile = shallowRef<BotProfile | null>(null);
 const model = ref('');
 const busy = ref(false);
 const error = ref('');
-const notice = ref('');
+const pendingProvider = ref('');
+const root = ref<HTMLElement | null>(null);
 const sharedRevision = computed(() => state.value.bots.find(agent => agent.id === props.id)?.revision);
+watch(() => props.active, active => { if (!active) pendingProvider.value = ''; });
 watch(() => props.id, (id, _, onCleanup) => {
   let active = true;
   onCleanup(() => { active = false; });
@@ -36,11 +38,21 @@ watch([sharedRevision, busy, profile, model], (_, __, onCleanup) => {
 async function save(field: 'provider' | 'model' | 'reasoning', value: string) {
   if (!profile.value) return;
   if (field === 'model') { model.value = value; return; }
-  if (field === 'provider' && value !== profile.value.provider && !window.confirm('Changing provider may send this conversation history to the new provider. Continue?')) return;
+  if (field === 'provider' && value !== profile.value.provider) { pendingProvider.value = value; await nextTick(); root.value?.querySelector<HTMLButtonElement>('[data-cancel-provider]')?.focus(); return; }
   await commit(field, value);
+}
+async function cancelProvider() {
+  const value = pendingProvider.value; pendingProvider.value = ''; await nextTick();
+  root.value?.querySelector<HTMLButtonElement>(`[data-provider="${CSS.escape(value)}"]`)?.focus();
+}
+async function confirmProvider() {
+  const value = pendingProvider.value; pendingProvider.value = ''; await commit('provider', value);
+  if (props.active) root.value?.querySelector<HTMLButtonElement>(`[data-provider="${CSS.escape(value)}"]`)?.focus();
 }
 async function commit(field: 'provider' | 'model' | 'reasoning', value: string) {
   if (!profile.value || busy.value) return;
+  if ((field === 'provider' && value === profile.value.provider) || (field === 'model' && value === (profile.value.model ?? '')) || (field === 'reasoning' && (value === 'default' ? null : value) === profile.value.reasoning)) return;
+  const focused = document.activeElement instanceof HTMLElement && root.value?.contains(document.activeElement) ? document.activeElement : null;
   busy.value = true;
   error.value = '';
   const previous = profile.value;
@@ -49,13 +61,14 @@ async function commit(field: 'provider' | 'model' | 'reasoning', value: string) 
     profile.value = saved;
     model.value = saved.model ?? '';
     emit('profile', saved, previous.revision);
-    notice.value = field === 'model' && previous.reasoning && previous.reasoning !== saved.reasoning ? 'Reasoning changed to Provider default for this model.' : 'Saved. Applies to the next message.';
-    if (profileAffectsCache(previous, saved)) notice.value += ' This change may reduce provider prompt cache reuse on the next message. Actual cache use depends on the provider.';
-    if (props.compact) { app.notify(notice.value, 'success'); if (field === 'model') emit('selected'); }
+    let notice = field === 'model' && previous.reasoning && previous.reasoning !== saved.reasoning ? 'Reasoning changed to Automatic for this model.' : 'Saved. Applies to the next message.';
+    if (profileAffectsCache(previous, saved)) notice += ' This change may reduce provider prompt cache reuse on the next message. Actual cache use depends on the provider.';
+    app.notify(notice, 'success');
   } catch (reason) { error.value = 'Save failed or is uncertain. Your edits are retained. ' + String(reason); }
-  finally { busy.value = false; }
+  finally { busy.value = false; await nextTick(); if (props.active && focused?.isConnected) focused.focus(); }
 }
 function blur(event: FocusEvent) {
+  if (event.relatedTarget instanceof HTMLElement && event.relatedTarget.hasAttribute('data-model')) return;
   if (event.target instanceof HTMLInputElement && profile.value && model.value !== (profile.value.model ?? '')) void commit('model', model.value);
 }
 async function compare() {
@@ -69,11 +82,16 @@ async function compare() {
 </script>
 
 <template>
-  <fieldset class="provider-picker" :disabled="disabled" aria-label="Provider picker">
+  <fieldset ref="root" class="provider-picker" :disabled="disabled" aria-label="Provider picker">
     <div v-if="profile" @focusout="blur">
-      <ChoiceFields :menu="compact" :provider="profile.provider" :model="model" :reasoning="profile.reasoning ?? 'default'" :disabled="busy" @model-select="value => commit('model', value)" @change="save" />
+      <ChoiceFields :menu="compact" :provider="profile.provider" :model="model" :reasoning="profile.reasoning ?? 'default'" :disabled="busy" :active="active" @catalog-ready="emit('catalogReady')" @model-select="value => commit('model', value)" @change="save" />
     </div>
-    <p role="status">{{ busy ? 'Saving…' : notice }}</p>
+    <div v-if="pendingProvider" class="picker-confirm" role="group" aria-label="Confirm provider change">
+      <p>Changing provider may send this conversation history to {{ pendingProvider }}. Continue?</p>
+      <button type="button" data-cancel-provider @click="cancelProvider">Cancel</button>
+      <button type="button" @click="confirmProvider">Change provider</button>
+    </div>
+    <p v-if="busy" role="status">Saving…</p>
     <template v-if="error"><p role="alert">{{ error }}</p><button @click="compare">Compare latest choices</button></template>
   </fieldset>
 </template>

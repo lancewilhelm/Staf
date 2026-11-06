@@ -468,3 +468,7 @@ After building, run `node --test test/instance-core.test.js`. The disposable
 fixture exercises paired CLI and API saves, direct edits, revision conflicts,
 late writes, reset, and captured chat and task instructions. It uses controlled
 providers and does not measure live model behavior or cache reuse.
+
+## Verify the model picker
+
+For model picker changes, build the application and run `node test/browser/provider-picker-smoke.mjs` and `node test/browser/gui-smoke.mjs`. The picker journey uses a disposable paired instance and controlled metadata. It does not verify live provider access or inference.
