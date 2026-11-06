@@ -8,6 +8,23 @@ import { join } from 'node:path';
 import { startInstance } from './fixtures/controlled-instance.mjs';
 import { Instance } from '../dist/instance.js';
 
+test('creation preserves explicit automatic and cleared choices separately from omitted defaults', async () => {
+ const dir=mkdtempSync(join(tmpdir(),'staf-create-null-')),path=join(dir,'db');let app=startInstance(path,0,{env:{}}),port=await app.listen();
+ const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});return [r.status,await r.json()]};
+ try {
+  const token=(await call('/api/pair','',{code:app.code}))[1].token;
+  const defaults=(await call('/api/creation-defaults',token))[1];await call('/api/creation-defaults',token,{...defaults,provider:'openrouter',model:'creation/model',reasoning:'low'});
+  const pairs=(await call('/api/provider-defaults',token))[1];await call('/api/provider-defaults',token,{revision:pairs.revision,provider:'codex',model:'saved/model',reasoning:'high'});
+  const explicit={operationId:'null-choices',name:'Explicit',provider:'codex',model:null,reasoning:null};
+  let result=await call('/api/bots',token,explicit);assert.equal(result[0],201);assert.equal(result[1].model,null);assert.equal(result[1].reasoning,null);const id=result[1].id;
+  result=await call('/api/bots',token,{name:'Shown',provider:'codex',model:'shown/model',reasoning:null});assert.equal(result[1].reasoning,null);
+  result=await call('/api/bots',token,{name:'Provider',provider:'codex'});assert.equal(result[1].model,'saved/model');assert.equal(result[1].reasoning,'high');
+  result=await call('/api/bots',token,{name:'Creation defaults'});assert.equal(result[1].model,'creation/model');assert.equal(result[1].reasoning,'low');
+  assert.equal((await call('/api/bots',token,{operationId:explicit.operationId,name:explicit.name,provider:explicit.provider}))[0],409);
+  await app.close();app=startInstance(path,0,{env:{}});port=await app.listen();result=await call('/api/bots',token,explicit);assert.equal(result[0],201);assert.equal(result[1].id,id);
+ } finally {await app.close();rmSync(dir,{recursive:true,force:true});}
+});
+
 test('creation operation retries across restart with copied defaults and optional provider', async () => {
  const dir=mkdtempSync(join(tmpdir(),'staf-create-retry-')),path=join(dir,'db');let app=startInstance(path,0,{env:{}}),port=await app.listen();
  const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return [r.status,await r.json()]};

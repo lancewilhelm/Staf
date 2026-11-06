@@ -7,6 +7,20 @@ import { Instance } from '../dist/instance.js';
 
 import {legacyDemo} from './fixtures/legacy-agent.mjs';
 
+for (const kind of ['chat','task']) test(`invalid unrelated agent does not block healthy ${kind}`, () => {
+ const dir=mkdtempSync(join(tmpdir(),'staf-isolated-invalid-')),instance=new Instance(join(dir,'db'));
+ try {
+  const broken=instance.createBot({name:'Broken',instructions:'',provider:'live',model:'fixture'});
+  const healthy=instance.createBot({name:'Healthy',instructions:'',provider:'live',model:'fixture'});
+  const file=join(broken.configDir,'agent.toml');writeFileSync(file,'invalid = [');
+  try {instance.setCreationDefaults({...instance.creationDefaults(),provider:'live',model:'fixture'});} catch {}
+  const accept=(botId,id)=>kind==='chat'?instance.claim({id,botId,content:'Hello'}):instance.acceptTask({id,botId,objective:'Work',limitMs:60000});
+  assert.equal(accept(healthy.id,'healthy').kind,'accepted');
+  assert.throws(()=>accept(broken.id,'broken'));
+  assert.equal(readFileSync(file,'utf8'),'invalid = [');
+ } finally {instance.close();rmSync(dir,{recursive:true,force:true});}
+});
+
 test('real defaults migrate active and archived Demo agents without changing history or other providers', () => {
  const dir=mkdtempSync(join(tmpdir(),'staf-real-defaults-')), path=join(dir,'db'); let instance=new Instance(path);
  try {
@@ -61,6 +75,20 @@ test('interrupted migration resumes without overwriting a concurrent real-provid
   assert.equal(instance.bot(first.id).provider,'lmstudio');assert.equal(instance.bot(first.id).model,'owner-model');
   assert.equal(instance.bot(second.id).provider,'codex');assert.equal(instance.bot(second.id).instructions,'Two');
   assert.equal(instance.bots().length,2);
+ } finally {instance.close();rmSync(dir,{recursive:true,force:true});}
+});
+
+test('migration continues past an invalid agent and retries repaired legacy data', () => {
+ const dir=mkdtempSync(join(tmpdir(),'staf-migration-isolation-')),instance=new Instance(join(dir,'db'));
+ try {
+  const broken=legacyDemo(instance,'Broken legacy','Original'),healthy=legacyDemo(instance,'Later legacy','Preserved');
+  instance.claim({id:'history-isolated',botId:healthy.id,content:'Remember'});instance.complete('history-isolated','Answer');
+  const file=join(broken.configDir,'agent.toml'),original=readFileSync(file,'utf8');writeFileSync(file,'invalid = [');
+  assert.throws(()=>instance.setCreationDefaults({...instance.creationDefaults(),provider:'codex',model:'fixture'}),/migration incomplete/i);
+  assert.equal(instance.bot(healthy.id).provider,'codex');assert.equal(instance.claim({id:'after-migration',botId:healthy.id,content:'Continue'}).kind,'accepted');
+  writeFileSync(file,original);instance.resumeDemoMigration();instance.resumeDemoMigration();
+  assert.equal(instance.bot(broken.id).provider,'codex');assert.equal(instance.bot(broken.id).instructions,'Original');
+  assert.deepEqual(instance.messages(healthy.id).map(message=>message.content),['Remember','Answer','Continue']);
  } finally {instance.close();rmSync(dir,{recursive:true,force:true});}
 });
 

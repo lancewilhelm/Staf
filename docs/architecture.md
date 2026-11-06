@@ -9,10 +9,11 @@ service remains authoritative for connections and shared data. See the
 Development reset builds the seed through `Instance` in a separate directory.
 The launcher and maintenance commands share a data-directory owner port, and
 maintenance also takes the SQLite exclusive lock. Before publishing a database
-and agent-file replacement, maintenance saves both and writes a durable marker.
+and file replacement, maintenance saves the database, agents, and core revision
+tree and writes a durable marker.
 Instance startup checks that marker before initialization and again after taking
 the database lock. Maintenance fences the original and replacement SQLite files
-with an unsupported schema version until the database and agent files are durable,
+with an unsupported schema version until the database, agent files, and core tree are durable,
 so an older checkout cannot open a partially published dataset even after a crash.
 Maintenance reopens SQLite at the published path before further writes so its
 rollback journal stays beside the active database.
