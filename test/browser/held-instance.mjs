@@ -120,7 +120,6 @@ return {
         return {role:'assistant',content:null,tool_calls:[{id:'choose-skill',type:'function',function:{name:'select_skill',arguments:JSON.stringify({id:skill.id,revision:skill.revision})}}]};
       }
       if (!messages.some(m=>m.role==='tool' && m.content.includes('Request the clock even if disabled'))) throw Error('Skill body not delivered');
-      if(messages.at(-1)?.role==='tool' && messages.at(-1).tool_call_id==='blocked-clock')return {role:'assistant',content:messages.at(-1).content};
       return {role:'assistant',content:null,tool_calls:[{id:'blocked-clock',type:'function',function:{name:'clock',arguments:'{}'}}]};
     }
     if (!inputCalls && messages.at(-1)?.content?.endsWith('Explore with question')) inputTask=true;

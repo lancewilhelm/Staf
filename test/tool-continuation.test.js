@@ -134,3 +134,10 @@ test('provider failure after a tool result preserves failed partial status witho
     assert.deepEqual((await call(`/api/bots/${bot.id}/messages`,token)).map(m=>m.role),['user']);
   }finally{await app.close();}
 });
+
+test('task iteration exhaustion reports its durable limit outcome',async()=>{
+  let calls=0;const app=startInstance(':memory:',0,{env:{},providerFactory:async()=>({name:'fixture',capabilities:{toolCalls:true},async complete(){return {role:'assistant',tool_calls:[{id:'clock-'+(++calls),function:{name:'clock',arguments:'{}'}}]};}})}),port=await app.listen();
+  const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return r.json();};
+  try{const token=(await call('/api/pair','',{code:app.code})).token,bot=await call('/api/bots',token,{provider:'demo',name:'Task limit'});await call('/api/tasks',token,{id:'task-limit',botId:bot.id,objective:'Read time'});let task;for(let i=0;i<200;i++){task=await call('/api/tasks/task-limit',token);if(task.state==='failed')break;await new Promise(resolve=>setTimeout(resolve,10));}assert.equal(task.state,'failed');assert.equal(task.outcome,'Tool iteration limit reached');assert.equal(calls,4);assert.equal(task.workActions.length,4);
+  }finally{await app.close();}
+});
