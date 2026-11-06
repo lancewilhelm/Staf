@@ -424,3 +424,10 @@ For a manual CLI check, start the controlled fixture as described in [Review cha
 After one build, run `node --test test/native-interactive.test.js` for the paired real pipe/PTY, retained-work, EOF/resize, cross-client/CLI, Stop, privacy and input-recovery checks. Reuse these disposable fixtures for focused development; run the required check/full suite at completed integration and the combined GUI/CLI journey at final feature acceptance. No extra test environment or live provider is needed. The distribution test packs Staf, installs production dependencies, and executes a real PTY command using the installed native binding. Linux runtime is separate from macOS arm64 evidence.
 
 For a manual offline check, use the existing controlled instance above, create a Hybrid Demo agent and send `Interactive process fixture`. Its process should remain running after the response. Open process details, set a size and select Resize terminal, type `hello` and select Send line, then refresh output. Expect `answer:hello` in the terminal stream. Select Stop process and expect an observed exit. The same resource is inspectable and controllable from the paired CLI.
+
+## Verify shared core guidance
+
+After building, run `node --test test/instance-core.test.js`. The disposable
+fixture exercises paired CLI and API saves, direct edits, revision conflicts,
+late writes, reset, and captured chat and task instructions. It uses controlled
+providers and does not measure live model behavior or cache reuse.

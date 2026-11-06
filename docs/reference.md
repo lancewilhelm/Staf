@@ -198,7 +198,7 @@ The CLI prints the generated operation ID before submission; callers can reuse
 it with unchanged arguments. A direct API creation without an operation ID is
 not retry-safe. The server stores
 SHA-256 token hashes in SQLite and limits ordinary JSON request bodies to 64 KiB.
-Skill import and update requests are limited to 1,600,000 bytes. Authenticated
+Skill import and update requests are limited to 1,600,000 bytes. Core updates are limited to 200,000 bytes. Authenticated
 agent create/profile requests using the dedicated image media type have a
 1 MiB limit; see [agent image configuration and API](#agent-image-configuration-and-api).
 Newly created databases have owner-only permissions, independent of a permissive umask. Existing file permissions are not changed. Restrict the containing directory and any existing database separately. On the tested platform, SQLite rollback journals inherit the owner-only database mode.
@@ -215,6 +215,18 @@ Paired clients request Stop with `POST /api/commands/{id}/stop` or `instance res
 The paired `GET /api/bots/{id}/response/stream` endpoint returns `text/event-stream` and requires a bearer authorization header and the same origin checks as other instance requests. An initial `snapshot` event contains the current progress or null. Later JSON events contain either a `snapshot` with `response`, or a `delta` with `id` and text to append. Completed snapshots have empty text; clients read the completed answer from the conversation. Failed, interrupted, stopping, and stopped snapshots retain provisional text. Each reconnection begins with a new snapshot; clients do not resubmit a command. Heartbeat comments keep idle connections open. Revocation closes the revoked client's connections. The instance allows up to 256 response streams and disconnects clients whose pending output exceeds 2 MB; they can reconnect for a current snapshot. The workspace uses authenticated `fetch` to consume the stream. Chat work and pending approvals use polling.
 
 An optional profile description is directory metadata visible to other bots. A profile edit that omits it preserves its current value. The paired `POST /api/bot-discovery` endpoint accepts `requesterId` and `query`, and returns matching active or busy bots by name and description, without selecting a helper. Archived bots and the requester are excluded. Matching and limits are provisional; discovery itself does not execute collaboration. The version 12 migration backs up existing databases and initializes descriptions as empty strings. Version 13 separately records an owner-selected helper clock scope on task acceptance. Version 14 installs the collaboration journal and interrupts active assignments on restart. Version 15 installs the exact-message disclosure approval journal; pending and unused approvals are interrupted on restart. The exchange runtime has been exercised with synthetic providers, not live providers. Every request, question, answer, and result requires approval of its exact recipient and text. The helper clock scope defaults to false, retries retain it, and it does not enable a disabled capability. Version 16 journals main-chat task starts by command and tool-call ID. Version 17 adds revision-safe bot creation defaults.
+
+Paired `GET /api/core` returns `source` (`default` or `override`), effective
+`content`, `defaultContent`, host `path`, and a `revision`. `POST /api/core`
+accepts that revision and `content`; a string replaces the core and `null`
+removes the override. Empty strings are valid. Content is UTF-8, limited to
+30,000 UTF-16 code units and 120,000 bytes, and cannot contain NUL. A stale
+revision returns 409. An unreadable or invalid file and an edit to a retired
+revision return 422 with `invalid_core_configuration`. An uncertain publication
+returns 503 with `configuration_save_uncertain`. New work is rejected while
+core configuration is invalid. A lost response also requires inspection before
+retrying. The paired CLI uses `core`, `core-save`, and `core-reset`; see
+[shared core guidance](usage.md#shared-core-guidance).
 
 `GET /api/bots/ID` returns `configDir`, `instructions`, and the current
 configuration `revision`. `POST /api/bots/ID/profile` accepts `revision`,
