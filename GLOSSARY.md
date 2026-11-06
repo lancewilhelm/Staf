@@ -28,6 +28,17 @@ An agent's standing instructions, including its role, personality, values,
 communication style, and approach to its work.
 _Avoid_: Memory, conversation history
 
+**Staf core guidance**:
+The instance-wide operating instructions shared by its agents. The owner can
+customize this guidance separately from each agent's soul.
+_Avoid_: Soul, agent permissions, conversation history
+
+**Core override**:
+The owner's replacement for Staf's built-in core guidance, shared by agents in
+an instance. It may be intentionally empty and remains separate from each
+agent's soul and permissions.
+_Avoid_: Soul, creation defaults, permission grant
+
 **Agent message**:
 An actual message from one agent to another requesting help, conveying relevant
 context, asking a question, or returning a result.
