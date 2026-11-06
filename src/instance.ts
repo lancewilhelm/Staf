@@ -31,7 +31,7 @@ import { ApprovalGrants, approvalGrantSchema, type GrantBoundary } from './appro
 const clockAction: Action = { capability:'clock', operation:'read', resource:'utc', effect:'read', limits:{}, risk:'safe' };
 const clockBoundary = { enabledCapabilities:['clock'], actions:[clockAction] };
 const modes: ApprovalMode[] = ['ask-every-time','ask-for-risky-actions','never-ask'];
-export const INSTANCE_SCHEMA_VERSION = 36;
+export const INSTANCE_SCHEMA_VERSION = 37;
 const MAINTENANCE_VERSION = 2147483647;
 
 export const starterSoul = "You are an assistant working for the owner. Be clear and candid. Distinguish observations from assumptions. Follow the owner's role instructions and work within the permissions and task scope granted to you.";
@@ -113,7 +113,7 @@ export class Instance {
     this.maintenanceToken=maintenanceToken;
     if (version > INSTANCE_SCHEMA_VERSION) throw new Error(`Database version ${version} is newer than this Staf (maximum ${INSTANCE_SCHEMA_VERSION}). Use a compatible checkout or select another data directory; the database was not reset.`);
     if (hasBots && version < INSTANCE_SCHEMA_VERSION && path !== ':memory:') {
-      this.migrationBackup = `${path}.before-${version < 2 ? 'profiles' : version < 3 ? 'tasks' : version < 4 ? 'approvals' : version < 5 ? 'task-inbox' : version < 6 ? 'memory' : version < 7 ? 'memory-confirmation' : version < 8 ? 'skills' : version < 9 ? 'schedules' : version < 10 ? 'schedule-retries' : version < 11 ? 'schedule-lineage' : version < 12 ? 'bot-description' : version < 13 ? 'delegation-scope' : version < 14 ? 'collaboration' : version < 15 ? 'disclosure' : version < 16 ? 'chat-tasks' : version < 17 ? 'creation-defaults' : version < 18 ? 'web-actions' : version < 19 ? 'search-actions' : version < 20 ? 'scratch-shell' : version < 21 ? 'approval-grants' : version < 22 ? 'schedule-web-scope' : version < 23 ? 'schedule-search-scope' : version < 24 ? 'schedule-shell-scope' : version < 25 ? 'main-bot' : version < 26 ? 'command-events' : version < 27 ? 'bot-creation' : version < 28 ? 'response-progress' : version < 31 ? 'response-stop' : version < 33 ? 'work-actions' : 'search-bindings'}-${randomUUID()}.sqlite`;
+      this.migrationBackup = `${path}.before-${version < 2 ? 'profiles' : version < 3 ? 'tasks' : version < 4 ? 'approvals' : version < 5 ? 'task-inbox' : version < 6 ? 'memory' : version < 7 ? 'memory-confirmation' : version < 8 ? 'skills' : version < 9 ? 'schedules' : version < 10 ? 'schedule-retries' : version < 11 ? 'schedule-lineage' : version < 12 ? 'bot-description' : version < 13 ? 'delegation-scope' : version < 14 ? 'collaboration' : version < 15 ? 'disclosure' : version < 16 ? 'chat-tasks' : version < 17 ? 'creation-defaults' : version < 18 ? 'web-actions' : version < 19 ? 'search-actions' : version < 20 ? 'scratch-shell' : version < 21 ? 'approval-grants' : version < 22 ? 'schedule-web-scope' : version < 23 ? 'schedule-search-scope' : version < 24 ? 'schedule-shell-scope' : version < 25 ? 'main-bot' : version < 26 ? 'command-events' : version < 27 ? 'bot-creation' : version < 28 ? 'response-progress' : version < 31 ? 'response-stop' : version < 33 ? 'work-actions' : version < 36 ? 'search-bindings' : 'demo-migration'}-${randomUUID()}.sqlite`;
       const previousUmask = process.umask(0o077);
       try {
         this.db.prepare('VACUUM INTO ?').run(this.migrationBackup);
@@ -201,6 +201,7 @@ export class Instance {
     this.db.exec("UPDATE code_executions SET outcome='interrupted' WHERE outcome='running'");
     if(version < 35) this.db.exec(nativeProcessSchema);
     if(version < 36)for(const [name,definition] of Object.entries({retained:'INTEGER NOT NULL DEFAULT 0',input_closed:'INTEGER NOT NULL DEFAULT 0',input_bytes:'INTEGER NOT NULL DEFAULT 0',cols:'INTEGER',rows:'INTEGER'}))if(!this.db.prepare("SELECT 1 FROM pragma_table_info('native_processes') WHERE name=?").get(name))this.db.exec(`ALTER TABLE native_processes ADD COLUMN ${name} ${definition}`);
+    if(version < 37) this.db.exec("CREATE TABLE IF NOT EXISTS demo_migration (id INTEGER PRIMARY KEY CHECK(id=1)); UPDATE creation_defaults SET provider='',model=NULL,reasoning=NULL WHERE provider='demo' OR model IS NULL OR trim(model)=''; INSERT OR IGNORE INTO demo_migration SELECT 1 FROM creation_defaults WHERE provider<>''");
     if(version < 30 && !this.db.prepare("SELECT 1 FROM pragma_table_info('command_runtime_events') WHERE name='detail'").get())this.db.exec('ALTER TABLE command_runtime_events ADD COLUMN detail TEXT');
     this.db.exec('CREATE INDEX IF NOT EXISTS command_runtime_events_command ON command_runtime_events(command_id,seq)');
     if (!maintenanceToken) this.db.exec(`PRAGMA user_version=${INSTANCE_SCHEMA_VERSION}`);
@@ -223,6 +224,9 @@ export class Instance {
     this.db.exec('COMMIT');
     // Seal valid pre-existing file configurations before accepting clients.
     this.bots();
+    // A broken file must remain repairable through the service; reads of the
+    // defaults and later attempts to accept work report the pending migration.
+    try { this.resumeDemoMigration(); } catch {}
     } catch (error) { this.db.close(); if(this.temporaryConfigRoot)rmSync(this.temporaryConfigRoot,{recursive:true,force:true}); throw error; }
   }
   private bindWork(work:WorkRef, botId:string) {
@@ -410,6 +414,7 @@ export class Instance {
       const row=this.db.prepare('SELECT bot_id FROM main_bot WHERE id=1').get();
       if (row && typeof row.bot_id === 'string') { const bot=this.bots().find(item=>item.id===row.bot_id); if (!bot) throw Error('Main bot is missing'); this.db.exec('COMMIT'); return bot; }
       const id=randomUUID(), chatId=randomUUID(), defaults=this.creationDefaults();
+      if (!defaults.provider) throw Error('Choose a creation-default provider and model in Settings first, or run staf settings set-defaults PROVIDER MODEL.');
       this.configs.publish(id,{name:'Staf',description:'',provider:defaults.provider,model:defaults.model,reasoning:defaults.reasoning,toolMode:defaults.toolMode,instructions:starterSoul},false);
       this.db.prepare('INSERT INTO bots VALUES (?, ?, ?, ?, ?, ?, ?)').run(id,chatId,'','','demo',null,null);
       this.db.prepare('INSERT INTO bot_profiles (bot_id,revision,soul,archived) VALUES (?, 1, ?, 0)').run(id,'');
@@ -692,11 +697,34 @@ export class Instance {
     return this.editBot(id,{...current,revision,provider,model:model===undefined?pair.model:model,reasoning:reasoning===undefined?pair.reasoning:reasoning});
   }
   creationDefaults() {const row=this.db.prepare('SELECT revision,provider,model,reasoning,tool_mode FROM creation_defaults WHERE id=1').get();if(!row || typeof row.revision !== 'number' || typeof row.provider !== 'string' || !(row.model === null || typeof row.model === 'string') || !(row.reasoning === null || typeof row.reasoning === 'string'))throw Error('Invalid creation defaults');return {revision:row.revision,provider:row.provider,model:row.model,reasoning:row.reasoning,toolMode:parseToolMode(row.tool_mode)};}
+  resumeDemoMigration() {
+    if (!this.db.prepare('SELECT 1 FROM demo_migration WHERE id=1').get()) return;
+    try {
+      this.db.exec('BEGIN IMMEDIATE');
+      const defaults=this.creationDefaults();
+      for (const row of this.db.prepare('SELECT id FROM bots ORDER BY rowid').all()) {
+        const bot=this.bot(String(row.id));
+        if (!bot || bot.provider!=='demo') continue;
+        this.configs.publish(bot.id,{...bot,provider:defaults.provider,model:defaults.model,reasoning:defaults.reasoning,providerChoices:{...bot.providerChoices,[defaults.provider]:{model:defaults.model,reasoning:defaults.reasoning}}},bot.archived,bot.revision);
+      }
+      this.db.exec('DELETE FROM demo_migration WHERE id=1; COMMIT');
+    } catch(error) {
+      try { this.db.exec('ROLLBACK'); } catch {}
+      throw new BotConflict(`Demo migration incomplete. Resolve the agent configuration error and retry saving the same defaults: ${error instanceof Error ? error.message : 'unknown error'}`);
+    }
+  }
   setCreationDefaults(input:{revision:number;provider:string;model:string|null;reasoning:string|null;toolMode?:ToolMode}) {
-    if(!Number.isSafeInteger(input.revision) || input.revision<1 || !['demo','codex','openrouter','lmstudio','live'].includes(input.provider) || !(input.model === null || typeof input.model === 'string' && input.model.length <= 200) || !(input.reasoning === null || typeof input.reasoning === 'string' && input.reasoning.length <= 100))throw Error('Invalid creation defaults');
+    if(!Number.isSafeInteger(input.revision) || input.revision<1 || !['','codex','openrouter','lmstudio','live'].includes(input.provider) || (input.provider!=='' && !(typeof input.model==='string' && input.model.trim() && input.model.length<=200)) || (input.provider==='' && input.model!==null) || !(input.reasoning === null || typeof input.reasoning === 'string' && input.reasoning.length <= 100))throw Error('Choose a real provider and model for creation defaults');
+    this.resumeDemoMigration();
     const toolMode=input.toolMode===undefined?this.creationDefaults().toolMode:parseToolMode(input.toolMode);
-    const result=this.db.prepare('UPDATE creation_defaults SET revision=revision+1,provider=?,model=?,reasoning=?,tool_mode=? WHERE id=1 AND revision=?').run(input.provider,input.model,input.reasoning,toolMode,input.revision);
-    if(!result.changes)throw new BotConflict('Creation defaults changed. Refresh before editing.');return this.creationDefaults();
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const result=this.db.prepare('UPDATE creation_defaults SET revision=revision+1,provider=?,model=?,reasoning=?,tool_mode=? WHERE id=1 AND revision=?').run(input.provider,input.model,input.reasoning,toolMode,input.revision);
+      if(!result.changes)throw new BotConflict('Creation defaults changed. Refresh before editing.');
+      if(input.provider) this.db.exec('INSERT OR IGNORE INTO demo_migration VALUES (1)');
+      this.db.exec('COMMIT');
+    } catch(error) {this.db.exec('ROLLBACK');throw error;}
+    this.resumeDemoMigration();return this.creationDefaults();
   }
   private imageAssets() {return this.images??=new AgentImageAssets(join(dirname(dirname(this.configs.location('placeholder'))),'.images'));}
   agentImage(assetId:string) {return this.imageAssets().read(assetId);}
@@ -706,6 +734,7 @@ export class Instance {
   core() { return this.coreStore.read(); }
   saveCore(input:{revision:string;content:string|null}) { return this.coreStore.save(input.revision,input.content); }
   createBot(input: {name: string; instructions: string; provider?: string; model?: string; reasoning?: string; operationId?: string;toolMode?:ToolMode;image?:AgentImageInput}, advertisedModel?:string) {
+    this.resumeDemoMigration();
     if (!input.name.trim() || (input.provider !== undefined && !input.provider.trim())) throw new Error('Name and provider are required');
     if(input.toolMode!==undefined)parseToolMode(input.toolMode);
     const id = randomUUID(), chatId = randomUUID();
@@ -717,6 +746,7 @@ export class Instance {
       if(input.operationId) { const existing=this.db.prepare('SELECT digest,bot_id FROM bot_creation_operations WHERE id=?').get(input.operationId); if(existing) { if(existing.digest!==digest || typeof existing.bot_id!=='string') throw new BotConflict('Creation operation ID conflict'); const bot=this.bot(existing.bot_id); this.db.exec('COMMIT'); return bot; } }
       this.requireStoredImage(image);
       const defaults=this.creationDefaults();const provider=input.provider ?? defaults.provider;
+      if (!provider) throw Error('Choose a creation-default provider and model in Settings first.');
       const first=this.providerDefaults().read().providers[provider];
       const chosenModel=input.model ?? (input.provider===undefined?defaults.model:first?.model??advertisedModel??null);
       const chosenReasoning=input.reasoning ?? (input.provider===undefined?defaults.reasoning:first?.reasoning??null);
@@ -799,6 +829,7 @@ export class Instance {
     return {...visible,toolMode:parseToolModeFromProfile(capturedProfile), workActions:this.workActions().inspectActions({kind:'task',id}),codeExecutions:this.workActions().inspect({kind:'task',id}), waitReason, inbox, usage:session?.usage ?? [], activity: this.db.prepare('SELECT seq,event FROM task_activity WHERE attempt_id=? ORDER BY seq').all(id).map(event => { const value = JSON.parse(String(event.event)); if (value.type === 'tool_result' && value.name === 'select_skill' && typeof value.content === 'string') { value.content = this.redactSkill(value.content); if (value.success) { try { const detail=JSON.parse(value.content); if (typeof detail.digest === 'string' && detail.sourceDigest === undefined) { detail.sourceDigest=detail.digest; delete detail.digest; value.content=JSON.stringify(detail); } } catch { /* Historical error text is not structured selection evidence. */ } } } return {seq:event.seq, ...value}; })};
   }
   acceptTask(input: {id:string; botId:string; objective:string; limitMs:number; predecessor?:string; delegateClock?:boolean}, visibleObjective=input.objective) {
+    this.resumeDemoMigration();
     this.db.exec('BEGIN IMMEDIATE');
     try {
       const result=this.acceptTaskInTransaction(input,visibleObjective);
@@ -807,6 +838,7 @@ export class Instance {
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
   }
   private acceptTaskInTransaction(input: {id:string; botId:string; objective:string; limitMs:number; predecessor?:string; delegateClock?:boolean}, visibleObjective=input.objective, isolated=false) {
+    if (this.db.prepare('SELECT 1 FROM demo_migration WHERE id=1').get()) throw new BotConflict('Demo migration is incomplete. Repair the reported configuration and reload creation defaults.');
     const digest=createHmac('sha256',this.fingerprintKey).update(JSON.stringify([input.id,input.botId,input.objective,input.limitMs,input.predecessor ?? null,...(input.delegateClock ? ['delegate-clock'] : [])])).digest('hex');
       const existing = this.taskAttempt(input.id);
       if (existing) {
@@ -1154,6 +1186,7 @@ export class Instance {
   commandSkillLoaded(id:string,event:object) { this.db.prepare('INSERT INTO command_skill_activity VALUES (?,?)').run(id,JSON.stringify(event)); }
   /** Claims and persists the user message together; retries only inspect the existing command. */
   claim(input: {id: string; botId: string; content: string}, visibleContent = input.content) {
+    this.resumeDemoMigration();
     if (!input.id.trim() || !input.content.trim()) throw new Error('Command ID and content are required');
     const digest = createHmac('sha256', this.fingerprintKey).update(JSON.stringify([input.id,input.botId,input.content])).digest('hex');
     this.db.exec('BEGIN IMMEDIATE');

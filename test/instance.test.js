@@ -236,12 +236,12 @@ test('pending parent input invalidates helper question and result disclosures wi
 test('creation defaults are revision safe and copied once into new bots',()=>{
  const dir=mkdtempSync(join(tmpdir(),'staf-defaults-')),path=join(dir,'db');let instance=new Instance(path);
  try{
-  const old=instance.createBot({name:'Old',instructions:''});const initial=instance.creationDefaults();
+  const old=instance.createBot({name:'Old',instructions:'',provider:'demo'});const initial=instance.creationDefaults();
   const updated=instance.setCreationDefaults({revision:initial.revision,provider:'codex',model:'synthetic-model',reasoning:'high'});
-  assert.throws(()=>instance.setCreationDefaults({revision:initial.revision,provider:'demo',model:null,reasoning:null}),/changed/);
+  assert.throws(()=>instance.setCreationDefaults({revision:initial.revision,provider:'codex',model:'stale',reasoning:null}),/changed/);
   const created=instance.createBot({name:'New',instructions:''});assert.equal(created.provider,'codex');assert.equal(created.model,'synthetic-model');assert.equal(created.reasoning,'high');
-  instance.setCreationDefaults({revision:updated.revision,provider:'demo',model:null,reasoning:null});assert.equal(instance.bot(old.id).provider,'demo');assert.equal(instance.bot(created.id).model,'synthetic-model');
-  instance.close();instance=new Instance(path);assert.equal(instance.creationDefaults().provider,'demo');assert.equal(instance.bot(created.id).provider,'codex');
+  instance.setCreationDefaults({revision:updated.revision,provider:'openrouter',model:'other',reasoning:null});assert.equal(instance.bot(old.id).provider,'codex');assert.equal(instance.bot(created.id).model,'synthetic-model');
+  instance.close();instance=new Instance(path);assert.equal(instance.creationDefaults().provider,'openrouter');assert.equal(instance.bot(created.id).provider,'codex');
  }finally{instance.close();rmSync(dir,{recursive:true,force:true});}
 });
 

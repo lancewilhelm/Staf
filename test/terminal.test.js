@@ -18,7 +18,7 @@ root=tempfile.mkdtemp(prefix='staf-pty-',dir='/tmp')
 node=os.environ['STAF_TEST_NODE']
 class Terminal:
  def __init__(self,name,no_color=False,narrow=False,dumb=False):
-  self.data=os.path.join(root,name);self.master,self.slave=pty.openpty();self.buf=b'';self.all=b''
+  self.data=os.path.join(root,name);subprocess.run([node,'test/fixtures/demo-terminal.mjs',self.data],check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL);self.master,self.slave=pty.openpty();self.buf=b'';self.all=b''
   fcntl.ioctl(self.slave,termios.TIOCSWINSZ,struct.pack('HHHH',12 if narrow else 28,32 if narrow else 100,0,0))
   env=os.environ.copy();env['TERM']='dumb' if dumb else 'xterm-256color';env.pop('FORCE_COLOR',None)
   if no_color:env['NO_COLOR']=''

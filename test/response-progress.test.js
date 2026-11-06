@@ -22,6 +22,7 @@ test('interactive terminal shows held OpenRouter chunks as provisional before co
   const call=async(route,token,body)=>{const res=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return res.json();};
   try{
     const token=(await call('/api/pair','',{code:app.code})).token,credential=join(dir,'client.json');writeFileSync(credential,JSON.stringify({token}));
+    const defaults=await call('/api/creation-defaults',token);await call('/api/creation-defaults',token,{...defaults,provider:'codex',model:'fixture-model'});
     const bot=await call('/api/main-bot',token,{});await call(`/api/bots/${bot.id}/profile`,token,{...bot,provider:'openrouter',model:'fixture/model'});
     child=spawn(process.execPath,['dist/cli.js','--instance',`http://127.0.0.1:${port}`,'--credential',credential,'--data-dir',dir],{stdio:['pipe','pipe','pipe']});let out='',err='';child.stdout.on('data',chunk=>out+=chunk);child.stderr.on('data',chunk=>err+=chunk);
     child.stdin.write('stream now\n');
@@ -42,6 +43,7 @@ test('interactive terminal shows stopped partial output for another client respo
   const call=async(route,token,body)=>{const res=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return res.json();};
   try{
     const token=(await call('/api/pair','',{code:app.code})).token,credential=join(dir,'client.json');writeFileSync(credential,JSON.stringify({token}));
+    const defaults=await call('/api/creation-defaults',token);await call('/api/creation-defaults',token,{...defaults,provider:'codex',model:'fixture-model'});
     const bot=await call('/api/main-bot',token,{});await call('/api/commands',token,{id:'foreign-stream',botId:bot.id,content:'start elsewhere'});
     for(let i=0;i<100;i++){if((await call('/api/commands/foreign-stream',token)).responseProgress?.text.includes('Partial output'))break;await new Promise(resolve=>setTimeout(resolve,10));}
     child=spawn(process.execPath,['dist/cli.js','--instance',`http://127.0.0.1:${port}`,'--credential',credential,'--data-dir',dir],{stdio:['pipe','pipe','pipe']});let out='',err='';child.stdout.on('data',chunk=>out+=chunk);child.stderr.on('data',chunk=>err+=chunk);child.stdin.write('/status foreign-stream\n');
@@ -84,7 +86,7 @@ test('paired clients observe provisional response progress and contention', asyn
   try {
     const first = (await call('/api/pair', '', { code: app.code })).token;
     const second = (await call('/api/pair', '', { code: app.issueCode() })).token;
-    const bot = await call('/api/bots', first, { name: 'Stream' });
+    const bot = await call('/api/bots', first, {provider:'demo', name: 'Stream' });
     assert.equal((await call('/api/commands', first, { id: 'stream-one', botId: bot.id, content: 'Hello' })).kind, 'accepted');
     let progress;
     for (let i = 0; i < 100; i++) {
@@ -119,7 +121,7 @@ test('shared progress streams through the real Codex adapter before the SSE resp
   const emit=event=>stream.enqueue(encoder.encode('data: '+JSON.stringify(event)+'\n\n'));
   try {
     const credential=(await call('/api/pair','',{code:app.code})).token;
-    const bot=await call('/api/bots',credential,{name:'Codex'});
+    const bot=await call('/api/bots',credential,{provider:'demo',name:'Codex'});
     await call('/api/commands',credential,{id:'codex-stream',botId:bot.id,content:'go'});
     emit({type:'response.output_text.delta',delta:'Live response begins here. '+token.slice(0,20)});
     let progress;
@@ -147,7 +149,7 @@ test('failed progress is provisional, redacted across chunks, and visible to the
   const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return r.json();};
   try {
     const token=(await call('/api/pair','',{code:app.code})).token;
-    const bot=await call('/api/bots',token,{name:'Stream'});
+    const bot=await call('/api/bots',token,{provider:'demo',name:'Stream'});
     await call('/api/commands',token,{id:'failure',botId:bot.id,content:'go'});
     let progress;
     for(let i=0;i<100;i++){progress=await call(`/api/bots/${bot.id}/response`,token);if(progress?.text?.includes('readable'))break;await new Promise(r=>setTimeout(r,10));}
@@ -185,7 +187,7 @@ test('restart retains interrupted progress without committing an assistant messa
   const call=async(route,token,body)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return response.json();};
   try {
     const token=(await call('/api/pair','',{code:app.code})).token;
-    const bot=await call('/api/bots',token,{name:'Interrupted'});
+    const bot=await call('/api/bots',token,{provider:'demo',name:'Interrupted'});
     await call('/api/commands',token,{id:'interrupted',botId:bot.id,content:'go'});
     for(let i=0;i<100;i++){const p=await call(`/api/bots/${bot.id}/response`,token);if(p?.text?.includes('Partial response'))break;await new Promise(r=>setTimeout(r,10));}
     await app.close();app=startInstance(join(dir,'db'),0,{env:{}});port=await app.listen();
@@ -211,7 +213,7 @@ test('streamed progress redacts managed OpenRouter keys saved and replaced durin
   const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return r.json();};
   try{
     const token=(await call('/api/pair','',{code:app.code})).token;
-    const agent=await call('/api/bots',token,{name:'Streaming agent'});
+    const agent=await call('/api/bots',token,{provider:'demo',name:'Streaming agent'});
     await call('/api/openrouter-connection',token,{key:first});
     await call('/api/commands',token,{id:'managed-stream',botId:agent.id,content:'hello'});
     let progress;
