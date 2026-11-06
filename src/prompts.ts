@@ -1,7 +1,8 @@
 import type { Message, ToolDefinition } from './types.js';
+import {defaultCore} from './instance-core.js';
 
 /** The visible Staf-owned prompt pieces, shared by transports and context estimates. */
-export const chatSystemMessage = { role: 'system', content: 'You are Staf, a helpful assistant. Use clock for the current time.' };
+export const chatSystemMessage = { role: 'system', content: defaultCore };
 export const codexResponseSchema = { type: 'object', properties: {
   kind: { type: 'string', enum: ['text', 'clock'] }, text: { type: 'string' },
 }, required: ['kind', 'text'], additionalProperties: false };

@@ -432,3 +432,9 @@ For a manual offline check, use the existing controlled instance above, create a
 ## Creation defaults and legacy Demo data
 
 Use a disposable instance when testing default selection or migration. Set a real provider and synthetic model in Settings without signing in. Saving the choice migrates Demo agents, including archived records. To test a failed migration, make a disposable agent configuration invalid, save the default, repair the file, and reload the defaults. The migration retries without replacing agents already moved to a real provider. The seed still contains Demo fixtures for compatibility with the remaining provider removal work.
+## Verify shared core guidance
+
+After building, run `node --test test/instance-core.test.js`. The disposable
+fixture exercises paired CLI and API saves, direct edits, revision conflicts,
+late writes, reset, and captured chat and task instructions. It uses controlled
+providers and does not measure live model behavior or cache reuse.

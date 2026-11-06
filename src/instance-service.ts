@@ -24,12 +24,12 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { assertDatasetAvailable, BotConflict, Instance } from './instance.js';
 import { AgentConfigConflict, AgentConfigInvalid, AgentConfigUncertain } from './agent-config.js';
+import {CoreInvalid} from './instance-core.js';
 import {agentImageBodyType,agentImageBodyLimit,parseAgentImageInput} from './agent-image.js';
 import { MemoryConflict, type MemoryScope } from './memory.js';
 import { selectProvider } from './registry.js';
 import { runTurn } from './runtime.js';
 import { redactor, streamingRedactor, byteStreamRedactor, credentialRedactionOverlap, redactValue, type Environment } from './config.js';
-import { chatSystemMessage } from './prompts.js';
 import { SkillConflict } from './skill-catalog.js';
 import { dirname, resolve } from 'node:path';
 import { readFileSync } from 'node:fs';
@@ -344,7 +344,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
             remaining=limitMs; resume();
             if (!['demo','codex','openrouter','lmstudio','live'].includes(profile.provider)) throw Error('Unsupported provider');
             if (profile.provider !== 'demo' && !profile.model?.trim()) throw Error('Set a model in the agent profile');
-            const instructions=`${chatSystemMessage.content}\n\nBot instructions:\n${profile.instructions}`;
+            const instructions=`${profile.core}${profile.core ? "\n\n" : ""}Bot instructions:\n${profile.instructions}`;
             const taskProfile={...profile,chatId:id};
             const provider=options.providerFactory ? await options.providerFactory(taskProfile,instructions) : (await selectProvider(profile.provider,{env:providerEnv(profile.provider),model:profile.model ?? undefined,reasoning:profile.reasoning ?? undefined,dataDir,sessionId:id,instructions})).provider;
             controller.signal.throwIfAborted();
@@ -404,7 +404,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
           const credential=req.headers.authorization?.match(/^Bearer ([A-Za-z0-9_-]+)$/)?.[1];
           if(!credential || !instance.authorized(credential))return rejectBody(401,'Unauthorized');
         } else if (!req.headers['content-type']?.startsWith('application/json')) return rejectBody(415,'JSON required');
-        const bodyLimit=imageBody ? agentImageBodyLimit : (req.url === '/api/skills' || /^\/api\/skills\/[\w-]+\/update$/.test(req.url ?? '')) ? 1600000 : 65536;
+        const bodyLimit=imageBody ? agentImageBodyLimit : req.url === '/api/core' ? 200000 : (req.url === '/api/skills' || /^\/api\/skills\/[\w-]+\/update$/.test(req.url ?? '')) ? 1600000 : 65536;
         const chunks:Buffer[]=[];let size=0;
         for await (const chunk of req) { const bytes=Buffer.isBuffer(chunk)?chunk:Buffer.from(chunk);size+=bytes.length;if(size>bodyLimit)chunks.length=0;else chunks.push(bytes); }
         if(size>bodyLimit)return rejectBody(413,'Body too large');
@@ -427,6 +427,14 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
         res.writeHead(200,{'Content-Type':'image/png','Content-Length':bytes.length});return res.end(bytes);
       }
       if(req.method==='POST' && (req.url==='/api/bots' || req.url==='/api/creation-defaults' || req.url==='/api/provider-defaults' || /^\/api\/bots\/[\w-]+\/selection$/.test(req.url??'') || /^\/api\/bots\/[\w-]+\/profile$/.test(req.url ?? '')) && JSON.stringify(redactValue(value,redact))!==JSON.stringify(value)) return json(400,{error:'Agent configuration cannot contain a credential'});
+      if(req.url==='/api/core') {
+        if(req.method==='GET') return json(200,instance.core());
+        if(req.method==='POST') {
+          if(typeof value.revision!=='string' || !/^[a-f0-9]{64}$/.test(value.revision) || !(value.content===null || typeof value.content==='string')) return json(400,{error:'Invalid core'});
+          if(typeof value.content==='string' && redact(value.content)!==value.content) return json(400,{error:'Core cannot contain a credential'});
+          return json(200,instance.saveCore({revision:value.revision,content:value.content}));
+        }
+      }
       if(req.url==='/api/openrouter-connection') {
         if(req.method==='GET') return json(200,{saved:!!loadOpenRouterKey(dataDir)});
         if(req.method==='POST') {saveOpenRouterKey({root:dataDir,key:value.key});if(typeof value.key==='string') knownKeys.add(value.key);return json(200,{saved:true});}
@@ -748,7 +756,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
             const {profile,session,notices} = instance.execution(id);
             if (!['demo','codex','openrouter','lmstudio','live'].includes(profile.provider)) throw Error('Unsupported provider');
             if (profile.provider !== 'demo' && !profile.model?.trim()) throw Error('Set a model in the agent profile');
-            const instructions = `${chatSystemMessage.content}\n\nBot instructions:\n${profile.instructions}`;
+            const instructions = `${profile.core}${profile.core ? "\n\n" : ""}Bot instructions:\n${profile.instructions}`;
             const provider = options.providerFactory ? await options.providerFactory(profile,instructions) : (await selectProvider(profile.provider,{env:providerEnv(profile.provider),model:profile.model ?? undefined,reasoning:profile.reasoning ?? undefined,dataDir,sessionId:profile.chatId,instructions})).provider;
             controller.signal.throwIfAborted();
             const skillWork={kind:'command' as const,id};
@@ -765,7 +773,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
         return json(200,claim);
       }
       return json(404,{error:'Not found'});
-    } catch (error) { if(error instanceof ActionFailed)return json(400,{error:error.safeResult});if(error instanceof AgentConfigInvalid)return json(422,{error:error.message,code:'invalid_agent_configuration'});if(error instanceof AgentConfigUncertain)return json(503,{error:error.message,code:'configuration_save_uncertain'});return json((error instanceof BotConflict || error instanceof AgentConfigConflict || error instanceof MemoryConflict || error instanceof SkillConflict || error instanceof ScheduleConflict) ? 409 : 400,{error:error instanceof Error ? error.message : 'Request failed'}); }
+    } catch (error) { if(error instanceof ActionFailed)return json(400,{error:error.safeResult});if(error instanceof CoreInvalid)return json(422,{error:error.message,code:'invalid_core_configuration'});if(error instanceof AgentConfigInvalid)return json(422,{error:error.message,code:'invalid_agent_configuration'});if(error instanceof AgentConfigUncertain)return json(503,{error:error.message,code:'configuration_save_uncertain'});return json((error instanceof BotConflict || error instanceof AgentConfigConflict || error instanceof MemoryConflict || error instanceof SkillConflict || error instanceof ScheduleConflict) ? 409 : 400,{error:error instanceof Error ? error.message : 'Request failed'}); }
   });
   return { server, code, migrationBackup: instance.migrationBackup, finishUpgrade: (token:string)=>instance.finishUpgrade(token), issueCode: () => (code = randomBytes(18).toString('base64url')), close: () => new Promise<void>((resolve,reject)=>{closing=true; instanceAuth?.shutdown(); if(scheduleTimer) clearInterval(scheduleTimer); for(const subscriber of responseSubscribers)subscriber.response.end();for(const controller of active) controller.abort(); server.close(error=>{void processes.shutdown().then(()=>{instance.close(); if(error)reject(error);else resolve();},reject);});}), listen: () => new Promise<number>((resolve,reject)=>{server.once('error',reject);server.listen(port,'127.0.0.1',()=>{const a=server.address();if(a && typeof a !== 'string') { tickSchedules(); scheduleTimer=setInterval(tickSchedules,30000); resolve(a.port); }else reject(Error('Listen failed'));});}) };
 }
