@@ -14,6 +14,33 @@ const appearances: Appearance[] = ['light', 'dark', 'system'];
 function chooseAppearance(value: Appearance) { emit('update:appearance', value); saveAppearance(value); }
 const confirmingSignOut = ref(false);
 function signOut() { confirmingSignOut.value = false; void app.signOutAuth(); }
+type EarlierRecord = {key: string; value: string};
+const discardTarget = ref<{record: EarlierRecord; dataset: string | null} | null>(null);
+function recordContent(raw: string) {
+  try {
+    const value: unknown = JSON.parse(raw);
+    if (!value || typeof value !== 'object') return raw;
+    const fields: string[] = [];
+    for (const [name, text] of Object.entries(value)) {
+      if (typeof text === 'string') fields.push(`${name}:\n${text}`);
+      if (name === 'submission' && text && typeof text === 'object') {
+        for (const [part, saved] of Object.entries(text)) if (typeof saved === 'string') fields.push(`submission ${part}:\n${saved}`);
+      }
+    }
+    return [...fields, `Original saved record:\n${raw}`].join('\n\n');
+  } catch { return raw; }
+}
+async function copyRecord(record: EarlierRecord) {
+  try { await navigator.clipboard.writeText(recordContent(record.value)); app.notify('Record copied.', 'success'); }
+  catch { app.notify('Could not copy the record. Select and copy its text instead.', 'error'); }
+}
+async function discardRecord() {
+  const target = discardTarget.value;
+  discardTarget.value = null;
+  if (!target) return;
+  if (await app.discardLegacyRecord(target.record, target.dataset)) app.notify('Record discarded.', 'success');
+  else app.notify('Record changed or is in use. It was not discarded.', 'error');
+}
 async function saveRouter() {
   form.busy = true;
   form.status = '';
@@ -79,6 +106,15 @@ async function disconnectRouter() {
       <p role="status">{{ form.status }}</p>
     </div>
     </div></section>
+    <section v-if="s.connection.kind === 'ready' && s.legacyRecords.length" class="settings-section">
+      <h2 class="section-title">Earlier browser records</h2>
+      <p class="section-help">These records have no dataset identity, so Staf cannot verify where they belong. Copy any text you need. Staf will not send them or attach them to this instance automatically.</p>
+      <div v-for="record in s.legacyRecords" :key="record.key" class="provider-card earlier-record">
+        <p>{{ record.key }}</p><pre style="white-space: pre-wrap; overflow-wrap: anywhere">{{ recordContent(record.value) }}</pre>
+        <div class="row"><button class="quiet" @click="copyRecord(record)">Copy</button><button class="quiet" @click="discardTarget = {record: {...record}, dataset: s.datasetIdentity}">Discard</button></div>
+      </div>
+      <ConfirmAction v-if="discardTarget" title="Discard this browser record?" message="This removes only the selected saved record from this browser. Copy anything you need first." action="Discard record" @cancel="discardTarget = null" @confirm="discardRecord" />
+    </section>
     <ProviderDefaults />
     <CoreSettings />
     <div class="row"><button v-if="hasAgentSettings" class="quiet" @click="emit('agentSettings')">Back to agent settings</button><button class="quiet" @click="emit('chat')">Back to chat</button></div>

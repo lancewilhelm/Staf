@@ -78,7 +78,7 @@ export class Controller {
     if(gen!==this.generation)return false;
     if(this.dataset!==data.id){
       const changed=this.dataset!==null;this.dataset=data.id;this.draftLoad++;this.currentKey='';this.retainedCreation=null;this.watchResponse(null);
-      this.update({datasetIdentity:data.id});
+      this.update({datasetIdentity:data.id,legacyRecords:[]});
       if(changed)this.update({setup:{kind:'closed'},bots:[],selected:null,messages:[],work:[],response:null,draft:{text:'',submission:null},draftReady:false,notice:'The development dataset changed. Previous browser drafts and pending creations remain saved separately.'});
       void this.restoreCreation(data.id);
     }
@@ -226,6 +226,19 @@ export class Controller {
         if(JSON.stringify(records)!==JSON.stringify(this.state.legacyRecords))this.update({legacyRecords:records});
       }
     }finally{this.legacyChecking=false}
+  }
+  async discardLegacyRecord(record:{key:string;value:string}, dataset:string|null):Promise<boolean>{
+    if(!dataset || this.dataset!==dataset || !this.token || this.claims.has(record.key))return false;
+    const parts=record.key.startsWith(prefix)?record.key.slice(prefix.length).split(':'):[];
+    if(parts.length!==2)return false;
+    try{
+      return await navigator.locks.request('staf-draft:'+record.key,{ifAvailable:true},lock=>{
+        if(!lock || this.dataset!==dataset || this.claims.has(record.key) || localStorage.getItem(record.key)!==record.value)return false;
+        localStorage.removeItem(record.key);
+        this.update({legacyRecords:this.state.legacyRecords.filter(item=>item.key!==record.key || item.value!==record.value)});
+        return true;
+      });
+    }catch{return false;}
   }
   private async restoreCreation(dataset:string){
     try{
