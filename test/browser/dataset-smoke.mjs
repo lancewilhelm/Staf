@@ -14,7 +14,8 @@ const port=await new Promise(resolvePort=>{const s=createServer();s.listen(0,'12
 const url=`http://127.0.0.1:${port}`,env={PATH:process.env.PATH,HOME:temp,TMPDIR:temp,STAF_DEV_DATA_DIR:temp};
 const sleep=ms=>new Promise(resolveSleep=>setTimeout(resolveSleep,ms));
 async function until(fn,label){for(let i=0;i<250;i++){try{const value=await fn();if(value)return value;}catch{}await sleep(100);}throw Error(`Timed out: ${label}`);}
-let app=startInstance(data,port,{env:{}}),browser,socket,proxy,seq=0;const pending=new Map();
+const instanceOptions={env:{},providerFactory:async()=>({name:'recovery-fixture',capabilities:{toolCalls:false,incrementalText:false,transport:'demo'},complete:async()=>({role:'assistant',content:'Controlled response'})})};
+let app=startInstance(data,port,instanceOptions),browser,socket,proxy,seq=0;const pending=new Map();
 function cdp(method,params={}){return new Promise((resolveResult,reject)=>{const id=++seq,timer=setTimeout(()=>reject(Error(`CDP timed out: ${method}`)),10000);pending.set(id,{resolve:value=>{clearTimeout(timer);resolveResult(value);},reject});socket.send(JSON.stringify({id,method,params}));});}
 async function evaluate(expression){const result=await cdp('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});if(result.exceptionDetails)throw Error(JSON.stringify(result.exceptionDetails));return result.result.value;}
 try {
@@ -67,6 +68,21 @@ try {
  assert.equal(await evaluate(`localStorage.getItem(${JSON.stringify(scopedDraft)})`),valueA,'dataset-scoped draft survives discard');
  await clickRecord(oldB,'Discard');await until(()=>evaluate("!!document.querySelector('dialog[open]')"),'discard remaining record');await clickDialog('Discard record');
  await until(()=>evaluate("!document.body.innerText.includes('Earlier browser records')"),'section disappears when resolved');
+ // Durable command and creation records prove which dataset owns these old journals.
+ const tokenBeforeReset=await evaluate("localStorage.getItem('staf-token')");
+ const request=async(path,body)=>{const response=await fetch(url+path,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${tokenBeforeReset}`,...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});assert.ok(response.ok,`${path}: ${response.status}`);return response.json()};
+ const verifiedBot=await request('/api/bots',{operationId:'verified-creation',name:'Verified recovery',provider:'demo'});
+ await request('/api/commands',{id:'verified-command',botId:verifiedBot.id,content:'Verified original'});
+ await until(async()=>(await request('/api/commands/verified-command')).state==='completed','controlled command persisted');
+ const verifiedDraft=`staf-workspace-v1:old-writer:${verifiedBot.id}`,verifiedCreation='staf-workspace-v1:creation:verified-creation';
+ await evaluate(`localStorage.setItem(${JSON.stringify(verifiedDraft)},${JSON.stringify(JSON.stringify({text:'Verified next draft',submission:{id:'verified-command',text:'Verified original',kind:'pending'}}))});localStorage.setItem(${JSON.stringify(verifiedCreation)},${JSON.stringify(JSON.stringify({kind:'create',operationId:'verified-creation',name:'Verified recovery',instructions:'',provider:'demo',model:'',status:''}))})`);
+ await cdp('Page.reload');
+ await until(()=>evaluate("document.body.innerText.includes('Recovered creation. Check status')"),'verified creation recovered');
+ await evaluate("[...document.querySelectorAll('.agent-settings button')].find(b=>b.textContent.trim()==='Check creation').click()");
+ await until(()=>evaluate("document.querySelector('[aria-label=Message]')?.value==='Verified next draft'"),'verified draft recovered');
+ assert.equal(await evaluate(`localStorage.getItem(${JSON.stringify(verifiedDraft)})===null && localStorage.getItem(${JSON.stringify(verifiedCreation)})===null`),true,'verified old records migrated');
+ const verifiedMessages=await request(`/api/bots/${verifiedBot.id}/messages`);
+ assert.equal(verifiedMessages.filter(message=>message.role==='user'&&message.content==='Verified original').length,1,'verified command is not submitted twice');
  await evaluate("[...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('New agent')).click()");
  await until(()=>evaluate("!!document.querySelector('.agent-settings input')"),'creation form');
  await evaluate("{const el=document.querySelector('.agent-settings input');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(el,'Delayed creation');el.dispatchEvent(new Event('input',{bubbles:true}));window.originalFetch=window.fetch;window.fetch=async(...args)=>{const response=await window.originalFetch(...args);if(args[0]==='/api/bots'&&args[1]?.method==='POST'){window.held=true;await new Promise(resolve=>window.release=resolve)}return response}}");
@@ -91,7 +107,7 @@ try {
  assert.equal(await evaluate("document.body.innerText.includes('Delayed creation')"),false,'late old response cannot restore old form or agent');
  assert.equal(await evaluate(`localStorage.getItem(${JSON.stringify(oldRecord)})!==null`),true,'old creation stays quarantined');
  const token=await evaluate("localStorage.getItem('staf-token')");const bots=await(await fetch(url+'/api/bots',{headers:{Authorization:`Bearer ${token}`}})).json();assert.equal(bots.some(bot=>bot.name==='Delayed creation'),false);
- console.log('PASS delayed creation response cannot cross a dataset reset in an already-open browser');
+ console.log('PASS earlier records, clipboard, discard ownership, verified recovery and dataset reset');
 } finally {
  socket?.close();if(browser&&browser.exitCode===null){browser.kill('SIGTERM');await new Promise(resolveExit=>browser.once('exit',resolveExit));}
  if(app)await app.close();if(proxy)await new Promise(resolveClose=>proxy.close(resolveClose));await rm(temp,{recursive:true,force:true});
