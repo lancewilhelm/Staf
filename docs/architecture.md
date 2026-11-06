@@ -71,8 +71,10 @@ Appearance and layout are browser-local preferences (`web/appearance.ts` and
 `web/design.ts`); the default is Light/Evergreen with an expanded sidebar.
 The bundled DM Sans font needs no external request. The composer popup renders grouped menu choices through the existing choice and
 save boundary, while agent settings use the full form. Both keep service-backed
-discovery, manual model entry, reasoning and conflict recovery. Creation uses a
-native modal dialog over the chat; its durable state remains in the controller.
+discovery, manual model entry, reasoning and conflict recovery. Creation uses the same fields and layout as agent settings. Editor drafts stay in
+the browser tab across navigation, including their original profile revisions.
+Explicit Cancel discards unsaved edits; creation operation recovery remains in
+the controller.
 CSS follows the device color scheme when System is selected. These preferences
 are not stored by the shared instance.
 
@@ -217,8 +219,8 @@ The agent editor combines its revisioned profile with the authenticated ChatGPT
 and OpenRouter presence statuses to offer configured shared connections and the
 offline Demo provider. It retains an existing disconnected provider, blocks a
 new unavailable selection, and keeps unsaved edits mounted while the owner
-visits global Settings. Model text is retained and must be reviewed on a switch;
-the browser confirms the potential history disclosure before its profile save.
+visits global Settings. The editor stages the chosen provider and model; the browser confirms the
+potential history disclosure before its profile save.
 The service still accepts supported configurations without requiring a saved
 connection, so direct edits and other clients can configure an agent before
 connecting. The editor does not run inference or verify provider access.
@@ -226,8 +228,8 @@ connecting. The editor does not run inference or verify provider access.
 ## Shared provider choice ownership
 
 Agent files own remembered provider pairs; the active top-level pair is folded
-into that history on reads and revision-checked service writes. The composer,
-agent settings and terminal use the same selection operation. Existing captured
+into that history on reads and revision-checked service writes. The composer and terminal use the selection operation. Agent settings submits
+the staged fields together through the revision-checked profile operation. Existing captured
 response profiles remain unchanged by later selections. Global nonsecret defaults
 use atomic JSON replacement and content revisions beside the agent directories.
 They seed first selections, never live inheritance. Creation still copies its

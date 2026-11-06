@@ -62,7 +62,6 @@ try{
  await evaluate("window.fetch=window.realPickerFetch");
  await evaluate("[...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('New agent')).click()");
  await until(()=>evaluate("document.body.innerText.includes('Create agent')"),'creation choices');
- await evaluate("document.querySelector('.creation-choices').open=true");
  await evaluate("(()=>{const p=document.querySelector('.setup fieldset select');p.value='openrouter';p.dispatchEvent(new Event('change',{bubbles:true}))})()");
  await until(()=>evaluate("document.querySelector('.setup fieldset input').value==='owner/model' && [...document.querySelector('.setup select[aria-label=Reasoning]')?.options??[]].some(o=>o.value==='high')"),'creation defaults and reasoning options');
  await evaluate("window.fetch=async(...args)=>{const response=await window.realPickerFetch(...args);if(args[0]!=='/api/models')return response;const catalog=await response.json();catalog.models.push({id:'fixture/unknown',label:'Unknown reasoning',reasoning:null,reasoningStatus:'unknown'});return new Response(JSON.stringify(catalog),{status:200,headers:{'Content-Type':'application/json','X-Staf-Dataset':args[1].headers['X-Staf-Dataset']}})};(()=>{const r=document.querySelector('.setup select[aria-label=Reasoning]');r.value='high';r.dispatchEvent(new Event('change',{bubbles:true}));testClick('List models')})()");

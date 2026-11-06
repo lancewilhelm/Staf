@@ -373,6 +373,23 @@ distinguish synthetic coverage from live provider, VM, or Docker acceptance.
 For docs-only changes, report the relevant documentation checks instead of
 requiring an application launch.
 
+## Review the agent editor
+
+On the implementation branch, stop another development launcher using the same
+port and data directory, then run `corepack pnpm dev`. Reuse the paired browser
+at `http://127.0.0.1:3210/`. Open **New agent**, enter a name and change an image
+or another field. Navigate to Settings and return to **New agent**; expect the
+unsaved values to return. Select **Cancel**, reopen the form, and expect a fresh
+form. Create an agent, then open its settings from the chat header. Change several
+fields, including provider and model. Navigate to another agent and back; expect
+the draft to remain. Select **Save settings**, cancel the provider confirmation,
+and expect the draft to remain. Confirm a subsequent save and expect all values
+to appear together when settings reopen. No provider request is needed.
+
+For controlled offline checks, build and run `node test/browser/agent-images-smoke.mjs`
+and `node test/browser/gui-smoke.mjs`. These use disposable instances and scripted
+providers; they do not prove live provider behavior.
+
 ## Review agent images
 
 On the implementation branch, stop another development launcher using the same
