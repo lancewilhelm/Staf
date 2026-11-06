@@ -70,15 +70,11 @@ ChatGPT uses direct Responses and a separate Staf OAuth grant. A credential alon
 does not select a provider. Per-bot endpoint overrides are not implemented.
 See [model selection](model-selection.md) and [ChatGPT sign-in](codex-direct.md).
 
-In the browser's agent settings, Demo is always selectable and ChatGPT or
-OpenRouter is selectable when the instance reports a saved connection. Existing
-disconnected or host-configured selections remain visible. LM Studio and live
-are configured on the host and are not offered as new browser choices. The
-browser retains the model on a provider change, asks the owner to review it,
-and confirms possible conversation-history disclosure before saving. This
-selection policy is a browser convenience; the paired service, CLI, and direct
-files continue to accept supported provider configurations independently of
-connection presence.
+In the browser's agent settings, supported providers remain selectable without a
+saved connection. Selecting a provider stages its remembered or default model
+and reasoning for review. Saving a changed provider requires confirmation of
+possible conversation-history disclosure. The paired service, CLI, and direct
+files accept supported provider configurations independently of connection presence.
 
 ## Scripts
 
@@ -174,6 +170,12 @@ requires a nonblank `name` and accepts optional `instructions`, `provider`,
 `model`, and `operationId`. An omitted provider uses the copied instance
 default, and fails with a setup error if it is unset. A creation default requires a real provider and a nonblank model. An omitted model uses the default when the provider is omitted, or
 is empty when a provider is specified. A model can override the default.
+The browser uses one settings form for creation and editing. Profile saves submit
+name, image, instructions, tool mode, provider, model, and reasoning together
+with the original revision. Navigation retains unsaved form state in the current
+tab. Cancel discards it; uncertain saves retain it for comparison. The composer
+selection control remains an immediate service operation.
+
 For retry-safe creation, clients supply an `operationId`;
 `GET /api/bot-creations/OPERATION_ID` recovers a recorded result. Reusing an
 operation ID with different input conflicts. The transaction copies remaining

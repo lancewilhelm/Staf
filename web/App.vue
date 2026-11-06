@@ -16,13 +16,15 @@ import MemoryView from './components/MemoryView.vue';
 import { design } from './design';
 
 const {app, state: s} = provideWorkspace();
-type View = 'chat' | 'settings' | 'agent' | 'agent-memory' | 'user-memory';
+type View = 'chat' | 'settings' | 'agent' | 'create' | 'agent-memory' | 'user-memory';
 const view = ref<View>('chat');
 const code = ref('');
 const routerForm = reactive({key: '', status: '', busy: false});
 const appearance = ref(readAppearance());
 applyAppearance(appearance.value);
 const settingsAgentId = ref<string | null>(null);
+const editorVersions = reactive<Record<string, number>>({});
+const editorDataset = ref(0);
 const memoryAgentId = ref<string | null>(null);
 const sharedReturn = ref<'settings' | 'agent-memory'>('settings');
 const agentSaving = ref(false);
@@ -53,9 +55,13 @@ watch(() => s.value.connection.kind, () => {
     for (const notice of app.state.notices) if (notice.topic === 'connection') app.dismissNotice(notice.id);
   }
 });
-function createAgent() { settingsAgentId.value = null; view.value = 'chat'; app.openSetup(); }
+watch(() => s.value.datasetIdentity, () => { editorDataset.value++; settingsAgentId.value = null; });
+watch(() => s.value.setup.kind, (kind, previous) => { if (kind === 'create') view.value = 'create'; else if (previous === 'create' && view.value === 'create') view.value = 'chat'; });
+function createAgent() { settingsAgentId.value = null; app.openSetup(); view.value = 'create'; }
 function openSettings() { app.closeSetup(); view.value = 'settings'; }
-function closeAgentSettings() { settingsAgentId.value = null; view.value = 'chat'; }
+function closeAgentSettings() { if (view.value === 'create') app.closeSetup(); settingsAgentId.value = null; view.value = 'chat'; }
+function discardAgentSettings(id:string) { editorVersions[id] = (editorVersions[id] ?? 0) + 1; closeAgentSettings(); }
+function cancelCreation() { app.cancelSetup(); view.value = 'chat'; }
 function openAgentSettings(id: string) { settingsAgentId.value = id; view.value = 'agent'; }
 function openAgentMemory(id: string) { memoryAgentId.value = id; view.value = 'agent-memory'; }
 function openUserMemory() { sharedReturn.value = view.value === 'agent-memory' ? 'agent-memory' : 'settings'; view.value = 'user-memory'; }
@@ -95,7 +101,7 @@ function legacyContent(raw: string) {
         <button v-if="selected && view === 'chat' && s.setup.kind === 'closed'" class="header-agent-image" aria-label="Open agent settings" title="Open agent settings" :disabled="agentSaving" @click="openAgentSettings(selected.id)"><AgentImage :image="selected.image" :name="selected.name" /></button>
         <div v-else :class="headerAgent && view !== 'user-memory' ? 'header-agent-image' : 'avatar'"><AgentImage v-if="headerAgent && view !== 'user-memory'" :image="headerAgent.image" :name="headerAgent.name" /><BrandMark v-else /></div>
         <div>
-          <div class="title"><template v-if="view === 'settings'">Settings</template><template v-else-if="view === 'user-memory'">User memory</template><button v-else-if="selected && view === 'chat' && s.setup.kind === 'closed'" class="header-agent-name" :disabled="agentSaving" @click="openAgentSettings(selected.id)"><AgentLabel :agent="selected" /></button><AgentLabel v-else-if="headerAgent" :agent="headerAgent" /><template v-else>Welcome to Staf</template></div>
+          <div class="title"><template v-if="view === 'settings'">Settings</template><template v-else-if="view === 'create'">Create agent</template><template v-else-if="view === 'user-memory'">User memory</template><button v-else-if="selected && view === 'chat' && s.setup.kind === 'closed'" class="header-agent-name" :disabled="agentSaving" @click="openAgentSettings(selected.id)"><AgentLabel :agent="selected" /></button><AgentLabel v-else-if="headerAgent" :agent="headerAgent" /><template v-else>Welcome to Staf</template></div>
         </div>
         <div class="spacer" />
         <button v-if="view !== 'chat'" class="header-action" :disabled="agentSaving" aria-label="Back to chat" @click="closeAgentSettings"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="m6 6 12 12M6 18 18 6"/></svg></button>
@@ -107,9 +113,9 @@ function legacyContent(raw: string) {
         <div v-for="record in s.legacyRecords" :key="record.key"><p>{{ record.key }}</p><pre style="white-space: pre-wrap; overflow-wrap: anywhere">{{ legacyContent(record.value) }}</pre></div>
       </details>
       <div v-if="s.connection.kind === 'offline'" class="connection-recovery" role="alert">{{ s.connection.message }} {{ s.freshness }}</div>
-      <div v-if="settingsAgentId && s.connection.kind !== 'pairing'" :style="{display: view === 'agent' ? 'contents' : 'none'}">
-        <AgentSettings :key="settingsAgentId" :id="settingsAgentId" v-model:saving="agentSaving" @providers="openSettings" @memory="openAgentMemory(settingsAgentId)" @close="closeAgentSettings" />
-      </div>
+      <KeepAlive :key="editorDataset">
+        <AgentSettings v-if="view === 'agent' && settingsAgentId && s.connection.kind !== 'pairing'" :key="settingsAgentId + ':' + (editorVersions[settingsAgentId] ?? 0)" :id="settingsAgentId" v-model:saving="agentSaving" @providers="openSettings" @memory="openAgentMemory(settingsAgentId)" @close="discardAgentSettings(settingsAgentId)" />
+      </KeepAlive>
       <div v-if="s.connection.kind !== 'pairing' && (view === 'settings' || view === 'user-memory' && sharedReturn === 'settings')" :style="{display: view === 'settings' ? 'contents' : 'none'}">
         <SettingsView v-model:appearance="appearance" :router-form="routerForm" :has-agent-settings="!!settingsAgentId" @agent-settings="view = 'agent'" @chat="closeAgentSettings" @memory="openUserMemory" />
       </div>
@@ -118,11 +124,11 @@ function legacyContent(raw: string) {
           <span class="eyebrow">WELCOME TO STAF</span><h2>Pair this browser</h2><p>Enter the one-time code shown on the host.</p>
           <label>Pairing code<input v-model="code" /></label><button @click="app.pair(code)">Pair</button><p role="alert">{{ s.connection.message }}</p>
         </div>
+        <NewAgent v-else-if="view === 'create'" @cancel="cancelCreation" />
         <MemoryView v-else-if="view === 'agent-memory' && memoryAgentId" :key="memoryAgentId" :scope="{kind: 'bot', botId: memoryAgentId}" :back-label="settingsAgentId === memoryAgentId ? 'Back to agent settings' : 'Back to chat'" @back="closeAgentMemory" @shared="openUserMemory" />
         <MemoryView v-else-if="view === 'user-memory'" key="user-memory" :scope="{kind: 'user'}" :back-label="sharedReturn === 'agent-memory' ? 'Back to agent memory' : 'Back to settings'" @back="closeUserMemory" />
         <ChatView v-else-if="view === 'chat'" @create="createAgent" @providers="openSettings" @settings="openAgentSettings" />
       </template>
     </main>
-    <NewAgent v-if="s.setup.kind === 'create'" />
   </div>
 </template>
