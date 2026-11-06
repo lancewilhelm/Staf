@@ -70,7 +70,7 @@ try{
  assert.match(await evaluate("document.querySelector('[aria-label=\"Provider defaults\"]').innerText"),/Could not save defaults/,'shared-memory visit retains inline failure');
  await evaluate("[...document.querySelectorAll('.side nav button')].find(b=>b.textContent.includes('Ada')).click()");
  await until(()=>evaluate("document.querySelector('.top').innerText.includes('Ada')"),'Ada selected');
- await act("document.querySelector('button[aria-label=\"Agent settings\"]').click()","!!document.querySelector('.agent-memory-link')",'open agent settings');
+ await act("document.querySelector('.header-agent-name').click()","!!document.querySelector('.agent-memory-link')",'open agent settings');
  await evaluate("testInput('.agent-settings input','Unsaved Ada name')");
  await act("testClick('View agent memory')","document.querySelectorAll('.memory-entry').length===1",'agent memory');
  assert.match(await evaluate("document.querySelector('.memory-view').innerText"),/Ada’s memory[\s\S]*Available only to Ada/);
@@ -109,8 +109,8 @@ try{
  await evaluate(`window.heldMemoryPath='/api/${privatePath}';window.heldStarted=false;window.heldAborted=false;window.heldGate=new Promise(resolve=>window.releaseHeld=resolve);window.fetch=async(...args)=>{if(args[0]===window.heldMemoryPath){args[1].signal.addEventListener('abort',()=>window.heldAborted=true,{once:true});const response=await window.realMemoryFetch(...args);window.heldStarted=true;await window.heldGate;return response}return window.realMemoryFetch(...args)};testClick('View agent memory')`);
  await until(()=>evaluate("window.heldStarted && document.body.innerText.includes('Loading memory…')"),'held request loading');
  await evaluate("[...document.querySelectorAll('.side nav button')].find(b=>b.textContent.includes('Grace')).click()");
- await until(()=>evaluate("document.querySelector('.top').innerText.includes('Grace') && !!document.querySelector('button[aria-label=\"Agent settings\"]')"),'switch agent during memory load');
- await act("document.querySelector('button[aria-label=\"Agent settings\"]').click()","document.querySelector('.agent-settings h1')?.textContent==='Grace'",'Grace settings');
+ await until(()=>evaluate("document.querySelector('.top').innerText.includes('Grace') && !!document.querySelector('.header-agent-name')"),'switch agent during memory load');
+ await act("document.querySelector('.header-agent-name').click()","document.querySelector('.agent-settings h1')?.textContent==='Grace'",'Grace settings');
  await act("testClick('View agent memory')","document.querySelector('.memory-text')?.textContent==='Grace private preference'",'Grace memory before old response');
  assert.equal(await evaluate("window.heldAborted"),true,'leaving aborts old request');
  await evaluate("window.releaseHeld();window.fetch=window.realMemoryFetch");await sleep(200);
@@ -150,7 +150,7 @@ try{
  await evaluate("window.fetch=(...args)=>args[0]==='/api/memories/user'?Promise.resolve(new Response(JSON.stringify({error:'Unauthorized'}),{status:401})):window.realMemoryFetch(...args);testClick('Refresh memory')");
  await until(()=>evaluate("document.body.innerText.includes('Pair this browser') && !document.querySelector('.memory-view') && !document.querySelector('.agent-settings')"),'memory 401 clears settings and requires pairing');
  assert.equal(await evaluate("localStorage.getItem('staf-token')"),null);
- await act("document.querySelector('.top button[aria-label=\"Agent settings\"]').click()","document.body.innerText.includes('Pair this browser') && !document.querySelector('.agent-settings')",'settings navigation cannot hide re-pair form');
+ await act("document.querySelector('.header-agent-name').click()","document.body.innerText.includes('Pair this browser') && !document.querySelector('.agent-settings')",'settings navigation cannot hide re-pair form');
  await act("document.querySelector('.side button[aria-label=Settings]').click()","document.body.innerText.includes('Pair this browser') && !document.querySelector('.settings-content')",'global settings cannot bypass pairing');
  await evaluate("document.querySelector('.top button[aria-label=\"Back to chat\"]').click()");
  // Re-pair then revoke a real client with a successful memory response held.

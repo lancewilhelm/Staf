@@ -220,7 +220,7 @@ The workspace keeps an agent list beside the selected main chat, visible while
 the chat scrolls. Select an agent to switch conversations; agents with the same
 name, including archived namesakes, show the last four characters of their stable
 IDs in the list and Updates. Suffixes can coincide; full IDs remain available
-through the API or CLI. **New agent**, under the **Agents** sidebar heading, opens creation, and **Settings** controls appearance and
+through the API or CLI. **New agent**, at the bottom of the sidebar, opens creation, and **Settings** controls appearance and
 instance-wide provider connections. New agent opens a modal with keyboard focus
 contained inside; Escape or Cancel closes it and returns focus. Optional provider
 choices remain under its Provider, model and reasoning disclosure. Choose Light, Dark, or System appearance;
@@ -231,8 +231,8 @@ The sidebar starts expanded. Use its panel icon to collapse it to the Focus rail
 the expand button then appears in the workspace header. Agent selection, New
 agent, and Settings remain available in the rail. Settings offers Evergreen and
 Ink palettes and **Layout and typography** controls for DM Sans or system sans,
-text size, spacing, corners, and the five-dot logo. Defaults are Evergreen, DM
-Sans, 14px text, 20px spacing, 10px corners, and Orbit. These choices apply only
+text size, spacing, and corners. Defaults are Evergreen, DM
+Sans, 14px text, 20px spacing, and 10px corners. These choices apply only
 to this browser. Settings groups shared connections into provider cards;
 Creation defaults opens its editor through Edit defaults. The composer model button opens provider, model, and reasoning
 choices immediately above it as grouped menu rows with selection checkmarks.
@@ -255,7 +255,7 @@ new one. **Sign out** removes the instance's local credential after confirmation
 finish active work and sign-in first. Agent provider and model selections and
 unsent drafts are retained. Create an agent with a name and optional
 instructions, provider, and model, even before signing in or choosing a model. Select the
-agent avatar in the chat header to edit its full settings and Instructions. The
+agent name or avatar in the chat header to edit its full settings and Instructions. The
 optional **Instructions** field provides standing guidance in the agent's
 `soul.md`. Open **About Instructions** with a click, tap, or keyboard to read
 the explanation; hovering the control also shows it. Press
@@ -274,7 +274,7 @@ and asks for confirmation because future requests can send the existing chat to
 the new provider. Saving settings does not send a model request. Other agents
 keep their own choices.
 In agent settings, select **Archive agent** to retain configuration and history
-while preventing new work. To restore it, expand **Archived agents** in the **Agents** sidebar and select
+while preventing new work. Confirm the action in Staf. To restore it, expand **Archived agents** in the sidebar and select
 **Restore agent** beside its name. An agent with active chat or background
 work cannot be archived until that work settles.
 

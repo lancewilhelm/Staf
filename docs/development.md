@@ -268,6 +268,10 @@ registration remains unverified by the offline checks. See
   arrow/Home/End navigation, Tab/Escape dismissal with focus return,
   selection checkmarks, and outside-click dismissal. New agent opens a modal:
   expect Name focus, trapped Tab navigation, and Escape returning focus.
+  The agent name and avatar open agent settings. Archive and ChatGPT sign-out
+  open in-app confirmations; Escape cancels and returns focus. The message
+  composer shows a focus indicator for keyboard navigation without a border
+  change when clicked.
   Settings should show theme cards, palette swatches, provider cards and an
   Edit defaults disclosure. Buttons
   keep their appearance on pointer hover and show keyboard focus.
