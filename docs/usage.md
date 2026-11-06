@@ -324,6 +324,39 @@ remain available.
 
 After updating Staf, reload any already-open workspace tabs so they all use the
 current draft coordination before editing in multiple tabs.
+### Shared core guidance
+
+Staf supplies instance-wide operating guidance separately from each agent's
+`soul.md`. Inspect it with the paired CLI:
+
+```sh
+node dist/cli.js instance core http://127.0.0.1:3210 "$HOME/.staf/dev-client/client.json"
+```
+
+The result includes the effective `content`, its `source`, `revision`, `path`,
+and the latest `defaultContent`. To replace it, save UTF-8 Markdown in a file and
+run `instance core-save URL CREDENTIAL_FILE REVISION FILE`. Use the revision
+from inspection. An empty file deliberately disables only the shared core. To
+remove the override and adopt the latest shipped default, run `instance
+core-reset URL CREDENTIAL_FILE REVISION`.
+
+The reported `path` is the authoritative override on the instance host. When
+`source` is `default`, that file is absent; creating it activates an override.
+Editing or deleting it directly affects newly accepted chat and task work.
+Staf validates the file before accepting work. Invalid or unreadable content
+blocks acceptance until repaired. An editor can overwrite an unobserved direct
+edit, so coordinate direct writers. Client saves reject stale revisions. If a
+save outcome is uncertain, inspect the current core before retrying.
+
+Staf retains previous revision directories, which may contain private guidance.
+If an editor writes an older open file after publication, Staf blocks new work
+and reports its directory. Close that editor, compare the old and current files,
+apply the desired changes, then remove the old directory's `.retired` marker.
+Each accepted request retains its captured core, including during provider
+continuations. A task retry retains its predecessor's captured profile. Prompt
+text cannot grant tools or bypass service permissions, approvals, or Stop.
+The Advanced Settings editor is not yet available.
+
 ### Agent configuration files
 
 Each agent has `agent.toml` for its name, description, provider, model and
