@@ -7,7 +7,7 @@ const responding = computed(() => !!s.value.response && ['accepted', 'running', 
 </script>
 
 <template>
-  <div v-if="submission" class="submission" role="status">
+  <div v-if="submission && !['submitting','pending'].includes(submission.kind)" class="submission" role="status">
     Message {{ submission.kind === 'uncertain-busy' ? 'busy' : submission.kind === 'submitting-uncertain' ? 'submitting' : submission.kind }}.
     {{ 'error' in submission ? submission.error : '' }} {{ submission.kind === 'unknown' ? 'Reconnecting to the original request.' : '' }}
     <div v-if="['busy', 'uncertain-busy', 'rejected', 'failed', 'interrupted'].includes(submission.kind)" class="row">

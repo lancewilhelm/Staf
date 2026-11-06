@@ -77,8 +77,8 @@ test('old dataset with a real default resumes migration after upgrade', async ()
  const dir=mkdtempSync(join(tmpdir(),'staf-old-defaults-')),path=join(dir,'db');let instance=new Instance(path);
  try {
   const bot=legacyDemo(instance,'Legacy','Preserved');instance.close();
-  const db=new DatabaseSync(path);db.exec("DROP TABLE demo_migration; UPDATE creation_defaults SET provider='openrouter',model='fixture/model',reasoning=NULL; PRAGMA user_version=36");db.close();
-  instance=new Instance(path);assert.equal(instance.bot(bot.id).provider,'openrouter');assert.equal(instance.bot(bot.id).model,'fixture/model');assert.equal(instance.bot(bot.id).instructions,'Preserved');assert.ok(instance.migrationBackup);
+  const db=new DatabaseSync(path);db.exec("DROP TABLE demo_migration; ALTER TABLE command_runtime_events DROP COLUMN call_id; UPDATE creation_defaults SET provider='openrouter',model='fixture/model',reasoning=NULL; PRAGMA user_version=36");db.close();
+  instance=new Instance(path);assert.equal(instance.bot(bot.id).provider,'openrouter');assert.equal(instance.bot(bot.id).model,'fixture/model');assert.equal(instance.bot(bot.id).instructions,'Preserved');assert.ok(instance.migrationBackup);assert.deepEqual(instance.chatWork(bot.id).requests,[]);
  } finally {instance.close();rmSync(dir,{recursive:true,force:true});}
 });
 

@@ -46,7 +46,7 @@ export interface Provider {
 }
 export type RuntimeEvent =
   | { type: 'provider_start'; provider: string }
-  | { type: 'tool_start'; id: string; name: string }
+  | { type: 'tool_start'; id: string; name: string; arguments?: string }
   | { type: 'tool_result'; id: string; name: string; success: boolean; content: string }
   | { type: 'assistant'; text: string }
   | { type: 'assistant_observed'; text: string }
