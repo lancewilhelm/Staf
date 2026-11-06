@@ -35,13 +35,14 @@ try{
  await evaluate("document.querySelector('.defaults-editor').open=true");
  const api=async(path,body)=>evaluate(`(async()=>{const r=await fetch('/api/'+${JSON.stringify(path)},{method:${JSON.stringify(body?'POST':'GET')},headers:{Authorization:'Bearer '+localStorage.getItem('staf-token'),'Content-Type':'application/json'},${body?'body:JSON.stringify('+JSON.stringify(body)+'),':''}});return r.json()})()`);
  await evaluate("window.confirm=()=>true");
- await evaluate("document.querySelector('[aria-label=\"Provider defaults\"] select').value='openrouter';document.querySelector('[aria-label=\"Provider defaults\"] select').dispatchEvent(new Event('change',{bubbles:true}))");
+ await evaluate("document.querySelector('[aria-label=\"Provider defaults\"] .provider-choices select').value='openrouter';document.querySelector('[aria-label=\"Provider defaults\"] .provider-choices select').dispatchEvent(new Event('change',{bubbles:true}))");
+ await until(()=>evaluate("document.querySelector('[aria-label=\"Provider defaults\"] .provider-choices select').value==='openrouter'"),'provider defaults selection settled');
  await evaluate("testClick('List models')");
- await until(()=>evaluate("document.querySelector('[aria-label=\"Provider defaults\"] [role=status]')?.textContent.includes('2 models loaded')"),'model discovery reports loaded models');
+ await until(()=>evaluate("document.querySelector('[aria-label=\"Provider defaults\"] .provider-choices [role=status]')?.textContent.includes('2 models loaded')"),'model discovery reports loaded models');
  assert.equal(await evaluate("document.querySelector('[aria-label=\"Available models\"]')?.options.length"),3,'loaded models have a visible picker');
  if(process.env.STAF_SETTINGS_SCREENSHOT){const shot=await cdp('Page.captureScreenshot',{format:'png'});await writeFile(process.env.STAF_SETTINGS_SCREENSHOT,Buffer.from(shot.data,'base64'))}
  assert.equal(await evaluate("(()=>{const form=document.querySelector('.setup'),scroller=form.closest('.settings-scroll');return !!scroller&&Math.abs(scroller.getBoundingClientRect().right-document.querySelector('.main').getBoundingClientRect().right)<2})()"),true,'Settings scrolls at the pane edge');
- assert.equal(await evaluate("(()=>{const section=document.querySelector('[aria-label=\"Provider defaults\"]');return section.querySelector('button:not(fieldset button)').getBoundingClientRect().top-section.querySelector('fieldset').getBoundingClientRect().bottom>=12})()"),true,'provider actions have space below their group');
+ assert.equal(await evaluate("(()=>{const section=document.querySelector('[aria-label=\"Provider defaults\"]');return section.querySelector('.provider-default-actions button').getBoundingClientRect().top-section.querySelector('fieldset').getBoundingClientRect().bottom>=12})()"),true,'provider actions have space below their group');
  await evaluate("testInput('[aria-label=\"Provider defaults\"] input','owner/model');testClick('Save provider defaults')");
  await until(async()=>(await api('provider-defaults')).providers.openrouter?.model==='owner/model','owner defaults persist');await until(()=>evaluate("document.body.innerText.includes('Defaults saved.')"),'defaults save settled');
  // An empty successful catalog is distinct from both loaded choices and failure.
@@ -62,7 +63,6 @@ try{
  await evaluate("window.fetch=window.realPickerFetch");
  await evaluate("[...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('New agent')).click()");
  await until(()=>evaluate("document.body.innerText.includes('Create agent')"),'creation choices');
- await evaluate("document.querySelector('.creation-choices').open=true");
  await evaluate("(()=>{const p=document.querySelector('.setup fieldset select');p.value='openrouter';p.dispatchEvent(new Event('change',{bubbles:true}))})()");
  await until(()=>evaluate("document.querySelector('.setup fieldset input').value==='owner/model' && [...document.querySelector('.setup select[aria-label=Reasoning]')?.options??[]].some(o=>o.value==='high')"),'creation defaults and reasoning options');
  await evaluate("window.fetch=async(...args)=>{const response=await window.realPickerFetch(...args);if(args[0]!=='/api/models')return response;const catalog=await response.json();catalog.models.push({id:'fixture/unknown',label:'Unknown reasoning',reasoning:null,reasoningStatus:'unknown'});return new Response(JSON.stringify(catalog),{status:200,headers:{'Content-Type':'application/json','X-Staf-Dataset':args[1].headers['X-Staf-Dataset']}})};(()=>{const r=document.querySelector('.setup select[aria-label=Reasoning]');r.value='high';r.dispatchEvent(new Event('change',{bubbles:true}));testClick('List models')})()");

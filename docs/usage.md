@@ -224,9 +224,8 @@ the chat scrolls. Select an agent to switch conversations; agents with the same
 name, including archived namesakes, show the last four characters of their stable
 IDs in the list and Updates. Suffixes can coincide; full IDs remain available
 through the API or CLI. **New agent**, at the bottom of the sidebar, opens creation, and **Settings** controls appearance and
-instance-wide provider connections. New agent opens a modal with keyboard focus
-contained inside; Escape or Cancel closes it and returns focus. Optional provider
-choices remain under its Provider, model and reasoning disclosure. Choose Light, Dark, or System appearance;
+instance-wide provider connections. New agent uses the same settings form as an
+existing agent, with provider, model, and reasoning choices visible. Choose Light, Dark, or System appearance;
 Light is the default; System follows device appearance changes. The choice is saved
 in this browser, independently of other browsers; clearing browser storage resets it.
 
@@ -260,22 +259,22 @@ unsent drafts are retained. Create an agent with a name and optional
 instructions, provider, and model, even before signing in or choosing a model. Select the
 agent name or avatar in the chat header to edit its full settings and Instructions. The
 optional **Instructions** field provides standing guidance in the agent's
-`soul.md`. Open **About Instructions** with a click, tap, or keyboard to read
-the explanation; hovering the control also shows it. Press
+`soul.md`. Use the information icons beside **Instructions** and **Tool mode** to read
+their explanations by hover, focus, click, or tap. Press
 Enter to send a message or Shift+Enter to insert a new line. The workspace keeps drafts when switching agents. If sign-in or a model is
 missing, the submitted text remains beside an explanation and Retry control.
 
-In agent settings, Demo is always available; ChatGPT and OpenRouter can be chosen
-when their shared connection is saved. A saved connection does not verify account
-or model access. A disconnected current provider remains visible, and **Open
-provider settings** lets you repair a connection and return to your unsaved
-agent edits. The browser does not offer LM Studio or HTTP compatible as new
-choices because their host configuration is not managed in global Settings;
-existing selections remain visible and can still be edited through the CLI or
-configuration files. A provider switch retains the model text for you to review
-and asks for confirmation because future requests can send the existing chat to
-the new provider. Saving settings does not send a model request. Other agents
-keep their own choices.
+In agent settings, choose a provider and review its model and reasoning before
+saving. Provider connections are shared by the instance, and a saved connection
+does not verify account or model access. **Open provider settings** lets you repair
+a connection and return to the unsaved form. Name, image, instructions, tool mode,
+provider, model, and reasoning are saved together. A provider change requires
+confirmation at Save because future requests can send the existing chat to the
+new provider. Canceling that confirmation keeps the form. Navigating away keeps
+the draft in the current tab; returning restores its original revision. **Cancel**
+discards unsaved form edits. If a save fails or its acknowledgment is uncertain,
+compare the latest settings and reconcile the retained draft before retrying.
+Saving settings does not send a model request. Other agents keep their own choices.
 In agent settings, select **Archive agent** to retain configuration and history
 while preventing new work. Confirm the action in Staf. To restore it, expand **Archived agents** in the sidebar and select
 **Restore agent** beside its name. An agent with active chat or background
@@ -606,8 +605,8 @@ Model IDs absent from the list remain valid manual entries. Provider default rea
 with explicitly incompatible advertised reasoning resets the effort visibly.
 Missing metadata leaves the saved effort intact; generation can still reject it.
 Changing providers asks for confirmation before saving. Drafts stay in place.
-Agent settings uses the same picker; name and instructions retain their separate
-Save settings action and conflict recovery.
+The agent settings form uses the shared choice fields but stages them with the other
+fields until Save. The composer picker saves its selection separately.
 
 Global Settings → Provider defaults configures each provider's first-use pair.
 Returning to a provider restores that agent's remembered pair. Changing defaults

@@ -51,8 +51,8 @@ try {
  await evaluate(`for(const key of Object.keys(localStorage))if(key.startsWith('staf-workspace-v1:')&&key.endsWith(':'+${JSON.stringify(bot.id)}))localStorage.removeItem(key);localStorage.setItem(${JSON.stringify(legacyDraft)},${JSON.stringify(JSON.stringify({text:'legacy next draft',submission:{id:'smoke-command',text:'offline smoke',kind:'pending'}}))});localStorage.setItem(${JSON.stringify(legacyCreation)},${JSON.stringify(JSON.stringify({kind:'create',operationId:'smoke-agent',name:'Smoke agent',instructions:'',provider:'demo',model:'',status:''}))});localStorage.setItem(${JSON.stringify(unverifiedDraft)},${JSON.stringify(JSON.stringify({text:'unverified saved text\nsecond line',submission:null}))});localStorage.setItem(${JSON.stringify(unverifiedCreation)},${JSON.stringify(JSON.stringify({kind:'create',operationId:'unknown-operation',name:'Unverified agent',instructions:'unverified instructions',provider:'demo',model:'',status:''}))})`);
  await cdp('Page.reload');
  await until(()=>evaluate("document.body.innerText.includes('Recovered creation. Check status')"),'verified legacy creation recovered');
- await evaluate("[...document.querySelectorAll('dialog button')].find(b=>b.textContent==='Check creation').click()");
- await until(()=>evaluate("!document.querySelector('dialog')"),'verified creation status resolved');
+ await evaluate("[...document.querySelectorAll('.agent-settings button')].find(b=>b.textContent==='Check creation').click()");
+ await until(()=>evaluate("!document.querySelector('.agent-settings')"),'verified creation status resolved');
  await until(()=>evaluate("document.querySelector('textarea[aria-label=Message]')?.value==='legacy next draft'"),'verified legacy draft recovered');
  const occupiedOperation='occupied-legacy-creation',occupiedName='Recovered after occupied form';
  await call('/api/bots',{operationId:occupiedOperation,name:occupiedName,provider:'demo'});
@@ -62,10 +62,10 @@ try {
  await evaluate(`{const el=document.querySelector('.setup input');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(el,'Active creation');el.dispatchEvent(new Event('input',{bubbles:true}));localStorage.setItem(${JSON.stringify(occupiedKey)},${JSON.stringify(JSON.stringify({kind:'create',operationId:occupiedOperation,name:occupiedName,instructions:'',provider:'demo',model:'',status:''}))})}`);
  await until(()=>evaluate(`localStorage.getItem(${JSON.stringify(occupiedKey)})===null`),'verified creation migrated while form occupied');
  assert.equal(await evaluate("document.querySelector('.setup input').value"),'Active creation','recovery does not overwrite the active form');
- await evaluate("document.querySelector('.setup button[aria-label=\"Close dialog\"]').click()");
+ await evaluate("[...document.querySelectorAll('.agent-settings button')].find(b=>b.textContent.trim()==='Cancel').click()");
  await until(()=>evaluate(`document.querySelector('.setup input')?.value===${JSON.stringify(occupiedName)}`),'queued creation recovers when form clears without reload');
- await evaluate("[...document.querySelectorAll('dialog button')].find(b=>b.textContent==='Check creation').click()");
- await until(()=>evaluate("!document.querySelector('dialog')"),'queued creation status resolved');
+ await evaluate("[...document.querySelectorAll('.agent-settings button')].find(b=>b.textContent==='Check creation').click()");
+ await until(()=>evaluate("!document.querySelector('.agent-settings')"),'queued creation status resolved');
  await evaluate("[...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('Smoke agent')).click()");
  await until(()=>evaluate("document.querySelector('textarea[aria-label=Message]')?.value==='legacy next draft'"),'original draft remains after queued creation');
  await until(()=>evaluate("document.body.innerText.includes('Earlier browser records')"),'unverified records available');
