@@ -20,7 +20,7 @@ test('shared proposals that cannot be shown faithfully are rejected before journ
   try {
     token=(await call('/api/pair',{code:app.code})).token;
     for(const mode of ['direct','hybrid','code']) {
-      const bot=await call('/api/bots',{name:'Proposal privacy '+mode,toolMode:mode}),id='proposal-privacy-'+mode;
+      const bot=await call('/api/bots',{provider:'demo',name:'Proposal privacy '+mode,toolMode:mode}),id='proposal-privacy-'+mode;
       await call('/api/commands',{id,botId:bot.id,content:'Perform fixture operation.'});
       let command;for(let n=0;n<500;n++){command=await call('/api/commands/'+id);if(command.state!=='pending')break;await new Promise(resolve=>setTimeout(resolve,10));}
       assert.equal(command.state,'completed',command.error);
@@ -49,7 +49,7 @@ test('registered memory action changes the owner-visible store',async()=>{
   const call=async(path,body)=>{const r=await fetch(`http://127.0.0.1:${port}${path}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});assert.ok(r.ok,`${path}: ${r.status}`);return r.json();};
   try {
     token=(await call('/api/pair',{code:app.code})).token;
-    const bot=await call('/api/bots',{name:'Memory',toolMode:'direct'});
+    const bot=await call('/api/bots',{provider:'demo',name:'Memory',toolMode:'direct'});
     await call('/api/commands',{id:'memory-fixture',botId:bot.id,content:'Please perform the fixture operation.'});
     let command;for(let i=0;i<500;i++){command=await call('/api/commands/memory-fixture');if(command.state!=='pending')break;await new Promise(resolve=>setTimeout(resolve,10));}
     assert.equal(command.state,'completed',command.error);
@@ -80,7 +80,7 @@ test('all modes share scoped store, owner confirmation, conflicts, and restart p
   try {
     await start();const pair=await call('/api/pair',{code:app.code},null);token=pair.token;const other=(await call('/api/pair',{code:app.issueCode()},null)).token;
     const credential=join(dir,'credential.json');writeFileSync(credential,JSON.stringify(pair));
-    const bots={};for(const mode of ['direct','hybrid','code'])bots[mode]=await call('/api/bots',{name:`Memory ${mode}`,toolMode:mode});
+    const bots={};for(const mode of ['direct','hybrid','code'])bots[mode]=await call('/api/bots',{provider:'demo',name:`Memory ${mode}`,toolMode:mode});
     for(const mode of ['direct','hybrid','code']) {
       const bot=bots[mode],route=mode==='direct'?'direct':'code',scope={kind:'agent'};
       await run(bot,route,'memory_remember',{scope,text:`amber ${mode}`});
@@ -139,14 +139,14 @@ test('completed mutation resumes after guest error without applying its stale ve
   }})});
   const port=await app.listen();let token;
   const call=async(path,body)=>{const r=await fetch(`http://127.0.0.1:${port}${path}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});assert.ok(r.ok);return r.json();};
-  try {token=(await call('/api/pair',{code:app.code})).token;const bot=await call('/api/bots',{name:'Recovery',toolMode:'hybrid'});item=await call(`/api/memories/bot/${bot.id}`,{text:'before'});await call('/api/commands',{id:'recover',botId:bot.id,content:'Perform operation fixture.'});let c;for(let i=0;i<1000;i++){c=await call('/api/commands/recover');if(c.state!=='pending')break;await new Promise(r=>setTimeout(r,10));}assert.equal(c.state,'completed',c.error);assert.equal(c.workActions.length,1);assert.equal(c.workActions[0].state,'succeeded');assert.equal(c.codeExecutions[0].outcome,'error');assert.match(seen.at(-1).at(-1).content,/changed once/);const [updated]=await call(`/api/memories/bot/${bot.id}`);assert.equal(updated.version,2);assert.equal(updated.text,'changed once');}
+  try {token=(await call('/api/pair',{code:app.code})).token;const bot=await call('/api/bots',{provider:'demo',name:'Recovery',toolMode:'hybrid'});item=await call(`/api/memories/bot/${bot.id}`,{text:'before'});await call('/api/commands',{id:'recover',botId:bot.id,content:'Perform operation fixture.'});let c;for(let i=0;i<1000;i++){c=await call('/api/commands/recover');if(c.state!=='pending')break;await new Promise(r=>setTimeout(r,10));}assert.equal(c.state,'completed',c.error);assert.equal(c.workActions.length,1);assert.equal(c.workActions[0].state,'succeeded');assert.equal(c.codeExecutions[0].outcome,'error');assert.match(seen.at(-1).at(-1).content,/changed once/);const [updated]=await call(`/api/memories/bot/${bot.id}`);assert.equal(updated.version,2);assert.equal(updated.text,'changed once');}
   finally {await app.close();}
 });
 
 test('agent substitution is rejected and cannot address another agent',async()=>{
   let other;const app=startInstance(':memory:',0,{env:{},providerFactory:async()=>({name:'fixture',capabilities:{toolCalls:true},async complete(messages){if(messages.at(-1).role==='tool')return {role:'assistant',content:'done'};return tool('memory_remember',{scope:{kind:'agent',botId:other.id},text:'forged'});}})});const port=await app.listen();let token;
   const call=async(path,body)=>{const r=await fetch(`http://127.0.0.1:${port}${path}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});assert.ok(r.ok);return r.json();};
-  try {token=(await call('/api/pair',{code:app.code})).token;const bot=await call('/api/bots',{name:'Executor',toolMode:'direct'});other=await call('/api/bots',{name:'Other'});await call('/api/commands',{id:'forged-memory',botId:bot.id,content:'Perform fixture.'});let c;for(let i=0;i<1000;i++){c=await call('/api/commands/forged-memory');if(c.state!=='pending')break;await new Promise(r=>setTimeout(r,10));}assert.equal(c.workActions.length,0);assert.deepEqual(await call(`/api/memories/bot/${bot.id}`),[]);assert.deepEqual(await call(`/api/memories/bot/${other.id}`),[]);}
+  try {token=(await call('/api/pair',{code:app.code})).token;const bot=await call('/api/bots',{provider:'demo',name:'Executor',toolMode:'direct'});other=await call('/api/bots',{provider:'demo',name:'Other'});await call('/api/commands',{id:'forged-memory',botId:bot.id,content:'Perform fixture.'});let c;for(let i=0;i<1000;i++){c=await call('/api/commands/forged-memory');if(c.state!=='pending')break;await new Promise(r=>setTimeout(r,10));}assert.equal(c.workActions.length,0);assert.deepEqual(await call(`/api/memories/bot/${bot.id}`),[]);assert.deepEqual(await call(`/api/memories/bot/${other.id}`),[]);}
   finally{await app.close();}
 });
 
@@ -154,7 +154,7 @@ test('memory registration uses actual task ownership and recovery admission',asy
   const {Instance}=await import('../dist/instance.js');const {registerMemoryCapabilities}=await import('../dist/memory-actions.js');
   const instance=new Instance(':memory:');
   try {
-    const bot=instance.createBot({name:'Task memory',instructions:'',toolMode:'hybrid'});const registry=instance.workActions();registerMemoryCapabilities(instance,registry,value=>value);
+    const bot=instance.createBot({provider:'demo',name:'Task memory',instructions:'',toolMode:'hybrid'});const registry=instance.workActions();registerMemoryCapabilities(instance,registry,value=>value);
     instance.acceptTask({id:'task-memory',botId:bot.id,objective:'fixture',limitMs:10000});instance.taskStart('task-memory');const controller=new AbortController();const actions=registry.open({kind:'task',id:'task-memory'},controller.signal);
     const source=callId=>({kind:'provider',responseId:'fixture',callId});const input={scope:{kind:'agent'},text:'task data'};
     const first=await actions.invoke({source:source('first'),name:'memory_remember',input,intent:{kind:'new'}});assert.equal(first.kind,'completed');assert.equal(instance.memories.list({kind:'bot',botId:bot.id}).length,1);
@@ -167,7 +167,7 @@ test('memory registration uses actual task ownership and recovery admission',asy
 test('an uncertain real-store update fences a later memory change',async()=>{
   const {Instance}=await import('../dist/instance.js');const {registerMemoryCapabilities}=await import('../dist/memory-actions.js');
   const instance=new Instance(':memory:');try {
-    const bot=instance.createBot({name:'Uncertain',instructions:'',toolMode:'hybrid'});instance.claim({id:'uncertain-memory',botId:bot.id,content:'fixture'});
+    const bot=instance.createBot({provider:'demo',name:'Uncertain',instructions:'',toolMode:'hybrid'});instance.claim({id:'uncertain-memory',botId:bot.id,content:'fixture'});
     const registry=instance.workActions();registerMemoryCapabilities(instance,registry,value=>value);const actions=registry.open({kind:'command',id:'uncertain-memory'},new AbortController().signal);
     const item=instance.memories.create({scope:{kind:'bot',botId:bot.id},text:'before'});
     instance.db.exec("CREATE TRIGGER memory_fixture_failure AFTER UPDATE ON memories BEGIN SELECT RAISE(FAIL, 'fixture lost result'); END");

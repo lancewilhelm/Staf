@@ -108,7 +108,7 @@ revoked, pair a client explicitly instead of silently restoring access.
 Open `/settings` in an interactive terminal to edit the current bot's provider,
 model, and reasoning. `/settings show` prints the current profile. In plain
 terminals, use `/set provider NAME`, `/set model MODEL_ID`, and `/set reasoning
-LEVEL`. Confirm a provider change with `/confirm-provider` after reviewing the history-transfer notice, or cancel with `/cancel-provider`. Use `/unset model` or `/unset reasoning` to restore the provider default. Changes are saved to the shared bot profile and apply to new work. Creation defaults are separate. Run `staf settings set-defaults PROVIDER MODEL [REASONING]` to set the provider and model together, including on a fresh instance. Use `staf settings defaults` to inspect them. `/models` reads
+LEVEL`. Confirm a provider change with `/confirm-provider` after reviewing the history-transfer notice, or cancel with `/cancel-provider`. Use `/unset model` or `/unset reasoning` to restore the provider default. Changes are saved to the shared bot profile and apply to new work. Creation defaults are separate. Run `staf settings set-defaults PROVIDER MODEL [REASONING]` to set the provider and model together, including on a fresh instance. Use `staf settings defaults` to inspect them. In an interactive terminal, use `/set-defaults PROVIDER MODEL [REASONING]` to save the pair. `/models` reads
 model metadata explicitly; a failed discovery does not prevent manual entry.
 
 The available providers are `demo`, `codex`, `openrouter`, `lmstudio`, and
@@ -678,7 +678,7 @@ history and backups.
 
 For an offline manual check, build and start the controlled fixture in
 [development](development.md#review-chat-locally-without-a-provider), pair,
-create a Demo agent with Hybrid, and send `Scripted clock fixture`. Expect
+create the fixture agent with Hybrid, and send `Scripted clock fixture`. Expect
 “Scripted clock completed” and a **Code execution** detail containing the
 source, returned time and action ID. Select Direct or Code Mode for later work
 and use a tool-capable provider to exercise the respective offer. This fixture

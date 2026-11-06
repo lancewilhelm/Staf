@@ -1,12 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import {seedDemoTerminal} from './fixtures/demo-terminal.mjs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-const cli=(root,input)=>spawnSync(process.execPath,['dist/cli.js','--data-dir',root],{input,encoding:'utf8',timeout:20000});
+const cli=(root,input)=>{if(!existsSync(join(root,'instance.sqlite')))seedDemoTerminal(root);return spawnSync(process.execPath,['dist/cli.js','--data-dir',root],{input,encoding:'utf8',timeout:20000});};
 const descriptor=root=>JSON.parse(readFileSync(join(root,'terminal-service.json'),'utf8'));
 const request=async(root,path,body)=>{
  const {port}=descriptor(root), {token}=JSON.parse(readFileSync(join(root,'terminal-credential.json'),'utf8'));
@@ -43,7 +44,7 @@ test('clock approval leaves the terminal usable and resolves the original comman
 
 
 test('simultaneous first clients converge on one main bot and one daemon',async()=>{
- const root=mkdtempSync(join(tmpdir(),'staf-terminal-race-'));
+ const root=mkdtempSync(join(tmpdir(),'staf-terminal-race-'));seedDemoTerminal(root);
  const run=()=>new Promise((resolve,reject)=>{const child=spawn(process.execPath,['dist/cli.js','--data-dir',root],{stdio:['pipe','pipe','pipe']});let out='',err='';child.stdout.on('data',chunk=>out+=chunk);child.stderr.on('data',chunk=>err+=chunk);child.on('error',reject);child.on('exit',code=>resolve({code,out,err}));child.stdin.end('/quit\n');});
  try {const results=await Promise.all([run(),run(),run()]);for(const result of results)assert.equal(result.code,0,result.err);const ids=results.map(result=>result.out.match(/shared main chat ([\w-]+)/)?.[1]);assert.ok(ids[0]);assert.equal(new Set(ids).size,1);assert.equal((await request(root,'/api/bots')).body.length,1);assert.equal((await request(root,'/api/clients')).body.length,1);}
  finally{await stop(root);rmSync(root,{recursive:true,force:true});}
@@ -52,7 +53,7 @@ test('simultaneous first clients converge on one main bot and one daemon',async(
 test('migrating an existing database does not silently pair a credential',async()=>{
  const {DatabaseSync}=await import('node:sqlite');const {Instance}=await import('../dist/instance.js');
  const root=mkdtempSync(join(tmpdir(),'staf-terminal-existing-')),path=join(root,'instance.sqlite');
- try{const instance=new Instance(path);instance.createBot({name:'Existing',instructions:''});instance.close();const db=new DatabaseSync(path);db.exec('DROP TABLE local_bootstrap; DROP TABLE main_bot; PRAGMA user_version=24');db.close();writeFileSync(join(root,'terminal-credential.json'),JSON.stringify({token:'a'.repeat(43)}),{mode:0o600});
+ try{const instance=new Instance(path);instance.createBot({provider:'demo',name:'Existing',instructions:''});instance.close();const db=new DatabaseSync(path);db.exec('DROP TABLE local_bootstrap; DROP TABLE main_bot; PRAGMA user_version=24');db.close();writeFileSync(join(root,'terminal-credential.json'),JSON.stringify({token:'a'.repeat(43)}),{mode:0o600});
   const result=cli(root,'/quit\n');assert.equal(result.status,1);assert.match(result.stderr,/authorization was revoked/);await stop(root);const data=new DatabaseSync(path,{readOnly:true});assert.equal(data.prepare('SELECT count(*) AS n FROM clients').get().n,0);assert.equal(data.prepare('SELECT count(*) AS n FROM bots').get().n,1);data.close();
  }finally{await stop(root);rmSync(root,{recursive:true,force:true});}
 });
@@ -60,7 +61,7 @@ test('migrating an existing database does not silently pair a credential',async(
 
 test('bare CLI shares one per-user instance across working directories and preserves checkout data',async()=>{
  const root=mkdtempSync(join(tmpdir(),'staf-terminal-default-')),first=join(root,'first'),second=join(root,'second'),old=join(first,'.staf','instance.sqlite'),current=join(root,'.staf','terminal-instance');
- try{mkdirSync(join(first,'.staf'),{recursive:true});mkdirSync(second);writeFileSync(old,'existing data');const run=cwd=>spawnSync(process.execPath,[resolve('dist/cli.js')],{cwd,env:{...process.env,HOME:root},input:'/settings\n/quit\n',encoding:'utf8',timeout:20000});const a=run(first),b=run(second);assert.equal(a.status,0,a.stderr);assert.equal(b.status,0,b.stderr);const id=a.stdout.match(/shared main chat ([\w-]+)/)?.[1];assert.ok(id);assert.match(b.stdout,new RegExp(`shared main chat ${id}`));assert.equal(readFileSync(old,'utf8'),'existing data');assert.ok(descriptor(current).pid);}
+ try{mkdirSync(join(first,'.staf'),{recursive:true});mkdirSync(second);writeFileSync(old,'existing data');seedDemoTerminal(current);const run=cwd=>spawnSync(process.execPath,[resolve('dist/cli.js')],{cwd,env:{...process.env,HOME:root},input:'/settings\n/quit\n',encoding:'utf8',timeout:20000});const a=run(first),b=run(second);assert.equal(a.status,0,a.stderr);assert.equal(b.status,0,b.stderr);const id=a.stdout.match(/shared main chat ([\w-]+)/)?.[1];assert.ok(id);assert.match(b.stdout,new RegExp(`shared main chat ${id}`));assert.equal(readFileSync(old,'utf8'),'existing data');assert.ok(descriptor(current).pid);}
  finally{await stop(current);rmSync(root,{recursive:true,force:true});}
 });
 
@@ -74,7 +75,8 @@ test('provider switches require explicit confirmation and settings can be cleare
   result=one('set','provider','codex');assert.equal(result.status,1);assert.match(result.stderr,/conversation history.*confirm-provider-change/);assert.equal((await request(root,'/api/main-bot',{})).body.provider,'demo');
   result=one('set','provider','codex','--confirm-provider-change');assert.equal(result.status,0,result.stderr);assert.equal((await request(root,'/api/main-bot',{})).body.provider,'codex');
   result=one('set','provider','codex');assert.equal(result.status,0,result.stderr);
-  for(const [key,value] of [['model','example-model'],['reasoning','high']]){assert.equal(one('set',key,value).status,0);assert.equal(one('unset',key).status,0);assert.equal((await request(root,'/api/main-bot',{})).body[key],null);assert.equal(one('set-default',key,value).status,0);assert.equal(one('unset-default',key).status,0);assert.equal((await request(root,'/api/creation-defaults')).body[key],null);}
+  for(const [key,value] of [['model','example-model'],['reasoning','high']]){assert.equal(one('set',key,value).status,0);assert.equal(one('unset',key).status,0);assert.equal((await request(root,'/api/main-bot',{})).body[key],null);}
+  assert.equal(one('set-defaults','codex','fixture-model').status,0);const saved=cli(root,'/set-defaults openrouter other-model\n/quit\n');assert.equal(saved.status,0,saved.stderr);assert.match(saved.stdout,/Saved creation defaults: openrouter \/ other-model/);assert.equal((await request(root,'/api/creation-defaults')).body.provider,'openrouter');assert.equal(one('set-default','reasoning','high').status,0);assert.equal(one('unset-default','reasoning').status,0);assert.equal((await request(root,'/api/creation-defaults')).body.reasoning,null);
   result=cli(root,'/set model example-model\n/set reasoning high\n/unset model\n/unset reasoning\n/settings reasoning\n/quit\n');assert.equal(result.status,0,result.stderr);assert.match(result.stdout,/Reasoning: \(provider default\)/);const profile=(await request(root,'/api/main-bot',{})).body;assert.equal(profile.model,null);assert.equal(profile.reasoning,null);
  }finally{await stop(root);rmSync(root,{recursive:true,force:true});}
 });
