@@ -347,6 +347,8 @@ An explicitly advertised catalog `default_model` may seed a first selection afte
 discovery; list order is never a default. Without a remembered pair, owner default
 or advertised default, the model remains unset and chatting requires a choice.
 
+Browser choice controls load model metadata on open and provider change. The composer saves explicit selections immediately; agent editors and provider defaults stage changes until saved. **Automatic** sends no explicit reasoning effort. Discovery does not authenticate or verify model access.
+
 ### Chat work records
 
 Paired `GET /api/bots/{id}/chat-work` returns `messages` (excluding background-task notices) and ordered `requests`. Each request contains its command `id`, service-owned response `progress`, and ordered `events` with stable numeric `id`, `type`, `name`, nullable numeric `success`, nullable `detail`, and its `command_id`. Tool-result detail is redacted and capped at 16,000 characters. Re-fetch replaces the snapshot; clients must not append duplicate events. Pending chat approvals come from `/api/inbox` and are matched by bot and command ID. Existing exact-ID approval decision endpoints and permission enforcement are unchanged. Background tasks remain available through explicit task endpoints and CLI operations, but are not offered to ordinary chat providers.
@@ -526,5 +528,3 @@ Paired owners can POST `/api/processes/ID/input` with `{ "data": "text\n" }`, `/
 `limits.inputBytes` is 16,384 per request, `pendingInputs` is eight per process, and `ptyInputBytes` is a cumulative 1,048,576 bytes per PTY lifetime. Input and resize requests are serialized per process. Stop closes interaction admission and interrupts queued input; it does not wait behind a blocked write. A receipt proves submission, not consumption. Pipe EOF closes input permanently; PTY EOF submits Ctrl-D. PTY output uses the `terminal` stream. Output bounds and redaction are shared with pipe mode.
 
 Schema 36 adds process retention, input counters/closure and PTY dimensions through the protected migration process, preserving combined native/search schema 35. Old records default to nonretained. Unknown handles cannot receive input, EOF, resize or signals after restart.
-
-Browser choice controls load model metadata on open and provider change. The composer saves explicit selections immediately; agent editors and provider defaults stage changes until saved. **Automatic** sends no explicit reasoning effort. Discovery does not authenticate or verify model access.

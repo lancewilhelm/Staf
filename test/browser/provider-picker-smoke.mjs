@@ -67,7 +67,8 @@ try{
  await until(()=>evaluate("document.body.innerText.includes('Invalid provider defaults response')"),'malformed defaults remain recoverable');
  await evaluate("window.fetch=async(...args)=>args[0]==='/api/models'?new Response(JSON.stringify({models:[null]}),{status:200,headers:{'Content-Type':'application/json','X-Staf-Dataset':args[1].headers['X-Staf-Dataset']}}):window.realPickerFetch(...args);(()=>{const p=document.querySelector('.provider-pair-defaults .provider-choices select');p.value='codex';p.dispatchEvent(new Event('change',{bubbles:true}));setTimeout(()=>{p.value='openrouter';p.dispatchEvent(new Event('change',{bubbles:true}))},0)})()");
  await until(()=>evaluate("document.body.innerText.includes('Invalid model catalog') && document.body.innerText.includes('Enter a model ID manually')"),'malformed catalog offers recovery');
- await evaluate("window.fetch=window.realPickerFetch");
+ await evaluate("window.fetch=window.realPickerFetch;document.querySelector('.provider-pair-defaults button').click()");
+ await until(()=>evaluate("document.querySelector('.provider-pair-defaults .model-discovery-status')?.textContent.includes('2 models loaded')"),'retry recovers catalog');
  await evaluate("[...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('New agent')).click()");
  await until(()=>evaluate("document.body.innerText.includes('Create agent')"),'creation choices');
  await evaluate("(()=>{const p=document.querySelector('.setup fieldset select');p.value='openrouter';p.dispatchEvent(new Event('change',{bubbles:true}))})()");

@@ -83,7 +83,7 @@ function modelKeydown(event: KeyboardEvent) {
         <button type="button" v-for="item in menuModels" :key="item.id" class="model-option" tabindex="-1" role="menuitemradio" :aria-checked="model === item.id" :data-model="item.id" @click="pickModel(item.id)"><span>{{ item.label }}</span><UiIcon v-if="model === item.id" name="check" /></button>
         <p class="model-discovery-status menu-note" role="status">{{ status }}</p><button v-if="failed" type="button" class="text-action" @click="discover">Retry model discovery</button>
       </div>
-      <div class="model-menu-group" role="group" aria-label="Reasoning"><div class="menu-caption">Reasoning <span title="Automatic lets the provider choose its reasoning behavior." aria-label="Automatic lets the provider choose its reasoning behavior.">ⓘ</span></div>
+      <div class="model-menu-group" role="group" aria-label="Reasoning"><div class="menu-caption">Reasoning <span role="img" title="Automatic lets the provider choose its reasoning behavior." aria-label="Automatic lets the provider choose its reasoning behavior.">ⓘ</span></div>
         <button type="button" v-for="level in ['default', ...levels]" :key="level" class="model-option" tabindex="-1" role="menuitemradio" :aria-checked="(reasoning || 'default') === level" :data-reasoning="level" :disabled="unavailable(level)" @click="emit('change', 'reasoning', level)"><span>{{ level === 'default' ? 'Automatic' : level }}{{ unavailable(level) ? ' (not supported)' : '' }}</span><UiIcon v-if="(reasoning || 'default') === level" name="check" /></button>
       </div>
     </template>
@@ -103,7 +103,7 @@ function modelKeydown(event: KeyboardEvent) {
       </select>
     </label>
     <p class="model-discovery-status" role="status">{{ status }}</p><button v-if="failed" type="button" class="quiet" @click="discover">Retry model discovery</button>
-    <label>Reasoning <span title="Automatic lets the provider choose its reasoning behavior." aria-label="Automatic lets the provider choose its reasoning behavior.">ⓘ</span><select aria-label="Reasoning" :value="reasoning || 'default'" @change="change('reasoning', $event)">
+    <label>Reasoning <span role="img" title="Automatic lets the provider choose its reasoning behavior." aria-label="Automatic lets the provider choose its reasoning behavior.">ⓘ</span><select aria-label="Reasoning" :value="reasoning || 'default'" @change="change('reasoning', $event)">
       <option value="default">Automatic</option>
       <option v-for="level in levels" :key="level" :value="level" :disabled="unavailable(level)">{{ level }}{{ unavailable(level) ? ' (not supported)' : '' }}</option>
     </select></label>
