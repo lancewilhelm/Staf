@@ -148,8 +148,6 @@ try {
   await evaluate("(()=>{const p=document.querySelector('.agent-settings .provider-choices select');p.value='demo';p.dispatchEvent(new Event('change',{bubbles:true}))})()");
   await until(()=>evaluate("document.querySelector('.agent-settings .provider-choices input').value==='owner/model'"),'restore staged original provider choices');
   await act("document.querySelectorAll('.side nav button')[1].click()","document.querySelector('.title')?.textContent==='Image two'",'navigate away from the editor');
-  await act("document.querySelectorAll('.side nav button')[0].click();document.querySelector('[aria-label=\"Open agent settings\"]').click()","document.querySelector('.agent-settings input')?.value==='My retained draft'",'restore the editor draft after switching agents');
-  assert.equal(await evaluate("document.querySelector('.agent-settings .provider-choices input').value"),'owner/model','model draft survives navigation');
   await evaluate("document.querySelector('[aria-label=\"Open agent settings\"]').click()",peer);
   await until(()=>evaluate("!!document.querySelector('.agent-settings input')",peer),'peer opens settings');
   await evaluate("click('Change image')",peer);
@@ -167,6 +165,8 @@ try {
   await evaluate("input('.agent-settings .provider-choices input','peer/model');click('Save settings')",peer);
   await until(async()=>(await api('/api/bots/'+one.id)).model==='peer/model','peer commits a provider choice with its profile');
   await until(()=>evaluate("!!document.querySelector('.composer')",peer),'peer returns to chat');
+  await act("document.querySelectorAll('.side nav button')[0].click();document.querySelector('[aria-label=\"Open agent settings\"]').click()","document.querySelector('.agent-settings input')?.value==='My retained draft'",'restore the editor draft after switching agents');
+  assert.equal(await evaluate("document.querySelector('.agent-settings .provider-choices input').value"),'owner/model','model draft survives navigation');
   await act("click('Save settings')","document.body.innerText.includes('Your edits are retained.')&&document.body.innerText.includes('Profile changed')",'stale form conflicts without overwriting the peer image or model');
   assert.deepEqual((await api('/api/bots/'+one.id)).image,peerImage);
   assert.equal((await api('/api/bots/'+one.id)).model,'peer/model');
