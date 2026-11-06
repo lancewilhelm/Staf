@@ -86,7 +86,8 @@ function settingIntent(line:string):[string,string]|undefined {
 const help = `Commands: /help, /settings, /settings show|models|reasoning,
 /set provider|model|reasoning|toolMode VALUE, /models,
 /unset model|reasoning, /confirm-provider, /cancel-provider,
-/defaults, /set-default provider|model|reasoning|toolMode VALUE, /unset-default model|reasoning,
+/defaults, /set-defaults PROVIDER MODEL [REASONING], /set-default model|reasoning|toolMode VALUE,
+/unset-default reasoning,
 /auth chatgpt login|status|cancel|logout, /usage [details|help], /context [refresh|help],
 /stop, /status ID, /edit ID TEXT, /retry ID, /discard ID, /approvals, /approve ID, /deny ID, /quit.
 Settings change this bot's shared profile for new work. New bot defaults are separate.
@@ -102,6 +103,12 @@ export async function terminalClient(args:string[]) {
     const url=new URL(remote);if(url.protocol!=='http:' || url.hostname!=='127.0.0.1' || url.username || url.password || url.pathname!=='/' || url.search || url.hash)throw Error('Instance URL must be a loopback HTTP origin');
     const saved:unknown=JSON.parse(await readFile(credentialPath,'utf8'));if(!isRecord(saved) || typeof saved.token!=='string')throw Error('Invalid client credential');connection={url:url.origin,token:saved.token};
   } else connection=await localConnection(root);
+  if(oneShot?.[0]==='settings' && oneShot[1]==='defaults' && oneShot.length===2) {const p=record(await request(connection,'/api/creation-defaults'));console.log(`New bot defaults | Provider: ${p.provider ? providerLabel(String(p.provider)) : '(choose a provider)'} | Model: ${String(p.model ?? '(choose a model)')} | Reasoning: ${String(p.reasoning ?? '(provider default)')} | Tool mode: ${String(p.toolMode)} | Revision: ${String(p.revision)}`);return;}
+  if(oneShot?.[0]==='settings' && oneShot[1]==='set-defaults' && (oneShot.length===4 || oneShot.length===5)) {
+    const current=record(await request(connection,'/api/creation-defaults'));
+    const provider=providerId(oneShot[2]??''),model=oneShot[3]??'',reasoning=oneShot[4]??null;
+    console.log(JSON.stringify(await request(connection,'/api/creation-defaults',{...current,provider,model,reasoning})));return;
+  }
   const bot=record(await request(connection,'/api/main-bot',{}));if(typeof bot.id!=='string')throw Error('Invalid main bot');const botId=bot.id;
   const view=new TerminalView(!!process.stdout.isTTY), errors=new TerminalView(!!process.stderr.isTTY);
   const pendingDir=join(root,'terminal-pending'); await mkdir(pendingDir,{recursive:true,mode:0o700});
@@ -134,6 +141,7 @@ export async function terminalClient(args:string[]) {
   async function showSettings() {const p=await profile();return [`Provider: ${providerLabel(String(p.provider))}`,`Model: ${String(p.model ?? '(provider default)')}`,`Reasoning: ${String(p.reasoning ?? '(provider default)')}`,`Tool mode: ${String(p.toolMode)}`,`Revision: ${String(p.revision)}`];}
   async function setProfile(key:'provider'|'model'|'reasoning'|'toolMode',value:string,confirmed=false, snapshot?:Record<string,unknown>) {const p=snapshot ?? await profile();const normalized=key==='provider'?providerId(value):value; if(key==='provider' && !['demo','codex','openrouter','lmstudio','live'].includes(normalized))throw Error('Unknown provider');if(key==='provider' && normalized!==p.provider && !confirmed)throw Error('Changing provider may send this conversation history to the new provider. Confirm with --confirm-provider-change.');const result=record(await (key==='toolMode'?request(connection,`/api/bots/${botId}/profile`,{...p,toolMode:normalized}):request(connection,`/api/bots/${botId}/selection`,{revision:p.revision,provider:key==='provider'?normalized:p.provider,...(key==='provider'?{}:{[key]:normalized||null})}))); return `Saved ${key}: ${key==='provider'?providerLabel(String(result[key])):String(result[key] ?? '(provider default)')}`;}
   async function showDefaults() {const p=record(await request(connection,'/api/creation-defaults'));return [`Provider: ${providerLabel(String(p.provider))}`,`Model: ${String(p.model ?? '(provider default)')}`,`Reasoning: ${String(p.reasoning ?? '(provider default)')}`,`Tool mode: ${String(p.toolMode)}`,`Revision: ${String(p.revision)}`];}
+  async function setDefaults(provider:string,model:string,reasoning?:string) {const p=record(await request(connection,'/api/creation-defaults'));const result=record(await request(connection,'/api/creation-defaults',{...p,provider:providerId(provider),model,reasoning:reasoning??null}));return `Saved creation defaults: ${providerLabel(String(result.provider))} / ${String(result.model)}. Existing Demo agents were moved to this provider.`;}
   async function setDefault(key:'provider'|'model'|'reasoning'|'toolMode',value:string) {const p=record(await request(connection,'/api/creation-defaults'));const normalized=key==='provider'?providerId(value):value;if(key==='provider' && !['demo','codex','openrouter','lmstudio','live'].includes(normalized))throw Error('Unknown provider');const updated={...p,[key]:normalized || null,...(key==='provider' && normalized!==p.provider?{model:null,reasoning:null}:{})};const result=record(await request(connection,'/api/creation-defaults',updated));return `Saved new bot default ${key}: ${key==='provider'?providerLabel(String(result[key])):String(result[key] ?? '(provider default)')}`;}
   async function models() {const result=record(await request(connection,`/api/bots/${botId}/models`,{}));if(!Array.isArray(result.models))throw Error('Invalid model catalog');return result.models.flatMap(model=>isRecord(model) && typeof model.id==='string'?[model.id]:[]);}
   async function auth(action:string) {
@@ -167,6 +175,7 @@ export async function terminalClient(args:string[]) {
       if(line==='/help')console.log(view.style(help,'dim'));
       else if(line==='/settings' || /^(?:please\s+)?(?:show|what are)\s+(?:my\s+|the\s+)?settings[?.!]?$/i.test(line)) {if(line==='/settings' && canUseSettingsMenu()){menuActive=true;input.suspend();let result;try{result=await openSettingsMenu({show:showSettings,set:(key,value)=>setProfile(key,value,true),models,showDefaults,setDefault},view);}finally{menuActive=false;input.resume();}if(result.exit)break;if(result.signIn)await auth('login');}else console.log(view.style((await showSettings()).join(' | '),'context'));}
       else if(line==='/defaults')console.log(view.style(`New bot defaults | ${(await showDefaults()).join(' | ')}`,'context'));
+      else if(line.startsWith('/set-defaults ')) {const parts=line.trim().split(/\s+/);if(parts.length<3||parts.length>4||!parts[1]||!parts[2])throw Error('Use /set-defaults PROVIDER MODEL [REASONING]');console.log(view.style(await setDefaults(parts[1],parts[2],parts[3]),'success'));}
       else if(/^\/set\s+toolmode\s+/i.test(line)) {const value=line.replace(/^\/set\s+toolmode\s+/i,'').trim();console.log(view.style(await setProfile('toolMode',value),'success'));}
       else if(line.startsWith('/set-default ')) {const match=line.match(/^\/set-default\s+(provider|model|reasoning|toolmode)\s+(.+)$/i);if(!match || !match[1] || !match[2])throw Error('Use /set-default provider|model|reasoning|toolMode VALUE');const key=match[1].toLowerCase();if(key==='provider'||key==='model'||key==='reasoning'||key==='toolmode')console.log(view.style(await setDefault(key==='toolmode'?'toolMode':key,match[2].trim()),'success'));}
       else if(line==='/settings show' || line==='/settings reasoning')console.log(view.style((await showSettings()).join(' | '),'context'));

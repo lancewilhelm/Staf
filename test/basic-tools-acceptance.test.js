@@ -87,7 +87,7 @@ test('one accepted workflow combines skills, files, memory and retained native i
     const second=(await call('/api/pair',{code:app.issueCode()})).token;
     skill=await call('/api/skills',{name:'Combined acceptance',description:'fixture',provenance:'owner',body:'COMBINED_SKILL_BODY'});
     for (const mode of ['direct','hybrid','code']) {
-      const bot=await call('/api/bots',{name:'Combined '+mode,toolMode:mode});
+      const bot=await call('/api/bots',{provider:'demo',name:'Combined '+mode,toolMode:mode});
       await call(`/api/skills/${skill.id}/availability`,{botId:bot.id,available:true});
       const request={id:'combined-'+mode,botId:bot.id,content:'Run combined workflow'};
       await call('/api/commands',request);
@@ -138,7 +138,7 @@ test('a real SQLite effect with a lost receipt fences later paired changing call
   const setup=new Instance(path), rows=[];
   try {
     for (const mode of ['direct','hybrid','code']) {
-      const bot=setup.createBot({name:'Uncertain '+mode,instructions:'',toolMode:mode});
+      const bot=setup.createBot({provider:'demo',name:'Uncertain '+mode,instructions:'',toolMode:mode});
       const memory=setup.memories.create({scope:{kind:'bot',botId:bot.id},text:'before'});
       rows.push({bot,memory});
     }

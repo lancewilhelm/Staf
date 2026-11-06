@@ -18,5 +18,5 @@ function input(field:'name'|'instructions',event:Event){if(event.target instance
   <div class="editor-label"><label :for="instructionsId">Instructions</label><InstructionsHelp :disabled="disabled" /></div>
   <textarea :id="instructionsId" :value="instructions" :disabled="disabled" @input="input('instructions',$event)" />
   <ToolModeSelect :model-value="toolMode" :allow-default="creating" :disabled="disabled" @update:model-value="value=>emit('toolMode',value)" />
-  <ChoiceFields :reset-unsupported="creating" :provider="provider" :model="model" :reasoning="reasoning" :disabled="disabled" @change="(field,value)=>emit('choice',field,value)" />
+  <ChoiceFields :real-only="creating" :reset-unsupported="creating" :provider="provider" :model="model" :reasoning="reasoning" :disabled="disabled" @change="(field,value)=>emit('choice',field,value)" />
 </template>

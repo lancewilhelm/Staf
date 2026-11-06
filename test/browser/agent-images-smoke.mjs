@@ -42,6 +42,7 @@ try {
   await act([`input('input',${JSON.stringify(app.code)})`,"click('Pair')"],"document.body.innerText.includes('Provider connections')",'pair synthetic instance');
   const token=await evaluate("localStorage.getItem('staf-token')");
   const api=async(path,body)=>{const response=await fetch(url+path,{method:body?'POST':'GET',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});assert.ok(response.ok,await response.clone().text());return response.json();};
+  await api('/api/creation-defaults',{...await api('/api/creation-defaults'),provider:'lmstudio',model:'fixture-model'});
   await act("document.querySelector('.new-agent').click()","!!document.querySelector('.agent-settings input')",'open New agent');
   assert.equal(await evaluate("document.activeElement===document.querySelector('.agent-settings input')"),true,'Name focus retained');
   await act(["input('.agent-settings input','Cancelled image')", "click('Change image')", "click('Built-in avatar')"],"document.querySelectorAll('[data-image-shape]').length===6",'all six shapes are in the chooser');
@@ -145,7 +146,7 @@ try {
   assert.equal((await api('/api/bots/'+one.id)).provider,one.provider,'provider remains unchanged before confirmation');
   await evaluate("document.querySelector('dialog .quiet').click()");
   assert.equal(await evaluate("document.querySelector('.agent-settings input').value"),'My retained draft','canceling confirmation retains the draft');
-  await evaluate("(()=>{const p=document.querySelector('.agent-settings .provider-choices select');p.value='demo';p.dispatchEvent(new Event('change',{bubbles:true}))})()");
+  await evaluate("(()=>{const p=document.querySelector('.agent-settings .provider-choices select');p.value='lmstudio';p.dispatchEvent(new Event('change',{bubbles:true}))})()");
   await until(()=>evaluate("document.querySelector('.agent-settings .provider-choices input').value==='owner/model'"),'restore staged original provider choices');
   await act("document.querySelectorAll('.side nav button')[1].click()","document.querySelector('.title')?.textContent==='Image two'",'navigate away from the editor');
   await evaluate("document.querySelector('[aria-label=\"Open agent settings\"]').click()",peer);

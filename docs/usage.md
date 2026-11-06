@@ -11,6 +11,7 @@ Build and link the CLI once, then start it from your working directory:
 pnpm install --frozen-lockfile
 pnpm run build
 pnpm link --global
+staf settings set-defaults codex MODEL_ID
 staf
 ```
 
@@ -23,9 +24,7 @@ running. The next launch displays the saved conversation. A stopped instance
 starts again when you launch the terminal; unfinished requests are marked
 interrupted when the instance restarts.
 
-The initial provider is an offline demo that echoes messages. It is not a
-language model. Type `show settings`, `set provider to demo`, `set model to NAME`,
-or `set reasoning to LEVEL` to inspect or change the current bot profile. Use
+A fresh instance requires a real provider and model. Replace `codex` and `MODEL_ID` in the setup command with your choice. No connection or inference is required to save it. Type `show settings`, `set model to NAME`, or `set reasoning to LEVEL` to inspect or change the current bot profile. Use
 `/help` to see deterministic commands, including approval and status commands.
 Other messages go to the selected provider or the instance's existing memory and
 task handlers. Natural-language settings support these documented phrases, not
@@ -109,9 +108,7 @@ revoked, pair a client explicitly instead of silently restoring access.
 Open `/settings` in an interactive terminal to edit the current bot's provider,
 model, and reasoning. `/settings show` prints the current profile. In plain
 terminals, use `/set provider NAME`, `/set model MODEL_ID`, and `/set reasoning
-LEVEL`. Confirm a provider change with `/confirm-provider` after reviewing the history-transfer notice, or cancel with `/cancel-provider`. Use `/unset model` or `/unset reasoning` to restore the provider default. Changes are saved to the shared bot profile and apply to new work. Bot
-creation defaults are separate and do not change existing bots. Use `/defaults`
-to inspect them and `/set-default provider|model|reasoning VALUE` to edit them. `/models` reads
+LEVEL`. Confirm a provider change with `/confirm-provider` after reviewing the history-transfer notice, or cancel with `/cancel-provider`. Use `/unset model` or `/unset reasoning` to restore the provider default. Changes are saved to the shared bot profile and apply to new work. Creation defaults are separate. Run `staf settings set-defaults PROVIDER MODEL [REASONING]` to set the provider and model together, including on a fresh instance. Use `staf settings defaults` to inspect them. In an interactive terminal, use `/set-defaults PROVIDER MODEL [REASONING]` to save the pair. `/models` reads
 model metadata explicitly; a failed discovery does not prevent manual entry.
 
 The available providers are `demo`, `codex`, `openrouter`, `lmstudio`, and
@@ -412,7 +409,7 @@ files with `configDir`, apply the changes you want to the current files, and
 remove the old revision's `.retired` marker after review. The old files remain
 on disk.
 
-A later request after a provider change can send existing chat history to the new provider. Creation defaults set provider, model, and reasoning for future bots. The instance copies these settings at creation; changing defaults never changes existing bots. Revisions prevent stale clients from overwriting each other. In the CLI, use `instance defaults URL CREDENTIAL_FILE` and `instance defaults-set URL CREDENTIAL_FILE REVISION PROVIDER MODEL REASONING [TOOL_MODE]`; use `-` for an empty model or reasoning. Permission and approval settings remain separate. The description is owner-edited metadata visible to other bots; keep private instructions and memory out of it. New bots start with an empty description.
+A later request after a provider change can send existing chat history to the new provider. Creation defaults set a real provider, model, and optional reasoning for future agents. The instance copies these settings at creation. Saving a real default also moves remaining Demo agents, including archived agents, to that provider and model. Existing real-provider agents are unchanged. Migration does not authenticate or run inference. If a file conflict interrupts migration, repair the reported configuration and reload creation defaults to retry. Revisions prevent stale clients from overwriting each other. In the paired CLI, use `instance defaults URL CREDENTIAL_FILE` and `instance defaults-set URL CREDENTIAL_FILE REVISION PROVIDER MODEL REASONING [TOOL_MODE]`; use `-` for automatic reasoning. Permission and approval settings remain separate. The description is owner-edited metadata visible to other bots; keep private instructions and memory out of it. New bots start with an empty description.
 The deterministic demo provider does not follow the instructions. Select ChatGPT, OpenRouter, LM Studio, or live and an explicit model in the bot profile. OpenRouter uses the managed instance key described above; the instance command does not load the project `.env` file. ChatGPT uses the Staf grant under the directory containing the instance database. From a paired browser, use ChatGPT sign-in and open the provided link on the instance host. The initiating paired client can check or cancel that attempt, including after refreshing the page. The CLI provides `instance chatgpt-auth-start URL CREDENTIAL_FILE`, `chatgpt-auth-current URL CREDENTIAL_FILE`, `chatgpt-auth-status URL CREDENTIAL_FILE ATTEMPT_ID`, `chatgpt-auth-cancel URL CREDENTIAL_FILE ATTEMPT_ID`, `chatgpt-auth-credential URL CREDENTIAL_FILE`, and `chatgpt-auth-logout URL CREDENTIAL_FILE`. The callback listens on the same loopback origin. Revoking the initiating client prevents credential commit. These paths have been tested with synthetic auth only; live sign-in has not been verified. Provider failures do not fall back to another provider. Live provider execution has not been verified in this preview.
 
 CLI examples (use a fresh host code for each client):
@@ -700,7 +697,7 @@ history and backups.
 
 For an offline manual check, build and start the controlled fixture in
 [development](development.md#review-chat-locally-without-a-provider), pair,
-create a Demo agent with Hybrid, and send `Scripted clock fixture`. Expect
+create the fixture agent with Hybrid, and send `Scripted clock fixture`. Expect
 “Scripted clock completed” and a **Code execution** detail containing the
 source, returned time and action ID. Select Direct or Code Mode for later work
 and use a tool-capable provider to exercise the respective offer. This fixture

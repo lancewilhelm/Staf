@@ -615,7 +615,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
         return json(200,result);
       }
       if(req.url === '/api/creation-defaults') {
-        if(req.method === 'GET') return json(200,instance.creationDefaults());
+        if(req.method === 'GET') {instance.resumeDemoMigration();return json(200,instance.creationDefaults());}
         if(req.method === 'POST') {if(typeof value.revision !== 'number' || typeof value.provider !== 'string' || !(value.model === null || typeof value.model === 'string') || !(value.reasoning === null || typeof value.reasoning === 'string'))return json(400,{error:'Invalid creation defaults'});return json(200,instance.setCreationDefaults({revision:value.revision,provider:value.provider,model:value.model,reasoning:value.reasoning,...(value.toolMode===undefined?{}:{toolMode:parseToolMode(value.toolMode)})}));}
       }
       if (req.method === 'POST' && req.url === '/api/main-bot') return json(200,instance.mainBot());

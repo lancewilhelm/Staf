@@ -32,6 +32,7 @@
     "dist/*.js",
     "src/*.ts",
     "test/*.test.js",
+    "test/fixtures/demo-terminal.mjs",
     "test/fixtures/session-v1.json",
     "docs/*.md",
     "tsconfig.json",

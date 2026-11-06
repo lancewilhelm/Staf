@@ -33,7 +33,7 @@ test('random file pages reject credentials crossing either byte boundary in ever
     const safe=join(directory,'safe');writeFileSync(safe,'ordinary file');
     let serial=0;
     for(const mode of ['direct','hybrid','code']){
-      const bot=await f.call('/api/bots',{name:mode,toolMode:mode});
+      const bot=await f.call('/api/bots',{provider:'demo',name:mode,toolMode:mode});
       for(const [variantIndex,variant] of [secret,JSON.stringify(secret).slice(1,-1)].entries()){
         const path=join(directory,'sensitive-'+variantIndex),bytes=Buffer.from(variant);writeFileSync(path,Buffer.concat([Buffer.from('prefix:'),bytes,Buffer.from(':suffix')]));
         for(const relative of [0,Math.floor(bytes.length/2),bytes.length-1]){
@@ -64,7 +64,7 @@ test('pattern-recognized tokens cannot escape random file pages when not configu
   try {
     let serial=0;
     for(const mode of ['direct','hybrid','code']){
-      const bot=await f.call('/api/bots',{name:'Pattern '+mode,toolMode:mode});
+      const bot=await f.call('/api/bots',{provider:'demo',name:'Pattern '+mode,toolMode:mode});
       for(const relative of [0,4096,100000,token.length-1]){
         const id='pattern-'+ ++serial;await f.call('/api/commands',{id,botId:bot.id,content:JSON.stringify({path,offset:7+relative,limit:16})});
         const work=await f.wait(id);assert.equal(work.state,'completed',work.error);assert.equal(work.workActions.length,1);
@@ -83,7 +83,7 @@ test('unselected guest reads leave action metadata but no durable payload receip
   let memory,closed=false;
   const f=await paired(path,(_profile,messages)=>messages.at(-1).role==='tool'?{role:'assistant',content:'Selected output only.'}:tool('code_mode',{source:`for(let offset=0;offset<8*32768;offset+=32768)await capabilities.file_read({path:${JSON.stringify(file)},offset,limit:32768}); await capabilities.memory_read({scope:{kind:'agent'},id:${JSON.stringify(memory.id)}}); return 'selected';`}));
   try {
-    const bot=await f.call('/api/bots',{name:'Read lifetime',toolMode:'code'});
+    const bot=await f.call('/api/bots',{provider:'demo',name:'Read lifetime',toolMode:'code'});
     memory=await f.call(`/api/memories/bot/${bot.id}`,{text:memoryText});
     await f.call('/api/commands',{id:'read-lifetime',botId:bot.id,content:'Inspect fixture reads.'});
     const work=await f.wait('read-lifetime');assert.equal(work.state,'completed',work.error);assert.equal(work.workActions.length,9);
@@ -103,7 +103,7 @@ test('unselected guest reads leave action metadata but no durable payload receip
 test('read receipts resume while work is open and expire without rerunning after release',async()=>{
   const instance=new Instance(':memory:');let calls=0;
   try {
-    const bot=instance.createBot({name:'Read receipt',instructions:'',toolMode:'direct'});instance.claim({id:'receipt',botId:bot.id,content:'read'});
+    const bot=instance.createBot({provider:'demo',name:'Read receipt',instructions:'',toolMode:'direct'});instance.claim({id:'receipt',botId:bot.id,content:'read'});
     const registry=instance.workActions();registry.register({name:'read_fixture',definition:{type:'function',function:{name:'read_fixture',description:'read',parameters:{type:'object'}}},parseInput:()=>({}),parseResult:value=>value,describe:()=>({summary:'Read fixture',resource:'fixture',effect:'read'}),eligible:()=>true,check:()=>{},authorize:async()=>{},execute:async()=>{calls++;return 'temporary receipt';},visibleResult:()=> 'Read completed'});
     const request=callId=>({source:{kind:'provider',responseId:'fixture',callId},name:'read_fixture',input:{},intent:{kind:'new'}});
     let actions=registry.open({kind:'command',id:'receipt'},new AbortController().signal);
@@ -130,7 +130,7 @@ test('paired owner and CLI reconcile only a settled observed native action befor
       return mode==='hybrid'?tool('file_write',input):tool('code_mode',{source:`return (await capabilities.file_write(${JSON.stringify(input)})).value;`});
     });
     try {
-      const bot=await f.call('/api/bots',{name:'Resolve '+mode,toolMode:mode});
+      const bot=await f.call('/api/bots',{provider:'demo',name:'Resolve '+mode,toolMode:mode});
       await f.call('/api/commands',{id:'resolve',botId:bot.id,content:'Resolve the controlled native fixture.'});await held;
       const work=await f.call('/api/commands/resolve');assert.equal(work.workActions.length,1);
       const process=(await f.call('/api/processes'))[0],action=work.workActions[0];
@@ -155,7 +155,7 @@ test('paired owner and CLI reconcile only a settled observed native action befor
 test('memory evidence resolves a lost receipt but an apparent repeat still requires a challenge',async()=>{
   const directory=mkdtempSync(join(tmpdir(),'staf-memory-resolution-')),path=join(directory,'db');
   const setup=new Instance(path);let bot,memory;
-  try {bot=setup.createBot({name:'Memory evidence',instructions:'',toolMode:'hybrid'});memory=setup.memories.create({scope:{kind:'bot',botId:bot.id},text:'before'});setup.db.exec("CREATE TRIGGER lost_receipt AFTER UPDATE ON memories BEGIN SELECT RAISE(FAIL, 'lost receipt'); END");}finally{setup.close();}
+  try {bot=setup.createBot({provider:'demo',name:'Memory evidence',instructions:'',toolMode:'hybrid'});memory=setup.memories.create({scope:{kind:'bot',botId:bot.id},text:'before'});setup.db.exec("CREATE TRIGGER lost_receipt AFTER UPDATE ON memories BEGIN SELECT RAISE(FAIL, 'lost receipt'); END");}finally{setup.close();}
   let ready,release;const held=new Promise(resolve=>ready=resolve),gate=new Promise(resolve=>release=resolve),seen=[];
   const input={scope:{kind:'agent'},id:memory.id,version:1,text:'after'};
   const f=await paired(path,async(_profile,messages)=>{
@@ -190,7 +190,7 @@ test('an active task retry reconciles a predecessor process through its own acce
   });
   const taskDone=async id=>{for(let n=0;n<1000;n++){const task=await f.call('/api/tasks/'+id);if(!['queued','running'].includes(task.state))return task;await new Promise(resolve=>setTimeout(resolve,10));}throw Error('Task timed out');};
   try {
-    const bot=await f.call('/api/bots',{name:'Task resolution',toolMode:'code'}),request={id:'first',botId:bot.id,objective:'Resolve predecessor effect',limitMs:300000};
+    const bot=await f.call('/api/bots',{provider:'demo',name:'Task resolution',toolMode:'code'}),request={id:'first',botId:bot.id,objective:'Resolve predecessor effect',limitMs:300000};
     await f.call('/api/tasks',request);const first=await taskDone('first');assert.equal(first.state,'failed');assert.equal(first.workActions.length,1);
     phase='retry';await f.call('/api/tasks',{...request,id:'retry',predecessor:'first'});await held;
     let process;for(let n=0;n<500;n++){process=(await f.call('/api/processes'))[0];if(process.outputComplete)break;await new Promise(resolve=>setTimeout(resolve,10));}
@@ -206,7 +206,7 @@ test('file-write resolution verifies actual bytes and does not silently replay a
   const {fileCapabilities}=await import('../dist/file-actions.js'),{createHash}=await import('node:crypto');
   const instance=new Instance(':memory:');let writes=0;
   try {
-    const bot=instance.createBot({name:'File evidence',instructions:'',toolMode:'hybrid'});instance.claim({id:'file-resolve',botId:bot.id,content:'write'});
+    const bot=instance.createBot({provider:'demo',name:'File evidence',instructions:'',toolMode:'hybrid'});instance.claim({id:'file-resolve',botId:bot.id,content:'write'});
     const registry=instance.workActions(),{write}=fileCapabilities(value=>value,()=>true,()=>16);
     registry.register({...write,execute:async(...args)=>{writes++;await write.execute(...args);throw Error('Lost result after the actual file write');}});
     const actions=registry.open({kind:'command',id:'file-resolve'},new AbortController().signal),input={path:'resolved.txt',content:'actual bytes'};
