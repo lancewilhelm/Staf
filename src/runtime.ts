@@ -181,8 +181,9 @@ export async function runTurn({ session, store, provider, text, emit = () => {},
           }
         }
         if(actions && !availableTools.some(tool=>tool.function.name===name)) {
-          const content='Tool error: capability is not offered for this work';messages.push({role:'tool',tool_call_id:call.id,content});report({type:'tool_result',id:call.id,name,success:false,content});
-          if(name==='clock' && actions.context.mode!=='code') {actions.close('authority');throw Error(clockUnavailable?.() ?? 'Clock unavailable');}continue;
+          const content=name==='clock' && actions.context.mode!=='code' ? `Tool not executed: ${clockUnavailable?.() ?? 'Clock unavailable'}` : 'Tool error: capability is not offered for this work';messages.push({role:'tool',tool_call_id:call.id,content});report({type:'tool_result',id:call.id,name,success:false,content});
+          if(name==='clock' && actions.context.mode!=='code') actions.close('authority');
+          continue;
         }
         let content;
         let fatalAction: string | undefined;
@@ -201,7 +202,7 @@ export async function runTurn({ session, store, provider, text, emit = () => {},
             const intent=envelope===undefined ? {kind:'new' as const} : actionIntent.parse(envelope);
             let result:Awaited<ReturnType<WorkActions['invoke']>>;
             try {result=await actions.invoke({source:{kind:'provider',responseId:`${attempt}:${step}`,callId:call.id},name,input:actionInput,intent});} catch(error) {const closed=actions.closedReason();if(closed && !['search_web','read_web','run_scratch_shell'].includes(name))fatalAction='Action admission closed: '+closed;throw error;}
-            if(result.kind==='blocked' && actions.closedReason() && !['search_web','read_web','run_scratch_shell'].includes(name)) {fatalAction=name==='clock' && result.reason==='Action authorization failed' ? (clockUnavailable?.() ?? result.reason) : result.reason;throw Error(fatalAction);}
+            if(result.kind==='blocked' && result.reason!=='Action denied' && actions.closedReason() && !['search_web','read_web','run_scratch_shell'].includes(name)) {fatalAction=name==='clock' && result.reason==='Action authorization failed' ? (clockUnavailable?.() ?? result.reason) : result.reason;throw Error(fatalAction);}
             if(result.kind!=='completed') success=false;
             const safeResult=result.kind==='completed' ? redactValue(result.value,redact) : redactValue(result,redact);
             content=typeof safeResult==='string' ? safeResult : JSON.stringify(safeResult);
