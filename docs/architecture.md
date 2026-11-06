@@ -164,8 +164,14 @@ Accepted chat and task profiles capture the effective core separately from the
 agent soul. Retries preserve their predecessor's profile. Existing profiles
 without a captured core use the earlier clock instruction. Tool definitions,
 context, permissions, approval checks, and cancellation remain service-owned.
-Controlled-provider tests cover request construction, not model behavior or
-provider cache reuse.
+The Advanced Settings editor uses the paired core API and retains its draft
+across workspace navigation. A failed or uncertain save requires a fresh read
+before retry. Cache-impact feedback compares committed request-relevant settings:
+core and soul text, tool mode, provider, and provider-supported model or reasoning
+fields. The direct adapter's local key covers model, instructions, and sorted
+tools, while reasoning changes the request separately. Neither a local key nor a
+changed prefix establishes provider cache use. Controlled-provider and scripted
+browser tests cover construction and feedback, not model behavior or cache reuse.
 
 Discovery uses names and owner-edited descriptions. Each accepted command and
 task captures its settings and instructions. The offline demo does not follow

@@ -185,6 +185,16 @@ For a workspace change, run the served GUI smoke journey after building:
 node test/browser/gui-smoke.mjs
 ```
 
+For shared core settings changes, also run the disposable paired browser and CLI
+journey after building:
+
+```sh
+node test/browser/core-settings-smoke.mjs
+```
+
+It uses synthetic settings and a controlled provider. It does not verify live
+provider behavior or cache reuse.
+
 For memory settings changes, also run the focused read-only browser journey:
 
 ```sh

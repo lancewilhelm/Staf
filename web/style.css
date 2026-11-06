@@ -2705,3 +2705,10 @@ button {
   .image-crop-controls { gap:10px; }
   .image-crop { width:115px;height:115px; }
 }
+
+.settings-content.core-settings textarea,
+.settings-content .core-settings textarea {
+  height: 240px;
+  min-height: 160px;
+  resize: vertical;
+}
