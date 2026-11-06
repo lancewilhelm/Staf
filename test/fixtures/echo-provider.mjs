@@ -14,4 +14,3 @@ export const demoProvider = {
     return { usage:{status:'not-applicable',source:'Controlled fixture'}, role: 'assistant', content: `Demo (offline): ${current}. User turns saved: ${messages.filter(m => m.role === 'user').length}. Ask "what time is it?" to see a tool call.` };
   },
 };
-
