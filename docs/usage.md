@@ -326,7 +326,17 @@ current draft coordination before editing in multiple tabs.
 ### Shared core guidance
 
 Staf supplies instance-wide operating guidance separately from each agent's
-`soul.md`. Inspect it with the paired CLI:
+`soul.md`. Open **Settings → Advanced Settings** to edit the complete effective
+core. **Save core** replaces the built-in text with your draft. Saving an empty
+draft deliberately removes the shared guidance. Open **View latest built-in core**
+to inspect the current shipped text. **Reset core** removes the override and
+adopts that text. An unsaved draft stays in the editor when you navigate away or
+reset; copy it before reloading or changing datasets.
+
+If a save conflicts, fails, or its outcome is uncertain, the editor retains your
+draft and blocks another save. Select **Compare latest core**, review the saved
+content, and reconcile your draft before retrying. The editor uses the same
+revision and authoritative file as the paired CLI. Inspect that file with:
 
 ```sh
 node dist/cli.js instance core http://127.0.0.1:3210 "$HOME/.staf/dev-client/client.json"
@@ -354,7 +364,14 @@ apply the desired changes, then remove the old directory's `.retired` marker.
 Each accepted request retains its captured core, including during provider
 continuations. A task retry retains its predecessor's captured profile. Prompt
 text cannot grant tools or bypass service permissions, approvals, or Stop.
-The Advanced Settings editor is not yet available.
+After relevant committed core, agent instruction, tool mode, provider, model, or
+reasoning changes, the workspace may report that provider prompt-cache reuse
+may decrease on the next message. It does not report this for name, image, or
+creation-default changes. The notice depends on the selected provider and the
+request inputs it uses. The direct ChatGPT adapter's local cache key includes
+the model, instructions, and sorted tools; reasoning can change the request
+without changing that key. A changed key or prefix does not establish a cache
+miss, a hit, or a cost change. Provider cache behavior has not been verified live.
 
 ### Agent configuration files
 

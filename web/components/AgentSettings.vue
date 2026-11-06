@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { profileAffectsCache } from '../../src/cache-impact';
 import { providerLabel } from '../provider-label';
 import { ref, shallowRef, watch } from 'vue';
 import type { BotProfile } from '../controller';
@@ -61,7 +62,10 @@ async function save() {
   if (!profile.value || !imageValid.value) return;
   emit('update:saving', true); status.value = ''; latest.value = null;
   try {
-    await app.saveBotProfile(profile.value, {name:name.value,provider:provider.value,model:model.value,reasoning:reasoning.value,instructions:instructions.value,toolMode:toolMode.value,image:image.value});
+    const before = profile.value;
+    const edit = {name:name.value,provider:provider.value,model:model.value,reasoning:reasoning.value,instructions:instructions.value,toolMode:toolMode.value,image:image.value};
+    await app.saveBotProfile(before, edit);
+    if (profileAffectsCache(before, {...before, ...edit, model:edit.model.trim() || null, reasoning:edit.reasoning === 'default' ? null : edit.reasoning})) app.notify('Settings saved. This change may reduce provider prompt cache reuse on the next message. Actual cache use depends on the provider.', 'success');
     emit('close');
   } catch (error) {
     compareAvailable.value = true;

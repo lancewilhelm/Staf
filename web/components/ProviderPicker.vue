@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { profileAffectsCache } from '../../src/cache-impact';
 import { computed, ref, shallowRef, watch } from 'vue';
 import type { BotProfile } from '../controller';
 import { useWorkspace } from '../workspace';
@@ -49,6 +50,7 @@ async function commit(field: 'provider' | 'model' | 'reasoning', value: string) 
     model.value = saved.model ?? '';
     emit('profile', saved, previous.revision);
     notice.value = field === 'model' && previous.reasoning && previous.reasoning !== saved.reasoning ? 'Reasoning changed to Provider default for this model.' : 'Saved. Applies to the next message.';
+    if (profileAffectsCache(previous, saved)) notice.value += ' This change may reduce provider prompt cache reuse on the next message. Actual cache use depends on the provider.';
     if (props.compact) { app.notify(notice.value, 'success'); if (field === 'model') emit('selected'); }
   } catch (reason) { error.value = 'Save failed or is uncertain. Your edits are retained. ' + String(reason); }
   finally { busy.value = false; }

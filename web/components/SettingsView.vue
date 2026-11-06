@@ -2,6 +2,7 @@
 import { useWorkspace } from '../workspace';
 import { type Appearance, saveAppearance } from '../appearance';
 import ProviderDefaults from './ProviderDefaults.vue';
+import CoreSettings from './CoreSettings.vue';
 import AppearanceOptions from './AppearanceOptions.vue';
 import ConfirmAction from './ConfirmAction.vue';
 import { ref } from 'vue';
@@ -79,6 +80,7 @@ async function disconnectRouter() {
     </div>
     </div></section>
     <ProviderDefaults />
+    <CoreSettings />
     <div class="row"><button v-if="hasAgentSettings" class="quiet" @click="emit('agentSettings')">Back to agent settings</button><button class="quiet" @click="emit('chat')">Back to chat</button></div>
   </div></div>
 </template>
