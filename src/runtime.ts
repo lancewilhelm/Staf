@@ -19,7 +19,7 @@ interface TurnOptions {
   text: string;
   requestText?: string;
   emit?: (event: RuntimeEvent) => void;
-  responseProgress?: (event: {type:'start'} | {type:'delta';text:string}) => void;
+  responseProgress?: (event: {type:'start'} | {type:'delta'|'message';text:string}) => void;
   maxSteps?: number;
   clock?: () => string;
   authorizeClock?: () => Promise<void>;
@@ -132,6 +132,7 @@ export async function runTurn({ session, store, provider, text, emit = () => {},
       delete message.usage;
       if (calls.length && provider.capabilities?.toolCalls === false) throw new Error('This adapter does not support tool requests');
       messages.push(message);
+      if (calls.length && message.content) responseProgress?.({type:'message',text:message.content});
       if (preserveObservedAfterAbort && signal?.aborted && calls.length && typeof message.content === 'string' && message.content) report({type:'assistant_observed',text:message.content});
       if (!calls.length) {
         if (typeof message.content !== 'string') throw new Error('Expected assistant text');

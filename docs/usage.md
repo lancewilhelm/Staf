@@ -288,7 +288,7 @@ leave no completed reply; inspect the response status and tool outcomes. A
 provider decides its own wording, so a useful explanation is not guaranteed.
 
 While a response runs, the workspace receives provisional text and progress over a shared-instance event stream. If the connection drops, the workspace reconnects and shows the latest saved progress.
-Tool calls appear as compact rows. Open a row to inspect its retained arguments and result. Approval requests and process controls remain available in the conversation. Older tool events without a call identity appear separately because their request and result cannot be paired reliably.
+Tool calls appear as compact rows before the next agent name and message. A response with several steps alternates tool rows, an agent message, more tool rows, and the next agent message. Intermediate messages remain visible after reload, failure, or Stop. Open a tool row to inspect its retained arguments and result. Approval requests and process controls remain available in the conversation. Older tool events without a call identity appear separately because their request and result cannot be paired reliably. Earlier responses without recorded message boundaries retain their existing tool group and final answer.
 The composer has one circular action: an up arrow labeled **Send** when ready, and a square labeled **Stop** during an active response. You can type a next draft while the response runs. Select **Stop** to request cancellation; the response shows **stopping** until the provider and pending operations settle. The circular action stays disabled and labeled **Stopping response** until settlement, then returns to Send. The draft remains editable throughout; Enter cannot submit it during generation or stopping, and nothing is queued. Send it explicitly after the response settles. Stopped partial output stays in the conversation labeled **stopped** and is not treated as a completed provider reply. A provider that does not promptly honor cancellation can keep the agent in stopping until it returns.
 Markdown headings, lists, links and code blocks render in assistant responses;
 use Copy on a code block. Raw HTML is not rendered. The conversation follows new
@@ -332,7 +332,12 @@ current draft coordination before editing in multiple tabs.
 ### Shared core guidance
 
 Staf supplies instance-wide operating guidance separately from each agent's
-`soul.md`. Open **Settings → Advanced Settings** to edit the complete effective
+`soul.md`. The built-in core covers direct answers, proportionate detail,
+useful follow-through, uncertainty, and service-enforced permissions. It names
+no individual tool. Tool definitions describe the capabilities actually offered.
+Upgrades adopt this text only when there is no custom override. To inspect or
+adopt it deliberately, use **View latest built-in core** or **Reset core**.
+Open **Settings → Advanced Settings** to edit the complete effective
 core. **Save core** replaces the built-in text with your draft. Saving an empty
 draft deliberately removes the shared guidance. Open **View latest built-in core**
 to inspect the current shipped text. **Reset core** removes the override and

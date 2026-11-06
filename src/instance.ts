@@ -32,7 +32,7 @@ import { ApprovalGrants, approvalGrantSchema, type GrantBoundary } from './appro
 const clockAction: Action = { capability:'clock', operation:'read', resource:'utc', effect:'read', limits:{}, risk:'safe' };
 const clockBoundary = { enabledCapabilities:['clock'], actions:[clockAction] };
 const modes: ApprovalMode[] = ['ask-every-time','ask-for-risky-actions','never-ask'];
-export const INSTANCE_SCHEMA_VERSION = 38;
+export const INSTANCE_SCHEMA_VERSION = 39;
 const MAINTENANCE_VERSION = 2147483647;
 
 export const starterSoul = "You are an assistant working for the owner. Be clear and candid. Distinguish observations from assumptions. Follow the owner's role instructions and work within the permissions and task scope granted to you.";
@@ -1145,7 +1145,12 @@ export class Instance {
   messages(botId: string) { return this.db.prepare('SELECT id, role, content FROM messages WHERE bot_id=? ORDER BY seq').all(botId); }
   hasBot(botId:string) {return !!this.botIdentity(botId);}
   command(id: string) { const row=this.db.prepare('SELECT c.id,c.bot_id AS botId,c.content,c.state,c.error,p.profile AS capturedProfile FROM commands c LEFT JOIN command_profiles p ON p.command_id=c.id WHERE c.id=?').get(id);if(!row)return undefined;const {capturedProfile,...command}=row;return {id:command.id,botId:command.botId,content:command.content,state:command.state,error:command.error,toolMode:parseToolModeFromProfile(capturedProfile)}; }
-  responseProgress(id:string) {return this.db.prepare("SELECT c.id,c.bot_id AS botId,CASE WHEN c.state='pending' THEN CASE WHEN EXISTS(SELECT 1 FROM response_stops s WHERE s.command_id=c.id) THEN 'stopping' WHEN p.command_id IS NULL THEN 'accepted' ELSE 'running' END ELSE c.state END AS state,COALESCE(p.text,'') AS text,c.error FROM commands c LEFT JOIN response_progress p ON p.command_id=c.id WHERE c.id=?").get(id);}
+  responseProgress(id:string) {
+    const progress=this.db.prepare("SELECT c.id,c.bot_id AS botId,CASE WHEN c.state='pending' THEN CASE WHEN EXISTS(SELECT 1 FROM response_stops s WHERE s.command_id=c.id) THEN 'stopping' WHEN p.command_id IS NULL THEN 'accepted' ELSE 'running' END ELSE c.state END AS state,COALESCE(p.text,'') AS text,c.error FROM commands c LEFT JOIN response_progress p ON p.command_id=c.id WHERE c.id=?").get(id);
+    if(!progress)return undefined;
+    const events=this.db.prepare("SELECT seq AS id,type,name,success,CASE WHEN type IN ('tool_result','assistant_message') THEN detail END AS detail,CASE WHEN type='tool_start' THEN detail END AS arguments,call_id AS callId FROM command_runtime_events WHERE command_id=? ORDER BY seq").all(id);
+    return {id:progress.id,botId:progress.botId,state:progress.state,text:progress.text,error:progress.error,events};
+  }
   latestResponse(botId:string) {const row=this.db.prepare('SELECT id FROM commands WHERE bot_id=? ORDER BY rowid DESC LIMIT 1').get(botId);return typeof row?.id==='string'?this.responseProgress(row.id):null;}
   updateResponse(id:string,text:string) {this.db.prepare("INSERT INTO response_progress(command_id,text) SELECT id,? FROM commands WHERE id=? AND state='pending' ON CONFLICT(command_id) DO UPDATE SET text=excluded.text").run(text,id);}
   requestResponseStop(id:string) {
@@ -1170,10 +1175,19 @@ export class Instance {
     this.db.prepare('INSERT INTO command_runtime_events (command_id,type,name,success,detail,call_id) VALUES (?,?,?,?,?,?)').run(id,event.type,event.name,event.success === undefined ? null : Number(event.success),detail,event.callId);
   }
   commandRuntimeEvents(id:string) {
-    return this.db.prepare('SELECT type,name,success FROM command_runtime_events WHERE command_id=? ORDER BY seq').all(id).map(row=>row.type === 'tool_result' ? {type:'tool_result' as const,name:String(row.name),success:row.success === 1} : {type:'tool_start' as const,name:String(row.name)});
+    return this.db.prepare("SELECT type,name,success FROM command_runtime_events WHERE command_id=? AND type IN ('tool_start','tool_result') ORDER BY seq").all(id).map(row=>row.type === 'tool_result' ? {type:'tool_result' as const,name:String(row.name),success:row.success === 1} : {type:'tool_start' as const,name:String(row.name)});
+  }
+  commandResponseMessage(id:string,text:string) {
+    // Schema 39 also fences older readers that treat every non-result as a tool start.
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      this.db.prepare("INSERT INTO command_runtime_events (command_id,type,name,detail) VALUES (?,'assistant_message','',?)").run(id,text);
+      this.updateResponse(id,'');
+      this.db.exec('COMMIT');
+    } catch(error) {this.db.exec('ROLLBACK');throw error;}
   }
   chatWork(botId:string) {
-    const events=this.db.prepare("SELECT e.command_id,e.seq AS id,e.type,e.name,e.success,CASE WHEN e.type='tool_result' THEN e.detail END AS detail,CASE WHEN e.type='tool_start' THEN e.detail END AS arguments,e.call_id AS callId FROM command_runtime_events e JOIN commands c ON c.id=e.command_id WHERE c.bot_id=? ORDER BY e.seq").all(botId);
+    const events=this.db.prepare("SELECT e.command_id,e.seq AS id,e.type,e.name,e.success,CASE WHEN e.type IN ('tool_result','assistant_message') THEN e.detail END AS detail,CASE WHEN e.type='tool_start' THEN e.detail END AS arguments,e.call_id AS callId FROM command_runtime_events e JOIN commands c ON c.id=e.command_id WHERE c.bot_id=? ORDER BY e.seq").all(botId);
     const byCommand=new Map<string,typeof events>();
     for(const event of events){const id=String(event.command_id);const group=byCommand.get(id) ?? [];group.push(event);byCommand.set(id,group);}
     const requests=this.db.prepare('SELECT c.id,p.profile AS capturedProfile FROM commands c LEFT JOIN command_profiles p ON p.command_id=c.id WHERE c.bot_id=? ORDER BY c.rowid').all(botId).map(row=>{

@@ -405,6 +405,19 @@ For controlled offline checks, build and run `node test/browser/agent-images-smo
 and `node test/browser/gui-smoke.mjs`. These use disposable instances and scripted
 providers; they do not prove live provider behavior.
 
+## Use Lucide icons
+
+Use [Icônes](https://icones.js.org/collection/lucide) to browse the Lucide set.
+The Vue workspace imports individual components from the pinned `@lucide/vue`
+development dependency. Vite bundles the selected inline SVGs locally, with no
+icon API or CDN request. See [Lucide's Vue guide](https://lucide.dev/guide/vue/getting-started).
+
+Import each icon by name, as `InfoHelp.vue` imports `Info`. Use `currentColor`,
+a stroke width of 2, and a size that fits its control. Keep an accessible name on
+the button and mark its decorative SVG `aria-hidden="true"`. Preserve keyboard
+focus and the existing hover, focus, click, and touch help interactions.
+The fixed Staf logo and agent avatars keep their own renderers.
+
 ## Review agent images
 
 On the implementation branch, stop another development launcher using the same

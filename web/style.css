@@ -727,10 +727,12 @@ summary {
 }
 
 .chat-work {
-  margin-top: 12px;
+  margin-bottom: 12px;
   text-align: left;
   font-size: 14px;
 }
+.chat-work:empty { display: none; }
+.response-part + .response-part { margin-top: 18px; }
 
 .chat-work details {
   margin: 6px 0;
@@ -2727,7 +2729,8 @@ button {
 .editor-label { display: flex; align-items: center; gap: 7px; margin: 14px 0 0; }
 .settings-content .editor-label label { margin: 0; }
 .info-help { position: relative; display: inline-block; font-size: 11px; }
-.info-help button { display: grid; place-items: center; width: 16px; height: 16px; border: 1px solid var(--muted-ink); border-radius: 50%; cursor: pointer; list-style: none; }
+.info-help button { display: grid; place-items: center; width: 20px; height: 20px; padding: 0; border: 0; background: transparent; color: var(--muted-ink); cursor: pointer; }
+.info-help button:hover, .info-help button:focus-visible { color: var(--ink); }
 .info-help span { position: absolute; z-index: 4; top: 20px; left: 0; width: 240px; padding: 10px; background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: var(--corner); box-shadow: 0 4px 12px #0002; font-weight: 400; visibility: hidden; }
 .info-help:hover span, .info-help:focus-within span, .info-help[data-open=true] span { visibility: visible; }
 .settings-content.core-settings textarea,

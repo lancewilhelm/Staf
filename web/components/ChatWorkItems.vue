@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { useWorkspace } from '../workspace';
-import type { ChatWork, InboxItem } from '../controller';
+import type { ChatEvent, ChatWork, InboxItem } from '../controller';
 import ApprovalItem from './ApprovalItem.vue';
 const { app: controller } = useWorkspace();
 const outputs = ref<Record<string,string>>({});
@@ -11,12 +11,13 @@ async function sendInput(id:string){try{await controller.processInput(id,(input.
 async function endInput(id:string){try{await controller.processEof(id);await showOutput(id);}catch{outputs.value[id]='Could not send EOF.';}}
 async function resize(id:string){try{await controller.resizeProcess(id,cols.value[id]??80,rows.value[id]??24);}catch{outputs.value[id]='Could not resize terminal.';}}
 async function showOutput(id:string,append=false) { try { const page=await controller.processOutput(id,append ? cursors.value[id]?.next ?? 0 : 0);outputs.value[id]=(append ? outputs.value[id] ?? '' : '')+(page.gap?'Earlier output expired.\n':'')+page.chunks.map(chunk=>`[${chunk.stream}] ${chunk.text ?? '[binary or incomplete UTF-8 chunk; see base64 output in API]'} `).join('');cursors.value[id]={next:page.nextCursor,more:page.hasMore}; } catch {outputs.value[id]='Could not load output.';} }
-const props = defineProps<{work: ChatWork | undefined; inbox: InboxItem[]}>();
+const props = withDefaults(defineProps<{work: ChatWork | undefined; inbox: InboxItem[]; events?:ChatEvent[]; controls?:boolean}>(),{controls:true});
 const approvals = computed(() => props.inbox.filter(item => item.kind === 'approval' && item.work.kind === 'command' && item.work.id === props.work?.id));
 const calls = computed(() => {
   const rows: Array<{key:string;name:string;start:string|null;result:string|null;success:number|null;done:boolean}> = [];
   const byId = new Map<string,number>();
-  for (const event of props.work?.events ?? []) {
+  for (const event of props.events ?? props.work?.events ?? []) {
+    if(event.type==='assistant_message')continue;
     const index = event.callId ? byId.get(event.callId) : undefined;
     if (event.type === 'tool_result' && index !== undefined) {
       const row = rows[index];
@@ -37,6 +38,7 @@ const calls = computed(() => {
       <template v-if="call.start !== null"><p>Arguments</p><pre>{{ call.start }}</pre></template>
       <template v-if="call.result !== null"><p>Result</p><pre>{{ call.result }}</pre></template>
     </details>
+    <template v-if="controls">
     <details v-for="execution in work.codeExecutions" :key="execution.id">
       <summary>Code execution · {{ execution.outcome }}</summary>
       <p>Source</p><pre>{{ execution.source }}</pre>
@@ -63,5 +65,6 @@ const calls = computed(() => {
       <button v-if="cursors[process.id]?.more" type="button" @click="showOutput(process.id,true)">More output</button>
     </details>
     <ApprovalItem v-for="item in approvals" :key="item.id" :item="item" />
+    </template>
   </div>
 </template>

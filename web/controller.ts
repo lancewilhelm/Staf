@@ -2,6 +2,7 @@ import {agentImageBodyType,agentImageByteLimit,parseAgentImage,parseAgentImageIn
 import {parseToolMode,type ToolMode} from '../src/tool-mode';
 import type {ToastNotice} from './toast-notice';
 import {responseEvents} from './response-stream';
+import {z} from 'zod';
 import type { Memory, MemoryScope } from '../src/memory-types';
 
 export type ModelCatalog={models:Array<{id:string;label:string;reasoning:string[]|null;reasoningStatus:string}>;defaultModel?:string};
@@ -13,8 +14,10 @@ function parseCore(value:unknown):Core {
   return {source:value.source,content:value.content,defaultContent:value.defaultContent,path:value.path,revision:value.revision};
 }
 export type Message={id:string;role:string;content:string};
-export type ResponseProgress={id:string;botId:string;state:'accepted'|'running'|'stopping'|'stopped'|'completed'|'failed'|'interrupted';text:string;error:string|null};
-export type ChatWork={id:string;processes:Array<{id:string;state:string;mode:string;retained:boolean;inputClosed:boolean;cols:number|null;rows:number|null;exitCode:number|null;exitSignal:string|null}>;progress:ResponseProgress;codeExecutions:Array<{id:string;source:string;sourceHash:string;outcome:string;result:unknown;actions:string[]}>;events:Array<{id:number;type:string;name:string;success:number|null;detail:string|null;arguments:string|null;callId:string|null}>};
+const chatEventSchema=z.object({id:z.number().int(),type:z.enum(['tool_start','tool_result','assistant_message']),name:z.string(),success:z.number().nullable(),detail:z.string().nullable(),arguments:z.string().nullable(),callId:z.string().nullable()});
+export type ChatEvent=z.infer<typeof chatEventSchema>;
+export type ResponseProgress={id:string;botId:string;state:'accepted'|'running'|'stopping'|'stopped'|'completed'|'failed'|'interrupted';text:string;error:string|null;events?:ChatEvent[]};
+export type ChatWork={id:string;processes:Array<{id:string;state:string;mode:string;retained:boolean;inputClosed:boolean;cols:number|null;rows:number|null;exitCode:number|null;exitSignal:string|null}>;progress:ResponseProgress;codeExecutions:Array<{id:string;source:string;sourceHash:string;outcome:string;result:unknown;actions:string[]}>;events:ChatEvent[]};
 export type InboxItem={kind:'question';id:string;botId:string|null;attemptId:string;text:string}|{kind:'approval';approvalKind:'clock'|'web'|'search'|'shell'|'disclosure';id:string;botId:string|null;work:{kind:'task'|'command';id:string};detail:unknown};
 type SubmissionIdentity={id:string;text:string};
 export type Submission=SubmissionIdentity & (
@@ -52,7 +55,7 @@ function parseMemories(value: unknown, scope: MemoryScope): Memory[] {
 }
 
 function isResponseProgress(value:unknown,botId:string):value is ResponseProgress {
-  return isRecord(value)&&typeof value.id==='string'&&value.botId===botId&&typeof value.state==='string'&&['accepted','running','stopping','stopped','completed','failed','interrupted'].includes(value.state)&&typeof value.text==='string'&&(value.error===null||typeof value.error==='string');
+  return isRecord(value)&&typeof value.id==='string'&&value.botId===botId&&typeof value.state==='string'&&['accepted','running','stopping','stopped','completed','failed','interrupted'].includes(value.state)&&typeof value.text==='string'&&(value.error===null||typeof value.error==='string')&&(value.events===undefined||z.array(chatEventSchema).safeParse(value.events).success);
 }
 const prefix='staf-workspace-v1:';
 function normalizeDraft(draft:Draft):Draft {

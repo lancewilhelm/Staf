@@ -71,7 +71,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
   if (options.localBootstrapToken) instance.bootstrapLocal(options.localBootstrapToken);
   const active = new Set<AbortController>();
   const responseControllers = new Map<string,AbortController>();
-  type ResponseSubscriber={botId:string;token:string;response:ServerResponse;last:{id:string;state:string;text:string}|null};
+  type ResponseSubscriber={botId:string;token:string;response:ServerResponse;last:{id:string;state:string;text:string;eventId:number}|null};
   const responseSubscribers=new Set<ResponseSubscriber>();
   function publishResponse(botId:string) {
     if(![...responseSubscribers].some(subscriber=>subscriber.botId===botId))return;
@@ -83,12 +83,13 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
       if(subscriber.response.writableLength>2_000_000){subscriber.response.destroy();continue;}
       const last=subscriber.last;
       if(progress && typeof progress.id==='string' && typeof progress.state==='string' && typeof progress.text==='string') {
+        const eventId=Number(progress.events.at(-1)?.id ?? 0);
         const visible=progress.state==='completed'?{...progress,text:''}:progress;
-        if(last && last.id===progress.id && last.state==='running' && progress.state==='running' && progress.text.startsWith(last.text)) {
+        if(last && last.id===progress.id && last.eventId===eventId && last.state==='running' && progress.state==='running' && progress.text.startsWith(last.text)) {
           const text=progress.text.slice(last.text.length);
           if(text)subscriber.response.write(`data: ${JSON.stringify({type:'delta',id:progress.id,text})}\n\n`);
         } else subscriber.response.write(`data: ${JSON.stringify({type:'snapshot',response:visible})}\n\n`);
-        subscriber.last={id:progress.id,state:progress.state,text:progress.state==='completed'?'':progress.text};
+        subscriber.last={id:progress.id,state:progress.state,text:progress.state==='completed'?'':progress.text,eventId};
       } else {subscriber.response.write(`data: ${JSON.stringify({type:'snapshot',response:null})}\n\n`);subscriber.last=null;}
     }
   }
@@ -757,9 +758,13 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
           if (intent) { instance.completeMemoryCommand(id,intent.input,intent.reply,intent.operation,intent.proposal);publishResponse(botId); return json(200,claim); }
           const controller = new AbortController(); active.add(controller); responseControllers.set(id,controller);
           let observed='', progressFull=false;
-          const responseProgress=(event:{type:'start'}|{type:'delta';text:string})=>{
+          const responseProgress=(event:{type:'start'}|{type:'delta'|'message';text:string})=>{
             if(controller.signal.aborted)return;
             if(event.type==='start'){observed='';progressFull=false;instance.updateResponse(id,'');publishResponse(botId);return;}
+            if(event.type==='message'){
+              const text=redact(event.text).replace(/https?:\/\/[^\s<>"']+/gi,url=>containsUnsafeWebUrl(url)?'[redacted URL]':url).slice(0,1000000);
+              instance.commandResponseMessage(id,text);observed='';publishResponse(botId);return;
+            }
             if(progressFull)return;
             if(observed.length+event.text.length>1000000){progressFull=true;return;}
             observed+=event.text;
@@ -781,7 +786,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
             skillTrackers.set(skillWorkKey(skillWork),skills);
             const actions=workActions.open(skillWork,controller.signal);
             const callIds=new Map<string,string>();
-            try {await runTurn({session, provider, responseProgress, actions, clockUnavailable:()=>clockUnavailable(botId,'command',id),  skills, requestText:content, memory:query=>recall(botId,query), text:notices.length ? `Task updates since your last chat turn:\n${notices.join('\n')}\n\nUser message:\n${content}` : content, redact, signal:controller.signal, emit:event=>{if(event.type === 'tool_start' || event.type === 'tool_result'){const allowed=['clock','code_mode','read_web','search_web','run_scratch_shell','select_skill','start_background_task','memory_search','memory_read','memory_remember','memory_update','memory_forget','memory_proposal_status'];const name=actions.recognizes(event.name) || allowed.includes(event.name) ? event.name : 'tool';const callId=event.type==='tool_start' ? randomUUID() : callIds.get(event.id) ?? null;if(event.type==='tool_start' && callId)callIds.set(event.id,callId);else if(event.type==='tool_result')callIds.delete(event.id);let detail=event.type==='tool_result' ? event.content : event.arguments;if(event.type==='tool_start' && detail!==undefined){try{detail=JSON.stringify(JSON.parse(detail));}catch{detail='[Invalid arguments omitted]';}}const safe=detail===undefined ? null : redact(detail).replace(/https?:\/\/[^\s<>"']+/gi,url=>containsUnsafeWebUrl(url)?'[redacted URL]':url).slice(0,16000);instance.commandRuntimeEvent(id,event.type === 'tool_start' ? {type:event.type,name,callId} : {type:event.type,name,success:event.success,callId},safe);}}, store:{save:async updated => instance.saveExecution(id,updated,updated.messages.length > session.messages.length)}});} finally {actions.dispose();skillTrackers.delete(skillWorkKey(skillWork));}
+            try {await runTurn({session, provider, responseProgress, actions, clockUnavailable:()=>clockUnavailable(botId,'command',id),  skills, requestText:content, memory:query=>recall(botId,query), text:notices.length ? `Task updates since your last chat turn:\n${notices.join('\n')}\n\nUser message:\n${content}` : content, redact, signal:controller.signal, emit:event=>{if(event.type === 'tool_start' || event.type === 'tool_result'){const allowed=['clock','code_mode','read_web','search_web','run_scratch_shell','select_skill','start_background_task','memory_search','memory_read','memory_remember','memory_update','memory_forget','memory_proposal_status'];const name=actions.recognizes(event.name) || allowed.includes(event.name) ? event.name : 'tool';const callId=event.type==='tool_start' ? randomUUID() : callIds.get(event.id) ?? null;if(event.type==='tool_start' && callId)callIds.set(event.id,callId);else if(event.type==='tool_result')callIds.delete(event.id);let detail=event.type==='tool_result' ? event.content : event.arguments;if(event.type==='tool_start' && detail!==undefined){try{detail=JSON.stringify(JSON.parse(detail));}catch{detail='[Invalid arguments omitted]';}}const safe=detail===undefined ? null : redact(detail).replace(/https?:\/\/[^\s<>"']+/gi,url=>containsUnsafeWebUrl(url)?'[redacted URL]':url).slice(0,16000);instance.commandRuntimeEvent(id,event.type === 'tool_start' ? {type:event.type,name,callId} : {type:event.type,name,success:event.success,callId},safe);publishResponse(botId);}}, store:{save:async updated => instance.saveExecution(id,updated,updated.messages.length > session.messages.length)}});} finally {actions.dispose();skillTrackers.delete(skillWorkKey(skillWork));}
           } catch (error) {
             const message = error instanceof Error ? error.message : '';
             const safe = message.startsWith('Clock ') || message === 'Action denied' || message === 'Action limit reached' || message === 'Tool iteration limit reached' || message.startsWith('Guest ') || message.startsWith('Source cannot be retained') || message.startsWith('Action admission closed') || message === 'Selected skill is no longer available' ? message : (message === 'Set a model in the agent profile' || message === retiredProviderMessage) ? message : /requires OPENROUTER_API_KEY/.test(message) ? 'Connect OpenRouter in Settings' : /HTTP 401/.test(message) || /credential|sign.in|login/i.test(message) ? 'Configure the selected provider credentials on the instance host' : /HTTP 402/.test(message) ? 'Provider credits are required' : /HTTP 429/.test(message) ? 'Provider rate limit reached; retry later' : /OpenRouter HTTP 40[034]/.test(message) ? 'Check the selected OpenRouter model, access and supported capabilities' : /OpenRouter (response|interrupted)|Invalid OpenRouter|Incomplete OpenRouter|Unsupported OpenRouter/.test(message) ? 'OpenRouter response was incomplete or unsupported; retry or choose another model' : /reasoning|effort/i.test(message) ? 'Check the model and reasoning settings in the agent profile' : /connection|timed out/i.test(message) ? 'Provider connection failed or timed out; check host network access' : 'Provider request failed. Check the instance host configuration.';

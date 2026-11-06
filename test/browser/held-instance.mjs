@@ -58,6 +58,11 @@ return {
       if(messages.at(-1)?.role==='tool')return {role:'assistant',content:'Repeated clocks completed.'};
       return {role:'assistant',content:null,tool_calls:['first-clock','second-clock'].map(id=>({id,type:'function',function:{name:'clock',arguments:'{}'}}))};
     }
+    if (options?.currentUserInput==='Alternating timeline fixture') {
+      const results=messages.slice(messages.findLastIndex(message=>message.role==='user')+1).filter(message=>message.role==='tool').length;
+      if(results===2)return {role:'assistant',content:'Final timeline answer.'};
+      return {role:'assistant',content:results===1?'First timeline answer.':null,tool_calls:[{id:'timeline-'+results,type:'function',function:{name:'clock',arguments:'{}'}}]};
+    }
     if (options?.currentUserInput==='Denied greeting fixture') {
       if(messages.at(-1)?.role==='tool') {
         if(!messages.at(-1).content.includes('denied'))throw Error('Expected a denied clock result');
@@ -185,6 +190,11 @@ const app = startInstance(path, Number(port), { env: {}, modelRequest:async()=>n
   },undefined,instructions);
   const provider=makeProvider();
   return {...provider,async *stream(messages,tools,options){
+    if(options?.currentUserInput==='Alternating timeline fixture'){
+      const message=await provider.complete(messages,tools,options);
+      if(message.content){yield {type:'text_delta',text:message.content+' '};if(message.tool_calls?.length)await new Promise(resolve=>{releaseStream=resolve});}
+      yield {type:'message',message};return;
+    }
     if(options?.currentUserInput!=='Streaming markdown fixture'){yield {type:'message',message:await provider.complete(messages,tools,options)};return;}
     const first='# Streaming heading\n\n- First item\n- [safe link](https://example.com)\n\n```js\nconst n = 1;\n```\n\n<img src=x onerror="window.pwned=1">\n\n'+Array.from({length:100},(_,i)=>`Line ${i}`).join('\n\n')+'\n\n';
     yield {type:'text_delta',text:first};

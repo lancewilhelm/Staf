@@ -5,6 +5,11 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {Instance} from '../dist/instance.js';
 
+test('built-in core guidance does not name individual capabilities',async()=>{
+ const {defaultCore}=await import('../dist/instance-core.js');
+ assert.doesNotMatch(defaultCore,/\b(clock|code_mode|read_web|search_web|memory_search|run_scratch_shell)\b/i);
+});
+
 test('shared core is captured at acceptance for chat and task work',()=>{
  const dir=mkdtempSync(join(tmpdir(),'staf-core-'));const instance=new Instance(join(dir,'db'));
  try {

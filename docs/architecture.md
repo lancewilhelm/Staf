@@ -400,4 +400,19 @@ resolution or model reconciliation tool. See [the contract](work-actions.md).
 
 ## Creation defaults and Demo migration
 
-Demo is not selectable or executable. Before a real default is chosen, legacy Demo agents and their records remain in place and need setup. Database version 37 records pending Demo migration separately from the saved creation default. The service commits the selected provider and model before publishing revision-checked agent files. It retries pending migration on restart and when clients read or save defaults. It reports file conflicts and blocks new accepted work until the owner repairs the configuration. Already-real agents are skipped on retry. Conversation records and accepted-work profiles are not rewritten. These checks use disposable offline instances and do not establish live provider behavior.
+Demo is not selectable or executable. Before a real default is chosen, legacy Demo agents and their records remain in place and need setup. Database version 37 records pending Demo migration separately from the saved creation default. The service commits the selected provider and model before publishing revision-checked agent files. It retries pending migration on restart and when clients read or save defaults. It reports file conflicts and blocks acceptance for affected legacy agents until their configuration is repaired. Invalid files do not block healthy agents. Already-real agents are skipped on retry. Conversation records and accepted-work profiles are not rewritten. These checks use disposable offline instances and do not establish live provider behavior.
+
+## Ordered chat messages and tool calls
+
+Schema 39 adds `assistant_message` boundaries to the command event journal.
+A validated intermediate provider message is retained before its tool calls,
+separately from the current streaming text. Response snapshots carry the ordered
+events, so live updates and history use the same boundaries. The GUI groups each
+run of tools before the next agent name and message. Request and result updates
+keep their call identity. Stop, failure, and restart retain observed messages;
+legacy records without boundaries keep their prior grouping. The CLI tool-event
+summary excludes message boundaries.
+
+The built-in core describes general assistant behavior without naming tools.
+Capability definitions and service enforcement remain separate. Custom and empty
+core overrides keep their existing upgrade and reset behavior.

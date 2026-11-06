@@ -11,10 +11,22 @@ Documentation is live and may change. This extends the earlier
 [instruction-file research](agent-instruction-files.md), which pins the source
 heads inspected on 2026-11-01. No agent or model was run for this research.
 
+## Implementation update on 2026-11-06
+
+The historical observations below describe the pinned pre-implementation source.
+The built-in core now lives in `src/instance-core.ts` and names no individual
+tools. It favors direct answers, proportionate detail, useful follow-through,
+and honest reporting of uncertainty and limitations. Hermes
+[default identity guidance](https://github.com/NousResearch/hermes-agent/blob/main/hermes_cli/default_soul.py)
+was checked as a style reference for direct communication. The Staf text is
+written for its own shared-core and service-authority contract. Custom overrides
+are preserved; Reset adopts the latest built-in text. This change does not
+establish live model behavior or reproduce the reported greeting.
+
 ## Findings for the owner's discussion
 
 - Staf already sends product instructions when the agent's Instructions are
-  blank. The current text explicitly says to use `clock` for the current time.
+  blank. The then-current text explicitly said to use `clock` for the current time.
   That text may influence a model's tool choice, but neither the clock call nor
   the reported missing answer establishes that it caused either outcome.
 - Both references distinguish product-provided operating guidance from
@@ -239,8 +251,8 @@ or a new file layout. Preserve service-owned configuration and action authority.
 1. **Product-owned operational core.** A short, versioned baseline describes
    Staf's role, how to use actually offered capabilities, how to respond after
    tool results, and how to report a blocked or failed action. Evaluate whether
-   time guidance should say to use a clock when current time is needed rather
-   than inviting it for an ordinary greeting.
+   any capability-specific guidance belongs in the actual capability definitions.
+   The subsequent owner direction is to name no tools in the built-in core.
 2. **Owner-editable standing guidance.** Insert the captured `soul.md` as a
    clearly identified agent-specific block. Blank guidance remains valid. Keep
    structured provider, model and tool settings in `agent.toml`.

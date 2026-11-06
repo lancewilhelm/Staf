@@ -7,7 +7,7 @@ import ChatWorkItems from './ChatWorkItems.vue';
 import SubmissionStatus from './SubmissionStatus.vue';
 import ChatComposer from './ChatComposer.vue';
 import BrandMark from './BrandMark.vue';
-import type { ChatWork, Message, ResponseProgress } from '../controller';
+import type { ChatEvent, ChatWork, Message, ResponseProgress } from '../controller';
 const emit = defineEmits<{create: []; providers: []; settings: [id: string]}>();
 const { state: s } = useWorkspace();
 const selected = computed(() => s.value.bots.find(agent => agent.id === s.value.selected));
@@ -15,6 +15,25 @@ const relevant = computed(() => s.value.inbox.filter(item => item.botId === s.va
 const submission = computed(() => s.value.draft.submission);
 const unmatched = computed(() => s.value.work.filter(work => submission.value?.id !== work.id && !s.value.messages.some(message => message.id === 'command-user-' + work.id) && (work.events.length || relevant.value.some(item => item.kind === 'approval' && item.work.id === work.id))));
 type Row = {kind:'user';key:string;text:string;commandId:string|null} | {kind:'response';key:string;commandId:string|null;message:Message|null;work:ChatWork|undefined;progress:ResponseProgress|null;optimistic:boolean};
+type ResponseRow=Extract<Row,{kind:'response'}>;
+function responseWork(row:ResponseRow):ChatWork|undefined {
+  return row.work ?? (row.progress?{id:row.progress.id,progress:row.progress,events:row.progress.events??[],processes:[],codeExecutions:[]}:undefined);
+}
+function responseParts(row:ResponseRow) {
+  const parts:Array<{key:string;events:ChatEvent[];text:string;live:boolean}>=[];
+  let key='start',events:ChatEvent[]=[];
+  const streamed=row.progress?.events,stored=row.work?.events??[];
+  const streamCurrent=streamed && (streamed.at(-1)?.id??0)>=(stored.at(-1)?.id??0);
+  const ordered=streamCurrent?streamed:stored;
+  for(const event of ordered) {
+    if(event.type==='assistant_message') {
+      parts.push({key,events,text:event.detail??'',live:false});key='after-'+event.id;events=[];
+    } else events.push(event);
+  }
+  const progress=streamCurrent?row.progress:row.work?.progress??row.progress;
+  parts.push({key,events,text:row.message?.content??progress?.text??'',live:true});
+  return parts;
+}
 const timeline = computed(() => {
   const rows: Row[] = [];
   const items=s.value.messages;
@@ -63,16 +82,18 @@ function scroll(event: Event) {
           <div v-for="row in timeline" :key="row.key" class="message" :class="{'user-message': row.kind === 'user', provisional: row.kind === 'response' && !!row.progress && ['accepted','running','stopping'].includes(row.progress.state)}">
             <template v-if="row.kind === 'user'"><div class="user-bubble"><div class="bubble">{{ row.text }}</div></div><SubmissionStatus v-if="submission && row.commandId === submission.id" /></template>
             <template v-else>
-              <div class="who"><AgentImage :image="selected.image" :name="selected.name" />{{ selected.name }}{{ row.message?.role === 'assistant_stopped' || row.progress?.state === 'stopped' ? ' · stopped' : '' }}<span v-if="(!row.progress && row.optimistic) || (row.progress && ['accepted','running','stopping'].includes(row.progress.state))" class="working-indicator" role="status" aria-label="Response in progress" /></div>
-              <ChatWorkItems :work="row.work" :inbox="relevant" />
-              <ResponseText v-if="row.message?.content || row.progress?.text || row.work?.progress.text" :text="row.message?.content || row.progress?.text || row.work?.progress.text || ''" />
+              <div v-for="part in responseParts(row)" :key="part.key" class="response-part">
+                <ChatWorkItems :work="responseWork(row)" :inbox="relevant" :events="part.events" :controls="part.live" />
+                <div class="who"><AgentImage :image="selected.image" :name="selected.name" />{{ selected.name }}{{ part.live && (row.message?.role === 'assistant_stopped' || row.progress?.state === 'stopped') ? ' · stopped' : '' }}<span v-if="part.live && ((!row.progress && row.optimistic) || (row.progress && ['accepted','running','stopping'].includes(row.progress.state)))" class="working-indicator" role="status" aria-label="Response in progress" /></div>
+                <ResponseText v-if="part.text" :text="part.text" />
+              </div>
               <div v-if="row.progress && ['failed','interrupted'].includes(row.progress.state)" class="meta">Response {{ row.progress.state }}. {{ row.progress.error }}</div>
             </template>
           </div>
         </template>
         <div v-else class="empty empty-state"><div class="logo-large"><BrandMark /></div><h2>Message {{ selected.name }}</h2><p>Send a message to start the conversation.</p></div>
         <div v-for="work in unmatched" :key="'unmatched-' + work.id" class="message">
-          <div class="who">{{ selected.name.toUpperCase() }} · request {{ work.id }}</div><ChatWorkItems :work="work" :inbox="relevant" />
+          <ChatWorkItems :work="work" :inbox="relevant" /><div class="who">{{ selected.name }} · request {{ work.id }}</div>
         </div>
         <div v-if="s.responseConnection === 'reconnecting'" class="message meta">Live response updates disconnected. Reconnecting…</div>
         <div v-if="selected.provider === 'codex' && s.credential === 'signed-out'" class="provider">

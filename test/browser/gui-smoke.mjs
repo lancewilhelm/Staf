@@ -528,6 +528,20 @@ try{
  await evaluate("(async()=>{const t=localStorage.getItem('staf-token');await fetch('/api/approval-settings/instance',{method:'POST',headers:{Authorization:'Bearer '+t,'Content-Type':'application/json'},body:JSON.stringify({mode:'never-ask',clockEnabled:true})})})()");
  await act("testInput('[aria-label=Message]','Repeated clock fixture');testClick('Send')","document.querySelector('.messages').innerText.includes('Repeated clocks completed.')",'repeated clock calls complete');
  assert.equal(await evaluate("(()=>{const row=[...document.querySelectorAll('.message')].find(e=>e.innerText.includes('Repeated clocks completed.'));const calls=[...row.querySelectorAll('.tool-call')];return calls.length===2 && calls.every(c=>!c.open && c.innerText.includes('Succeeded'))})()"),true,'repeated calls remain separate collapsed rows');
+ assert.equal(await evaluate("(()=>{const row=[...document.querySelectorAll('.message')].find(e=>e.innerText.includes('Repeated clocks completed.'));return !!(row.querySelector('.tool-call').compareDocumentPosition(row.querySelector('.who')) & Node.DOCUMENT_POSITION_FOLLOWING)})()"),true,'tool calls appear before the agent name');
+ await evaluate("window.timelineFetch=window.fetch;window.timelineHistoryGate=new Promise(resolve=>window.releaseTimelineHistory=resolve);window.fetch=async(...args)=>{if(String(args[0]).endsWith('/chat-work'))await window.timelineHistoryGate;return window.timelineFetch(...args)}");
+ await act("testInput('[aria-label=Message]','Alternating timeline fixture');testClick('Send')","document.querySelector('.messages').innerText.includes('First timeline answer.')",'intermediate text streams after its tool row without history polling');
+ await evaluate("window.timelineText=[...document.querySelectorAll('.bottext')].find(e=>e.textContent.trim()==='First timeline answer.');window.timelineTool=window.timelineText.closest('.response-part').querySelector('.tool-call');window.timelineTool.open=true");
+ server.stdin.write('stream-next\n');
+ await until(()=>evaluate("document.querySelector('.messages').innerText.includes('Final timeline answer.')"),'alternating tools and answers complete');
+ assert.equal(await evaluate("window.timelineText.isConnected && window.timelineTool.isConnected && window.timelineTool.open"),true,'intermediate text and expanded tools keep their DOM identity');
+ const timelineOrder="(()=>{const row=[...document.querySelectorAll('.message')].find(e=>e.innerText.includes('Final timeline answer.'));return [...row.querySelectorAll('.tool-call,.who,.bottext')].map(e=>e.classList.contains('tool-call')?'tool':e.classList.contains('who')?'name':e.textContent.trim())})()";
+ assert.deepEqual(await evaluate(timelineOrder),['tool','name','First timeline answer.','tool','name','Final timeline answer.']);
+ await evaluate("window.fetch=window.timelineFetch;window.releaseTimelineHistory()");
+ await cdp('Page.reload');
+ await until(()=>evaluate("document.querySelector('.messages')?.innerText.includes('Final timeline answer.')"),'alternating timeline survives reload');
+ assert.deepEqual(await evaluate(timelineOrder),['tool','name','First timeline answer.','tool','name','Final timeline answer.']);
+ await evaluate("window.testInput=(selector,value)=>{const el=document.querySelector(selector);Object.getOwnPropertyDescriptor(el.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,'value').set.call(el,value);el.dispatchEvent(new Event('input',{bubbles:true}))};window.testClick=text=>{const b=[...document.querySelectorAll('button')].find(x=>x.textContent.trim()===text);if(!b)throw Error('Missing button '+text);b.click()}");
  await act("testInput('[aria-label=Message]','Scripted clock fixture');testClick('Send')","document.querySelector('.messages').innerText.includes('Scripted clock completed.')",'scripted clock completes in chat');
  await until(()=>evaluate("[...document.querySelectorAll('.chat-work details summary')].some(e=>e.textContent.includes('Code execution · return'))"),'code execution inspection appears');
  await evaluate("[...document.querySelectorAll('.chat-work details summary')].find(e=>e.textContent.includes('Code execution · return')).click()");
@@ -697,6 +711,7 @@ try{
  await act("[...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('New agent')).focus();[...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('New agent')).click()","document.body.innerText.includes('Create agent')",'name-only creation form');
  await cdp('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
  assert.equal(await evaluate("document.querySelector('.editor-label label').textContent"),'Instructions');
+ assert.equal(await evaluate("!!document.querySelector('.instructions-help button svg[aria-hidden=true] circle') && getComputedStyle(document.querySelector('.instructions-help button')).borderTopWidth==='0px'"),true,'Lucide info icon has no duplicate circle border');
  await evaluate("document.querySelector('.instructions-help button').focus()");
  await cdp('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',text:'\r',unmodifiedText:'\r',windowsVirtualKeyCode:13,nativeVirtualKeyCode:13});
  await cdp('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13,nativeVirtualKeyCode:13});
