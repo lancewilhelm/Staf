@@ -97,9 +97,8 @@ corepack pnpm dev:reset
 corepack pnpm dev
 ```
 
-The reset prints a complete backup directory and creates new agent IDs. The seed
-contains Demo agents, short and long conversations, memories, an empty chat, and
-a synthetic failed request. It does not authenticate or call a provider. Normal
+The reset prints a complete backup directory and creates new agent IDs. The reset creates an empty, unconfigured instance. Choose a provider and model
+before creating agents. Reset does not authenticate or call a provider. Normal
 starts retain edits and never run the reset. Reset leaves the `auth` directory
 and any selected `STAF_DEV_CONNECTION_DIR` intact. Use the same environment
 variables for reset, recovery, and startup.
@@ -149,7 +148,7 @@ process termination can leave private staging directories in the data directory.
 For a disposable offline check, run `node --test test/dev-launch.test.js` and
 `node test/browser/dev-smoke.mjs` and `node test/browser/dataset-smoke.mjs` after installing dependencies. The latter
 requires the Chrome executable described below. These checks use synthetic
-credentials and demo responses; they do not prove live sign-in, token refresh,
+credentials and controlled responses; they do not prove live sign-in, token refresh,
 provider access, or inference.
 With commit `d2ab6fc` available in local Git history, `node test/manual/older-writer-probe.mjs`
 also runs its actual older constructor against a paused replacement and after a
@@ -461,7 +460,7 @@ For a manual offline check, use the existing controlled instance above, create a
 
 ## Creation defaults and legacy Demo data
 
-Use a disposable instance when testing default selection or migration. Set a real provider and synthetic model in Settings without signing in. Saving the choice migrates Demo agents, including archived records. To test a failed migration, make a disposable agent configuration invalid, save the default, repair the file, and reload the defaults. The migration retries without replacing agents already moved to a real provider. The seed still contains Demo fixtures for compatibility with the remaining provider removal work.
+Use a disposable instance when testing default selection or migration. Set a real provider and synthetic model in Settings without signing in. Saving the choice migrates Demo agents, including archived records. To test a failed migration, make a disposable agent configuration invalid, save the default, repair the file, and reload the defaults. The migration retries without replacing agents already moved to a real provider.
 ## Verify shared core guidance
 
 After building, run `node --test test/instance-core.test.js`. The disposable

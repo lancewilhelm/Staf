@@ -48,8 +48,7 @@ send existing conversation history to the new provider on the next request.
 
 Provider adapters normalize messages and tools for the runtime. ChatGPT uses direct
 Responses with a Staf-owned grant and model-bound replay. OpenRouter, LM Studio,
-and the generic live adapter use Chat Completions. The demo returns deterministic
-responses. ChatGPT and OpenRouter stream provisional text through the shared service; LM Studio and the generic live adapter buffer provider output. Only completed provider responses are committed as completed replies; stopped partial output is labeled separately. The terminal displays provisional text, command status and persisted tool progress. The service applies permissions and approval
+and the generic live adapter use Chat Completions. ChatGPT and OpenRouter stream provisional text through the shared service; LM Studio and the generic live adapter buffer provider output. Only completed provider responses are committed as completed replies; stopped partial output is labeled separately. The terminal displays provisional text, command status and persisted tool progress. The service applies permissions and approval
 rules before supported actions. See [direct Responses](direct-responses.md),
 [settings](settings.md), and [usage](usage.md).
 
@@ -140,7 +139,7 @@ CLI client uses a separate credential file. Commands claim a bot and append the
 user message transactionally; completed responses are stored with the command
 state. Stop records a durable request while retaining the pending command and its unique busy lock, aborts the running provider and pending operations, and settles only after the turn returns. A late provider result cannot commit after Stop. The partial output is stored as a stopped conversation entry and excluded from provider replay. Restart marks pending or stopping commands interrupted; it does not resume them. SQLite exclusive locking
 prevents a second process from treating active commands as interrupted. The
-service runs demo, ChatGPT, OpenRouter, LM Studio and live with instance or host credentials and an explicit bot model for each non-demo provider. This preview does not implement the LAN,
+service runs ChatGPT, OpenRouter, LM Studio and live with instance or host credentials and an explicit bot model. This preview does not implement the LAN,
 all operational features described in the plans above.
 
 Agent settings and instructions live under `agents/ID/current` beside the
@@ -188,8 +187,7 @@ changed prefix establishes provider cache use. Controlled-provider and scripted
 browser tests cover construction and feedback, not model behavior or cache reuse.
 
 Discovery uses names and owner-edited descriptions. Each accepted command and
-task captures its settings and instructions. The offline demo does not follow
-instructions. The private execution session retains tool history, usage and
+task captures its settings and instructions. The private execution session retains tool history, usage and
 model-bound replay separately from visible chat. Permissions and revocations
 remain service-controlled. Live provider execution remains unverified.
 The shared chat-completions adapter passes caller cancellation and its timeout
@@ -247,8 +245,7 @@ configuration writes. In-flight work may retain a previous key. Service, CLI,
 and served-browser coverage uses synthetic credentials and streaming provider responses, including tool calls and recovery; live OpenRouter conversation and remote-instance access remain unverified.
 
 The agent editor combines its revisioned profile with the authenticated ChatGPT
-and OpenRouter presence statuses to offer configured shared connections and the
-offline Demo provider. It retains an existing disconnected provider, blocks a
+and OpenRouter presence statuses to offer configured shared connections. It retains an existing disconnected provider, blocks a
 new unavailable selection, and keeps unsaved edits mounted while the owner
 visits global Settings. The editor stages the chosen provider and model; the browser confirms the
 potential history disclosure before its profile save.
@@ -402,4 +399,4 @@ resolution or model reconciliation tool. See [the contract](work-actions.md).
 
 ## Creation defaults and Demo migration
 
-Database version 37 records pending Demo migration separately from the saved creation default. The service commits the selected provider and model before publishing revision-checked agent files. It retries pending migration on restart and when clients read or save defaults. It reports file conflicts and blocks new accepted work until the owner repairs the configuration. Already-real agents are skipped on retry. Conversation records and accepted-work profiles are not rewritten. These checks use disposable offline instances and do not establish live provider behavior.
+Demo is not selectable or executable. Before a real default is chosen, legacy Demo agents and their records remain in place and need setup. Database version 37 records pending Demo migration separately from the saved creation default. The service commits the selected provider and model before publishing revision-checked agent files. It retries pending migration on restart and when clients read or save defaults. It reports file conflicts and blocks new accepted work until the owner repairs the configuration. Already-real agents are skipped on retry. Conversation records and accepted-work profiles are not rewritten. These checks use disposable offline instances and do not establish live provider behavior.

@@ -62,9 +62,8 @@ Models and reasoning belong to the bot profile, not environment variables.
 | `STAF_BASE_URL` | live | API root; defaults to `https://api.openai.com/v1/`. |
 | `STAF_API_KEY` | live | Required API key. |
 
-The supported bot providers are demo, ChatGPT, OpenRouter, LM Studio, and live.
-Live providers require an explicit bot model. The demo echoes messages without a
-model. OpenRouter uses its fixed Chat Completions endpoint. The live adapter uses
+The supported bot providers are ChatGPT, OpenRouter, LM Studio, and live.
+Each requires an explicit bot model. OpenRouter uses its fixed Chat Completions endpoint. The live adapter uses
 a generic OpenAI-compatible Chat Completions endpoint and can incur API charges.
 ChatGPT uses direct Responses and a separate Staf OAuth grant. A credential alone
 does not select a provider. Per-bot endpoint overrides are not implemented.
@@ -215,7 +214,7 @@ credentials are required for protected writes. No network transport beyond
 loopback is implemented here. ChatGPT and OpenRouter use instance-owned credentials; LM Studio and live use host configuration. Each requires an explicit bot model. Paired clients have derived
 identifiers; any paired client can list and revoke them. Every paired client is trusted to act for the sole owner, including managing approvals and settings; there is no separate owner role check.
 
-Paired clients can read the latest main-chat progress with `GET /api/bots/{id}/response`, or `responseProgress` within `GET /api/commands/{id}`. The response has the command ID, bot ID, accepted/running/stopping/stopped/completed/failed/interrupted state, provisional text and a safe error. `instance response-follow URL CREDENTIAL_FILE COMMAND_ID` polls and prints changed progress as JSON lines until a terminal state. Text that could complete a known credential may be withheld at chunk boundaries. The service also holds unfinished words for safe URL handling. Provisional snapshots stop growing at one million UTF-16 code units per provider step; the completed response remains available. Version 28 adds a progress table after a database backup; incomplete output is retained separately from committed conversation messages. ChatGPT direct and OpenRouter can emit deltas; LM Studio, generic Chat Completions and demo adapters are buffered. No live provider verification was performed for this change.
+Paired clients can read the latest main-chat progress with `GET /api/bots/{id}/response`, or `responseProgress` within `GET /api/commands/{id}`. The response has the command ID, bot ID, accepted/running/stopping/stopped/completed/failed/interrupted state, provisional text and a safe error. `instance response-follow URL CREDENTIAL_FILE COMMAND_ID` polls and prints changed progress as JSON lines until a terminal state. Text that could complete a known credential may be withheld at chunk boundaries. The service also holds unfinished words for safe URL handling. Provisional snapshots stop growing at one million UTF-16 code units per provider step; the completed response remains available. Version 28 adds a progress table after a database backup; incomplete output is retained separately from committed conversation messages. ChatGPT direct and OpenRouter can emit deltas; LM Studio and generic Chat Completions adapters are buffered. No live provider verification was performed for this change.
 
 Paired clients request Stop with `POST /api/commands/{id}/stop` or `instance response-stop URL CREDENTIAL_FILE COMMAND_ID`. The result is the current progress, including `stopping` while cancellation settles and `stopped` afterward. Repeating a request against the same command returns its current outcome and cannot stop a newer command. The accepted command keeps the per-agent busy lock while stopping; a noncooperative provider can delay settlement. Restart while stopping reports `interrupted`. Version 29 adds the stop journal after a database backup. Stopped partial output is retained as an `assistant_stopped` conversation message, excluded from provider replay.
 

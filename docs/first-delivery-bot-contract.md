@@ -93,7 +93,7 @@ next action. Copying configuration never freezes or expands authority.
 
 An authenticated owner can create or edit a bot before live credentials or model
 selection are ready. Report missing setup when execution is requested and keep
-settings usable. The existing offline demo remains available. Do not silently
+settings usable. The former offline demo was removed after this agreement. Do not silently
 switch providers, select an invented model, or make a live call just to save a
 profile. Provider credentials stay in the instance credential/configuration
 boundary; profiles and clients receive readiness, not the underlying credentials.

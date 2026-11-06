@@ -1,12 +1,16 @@
 import { createInterface } from 'node:readline';
 import { createServer } from 'node:http';
 import { startInstance } from '../../dist/instance-service.js';
-import { demoProvider, openRouterProvider } from '../../dist/providers.js';
+import { Instance } from '../../dist/instance.js';
+import { legacyDemo } from '../fixtures/legacy-agent.mjs';
+import { openRouterProvider } from '../../dist/providers.js';
+import { demoProvider } from '../fixtures/echo-provider.mjs';
 import { loadOpenRouterKey } from '../../dist/openrouter-credential.js';
 import {mkdir,writeFile} from 'node:fs/promises';
 import {join,dirname} from 'node:path';
 
 const [path, port] = process.argv.slice(2);
+if (process.argv.includes('--legacy-fixture')) {const instance=new Instance(path);try {legacyDemo(instance,'Legacy','Keep soul');const archived=legacyDemo(instance,'Archived');instance.setArchived(archived.id,archived.revision,true);} finally {instance.close();}}
 let releaseInputTask, releaseStream, releaseRouter;
 let routerFailed=false;
 function makeProvider() {

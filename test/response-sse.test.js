@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { startInstance } from '../dist/instance-service.js';
+import { startInstance } from './fixtures/controlled-instance.mjs';
 
 async function readEvent(reader) {
   let timer;
@@ -22,7 +22,7 @@ test('paired clients receive live response snapshots and can reconnect without r
   try {
     const token=(await (await call('/api/pair','',{code:app.code})).json()).token;
     const second=(await (await call('/api/pair','',{code:app.issueCode()})).json()).token;
-    const bot=await (await call('/api/bots',token,{provider:'demo',name:'SSE'})).json();
+    const bot=await (await call('/api/bots',token,{provider:'live',model:'fixture-offline',name:'SSE'})).json();
     assert.equal((await call(`/api/bots/${bot.id}/response/stream`,'')).status,401);
     const response=await fetch(`http://127.0.0.1:${port}/api/bots/${bot.id}/response/stream`,{headers:{Authorization:`Bearer ${token}`},signal:abort.signal});
     assert.match(response.headers.get('content-type'),/^text\/event-stream/);
@@ -61,7 +61,7 @@ test('completed responses larger than the stream frame limit remain available in
   const abort=new AbortController();let reader;
   try {
     const token=(await (await call('/api/pair','',{code:app.code})).json()).token;
-    const bot=await (await call('/api/bots',token,{provider:'demo',name:'Large response'})).json();
+    const bot=await (await call('/api/bots',token,{provider:'live',model:'fixture-offline',name:'Large response'})).json();
     const response=await fetch(`http://127.0.0.1:${port}/api/bots/${bot.id}/response/stream`,{headers:{Authorization:`Bearer ${token}`},signal:abort.signal});reader=response.body.getReader();
     await call('/api/commands',token,{id:'large-response',botId:bot.id,content:'go'});
     let buffer='',completed;
@@ -84,7 +84,7 @@ test('response streams reject bad origins and close immediately on client revoca
   try {
     const first=(await (await call('/api/pair','',{code:app.code})).json()).token;
     const second=(await (await call('/api/pair','',{code:app.issueCode()})).json()).token;
-    const bot=await (await call('/api/bots',first,{provider:'demo',name:'Secure stream'})).json();
+    const bot=await (await call('/api/bots',first,{provider:'live',model:'fixture-offline',name:'Secure stream'})).json();
     assert.equal((await call(`/api/bots/${bot.id}/response/stream`,first,undefined,'http://evil.example')).status,403);
     assert.equal((await call('/api/bots/no-such-agent/response/stream',first)).status,404);
     const response=await call(`/api/bots/${bot.id}/response/stream`,first);
@@ -106,7 +106,7 @@ test('a failed response is pushed with its incomplete text',async()=>{
   const abort=new AbortController();let reader;
   try {
     const token=(await (await call('/api/pair','',{code:app.code})).json()).token;
-    const bot=await (await call('/api/bots',token,{provider:'demo',name:'Failure'})).json();
+    const bot=await (await call('/api/bots',token,{provider:'live',model:'fixture-offline',name:'Failure'})).json();
     const response=await fetch(`http://127.0.0.1:${port}/api/bots/${bot.id}/response/stream`,{headers:{Authorization:`Bearer ${token}`},signal:abort.signal});reader=response.body.getReader();
     await call('/api/commands',token,{id:'failure-stream',botId:bot.id,content:'go'});
     let output='';for(let i=0;i<10&&!output.includes('Incomplete answer');i++){const part=await readEvent(reader);if(part.done)break;output+=new TextDecoder().decode(part.value);}

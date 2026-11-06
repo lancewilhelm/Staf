@@ -21,7 +21,7 @@ test('durable claims, busy drafts, duplicate IDs and restart interruption', () =
   const path = join(dir, 'instance.sqlite');
   let instance = new Instance(path);
   try {
-    const bot = instance.createBot({name: 'Ada', instructions: 'Help', provider: 'demo'});
+    const bot = instance.createBot({name: 'Ada', instructions: 'Help', provider:'live',model:'fixture-offline'});
     assert.equal(instance.claim({id:'one', botId:bot.id, content:'hello'}).kind, 'accepted');
     assert.equal(instance.claim({id:'two', botId:bot.id, content:'draft'}).kind, 'busy');
     assert.equal(instance.command('two'), undefined);
@@ -66,7 +66,7 @@ test('upgrades an existing database after making a readable backup', async () =>
 
 test('upgrading a journal database keeps unverifiable legacy command IDs fail closed', async () => {
  const {DatabaseSync}=await import('node:sqlite');const {readdirSync}=await import('node:fs');const dir=mkdtempSync(join(tmpdir(),'staf-fingerprint-migration-')),path=join(dir,'db');let instance=new Instance(path);
- const bot=instance.createBot({name:'Ada',instructions:'',provider:'demo'});instance.claim({id:'legacy',botId:bot.id,content:'[REDACTED]'});instance.complete('legacy','done');instance.close();
+ const bot=instance.createBot({name:'Ada',instructions:'',provider:'live',model:'fixture-offline'});instance.claim({id:'legacy',botId:bot.id,content:'[REDACTED]'});instance.complete('legacy','done');instance.close();
  const legacy=new DatabaseSync(path);legacy.exec('DROP TABLE task_inbox; DROP TABLE task_questions; DROP TABLE command_fingerprints; DROP TABLE instance_secrets; DROP TABLE schedule_task_retries; DROP TABLE schedule_occurrences; DROP TABLE schedules; PRAGMA user_version=1;');legacy.close();
  try{instance=new Instance(path);assert.ok(readdirSync(dir).some(name=>name.startsWith('db.before-profiles-')));assert.equal(instance.command('legacy').state,'completed');assert.throws(()=>instance.claim({id:'legacy',botId:bot.id,content:'[REDACTED]'}),/unverifiable/);assert.throws(()=>instance.claim({id:'legacy',botId:bot.id,content:'a secret'},'[REDACTED]'),/unverifiable/);assert.equal(instance.claim({id:'new',botId:bot.id,content:'hello'}).kind,'accepted');}finally{instance.close();rmSync(dir,{recursive:true,force:true});}
 });
@@ -80,7 +80,7 @@ test('new instance databases and SQLite journal are owner-only under a permissiv
   import {join} from 'node:path';
   process.umask(0o022);
   const path=join(process.argv[1],'new.sqlite');
-  const instance=new Instance(path);instance.createBot({name:'private',instructions:'private',provider:'demo'});instance.close();
+  const instance=new Instance(path);instance.createBot({name:'private',instructions:'private',provider:'live',model:'fixture-offline'});instance.close();
   const db=new DatabaseSync(path);db.exec("PRAGMA journal_mode=PERSIST; BEGIN IMMEDIATE; UPDATE bots SET name='updated'; COMMIT;");
   const journal=path+'-journal';const result={database:statSync(path).mode & 0o777,journal:existsSync(journal)?statSync(journal).mode & 0o777:null};db.close();
   const existing=join(process.argv[1],'existing.sqlite');const old=new DatabaseSync(existing);old.exec('PRAGMA user_version=3');old.close();chmodSync(existing,0o644);
@@ -95,7 +95,7 @@ test('new instance databases and SQLite journal are owner-only under a permissiv
 test('version 11 bot profiles migrate with backed-up empty descriptions', async () => {
  const {DatabaseSync}=await import('node:sqlite'); const {readdirSync}=await import('node:fs');
  const dir=mkdtempSync(join(tmpdir(),'staf-description-')), path=join(dir,'db');
- let instance=new Instance(path); const bot=instance.createBot({name:'Ada',instructions:'private',provider:'demo'}); instance.close();
+ let instance=new Instance(path); const bot=instance.createBot({name:'Ada',instructions:'private',provider:'live',model:'fixture-offline'}); instance.close();
  const db=new DatabaseSync(path); db.exec("ALTER TABLE bot_profiles DROP COLUMN description; PRAGMA user_version=11"); db.close();
  try {instance=new Instance(path); assert.equal(instance.bot(bot.id).description,''); assert.ok(readdirSync(dir).some(name=>name.startsWith('db.before-bot-description-'))); const backup=new DatabaseSync(instance.migrationBackup,{readOnly:true}); try {assert.equal(backup.prepare('PRAGMA user_version').get().user_version,11);} finally {backup.close();}} finally {instance?.close();rmSync(dir,{recursive:true,force:true});}
 });
@@ -103,7 +103,7 @@ test('version 11 bot profiles migrate with backed-up empty descriptions', async 
 test('delegation clock scope is explicit, durable, and cannot change on retry', () => {
  const dir=mkdtempSync(join(tmpdir(),'staf-delegation-scope-')), path=join(dir,'db'); let instance=new Instance(path);
  try {
-  const bot=instance.createBot({name:'Ada',instructions:'',provider:'demo'});
+  const bot=instance.createBot({name:'Ada',instructions:'',provider:'live',model:'fixture-offline'});
   assert.equal(instance.acceptTask({id:'first',botId:bot.id,objective:'First',limitMs:1000}).attempt.delegationClock,0);
   instance.taskStart('first'); instance.taskFinish('first','failed','failed');
   assert.throws(()=>instance.acceptTask({id:'changed',botId:bot.id,objective:'First',limitMs:1000,predecessor:'first',delegateClock:true}),/scope/);
@@ -120,7 +120,7 @@ test('delegation clock scope is explicit, durable, and cannot change on retry', 
 test('helper preparation commits one bounded request and isolated helper attempt atomically', () => {
  const instance=new Instance(':memory:');
  try {
-  const owner=instance.createBot({name:'Owner',instructions:'',provider:'demo'}), helper=instance.createBot({name:'Helper',instructions:'',provider:'demo'});
+  const owner=instance.createBot({name:'Owner',instructions:'',provider:'live',model:'fixture-offline'}), helper=instance.createBot({name:'Helper',instructions:'',provider:'live',model:'fixture-offline'});
   instance.claim({id:'private',botId:helper.id,content:'helper main chat secret'});instance.complete('private','private response');
   instance.acceptTask({id:'parent',botId:owner.id,objective:'Parent objective',limitMs:1000});instance.taskStart('parent');
   const input={parentAttemptId:'parent',commandId:'call-1',helperBotId:helper.id,objective:'Check fact',context:'Only this brief'};
@@ -138,7 +138,7 @@ test('helper preparation commits one bounded request and isolated helper attempt
 
 test('helper completion records the correlated result and delivers it once to the parent inbox', () => {
  const instance=new Instance(':memory:');try {
-  const owner=instance.createBot({name:'Owner',instructions:'',provider:'demo'}), helper=instance.createBot({name:'Helper',instructions:'',provider:'demo'});
+  const owner=instance.createBot({name:'Owner',instructions:'',provider:'live',model:'fixture-offline'}), helper=instance.createBot({name:'Helper',instructions:'',provider:'live',model:'fixture-offline'});
   instance.acceptTask({id:'p',botId:owner.id,objective:'Parent',limitMs:1000});instance.taskStart('p');
   const {helperAttemptId}=beginApproved(instance,{parentAttemptId:'p',commandId:'call',helperBotId:helper.id,objective:'Check',context:'Only this'});
   instance.taskStart(helperAttemptId);
@@ -152,7 +152,7 @@ test('helper completion records the correlated result and delivers it once to th
 
 test('helper clock requires explicit root scope and current intersected permissions and modes', () => {
  const instance=new Instance(':memory:');try {
-  const owner=instance.createBot({name:'Owner',instructions:'',provider:'demo'}), helper=instance.createBot({name:'Helper',instructions:'',provider:'demo'});
+  const owner=instance.createBot({name:'Owner',instructions:'',provider:'live',model:'fixture-offline'}), helper=instance.createBot({name:'Helper',instructions:'',provider:'live',model:'fixture-offline'});
   instance.acceptTask({id:'p',botId:owner.id,objective:'Parent',limitMs:1000,delegateClock:true});instance.taskStart('p');
   const {helperAttemptId}=beginApproved(instance,{parentAttemptId:'p',commandId:'call',helperBotId:helper.id,objective:'Check',context:'Only this'});instance.taskStart(helperAttemptId);
   assert.equal(instance.clockDecision(helper.id,'task',helperAttemptId).outcome,'allow');
@@ -165,7 +165,7 @@ test('helper clock requires explicit root scope and current intersected permissi
 
 test('stopping a parent cancels helper and records a late result without inbox delivery', () => {
  const instance=new Instance(':memory:');try {
-  const owner=instance.createBot({name:'Owner',instructions:'',provider:'demo'}), helper=instance.createBot({name:'Helper',instructions:'',provider:'demo'});
+  const owner=instance.createBot({name:'Owner',instructions:'',provider:'live',model:'fixture-offline'}), helper=instance.createBot({name:'Helper',instructions:'',provider:'live',model:'fixture-offline'});
   instance.acceptTask({id:'p',botId:owner.id,objective:'Parent',limitMs:1000,delegateClock:true});instance.taskStart('p');
   const {helperAttemptId}=beginApproved(instance,{parentAttemptId:'p',commandId:'call',helperBotId:helper.id,objective:'Check',context:'Only this'});instance.taskStart(helperAttemptId);
   instance.taskStop('p','Stop');assert.equal(instance.taskAttempt(helperAttemptId).state,'stopping');
@@ -178,7 +178,7 @@ test('stopping a parent cancels helper and records a late result without inbox d
 
 test('replacement records its explicit helper scope and conflicts if the retry changes it',()=>{
  const instance=new Instance(':memory:');try{
-  const bot=instance.createBot({name:'Owner',instructions:'',provider:'demo'});instance.acceptTask({id:'p',botId:bot.id,objective:'Old',limitMs:1000});instance.taskStart('p');
+  const bot=instance.createBot({name:'Owner',instructions:'',provider:'live',model:'fixture-offline'});instance.acceptTask({id:'p',botId:bot.id,objective:'Old',limitMs:1000});instance.taskStart('p');
   const input={id:'next',predecessor:'p',objective:'New',limitMs:1000,delegateClock:true};
   assert.equal(instance.replaceTask(input).attempt.delegationClock,1);assert.equal(instance.replaceTask(input).kind,'existing');
   assert.throws(()=>instance.replaceTask({...input,delegateClock:false}),/conflict/);
@@ -187,7 +187,7 @@ test('replacement records its explicit helper scope and conflicts if the retry c
 
 test('disclosure approval is bound to exact direction, recipient, kind and content',()=>{
  const instance=new Instance(':memory:');try{
-  const owner=instance.createBot({name:'Owner',instructions:'',provider:'demo'}), helper=instance.createBot({name:'Helper',instructions:'',provider:'demo'}), other=instance.createBot({name:'Other',instructions:'',provider:'demo'});
+  const owner=instance.createBot({name:'Owner',instructions:'',provider:'live',model:'fixture-offline'}), helper=instance.createBot({name:'Helper',instructions:'',provider:'live',model:'fixture-offline'}), other=instance.createBot({name:'Other',instructions:'',provider:'live',model:'fixture-offline'});
   instance.acceptTask({id:'p',botId:owner.id,objective:'Parent',limitMs:1000});instance.taskStart('p');
   const request={parentAttemptId:'p',senderBotId:owner.id,recipientBotId:helper.id,kind:'request',content:'Check\n\nAssignment context:\nOnly this'};
   const id=instance.proposeDisclosure(request);assert.throws(()=>instance.consumeDisclosure(id,request),/approval/);instance.decideDisclosure(id,true);
@@ -198,7 +198,7 @@ test('disclosure approval is bound to exact direction, recipient, kind and conte
 
 test('pending parent directions block approved helper requests and answers at dispatch',()=>{
  const instance=new Instance(':memory:');try{
-  const owner=instance.createBot({name:'Owner',instructions:'',provider:'demo'}),helper=instance.createBot({name:'Helper',instructions:'',provider:'demo'});
+  const owner=instance.createBot({name:'Owner',instructions:'',provider:'live',model:'fixture-offline'}),helper=instance.createBot({name:'Helper',instructions:'',provider:'live',model:'fixture-offline'});
   instance.acceptTask({id:'p',botId:owner.id,objective:'Parent',limitMs:1000});instance.taskStart('p');
   const input={parentAttemptId:'p',commandId:'call',helperBotId:helper.id,objective:'Check',context:'Only this'};
   const content='Check\n\nAssignment context:\nOnly this';const approval=instance.proposeDisclosure({parentAttemptId:'p',senderBotId:owner.id,recipientBotId:helper.id,kind:'request',content});instance.decideDisclosure(approval,true);
@@ -219,7 +219,7 @@ test('pending parent directions block approved helper requests and answers at di
 
 test('pending parent input invalidates helper question and result disclosures without sending',()=>{
  const instance=new Instance(':memory:');try{
-  const owner=instance.createBot({name:'Owner',instructions:'',provider:'demo'}),helper=instance.createBot({name:'Helper',instructions:'',provider:'demo'});
+  const owner=instance.createBot({name:'Owner',instructions:'',provider:'live',model:'fixture-offline'}),helper=instance.createBot({name:'Helper',instructions:'',provider:'live',model:'fixture-offline'});
   instance.acceptTask({id:'p',botId:owner.id,objective:'Parent',limitMs:1000});instance.taskStart('p');
   const {helperAttemptId}=beginApproved(instance,{parentAttemptId:'p',commandId:'call',helperBotId:helper.id,objective:'Check',context:'Only this'});instance.taskStart(helperAttemptId);
   const question=instance.proposeDisclosure({parentAttemptId:'p',senderBotId:helper.id,recipientBotId:owner.id,kind:'question',content:'Which source?'});instance.decideDisclosure(question,true);
@@ -236,23 +236,23 @@ test('pending parent input invalidates helper question and result disclosures wi
 test('creation defaults are revision safe and copied once into new bots',()=>{
  const dir=mkdtempSync(join(tmpdir(),'staf-defaults-')),path=join(dir,'db');let instance=new Instance(path);
  try{
-  const old=instance.createBot({name:'Old',instructions:'',provider:'demo'});const initial=instance.creationDefaults();
+  const old=instance.createBot({name:'Old',instructions:'',provider:'live',model:'fixture-offline'});const initial=instance.creationDefaults();
   const updated=instance.setCreationDefaults({revision:initial.revision,provider:'codex',model:'synthetic-model',reasoning:'high'});
   assert.throws(()=>instance.setCreationDefaults({revision:initial.revision,provider:'codex',model:'stale',reasoning:null}),/changed/);
   const created=instance.createBot({name:'New',instructions:''});assert.equal(created.provider,'codex');assert.equal(created.model,'synthetic-model');assert.equal(created.reasoning,'high');
-  instance.setCreationDefaults({revision:updated.revision,provider:'openrouter',model:'other',reasoning:null});assert.equal(instance.bot(old.id).provider,'codex');assert.equal(instance.bot(created.id).model,'synthetic-model');
+  instance.setCreationDefaults({revision:updated.revision,provider:'openrouter',model:'other',reasoning:null});assert.equal(instance.bot(old.id).provider,'live');assert.equal(instance.bot(created.id).model,'synthetic-model');
   instance.close();instance=new Instance(path);assert.equal(instance.creationDefaults().provider,'openrouter');assert.equal(instance.bot(created.id).provider,'codex');
  }finally{instance.close();rmSync(dir,{recursive:true,force:true});}
 });
 
 
 test('chat task command identity rejects changed objectives and permits only one attempt per command',()=>{
- const instance=new Instance(':memory:');try{const bot=instance.createBot({name:'Owner',instructions:'',provider:'demo'});instance.claim({id:'chat',botId:bot.id,content:'Investigate'});const first=instance.startChatTask('chat','call','Original');assert.equal(first.kind,'accepted');assert.equal(instance.startChatTask('chat','call','Original').kind,'existing');assert.throws(()=>instance.startChatTask('chat','call','Changed'),/already requested/);assert.throws(()=>instance.startChatTask('chat','another','Original'),/already requested/);assert.equal(instance.taskAttempts(bot.id).length,1);}finally{instance.close();}
+ const instance=new Instance(':memory:');try{const bot=instance.createBot({name:'Owner',instructions:'',provider:'live',model:'fixture-offline'});instance.claim({id:'chat',botId:bot.id,content:'Investigate'});const first=instance.startChatTask('chat','call','Original');assert.equal(first.kind,'accepted');assert.equal(instance.startChatTask('chat','call','Original').kind,'existing');assert.throws(()=>instance.startChatTask('chat','call','Changed'),/already requested/);assert.throws(()=>instance.startChatTask('chat','another','Original'),/already requested/);assert.equal(instance.taskAttempts(bot.id).length,1);}finally{instance.close();}
 });
 
 test('web permissions default off and cannot grant helper or scheduled reads',()=>{
  const instance=new Instance(':memory:');try{
-  const owner=instance.createBot({name:'Owner',instructions:'',provider:'demo'}),helper=instance.createBot({name:'Helper',instructions:'',provider:'demo'});instance.setWebPermission('instance',true);instance.setWebPermission(`bot:${owner.id}`,true);instance.setWebPermission(`bot:${helper.id}`,true);
+  const owner=instance.createBot({name:'Owner',instructions:'',provider:'live',model:'fixture-offline'}),helper=instance.createBot({name:'Helper',instructions:'',provider:'live',model:'fixture-offline'});instance.setWebPermission('instance',true);instance.setWebPermission(`bot:${owner.id}`,true);instance.setWebPermission(`bot:${helper.id}`,true);
   instance.acceptTask({id:'p',botId:owner.id,objective:'Parent',limitMs:1000});instance.taskStart('p');assert.equal(instance.webAllowed({kind:'task',id:'p'}),false);instance.setWebPermission('task:p',true);assert.equal(instance.webAllowed({kind:'task',id:'p'}),true);
   const {helperAttemptId}=beginApproved(instance,{parentAttemptId:'p',commandId:'call',helperBotId:helper.id,objective:'Check',context:'Only this'});instance.taskStart(helperAttemptId);instance.setWebPermission(`task:${helperAttemptId}`,true);assert.equal(instance.webCanOffer({kind:'task',id:helperAttemptId}),false);assert.equal(instance.webAllowed({kind:'task',id:helperAttemptId}),false);
   instance.taskStop('p','stop');instance.taskFinish('p','stopped','stopped');instance.taskFinish(helperAttemptId,'stopped','stopped');
@@ -261,14 +261,14 @@ test('web permissions default off and cannot grant helper or scheduled reads',()
 });
 
 test('search stays blocked for helpers and schedules despite enabled scopes',()=>{
- const instance=new Instance(':memory:');try{const owner=instance.createBot({name:'Owner',instructions:'',provider:'demo'}),helper=instance.createBot({name:'Helper',instructions:'',provider:'demo'});const config=instance.searchConfig();instance.setSearchConfig({revision:config.revision,origin:'http://127.0.0.1:8888'});instance.setSearchPermission('instance',true);instance.setSearchPermission(`bot:${owner.id}`,true);instance.setSearchPermission(`bot:${helper.id}`,true);instance.acceptTask({id:'p',botId:owner.id,objective:'Parent',limitMs:1000});instance.taskStart('p');assert.equal(instance.searchAllowed({kind:'task',id:'p'},'http://127.0.0.1:8888',2),false);instance.setSearchPermission('task:p',true);assert.equal(instance.searchAllowed({kind:'task',id:'p'},'http://127.0.0.1:8888',2),true);
+ const instance=new Instance(':memory:');try{const owner=instance.createBot({name:'Owner',instructions:'',provider:'live',model:'fixture-offline'}),helper=instance.createBot({name:'Helper',instructions:'',provider:'live',model:'fixture-offline'});const config=instance.searchConfig();instance.setSearchConfig({revision:config.revision,origin:'http://127.0.0.1:8888'});instance.setSearchPermission('instance',true);instance.setSearchPermission(`bot:${owner.id}`,true);instance.setSearchPermission(`bot:${helper.id}`,true);instance.acceptTask({id:'p',botId:owner.id,objective:'Parent',limitMs:1000});instance.taskStart('p');assert.equal(instance.searchAllowed({kind:'task',id:'p'},'http://127.0.0.1:8888',2),false);instance.setSearchPermission('task:p',true);assert.equal(instance.searchAllowed({kind:'task',id:'p'},'http://127.0.0.1:8888',2),true);
   const {helperAttemptId}=beginApproved(instance,{parentAttemptId:'p',commandId:'call',helperBotId:helper.id,objective:'Check',context:'Only this'});instance.taskStart(helperAttemptId);instance.setSearchPermission(`task:${helperAttemptId}`,true);assert.equal(instance.searchCanOffer({kind:'task',id:helperAttemptId}),false);assert.equal(instance.searchAllowed({kind:'task',id:helperAttemptId},'http://127.0.0.1:8888',2),false);instance.taskStop('p','stop');instance.taskFinish('p','stopped','stopped');instance.taskFinish(helperAttemptId,'stopped','stopped');
   const due=Date.parse('2024-03-01T12:00:00Z'),schedule=instance.schedules.create({botId:owner.id,objective:'Scheduled',recurrence:{kind:'daily',timeZone:'UTC',hour:12,minute:0},maxLatenessMs:300000,cursor:due-3600000,enabled:true,authorization:{action:'clock.read',resource:'utc',limits:{reads:'permitted'}}}),occurrence=instance.scheduleTick(schedule.id,due);instance.taskStart(occurrence.task_id);instance.setSearchPermission(`task:${occurrence.task_id}`,true);assert.equal(instance.searchCanOffer({kind:'task',id:occurrence.task_id}),false);assert.equal(instance.searchAllowed({kind:'task',id:occurrence.task_id},'http://127.0.0.1:8888',2),false);
  }finally{instance.close();}
 });
 
 test('shell permissions remain disabled for helper and scheduled attempts',()=>{
- const instance=new Instance(':memory:');try{const owner=instance.createBot({name:'Owner',instructions:'',provider:'demo'}),helper=instance.createBot({name:'Helper',instructions:'',provider:'demo'}),base=instance.shellConfig(),config=instance.setShellConfig({revision:base.revision,dockerBinary:'/usr/bin/docker',dockerSocket:'/tmp/synthetic.sock',imageId:'sha256:'+'a'.repeat(64)});instance.setShellPermission('instance',true);instance.setShellPermission(`bot:${owner.id}`,true);instance.setShellPermission(`bot:${helper.id}`,true);instance.acceptTask({id:'p',botId:owner.id,objective:'Parent',limitMs:1000});instance.taskStart('p');assert.equal(instance.shellAllowed({kind:'task',id:'p'},config.revision),false);instance.setShellPermission('task:p',true);assert.equal(instance.shellAllowed({kind:'task',id:'p'},config.revision),true);
+ const instance=new Instance(':memory:');try{const owner=instance.createBot({name:'Owner',instructions:'',provider:'live',model:'fixture-offline'}),helper=instance.createBot({name:'Helper',instructions:'',provider:'live',model:'fixture-offline'}),base=instance.shellConfig(),config=instance.setShellConfig({revision:base.revision,dockerBinary:'/usr/bin/docker',dockerSocket:'/tmp/synthetic.sock',imageId:'sha256:'+'a'.repeat(64)});instance.setShellPermission('instance',true);instance.setShellPermission(`bot:${owner.id}`,true);instance.setShellPermission(`bot:${helper.id}`,true);instance.acceptTask({id:'p',botId:owner.id,objective:'Parent',limitMs:1000});instance.taskStart('p');assert.equal(instance.shellAllowed({kind:'task',id:'p'},config.revision),false);instance.setShellPermission('task:p',true);assert.equal(instance.shellAllowed({kind:'task',id:'p'},config.revision),true);
   const {helperAttemptId}=beginApproved(instance,{parentAttemptId:'p',commandId:'call',helperBotId:helper.id,objective:'Check',context:'Only this'});instance.taskStart(helperAttemptId);instance.setShellPermission(`task:${helperAttemptId}`,true);assert.equal(instance.shellCanOffer({kind:'task',id:helperAttemptId}),false);assert.equal(instance.shellAllowed({kind:'task',id:helperAttemptId},config.revision),false);instance.taskStop('p','stop');instance.taskFinish('p','stopped','stopped');instance.taskFinish(helperAttemptId,'stopped','stopped');
   const due=Date.parse('2024-03-01T12:00:00Z'),schedule=instance.schedules.create({botId:owner.id,objective:'Scheduled',recurrence:{kind:'daily',timeZone:'UTC',hour:12,minute:0},maxLatenessMs:300000,cursor:due-3600000,enabled:true,authorization:{action:'clock.read',resource:'utc',limits:{reads:'permitted'}}}),occurrence=instance.scheduleTick(schedule.id,due);instance.taskStart(occurrence.task_id);instance.setShellPermission(`task:${occurrence.task_id}`,true);assert.equal(instance.shellCanOffer({kind:'task',id:occurrence.task_id}),false);assert.equal(instance.shellAllowed({kind:'task',id:occurrence.task_id},config.revision),false);
  }finally{instance.close();}

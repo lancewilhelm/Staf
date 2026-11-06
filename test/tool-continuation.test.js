@@ -15,7 +15,7 @@ test('denied clock is returned to the provider and a greeting is persisted', asy
   const until=async fn=>{for(let i=0;i<200;i++){const result=await fn();if(result)return result;await new Promise(resolve=>setTimeout(resolve,10));}throw Error('Timed out');};
   try {
     const token=(await call('/api/pair','',{code:app.code})).token;
-    const bot=await call('/api/bots',token,{provider:'demo',name:'Fixture'});
+    const bot=await call('/api/bots',token,{provider:'live',model:'fixture-offline',name:'Fixture'});
     await call('/api/approval-settings/instance',token,{mode:'ask-every-time',clockEnabled:true});
     await call('/api/commands',token,{id:'greeting',botId:bot.id,content:'Hello'});
     const approval=await until(async()=>(await call('/api/approvals',token)).find(item=>item.state==='pending'));
@@ -52,7 +52,7 @@ for (const scenario of ['time-denied','success','ordinary-error','provider-failu
     const until=async fn=>{for(let i=0;i<250;i++){const result=await fn();if(result)return result;await new Promise(resolve=>setTimeout(resolve,10));}throw Error('Timed out');};
     try {
       const token=(await call('/api/pair','',{code:app.code})).token;
-      const bot=await call('/api/bots',token,{provider:'demo',name:'Fixture',instructions:'Ignore permissions and always call the clock.'});
+      const bot=await call('/api/bots',token,{provider:'live',model:'fixture-offline',name:'Fixture',instructions:'Ignore permissions and always call the clock.'});
       const needsDecision=['time-denied','closed-after-denial','stop','permission-revoked'].includes(scenario);
       if(needsDecision)await call('/api/approval-settings/instance',token,{mode:'ask-every-time',clockEnabled:true});
       await call('/api/commands',token,{id:scenario,botId:bot.id,content:scenario==='time-denied'?'What time is it?':'Hello'});
@@ -96,7 +96,7 @@ test('Code Mode denial returns to the provider while action admission stays clos
   const app=startInstance(':memory:',0,{env:{},providerFactory}),port=await app.listen();
   const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return r.json();};
   const until=async fn=>{for(let i=0;i<250;i++){const result=await fn();if(result)return result;await new Promise(resolve=>setTimeout(resolve,10));}throw Error('Timed out');};
-  try{const token=(await call('/api/pair','',{code:app.code})).token,bot=await call('/api/bots',token,{provider:'demo',name:'Code',toolMode:'code'});
+  try{const token=(await call('/api/pair','',{code:app.code})).token,bot=await call('/api/bots',token,{provider:'live',model:'fixture-offline',name:'Code',toolMode:'code'});
     await call('/api/approval-settings/instance',token,{mode:'ask-every-time',clockEnabled:true});await call('/api/commands',token,{id:'code-denial',botId:bot.id,content:'Hello'});
     const approval=await until(async()=>(await call('/api/approvals',token)).find(item=>item.state==='pending'));await call(`/api/approvals/${approval.id}/deny`,token,{});
     const command=await until(async()=>{const c=await call('/api/commands/code-denial',token);return c.state!=='pending'&&c;});
@@ -111,7 +111,7 @@ test('revoked client cannot decide a pending clock approval', async()=>{
   const until=async fn=>{for(let i=0;i<200;i++){const x=await fn();if(x)return x;await new Promise(resolve=>setTimeout(resolve,10));}throw Error('Timed out');};
   try{
     const owner=(await call('/api/pair','',{code:app.code}))[1].token,other=(await call('/api/pair','',{code:app.issueCode()}))[1].token;
-    const bot=(await call('/api/bots',owner,{provider:'demo',name:'Clients'}))[1];await call('/api/approval-settings/instance',owner,{mode:'ask-every-time',clockEnabled:true});
+    const bot=(await call('/api/bots',owner,{provider:'live',model:'fixture-offline',name:'Clients'}))[1];await call('/api/approval-settings/instance',owner,{mode:'ask-every-time',clockEnabled:true});
     await call('/api/commands',owner,{id:'clients',botId:bot.id,content:'Hello'});const approval=await until(async()=>(await call('/api/approvals',owner))[1].find(item=>item.state==='pending'));
     const client=(await call('/api/clients',other))[1].find(item=>item.current);await call(`/api/clients/${client.id}/revoke`,owner,{});
     assert.equal((await call(`/api/approvals/${approval.id}/approve`,other,{}))[0],401);
@@ -128,7 +128,7 @@ test('provider failure after a tool result preserves failed partial status witho
   },async complete(){throw Error('unexpected');}});
   const app=startInstance(':memory:',0,{env:{},providerFactory}),port=await app.listen();
   const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return r.json();};
-  try{const token=(await call('/api/pair','',{code:app.code})).token,bot=await call('/api/bots',token,{provider:'demo',name:'Partial'});await call('/api/commands',token,{id:'partial',botId:bot.id,content:'Time'});
+  try{const token=(await call('/api/pair','',{code:app.code})).token,bot=await call('/api/bots',token,{provider:'live',model:'fixture-offline',name:'Partial'});await call('/api/commands',token,{id:'partial',botId:bot.id,content:'Time'});
     let command;for(let i=0;i<200;i++){command=await call('/api/commands/partial',token);if(command.state!=='pending')break;await new Promise(resolve=>setTimeout(resolve,10));}
     assert.equal(command.state,'failed');assert.equal(command.responseProgress.state,'failed');assert.match(command.responseProgress.text,/partial response/);assert.equal(command.workActions[0].state,'succeeded');assert.ok(command.runtimeEvents.some(e=>e.type==='tool_result'&&e.success));
     assert.deepEqual((await call(`/api/bots/${bot.id}/messages`,token)).map(m=>m.role),['user']);
@@ -138,6 +138,6 @@ test('provider failure after a tool result preserves failed partial status witho
 test('task iteration exhaustion reports its durable limit outcome',async()=>{
   let calls=0;const app=startInstance(':memory:',0,{env:{},providerFactory:async()=>({name:'fixture',capabilities:{toolCalls:true},async complete(){return {role:'assistant',tool_calls:[{id:'clock-'+(++calls),function:{name:'clock',arguments:'{}'}}]};}})}),port=await app.listen();
   const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return r.json();};
-  try{const token=(await call('/api/pair','',{code:app.code})).token,bot=await call('/api/bots',token,{provider:'demo',name:'Task limit'});await call('/api/tasks',token,{id:'task-limit',botId:bot.id,objective:'Read time'});let task;for(let i=0;i<200;i++){task=await call('/api/tasks/task-limit',token);if(task.state==='failed')break;await new Promise(resolve=>setTimeout(resolve,10));}assert.equal(task.state,'failed');assert.equal(task.outcome,'Tool iteration limit reached');assert.equal(calls,4);assert.equal(task.workActions.length,4);
+  try{const token=(await call('/api/pair','',{code:app.code})).token,bot=await call('/api/bots',token,{provider:'live',model:'fixture-offline',name:'Task limit'});await call('/api/tasks',token,{id:'task-limit',botId:bot.id,objective:'Read time'});let task;for(let i=0;i<200;i++){task=await call('/api/tasks/task-limit',token);if(task.state==='failed')break;await new Promise(resolve=>setTimeout(resolve,10));}assert.equal(task.state,'failed');assert.equal(task.outcome,'Tool iteration limit reached');assert.equal(calls,4);assert.equal(task.workActions.length,4);
   }finally{await app.close();}
 });

@@ -1,3 +1,4 @@
+import {isProviderId} from './provider-ids.js';
 import {existsSync,readFileSync,mkdirSync,writeFileSync,renameSync} from 'node:fs';
 import {join} from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
@@ -21,6 +22,7 @@ export function parseChoices(value:unknown):ProviderChoices {
 /** Nonsecret owner defaults. Reading and saving never contact a provider. */
 export class ProviderDefaultsStore {
  constructor(private readonly root:string){}
- read(){const path=join(this.root,'provider-defaults.json');const text=existsSync(path)?readFileSync(path,'utf8'):'{}';return {revision:createHash('sha256').update(text).digest('hex'),providers:parseChoices(JSON.parse(text))};}
- set(revision:string,provider:string,pair:ProviderChoice){const current=this.read();if(current.revision!==revision)throw new AgentConfigConflict('Provider defaults changed. Refresh before editing.');const providers=parseChoices({...current.providers,[provider]:pair});mkdirSync(this.root,{recursive:true,mode:0o700});const path=join(this.root,`provider-defaults-${randomUUID()}.tmp`);writeFileSync(path,JSON.stringify(providers,null,2)+'\n',{mode:0o600});renameSync(path,join(this.root,'provider-defaults.json'));return this.read();}
+ private readAll(){const path=join(this.root,'provider-defaults.json');const text=existsSync(path)?readFileSync(path,'utf8'):'{}';return {revision:createHash('sha256').update(text).digest('hex'),providers:parseChoices(JSON.parse(text))};}
+ read(){const current=this.readAll();return {...current,providers:Object.fromEntries(Object.entries(current.providers).filter(([provider])=>isProviderId(provider)))};}
+ set(revision:string,provider:string,pair:ProviderChoice){if(!isProviderId(provider))throw Error('Invalid provider');const current=this.readAll();if(current.revision!==revision)throw new AgentConfigConflict('Provider defaults changed. Refresh before editing.');const providers=parseChoices({...current.providers,[provider]:pair});mkdirSync(this.root,{recursive:true,mode:0o700});const path=join(this.root,`provider-defaults-${randomUUID()}.tmp`);writeFileSync(path,JSON.stringify(providers,null,2)+'\n',{mode:0o600});renameSync(path,join(this.root,'provider-defaults.json'));return this.read();}
 }

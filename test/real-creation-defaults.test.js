@@ -5,13 +5,15 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Instance } from '../dist/instance.js';
 
+import {legacyDemo} from './fixtures/legacy-agent.mjs';
+
 test('real defaults migrate active and archived Demo agents without changing history or other providers', () => {
  const dir=mkdtempSync(join(tmpdir(),'staf-real-defaults-')), path=join(dir,'db'); let instance=new Instance(path);
  try {
   assert.equal(instance.creationDefaults().provider, '');
   assert.throws(()=>instance.createBot({name:'Unset',instructions:''}), /choose.*provider/i);
-  const demo=instance.createBot({name:'Demo',instructions:'Keep me',provider:'demo'});
-  const archived=instance.createBot({name:'Archived',instructions:'Soul',provider:'demo'});
+  const demo=legacyDemo(instance,'Demo','Keep me');
+  const archived=legacyDemo(instance,'Archived','Soul');
   const real=instance.createBot({name:'Real',instructions:'Other',provider:'lmstudio',model:'local'});
   instance.claim({id:'history',botId:demo.id,content:'Hello'});instance.complete('history','Answer');
   instance.claim({id:'pending',botId:demo.id,content:'Before migration'});
@@ -45,8 +47,8 @@ test('paired clients save real defaults and create without provider authenticati
 test('interrupted migration resumes without overwriting a concurrent real-provider edit', () => {
  const dir=mkdtempSync(join(tmpdir(),'staf-migration-retry-')),path=join(dir,'db');let instance=new Instance(path);
  try {
-  const first=instance.createBot({name:'First',instructions:'One',provider:'demo'});
-  const second=instance.createBot({name:'Second',instructions:'Two',provider:'demo'});
+  const first=legacyDemo(instance,'First','One');
+  const second=legacyDemo(instance,'Second','Two');
   const file=join(second.configDir,'agent.toml'),original=readFileSync(file,'utf8');
   writeFileSync(file,'invalid = [');
   const initial=instance.creationDefaults();
@@ -66,7 +68,7 @@ test('old dataset with a real default resumes migration after upgrade', async ()
  const {DatabaseSync}=await import('node:sqlite');
  const dir=mkdtempSync(join(tmpdir(),'staf-old-defaults-')),path=join(dir,'db');let instance=new Instance(path);
  try {
-  const bot=instance.createBot({name:'Legacy',instructions:'Preserved',provider:'demo'});instance.close();
+  const bot=legacyDemo(instance,'Legacy','Preserved');instance.close();
   const db=new DatabaseSync(path);db.exec("DROP TABLE demo_migration; ALTER TABLE command_runtime_events DROP COLUMN call_id; UPDATE creation_defaults SET provider='openrouter',model='fixture/model',reasoning=NULL; PRAGMA user_version=36");db.close();
   instance=new Instance(path);assert.equal(instance.bot(bot.id).provider,'openrouter');assert.equal(instance.bot(bot.id).model,'fixture/model');assert.equal(instance.bot(bot.id).instructions,'Preserved');assert.ok(instance.migrationBackup);assert.deepEqual(instance.chatWork(bot.id).requests,[]);
  } finally {instance.close();rmSync(dir,{recursive:true,force:true});}

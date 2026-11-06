@@ -57,7 +57,7 @@ test('the offline review fixture keeps sign-in local and simulates a saved conne
   const credential = await (await fetch(origin + '/api/codex-auth/credential', {headers})).json();
   assert.equal(credential.signedIn, true);
   const call=async(path,body)=>{const response=await fetch(origin+path,{method:body?'POST':'GET',headers,...(body?{body:JSON.stringify(body)}:{})});assert.ok(response.ok);return response.json();};
-  const bot=await call('/api/bots',{name:'Interactive fixture',provider:'demo',toolMode:'hybrid'});
+  const bot=await call('/api/bots',{name:'Interactive fixture',provider:'live',model:'fixture-offline',toolMode:'hybrid'});
   await call('/api/commands',{id:'interactive-fixture',botId:bot.id,content:'Interactive process fixture'});
   let command;for(let i=0;i<300;i++){command=await call('/api/commands/interactive-fixture');if(command.state!=='pending')break;await new Promise(resolve=>setTimeout(resolve,10));}
   assert.equal(command.state,'completed',command.error);

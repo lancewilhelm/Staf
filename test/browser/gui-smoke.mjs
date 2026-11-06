@@ -264,7 +264,7 @@ try{
  await act("document.querySelector('.header-agent-name').click()","!!document.querySelector('.setup .provider-choices select')",'open disconnected agent settings');
  assert.equal(await evaluate("document.querySelector('.setup .provider-choices select').value"),'codex');
  assert.equal(await evaluate("document.querySelector('.setup .provider-choices select option:checked').textContent"),'ChatGPT');
- assert.equal(await evaluate("document.querySelector('.setup .provider-choices select option[value=demo]').disabled"),false);
+ assert.equal(await evaluate("!!document.querySelector('.setup .provider-choices select option[value=demo]')"),false);
  assert.equal(await evaluate("document.querySelector('.setup .provider-choices select option[value=openrouter]').disabled"),false);
  await evaluate("testInput('.setup textarea','Unsaved recovery instructions')");
  await act("testClick('Open provider settings')","!!document.querySelector('input[type=password]')",'open provider setup from agent settings');
@@ -591,7 +591,7 @@ try{
  await until(()=>evaluate("!!document.querySelector('[aria-label=Message]')"),'return from tool mode settings');
  await act("testInput('[aria-label=Message]','Start synthetic background work');testClick('Send')","document.querySelector('.messages').innerText.includes('Background tasks are deferred')",'unsolicited background creation rejected');
  assert.equal(await evaluate("[...document.querySelectorAll('.side button')].some(b=>b.textContent.includes('Updates'))"),false,'task update navigation absent');
- const duplicate=await evaluate("(async()=>{const t=localStorage.getItem('staf-token');return await (await fetch('/api/bots',{method:'POST',headers:{Authorization:'Bearer '+t,'Content-Type':'application/json'},body:JSON.stringify({name:'Mira',instructions:'Another role',provider:'demo'})})).json()})()");
+ const duplicate=await evaluate("(async()=>{const t=localStorage.getItem('staf-token');return await (await fetch('/api/bots',{method:'POST',headers:{Authorization:'Bearer '+t,'Content-Type':'application/json'},body:JSON.stringify({name:'Mira',instructions:'Another role',provider:'live',model:'fixture-offline'})})).json()})()");
  await until(()=>evaluate(`document.querySelector('.side').innerText.includes(${JSON.stringify(bot.id.slice(-4))}) && document.querySelector('.side').innerText.includes(${JSON.stringify(duplicate.id.slice(-4))})`),'duplicate agent identity');console.log('PASS duplicate agent names remain distinguishable');
  assert.deepEqual(await evaluate("[...document.querySelectorAll('.side nav .agent-id')].map(e=>[e.textContent.trim(),getComputedStyle(e).fontStyle])"),[['· '+bot.id.slice(-4),'italic'],['· '+duplicate.id.slice(-4),'italic']]);
  assert.equal(await evaluate(`document.querySelector('.side nav').textContent.includes(${JSON.stringify(bot.id)}) || document.querySelector('.side nav').textContent.includes(${JSON.stringify(duplicate.id)})`),false);
@@ -608,7 +608,7 @@ try{
  await act("document.querySelector('.header-agent-name').click()","!!document.querySelector('.setup .provider-choices select')",'open second agent settings');
  await evaluate("document.querySelector('.setup .provider-choices select').value='codex';document.querySelector('.setup .provider-choices select').dispatchEvent(new Event('change',{bubbles:true}));testClick('Save settings')");
  await until(()=>evaluate("document.querySelector('dialog')?.innerText.includes('Change provider?')"),'provider confirmation appears on Save');
- assert.equal((await evaluate(`(async()=>{const t=localStorage.getItem('staf-token');return await (await fetch('/api/bots/${duplicate.id}',{headers:{Authorization:'Bearer '+t}})).json()})()`)).provider,'demo');
+ assert.equal((await evaluate(`(async()=>{const t=localStorage.getItem('staf-token');return await (await fetch('/api/bots/${duplicate.id}',{headers:{Authorization:'Bearer '+t}})).json()})()`)).provider,'live');
  await evaluate("document.querySelector('dialog .quiet').click()");
  assert.equal(await evaluate("document.querySelector('.setup .provider-choices select').value"),'codex','canceling confirmation retains staged choice');
  await evaluate("testClick('Save settings')");
@@ -637,7 +637,7 @@ try{
  await evaluate("window.testInput=(selector,value)=>{const el=document.querySelector(selector);Object.getOwnPropertyDescriptor(el.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,'value').set.call(el,value);el.dispatchEvent(new Event('input',{bubbles:true}))};window.testClick=text=>{const b=[...document.querySelectorAll('button')].find(x=>x.textContent.trim()===text);if(!b)throw Error('Missing button '+text);b.click()}");
  await evaluate(`(async()=>{const t=localStorage.getItem('staf-token');const headers={Authorization:'Bearer '+t,'Content-Type':'application/json'};const p=await (await fetch('/api/bots/${duplicate.id}',{headers})).json();const r=await fetch('/api/bots/${duplicate.id}/archive',{method:'POST',headers,body:JSON.stringify({revision:p.revision})});if(!r.ok)throw Error(await r.text())})()`);
  await until(()=>evaluate("document.querySelectorAll('.side nav button').length===1"),'archived agent leaves navigation');
- assert.equal(duplicate.model,null);console.log('PASS another agent keeps its own model');
+ assert.equal(duplicate.model,'fixture-offline');console.log('PASS another agent keeps its own model');
  await mkdir(join(temp,'auth'),{recursive:true,mode:0o700});
  await writeFile(join(temp,'auth','codex-direct.json'),JSON.stringify({version:1,issuer:'https://auth.openai.com',subject:'synthetic',clientId:'synthetic-client',hostId:'synthetic-host',accessToken:'synthetic',refreshToken:'synthetic',idToken:'synthetic',scopes:['resource.invoke','chatgpt.tokens.use.direct'],expiresAt:Date.now()+3600000}),{mode:0o600});
  await act("[...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('Settings')).click()","document.body.innerText.includes('Saved sign-in found for this instance.')",'existing instance sign-in is recognized');
@@ -739,7 +739,7 @@ try{
  await act("[...document.querySelectorAll('.side nav button')].find(b=>b.textContent.includes('Name only')).click()","!!document.querySelector('[aria-label=Message]')",'open restored agent chat');
  await act("testInput('[aria-label=Message]','Remember for this agent: I like tea');testClick('Send')","document.body.innerText.includes('Saved to this agent’s memory.')",'chat uses agent memory wording');
  await act("testInput('[aria-label=Message]','Remember for all agents: I like coffee');testClick('Send')","document.body.innerText.includes('ALL agents will see this memory.')",'shared memory warning names agents');
- const named=await evaluate("(async()=>{const t=localStorage.getItem('staf-token');return await (await fetch('/api/bots',{method:'POST',headers:{Authorization:'Bearer '+t,'Content-Type':'application/json'},body:JSON.stringify({name:'My bot',provider:'demo'})})).json()})()");
+ const named=await evaluate("(async()=>{const t=localStorage.getItem('staf-token');return await (await fetch('/api/bots',{method:'POST',headers:{Authorization:'Bearer '+t,'Content-Type':'application/json'},body:JSON.stringify({name:'My bot',provider:'live',model:'fixture-offline'})})).json()})()");
  await until(()=>evaluate("[...document.querySelectorAll('.side nav button')].some(b=>b.textContent.includes('My bot'))"),'user chosen bot name remains unchanged');
  assert.equal(named.name,'My bot');console.log('PASS agent terminology and user-chosen names');
  const legacyStatus=await evaluate("(async()=>{const t=localStorage.getItem('staf-token');return (await fetch('/advanced',{headers:{Authorization:'Bearer '+t}})).status})()");assert.equal(legacyStatus,404);console.log('PASS retired Advanced page is not served');

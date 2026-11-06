@@ -79,7 +79,7 @@ try{
  await evaluate("document.querySelector('.setup fieldset input').focus();testInput('.setup fieldset input','fixture/plain');document.querySelector('.setup fieldset input').blur()");
  try{await until(()=>evaluate("document.querySelector('.setup select[aria-label=Reasoning]').value==='default' && document.body.innerText.includes('Reasoning changed to Automatic')"),'creation visibly resets unsupported reasoning')}catch(e){console.error(await evaluate("({text:document.querySelector('.setup').innerText,values:[...document.querySelectorAll('.setup fieldset select')].map(e=>e.value),model:document.querySelector('.setup fieldset input').value})"));throw e}
  await evaluate("testClick('Cancel')");
- const bot=await api('bots',{name:'Picker agent',provider:'demo'});
+ const bot=await api('bots',{name:'Picker agent',provider:'live',model:'fixture-offline'});
  await until(()=>evaluate("document.querySelector('.side nav button')?.textContent.includes('Picker agent')"),'agent appears');
  await evaluate("document.querySelector('.side nav button').click()");
  await until(()=>evaluate("!!document.querySelector('.model-button')"),'chat');
@@ -90,10 +90,10 @@ try{
  await until(()=>evaluate("!!document.querySelector('[aria-label=\"Confirm provider change\"]')"),'inline provider confirmation');
  await evaluate("document.querySelector('[data-cancel-provider]').click()");
  assert.equal(await evaluate("document.activeElement?.dataset.provider"),'openrouter','cancel restores provider focus');
- assert.equal((await api('bots/'+bot.id)).provider,'demo');
+ assert.equal((await api('bots/'+bot.id)).provider,'live');
  await evaluate("window.fetch=async(...args)=>String(args[0]).endsWith('/selection')?new Response(JSON.stringify({id:'bad'}),{status:200,headers:{'Content-Type':'application/json','X-Staf-Dataset':args[1].headers['X-Staf-Dataset']}}):window.realPickerFetch(...args)");await change('openrouter');await evaluate("testClick('Change provider')");
  await until(()=>evaluate("document.body.innerText.includes('Invalid selection response') && document.body.innerText.includes('Compare')"),'malformed selection offers comparison');
- assert.equal((await api('bots/'+bot.id)).provider,'demo');await evaluate("window.fetch=window.realPickerFetch");
+ assert.equal((await api('bots/'+bot.id)).provider,'live');await evaluate("window.fetch=window.realPickerFetch");
  await change('openrouter');await evaluate("testClick('Change provider')");
  await until(async()=>(await api('bots/'+bot.id)).model==='owner/model','provider selection applies defaults immediately');
  await until(()=>evaluate("!document.querySelector('[aria-label=\"Provider picker\"] fieldset').disabled"),'selection settled');
@@ -118,7 +118,7 @@ try{
  await evaluate("document.querySelector('[aria-label=\"Provider picker\"] input').blur()");
  await until(()=>evaluate("document.body.innerText.includes('Reasoning changed to Automatic')"),'visible unsupported reasoning reset');
  assert.equal((await api('bots/'+bot.id)).reasoning,null);
- await evaluate("if(document.querySelector('.composer-picker').hidden) document.querySelector('.model-button').click()");await change('demo');await evaluate("testClick('Change provider')");await until(async()=>(await api('bots/'+bot.id)).provider==='demo','switch away');
+ await evaluate("if(document.querySelector('.composer-picker').hidden) document.querySelector('.model-button').click()");await change('live');await evaluate("testClick('Change provider')");await until(async()=>(await api('bots/'+bot.id)).provider==='live','switch away');
  await until(()=>evaluate("!document.querySelector('[aria-label=\"Provider picker\"] fieldset').disabled"),'switch settled');
  await change('openrouter');await evaluate("testClick('Change provider')");await until(async()=>(await api('bots/'+bot.id)).model==='fixture/plain','remembered pair restored');
  assert.equal(await evaluate("document.querySelector('[aria-label=Message]').value"),'Retained picker draft');
@@ -144,7 +144,7 @@ try{
  await until(()=>evaluate("document.querySelector('.composer-picker').hidden"),'pointer click on open trigger closes popup');
  console.log('PASS popup dismissal preserves failed model edit and feedback; trigger closes with pointer');
 
- const unconfigured=await api('bots',{name:'Unconfigured menu check',provider:'demo'});
+ const unconfigured=await api('bots',{name:'Unconfigured menu check',provider:'live'});
  await until(()=>evaluate("[...document.querySelectorAll('.side nav button')].some(b=>b.textContent.includes('Unconfigured menu check'))"),'unconfigured agent appears');
  await evaluate("[...document.querySelectorAll('.side nav button')].find(b=>b.textContent.includes('Unconfigured menu check')).click()");
  await until(()=>evaluate("document.querySelector('.top').textContent.includes('Unconfigured menu check')"),'unconfigured chat selected');

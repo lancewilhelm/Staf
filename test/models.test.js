@@ -84,16 +84,16 @@ test('reasoning defaults persist with provenance, session overrides do not, unsu
 });
 
 
-test('shared model/reasoning shortcuts retain scope and expose demo discovery without a request',async t=>{
+test('shared model/reasoning shortcuts retain scope and require provider selection without a request',async t=>{
  const {settingsCommand}=await import('../dist/settings-commands.js');
  const dir=await mkdtemp(join(tmpdir(),'staf-selector-'));t.after(()=>rm(dir,{recursive:true,force:true}));
  const store=new SettingsStore(dir),session=await SettingsSession.begin(store,{file:{},shell:{},cli:{}});
- assert.match(await settingsCommand(store,session,['models']),/built-in demo/);
+ await assert.rejects(settingsCommand(store,session,['models']),/Choose a supported provider/);
  const original=session.models.bind(session);
  session.models=async()=>({source:'mock',fetchedAt:'fixed',cached:false,models:[{id:'keep',label:'Chosen',reasoning:['low'],reasoningStatus:'advertised'},{id:'other',label:'Other',reasoning:null,reasoningStatus:'unknown'}],note:'mock only'});
  const filtered=await settingsCommand(store,session,['models','chosen']);assert.match(filtered,/keep/);assert.ok(!filtered.includes('other |'));
  session.models=original;
- await assert.rejects(settingsCommand(store,session,['model','session','x']),/Demo has no/);
+ await assert.rejects(settingsCommand(store,session,['model','session','x']),/Choose a provider/);
  session.setSession('provider','codex');
  await settingsCommand(store,session,['model','session','manual-model']);
  await assert.rejects(session.apply('reasoning.codex','low',false,async()=>{throw Error('mock unsupported model');}),/mock unsupported/);

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { startInstance } from '../dist/instance-service.js';
+import { startInstance } from './fixtures/controlled-instance.mjs';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -86,7 +86,7 @@ test('paired clients observe provisional response progress and contention', asyn
   try {
     const first = (await call('/api/pair', '', { code: app.code })).token;
     const second = (await call('/api/pair', '', { code: app.issueCode() })).token;
-    const bot = await call('/api/bots', first, {provider:'demo', name: 'Stream' });
+    const bot = await call('/api/bots', first, {provider:'live',model:'fixture-offline', name: 'Stream' });
     assert.equal((await call('/api/commands', first, { id: 'stream-one', botId: bot.id, content: 'Hello' })).kind, 'accepted');
     let progress;
     for (let i = 0; i < 100; i++) {
@@ -121,7 +121,7 @@ test('shared progress streams through the real Codex adapter before the SSE resp
   const emit=event=>stream.enqueue(encoder.encode('data: '+JSON.stringify(event)+'\n\n'));
   try {
     const credential=(await call('/api/pair','',{code:app.code})).token;
-    const bot=await call('/api/bots',credential,{provider:'demo',name:'Codex'});
+    const bot=await call('/api/bots',credential,{provider:'live',model:'fixture-offline',name:'Codex'});
     await call('/api/commands',credential,{id:'codex-stream',botId:bot.id,content:'go'});
     emit({type:'response.output_text.delta',delta:'Live response begins here. '+token.slice(0,20)});
     let progress;
@@ -149,7 +149,7 @@ test('failed progress is provisional, redacted across chunks, and visible to the
   const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return r.json();};
   try {
     const token=(await call('/api/pair','',{code:app.code})).token;
-    const bot=await call('/api/bots',token,{provider:'demo',name:'Stream'});
+    const bot=await call('/api/bots',token,{provider:'live',model:'fixture-offline',name:'Stream'});
     await call('/api/commands',token,{id:'failure',botId:bot.id,content:'go'});
     let progress;
     for(let i=0;i<100;i++){progress=await call(`/api/bots/${bot.id}/response`,token);if(progress?.text?.includes('readable'))break;await new Promise(r=>setTimeout(r,10));}
@@ -187,7 +187,7 @@ test('restart retains interrupted progress without committing an assistant messa
   const call=async(route,token,body)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return response.json();};
   try {
     const token=(await call('/api/pair','',{code:app.code})).token;
-    const bot=await call('/api/bots',token,{provider:'demo',name:'Interrupted'});
+    const bot=await call('/api/bots',token,{provider:'live',model:'fixture-offline',name:'Interrupted'});
     await call('/api/commands',token,{id:'interrupted',botId:bot.id,content:'go'});
     for(let i=0;i<100;i++){const p=await call(`/api/bots/${bot.id}/response`,token);if(p?.text?.includes('Partial response'))break;await new Promise(r=>setTimeout(r,10));}
     await app.close();app=startInstance(join(dir,'db'),0,{env:{}});port=await app.listen();
@@ -213,7 +213,7 @@ test('streamed progress redacts managed OpenRouter keys saved and replaced durin
   const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return r.json();};
   try{
     const token=(await call('/api/pair','',{code:app.code})).token;
-    const agent=await call('/api/bots',token,{provider:'demo',name:'Streaming agent'});
+    const agent=await call('/api/bots',token,{provider:'live',model:'fixture-offline',name:'Streaming agent'});
     await call('/api/openrouter-connection',token,{key:first});
     await call('/api/commands',token,{id:'managed-stream',botId:agent.id,content:'hello'});
     let progress;

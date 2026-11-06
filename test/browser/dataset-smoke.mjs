@@ -28,6 +28,7 @@ try {
  await until(()=>evaluate("document.body.innerText.includes('Pair this browser')"),'pair page');
  const pair=code=>evaluate(`{const el=document.querySelector('input');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(el,${JSON.stringify(code)});el.dispatchEvent(new Event('input',{bubbles:true}));[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Pair').click()}`);
  await pair(app.code);await until(()=>evaluate("!![...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('New agent'))"),'paired');
+ await evaluate("(async()=>{const h={Authorization:'Bearer '+localStorage.getItem('staf-token'),'Content-Type':'application/json'},d=await(await fetch('/api/creation-defaults',{headers:h})).json();await fetch('/api/creation-defaults',{method:'POST',headers:h,body:JSON.stringify({...d,provider:'live',model:'fixture-offline'})})})()");
  // Old records without a dataset identity must only be managed from Settings.
  await until(()=>evaluate("!![...document.querySelectorAll('.settings-content button')].find(b=>b.textContent.trim()==='Back to chat')"),'initial Settings');
  await evaluate("[...document.querySelectorAll('.settings-content button')].find(b=>b.textContent.trim()==='Back to chat').click()");
@@ -71,11 +72,11 @@ try {
  // Durable command and creation records prove which dataset owns these old journals.
  const tokenBeforeReset=await evaluate("localStorage.getItem('staf-token')");
  const request=async(path,body)=>{const response=await fetch(url+path,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${tokenBeforeReset}`,...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});assert.ok(response.ok,`${path}: ${response.status}`);return response.json()};
- const verifiedBot=await request('/api/bots',{operationId:'verified-creation',name:'Verified recovery',provider:'demo'});
+ const verifiedBot=await request('/api/bots',{operationId:'verified-creation',name:'Verified recovery',provider:'live',model:'fixture-offline'});
  await request('/api/commands',{id:'verified-command',botId:verifiedBot.id,content:'Verified original'});
  await until(async()=>(await request('/api/commands/verified-command')).state==='completed','controlled command persisted');
  const verifiedDraft=`staf-workspace-v1:old-writer:${verifiedBot.id}`,verifiedCreation='staf-workspace-v1:creation:verified-creation';
- await evaluate(`localStorage.setItem(${JSON.stringify(verifiedDraft)},${JSON.stringify(JSON.stringify({text:'Verified next draft',submission:{id:'verified-command',text:'Verified original',kind:'pending'}}))});localStorage.setItem(${JSON.stringify(verifiedCreation)},${JSON.stringify(JSON.stringify({kind:'create',operationId:'verified-creation',name:'Verified recovery',instructions:'',provider:'demo',model:'',status:''}))})`);
+ await evaluate(`localStorage.setItem(${JSON.stringify(verifiedDraft)},${JSON.stringify(JSON.stringify({text:'Verified next draft',submission:{id:'verified-command',text:'Verified original',kind:'pending'}}))});localStorage.setItem(${JSON.stringify(verifiedCreation)},${JSON.stringify(JSON.stringify({kind:'create',operationId:'verified-creation',name:'Verified recovery',instructions:'',provider:'live',model:'fixture-offline',status:''}))})`);
  await cdp('Page.reload');
  await until(()=>evaluate("document.body.innerText.includes('Recovered creation. Check status')"),'verified creation recovered');
  await evaluate("[...document.querySelectorAll('.agent-settings button')].find(b=>b.textContent.trim()==='Check creation').click()");
@@ -100,7 +101,7 @@ try {
  const reset=spawnSync(process.execPath,['scripts/dev-data.mjs','reset'],{cwd:root,env,encoding:'utf8'});assert.equal(reset.status,0,reset.stderr);
  app=startInstance(data,port,{env:{}});await app.listen();
  await until(()=>evaluate("document.body.innerText.includes('Pair this browser')"),'old token rejected');
- await pair(app.code);await until(()=>evaluate("document.body.innerText.includes('Project guide')"),'paired with replacement');
+ await pair(app.code);await until(()=>evaluate("!!document.querySelector('.side')"),'paired with replacement');
  assert.equal(await evaluate(`localStorage.getItem(${JSON.stringify(resetLegacy)})`),valueB,'dataset reset cannot confirm old discard');
  assert.equal(await evaluate("!!document.querySelector('dialog[open]')"),false,'dataset change closes old confirmation');
  await evaluate('window.release()');await sleep(300);
