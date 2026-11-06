@@ -68,11 +68,11 @@ try {
  await until(()=>evaluate("!document.querySelector('.agent-settings')"),'queued creation status resolved');
  await evaluate("[...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('Smoke agent')).click()");
  await until(()=>evaluate("document.querySelector('textarea[aria-label=Message]')?.value==='legacy next draft'"),'original draft remains after queued creation');
- await until(()=>evaluate("document.body.innerText.includes('Earlier browser records')"),'unverified records available');
- assert.equal(await evaluate("document.body.innerText.includes('unverified saved text')"),false,'unverified text is not displayed automatically');
- await evaluate("[...document.querySelectorAll('summary')].find(e=>e.textContent.includes('Earlier browser records')).click()");
+ assert.equal(await evaluate("document.body.innerText.includes('Earlier browser records')"),false,'unverified records stay out of chat');
+ await evaluate("document.querySelector('.side button[aria-label=Settings]').click()");
+ await until(()=>evaluate("document.body.innerText.includes('Earlier browser records')"),'unverified records available in Settings');
  assert.equal(await evaluate(`document.body.innerText.includes(${JSON.stringify('unverified saved text\nsecond line')}) && document.body.innerText.includes('unknown-operation') && document.body.innerText.includes('unverified instructions')`),true,'unverified text and operation are available to copy');
- await evaluate("[...document.querySelectorAll('summary')].find(e=>e.textContent.includes('Earlier browser records')).click()");
+ await evaluate("[...document.querySelectorAll('.settings-content button')].find(b=>b.textContent.trim()==='Back to chat').click()");
  await evaluate(`{const el=document.querySelector('textarea[aria-label=Message]');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(el,'draft survives restart');el.dispatchEvent(new Event('input',{bubbles:true}))}`);
  const otherBot=await call('/api/bots',{operationId:'legacy-lock-agent',name:'Legacy lock agent',provider:'demo'});
  await call('/api/commands',{id:'legacy-lock-command',botId:otherBot.id,content:'locked command'});

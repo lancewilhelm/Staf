@@ -147,6 +147,11 @@ The workspace journals per-agent drafts and command IDs locally. It recovers an
 uncertain submission automatically with the same command ID; busy and definitive
 failures have inline Retry and Dismiss controls. A failed accepted command needs
 a new ID for an explicit retry.
+Earlier records without dataset identity are recovered only when durable service
+records verify their origin. Other records appear under **Settings > Earlier
+browser records** while present. Copy exports the selected record's text. Discard
+requires confirmation and removes only a still-matching, unlocked old record;
+scoped journals and pairing remain intact.
 
 The workspace is served at `/`. Its persistent agent list selects main chats,
 and duplicate names display the last four characters of their stable IDs.

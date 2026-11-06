@@ -109,9 +109,10 @@ with a new launcher code. Browser drafts and pending creations are scoped to a
 dataset; records from a prior dataset stay separate. On an ordinary upgrade,
 older unscoped drafts with a matching stored command and agent, and creations
 with a matching stored operation, can recover automatically. Other unscoped
-records remain in browser storage. Open **Earlier browser records** to inspect
-and copy their text and operation IDs; Staf cannot establish their origin or
-submit them automatically. Copy needed text before resetting. Normal backend
+records remain in browser storage. Open **Settings > Earlier browser records**
+to copy their text and operation IDs or discard an individual record. Staf cannot
+establish their origin or submit them automatically. Discard leaves changed or
+locked records in place. Copy needed text before resetting. Normal backend
 restarts keep the dataset identity and recover current records.
 
 Staf writes a backup under the development data directory before reset and before
