@@ -2718,3 +2718,30 @@ button {
   min-height: 160px;
   resize: vertical;
 }
+
+/* The picker has one scrolling surface, with independent choice columns. */
+.composer .model-control .composer-picker {
+  width: 720px;
+  max-width: min(720px, calc(100% + 42px));
+  overflow-y: auto;
+}
+.menu-choices {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(180px, 2fr) minmax(110px, 1fr);
+  gap: 8px;
+}
+.menu-choices .model-menu-group {
+  min-width: 0;
+  max-height: none;
+  overflow: visible;
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+.menu-manual { display: block; padding: 0 9px; font-size: 10px; color: var(--muted-ink); }
+.picker-confirm { margin: 8px; padding: 8px; border: 1px solid var(--line); border-radius: 6px; }
+.picker-confirm button { margin-right: 8px; }
+@media (max-width: 600px) {
+  .menu-choices { grid-template-columns: 1fr; }
+  .menu-choices .model-menu-group + .model-menu-group { border-top: 1px solid var(--line); padding-top: 5px; }
+}

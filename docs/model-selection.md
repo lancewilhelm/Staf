@@ -13,15 +13,15 @@ these in `/settings` or use the terminal commands below:
 
 Replace the example model and reasoning level with values supported by your
 provider and account. `/models` explicitly requests metadata from the selected
-provider. The settings menu can show discovered model IDs and also accepts manual
-entry. A catalog entry does not establish that an account can use that model.
+provider. The browser loads model metadata automatically in the composer, agent editor,
+and provider defaults. It also accepts manual model IDs. A catalog entry does not establish that an account can use that model.
 Discovery failure does not prevent manual model entry.
 
 The demo provider does not use a model. Codex uses its separately authorized
 Staf grant to discover models and requires an account-available model for
 inference. OpenRouter uses its model catalog. LM Studio and the generic live
 adapter use the configured compatible endpoint. Explicit nondefault reasoning
-support depends on the provider and model. `default` means Staf leaves the
+support depends on the provider and model. The browser labels `default` as **Automatic**. It leaves the
 provider's default in effect; it does not mean reasoning is disabled. LM Studio
 and live do not support a nondefault effort through these adapters.
 

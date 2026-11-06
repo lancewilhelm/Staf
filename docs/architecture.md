@@ -71,7 +71,7 @@ Appearance and layout are browser-local preferences (`web/appearance.ts` and
 `web/design.ts`); the default is Light/Evergreen with an expanded sidebar.
 The bundled DM Sans font needs no external request. The composer popup renders grouped menu choices through the existing choice and
 save boundary, while agent settings use the full form. Both keep service-backed
-discovery, manual model entry, reasoning and conflict recovery. Creation uses the same fields and layout as agent settings. Editor drafts stay in
+automatic metadata discovery, manual model entry, reasoning and conflict recovery. Discovery results never save a choice. Concurrent catalog requests cannot replace newer metadata with an older response, and a failed refresh clears metadata used for later selection decisions. Creation uses the same fields and layout as agent settings. Editor drafts stay in
 the browser tab across navigation, including their original profile revisions.
 Explicit Cancel discards unsaved edits; creation operation recovery remains in
 the controller.

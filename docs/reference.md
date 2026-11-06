@@ -526,3 +526,5 @@ Paired owners can POST `/api/processes/ID/input` with `{ "data": "text\n" }`, `/
 `limits.inputBytes` is 16,384 per request, `pendingInputs` is eight per process, and `ptyInputBytes` is a cumulative 1,048,576 bytes per PTY lifetime. Input and resize requests are serialized per process. Stop closes interaction admission and interrupts queued input; it does not wait behind a blocked write. A receipt proves submission, not consumption. Pipe EOF closes input permanently; PTY EOF submits Ctrl-D. PTY output uses the `terminal` stream. Output bounds and redaction are shared with pipe mode.
 
 Schema 36 adds process retention, input counters/closure and PTY dimensions through the protected migration process, preserving combined native/search schema 35. Old records default to nonretained. Unknown handles cannot receive input, EOF, resize or signals after restart.
+
+Browser choice controls load model metadata on open and provider change. The composer saves explicit selections immediately; agent editors and provider defaults stage changes until saved. **Automatic** sends no explicit reasoning effort. Discovery does not authenticate or verify model access.
