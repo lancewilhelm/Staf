@@ -455,8 +455,8 @@ for limits, recovery and adapter entry points.
 An ordinary failed tool result is paired with its provider call ID before the
 next provider step. Explicit action denial also permits a follow-up while the
 service keeps action admission closed. An unoffered clock call reports that it
-was not executed. Stop, failed live authority checks, and fatal execution errors
-still terminate work. The default limit is four provider steps, including the
+was not executed. Stop terminates work; failed live authority checks and fatal execution errors
+can terminate it. The default limit is four provider steps, including the
 initial request; a tool call on the last step may execute without a subsequent
 provider response. A failed chat turn does not commit its provider history;
 command progress, safe tool events, usage and action journals remain available
