@@ -29,7 +29,7 @@ function input(field: 'name' | 'instructions', event: Event) {
     <label>Name<input placeholder="e.g. Robin" :value="s.setup.name" :disabled="!!s.setup.operationId" @input="input('name', $event)" /></label>
     <AgentImageChooser :model-value="s.setup.image??{kind:'initials'}" :name="s.setup.name" :disabled="!!s.setup.operationId" @update:model-value="value=>app.setupImage(value)" @valid="value=>imageValid=value" />
     <label>Instructions<textarea :value="s.setup.instructions" :disabled="!!s.setup.operationId" @input="input('instructions', $event)" /></label><InstructionsHelp />
-    <details class="creation-choices"><summary>Provider, model and reasoning</summary><ChoiceFields reset-unsupported :provider="s.setup.provider" :model="s.setup.model" :reasoning="s.setup.reasoning ?? 'default'" :disabled="!!s.setup.operationId" @change="change" />
+    <details class="creation-choices"><summary>Provider, model and reasoning</summary><ChoiceFields real-only reset-unsupported :provider="s.setup.provider" :model="s.setup.model" :reasoning="s.setup.reasoning ?? 'default'" :disabled="!!s.setup.operationId" @change="change" />
     </details><ToolModeSelect :model-value="s.setup.toolMode ?? ''" allow-default :disabled="!!s.setup.operationId" @update:model-value="app.setupToolMode" /><p>Creation defaults are copied into this agent.</p>
     <div class="row modal-footer">
       <button type="button" class="quiet" @click="app.closeSetup()">Cancel</button>

@@ -366,3 +366,7 @@ recovery epoch. Task retries can resolve eligible predecessor actions. Original
 outcomes remain unchanged, closed work stays closed, and a matching resolved
 uncertain change still requires a repeat challenge. There is no generic force
 resolution or model reconciliation tool. See [the contract](work-actions.md).
+
+## Creation defaults and Demo migration
+
+Database version 37 records pending Demo migration separately from the saved creation default. The service commits the selected provider and model before publishing revision-checked agent files. It retries pending migration on restart and when clients read or save defaults. It reports file conflicts and blocks new accepted work until the owner repairs the configuration. Already-real agents are skipped on retry. Conversation records and accepted-work profiles are not rewritten. These checks use disposable offline instances and do not establish live provider behavior.

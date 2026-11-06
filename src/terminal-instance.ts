@@ -102,6 +102,12 @@ export async function terminalClient(args:string[]) {
     const url=new URL(remote);if(url.protocol!=='http:' || url.hostname!=='127.0.0.1' || url.username || url.password || url.pathname!=='/' || url.search || url.hash)throw Error('Instance URL must be a loopback HTTP origin');
     const saved:unknown=JSON.parse(await readFile(credentialPath,'utf8'));if(!isRecord(saved) || typeof saved.token!=='string')throw Error('Invalid client credential');connection={url:url.origin,token:saved.token};
   } else connection=await localConnection(root);
+  if(oneShot?.[0]==='settings' && oneShot[1]==='defaults' && oneShot.length===2) {const p=record(await request(connection,'/api/creation-defaults'));console.log(`New bot defaults | Provider: ${p.provider ? providerLabel(String(p.provider)) : '(choose a provider)'} | Model: ${String(p.model ?? '(choose a model)')} | Reasoning: ${String(p.reasoning ?? '(provider default)')} | Tool mode: ${String(p.toolMode)} | Revision: ${String(p.revision)}`);return;}
+  if(oneShot?.[0]==='settings' && oneShot[1]==='set-defaults' && (oneShot.length===4 || oneShot.length===5)) {
+    const current=record(await request(connection,'/api/creation-defaults'));
+    const provider=providerId(oneShot[2]??''),model=oneShot[3]??'',reasoning=oneShot[4]??null;
+    console.log(JSON.stringify(await request(connection,'/api/creation-defaults',{...current,provider,model,reasoning})));return;
+  }
   const bot=record(await request(connection,'/api/main-bot',{}));if(typeof bot.id!=='string')throw Error('Invalid main bot');const botId=bot.id;
   const view=new TerminalView(!!process.stdout.isTTY), errors=new TerminalView(!!process.stderr.isTTY);
   const pendingDir=join(root,'terminal-pending'); await mkdir(pendingDir,{recursive:true,mode:0o700});

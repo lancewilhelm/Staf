@@ -172,13 +172,13 @@ Authenticated `GET /api/inbox` projects pending questions and approvals.
 `GET /api/task-updates` returns task summaries for the inbox. `POST /api/bots`
 requires a nonblank `name` and accepts optional `instructions`, `provider`,
 `model`, and `operationId`. An omitted provider uses the copied instance
-default. An omitted model uses the default when the provider is omitted, or
+default, and fails with a setup error if it is unset. A creation default requires a real provider and a nonblank model. An omitted model uses the default when the provider is omitted, or
 is empty when a provider is specified. A model can override the default.
 For retry-safe creation, clients supply an `operationId`;
 `GET /api/bot-creations/OPERATION_ID` recovers a recorded result. Reusing an
 operation ID with different input conflicts. The transaction copies remaining
 creation defaults into the new bot. The version 27 migration adds the creation
-journal after a database backup. These operations do not change existing bots.
+journal after a database backup. Saving a real creation default migrates Demo agents, including archived agents; existing real-provider agents remain unchanged. The migration is resumable after interruption and preserves accepted-work snapshots.
 The workspace automatically restores an unfinished creation using its original
 operation ID, guarded by a browser Web Lock. Check creation and Retry same creation
 use that ID. Unscoped legacy records are adopted only with matching durable command
