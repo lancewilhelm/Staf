@@ -4,7 +4,7 @@ import {randomUUID} from 'node:crypto';
 import { verifyProviderSelection } from './models.js';
 import type { Environment } from './config.js';
 import type { Provider } from './types.js';
-import { demoProvider, liveProvider, openRouterProvider, lmStudioProvider } from './providers.js';
+import { liveProvider, openRouterProvider, lmStudioProvider } from './providers.js';
 import { resolve } from 'node:path';
 
 interface ProviderOptions { env: Environment; model?: string; reasoning?: string; dataDir?: string; sessionId?: string; instructions?: string }
@@ -15,10 +15,6 @@ interface Registration {
 
 /** CLI selection ends here; adding an adapter does not change the conversation loop. */
 export const providerRegistry: Readonly<Record<string, Registration>> = {
-  demo: { description: 'DEMO — offline, no model', create: ({ model }) => {
-    if (model) throw new Error('--model requires a live provider');
-    return demoProvider;
-  } },
   openrouter: { description: 'OPENROUTER — API credits/charges', create: ({ env, model, reasoning, instructions }) => openRouterProvider(env, model, fetch, reasoning, instructions) },
   codex: { description: 'CODEX DIRECT — Staf ChatGPT-plan registration; no CLI fallback', create: async ({ model, reasoning, dataDir, sessionId, instructions }) => {
     if(!model)throw Error('Choose an account-available model for direct ChatGPT');

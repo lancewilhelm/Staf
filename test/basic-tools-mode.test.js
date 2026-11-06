@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {startInstance} from '../dist/instance-service.js';
+import {startInstance} from './fixtures/controlled-instance.mjs';
 
 test('a new agent exposes the saved Hybrid tool mode through the paired service', async () => {
   const app=startInstance(':memory:',0,{env:{}});
@@ -16,7 +16,7 @@ test('a new agent exposes the saved Hybrid tool mode through the paired service'
   };
   try {
     const {token}=await call('/api/pair',{code:app.code});
-    const agent=await call('/api/bots',{name:'Clock agent',provider:'demo'},token);
+    const agent=await call('/api/bots',{name:'Clock agent',provider:'live',model:'fixture-offline'},token);
     assert.equal(agent.toolMode,'hybrid');
     assert.equal((await call(`/api/bots/${agent.id}`,undefined,token)).toolMode,'hybrid');
   } finally {await app.close();}
@@ -56,7 +56,7 @@ test('defaults, explicit choices, creation retry and profile conflicts retain th
 test('direct file edits preserve comments and legacy modes, and reject invalid values', () => {
   const instance=new Instance(':memory:');
   try {
-    const agent=instance.createBot({name:'File',provider:'demo',instructions:'',toolMode:'code'});
+    const agent=instance.createBot({name:'File',provider:'live',model:'fixture-offline',instructions:'',toolMode:'code'});
     const path=join(agent.configDir,'agent.toml');
     let source=readFileSync(path,'utf8').replace('toolMode = "code"','toolMode = "direct" # keep this comment');
     writeFileSync(path,source);
@@ -76,7 +76,7 @@ test('direct file edits preserve comments and legacy modes, and reject invalid v
 test('accepted command and task profiles keep their mode and validate legacy and invalid captures', () => {
   const instance=new Instance(':memory:');
   try {
-    let agent=instance.createBot({name:'Capture',provider:'demo',instructions:'',toolMode:'code'});
+    let agent=instance.createBot({name:'Capture',provider:'live',model:'fixture-offline',instructions:'',toolMode:'code'});
     instance.claim({id:'chat',botId:agent.id,content:'Hello'});
     instance.acceptTask({id:'task',botId:agent.id,objective:'Work',limitMs:1000});
     agent=instance.editBot(agent.id,{...agent,toolMode:'direct'});
@@ -102,7 +102,7 @@ test('accepted command and task profiles keep their mode and validate legacy and
 test('version 30 databases migrate with backup and preserve existing configuration', () => {
   const dir=mkdtempSync(join(tmpdir(),'staf-mode-migration-')),path=join(dir,'instance.sqlite');
   try {
-    let instance=new Instance(path);const agent=instance.createBot({name:'Existing',provider:'demo',instructions:''});instance.close();
+    let instance=new Instance(path);const agent=instance.createBot({name:'Existing',provider:'live',model:'fixture-offline',instructions:''});instance.close();
     let db=new DatabaseSync(path);db.exec('ALTER TABLE creation_defaults DROP COLUMN tool_mode; PRAGMA user_version=30');db.close();
     instance=new Instance(path);assert.ok(instance.migrationBackup && existsSync(instance.migrationBackup));
     assert.equal(instance.creationDefaults().toolMode,'hybrid');assert.equal(instance.bot(agent.id).name,'Existing');

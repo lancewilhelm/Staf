@@ -375,7 +375,7 @@ is the canonical planning map. The active planning milestone is
 [Plan the first connected bot delivery](https://github.com/lancewilhelm/Staf/milestone/1).
 Its target is authenticated access to an always-on instance, initial named-bot
 setup, shared persistent web and CLI chat, one simple read-only background task
-using the existing demo/clock capability, and Activity inspection. Exact behavior
+using the clock capability, and Activity inspection. The former Demo provider was later removed. Exact behavior
 is still being decided; this is a delivery boundary, not an implemented feature.
 
 Only that milestone's own decision dependencies gate its specification and build.

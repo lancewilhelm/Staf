@@ -17,7 +17,7 @@ provider. The settings menu can show discovered model IDs and also accepts manua
 entry. A catalog entry does not establish that an account can use that model.
 Discovery failure does not prevent manual model entry.
 
-The demo provider does not use a model. Codex uses its separately authorized
+Codex uses its separately authorized
 Staf grant to discover models and requires an account-available model for
 inference. OpenRouter uses its model catalog. LM Studio and the generic live
 adapter use the configured compatible endpoint. Explicit nondefault reasoning

@@ -7,7 +7,7 @@ import { useWorkspace } from '../workspace';
 const props = withDefaults(defineProps<{provider: string; model: string; reasoning: string; disabled?: boolean; resetUnsupported?: boolean; menu?: boolean; realOnly?:boolean}>(), {disabled: false, resetUnsupported: false});
 const emit = defineEmits<{change: [field: 'provider' | 'model' | 'reasoning', value: string]; modelSelect: [value: string]}>();
 const { app } = useWorkspace();
-const providers = computed(() => [...(props.realOnly ? [] : ['demo']), 'codex', 'openrouter', 'lmstudio', 'live']);
+const providers = ['codex', 'openrouter', 'lmstudio', 'live'];
 const catalog = shallowRef<ModelCatalog | null>(null);
 const status = ref('');
 const list = useId();

@@ -137,11 +137,10 @@ test('save failure does not announce success or alter conversation', async t => 
   assert.equal(events.at(-1), 'error');
 });
 
-test('demo provider remains offline with live environment settings', async t => {
+test('injected fixture stays offline with live environment settings', async t => {
   const { store, session } = await fixture(t);
-  const { selectProvider } = await import('../dist/registry.js');
   t.mock.method(globalThis, 'fetch', () => { throw new Error('NETWORK ATTEMPT'); });
-  const { provider } = await selectProvider('demo', { env: { STAF_API_KEY: 'fake-test-value', STAF_MODEL: 'fake', STAF_BASE_URL: 'https://invalid.example/' } });
+  const provider = demoProvider;
   const events = [];
   await runTurn({ store, session, provider, text: 'time', clock: () => 'fixed', emit: event => events.push(event) });
   await runTurn({ store, session, provider, text: 'hello' });

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { startInstance } from '../dist/instance-service.js';
+import { startInstance } from './fixtures/controlled-instance.mjs';
 
 test('direct file edits become visible and preserve previously observed configuration', async () => {
   const {writeFile,readdir}=await import('node:fs/promises');
@@ -11,7 +11,7 @@ test('direct file edits become visible and preserve previously observed configur
   const call=async(route,body)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});return [response.status,await response.json()];};
   try {
     token=(await call('/api/pair',{code:app.code}))[1].token;
-    const agent=(await call('/api/bots',{provider:'demo',name:'Ada',instructions:'Original'}))[1],file=join(agent.configDir,'agent.toml');
+    const agent=(await call('/api/bots',{provider:'live',model:'fixture-offline',name:'Ada',instructions:'Original'}))[1],file=join(agent.configDir,'agent.toml');
     const original=await readFile(file,'utf8');
     await writeFile(file,original.replace('name = "Ada"','name = "Ada Test"'));
     const edited=await call(`/api/bots/${agent.id}`);assert.equal(edited[0],200);assert.equal(edited[1].name,'Ada Test');
@@ -40,7 +40,7 @@ test('observed direct changes keep stale clients stale even with coarse file tim
   const originalStat=fs.statSync;
   try {
     token=(await call('/api/pair',{code:app.code}))[1].token;
-    const agent=(await call('/api/bots',{provider:'demo',name:'Ada',instructions:'A'}))[1],file=join(agent.configDir,'soul.md');
+    const agent=(await call('/api/bots',{provider:'live',model:'fixture-offline',name:'Ada',instructions:'A'}))[1],file=join(agent.configDir,'soul.md');
     fs.statSync=(path,options)=>{const result=originalStat(path,options);if(options?.bigint && /(?:agent\.toml|soul\.md)$/.test(String(path)))return {...result,ctimeNs:0n,mtimeNs:0n};return result;};syncBuiltinESMExports();
     const initial=(await call(`/api/bots/${agent.id}`))[1];
     await writeFile(file,'B');assert.equal((await call(`/api/bots/${agent.id}`))[1].instructions,'B');
@@ -69,7 +69,7 @@ test('fresh service exposes the authoritative agent configuration files', async 
   }
   try {
     const { token } = await call('/api/pair', { code: app.code });
-    const agent = await call('/api/bots', {provider:'demo', name: 'Ada', instructions: 'Explain clearly' }, token);
+    const agent = await call('/api/bots', {provider:'live',model:'fixture-offline', name: 'Ada', instructions: 'Explain clearly' }, token);
     const config = await call(`/api/bots/${agent.id}`, undefined, token);
     assert.equal('soul' in config, false);
     assert.equal(typeof config.configDir, 'string', 'agent configuration directory should be discoverable');
@@ -92,8 +92,8 @@ test('service and direct file edits share a stable, validated configuration acro
   };
   try {
     token=(await call('/api/pair',{code:app.code}))[1].token;
-    const agent=(await call('/api/bots',{provider:'demo',name:'Ada',instructions:'Initial'}))[1];
-    const other=(await call('/api/bots',{provider:'demo',name:'Other'}))[1];
+    const agent=(await call('/api/bots',{provider:'live',model:'fixture-offline',name:'Ada',instructions:'Initial'}))[1];
+    const other=(await call('/api/bots',{provider:'live',model:'fixture-offline',name:'Other'}))[1];
     const edited=(await call(`/api/bots/${agent.id}/profile`,{...agent,name:'Renamed',instructions:'From API'}))[1];
     assert.equal((await call(`/api/bots/${agent.id}/profile`,{...edited,soul:'A competing document'}))[0],400);
     assert.equal(edited.configDir,agent.configDir);
@@ -130,7 +130,7 @@ test('a failed service publication retains the previously accepted file pair', a
   const original=fs.renameSync;
   try {
     token=(await call('/api/pair',{code:app.code}))[1].token;
-    const before=(await call('/api/bots',{provider:'demo',name:'Before',instructions:'Before instructions'}))[1];
+    const before=(await call('/api/bots',{provider:'live',model:'fixture-offline',name:'Before',instructions:'Before instructions'}))[1];
     fs.renameSync=(from,to)=>{if(String(to)===before.configDir)throw Error('synthetic interrupted publication');return original(from,to)};
     syncBuiltinESMExports();
     const failed=await call(`/api/bots/${before.id}/profile`,{...before,name:'After',instructions:'After instructions'});
@@ -154,7 +154,7 @@ test('actual paired CLI inspects and edits the same files as direct file changes
   const cli=async(...args)=>(await exec(process.execPath,['dist/cli.js','instance',...args])).stdout;
   try {
     await cli('pair',url,credential,app.code);
-    const agent=JSON.parse(await cli('create',url,credential,'Ada','--instructions','From CLI','--provider','demo'));
+    const agent=JSON.parse(await cli('create',url,credential,'Ada','--instructions','From CLI','--provider','live','--model','fixture-offline'));
     assert.equal(await readFile(join(agent.configDir,'soul.md'),'utf8'),'From CLI');
     await writeFile(join(agent.configDir,'soul.md'),'From disk');
     const inspected=JSON.parse(await cli('inspect',url,credential,agent.id));
@@ -178,7 +178,7 @@ test('simultaneous service saves preserve the losing draft and only one version 
   const call=async(route,body)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});return [response.status,await response.json()];};
   try {
     token=(await call('/api/pair',{code:app.code}))[1].token;
-    const agent=(await call('/api/bots',{provider:'demo',name:'Ada',instructions:'Original'}))[1];
+    const agent=(await call('/api/bots',{provider:'live',model:'fixture-offline',name:'Ada',instructions:'Original'}))[1];
     const drafts=['First edit','Second edit'].map(instructions=>({...agent,instructions}));
     const results=await Promise.all(drafts.map(draft=>call(`/api/bots/${agent.id}/profile`,draft)));
     assert.deepEqual(results.map(result=>result[0]).sort(),[200,409]);
@@ -193,7 +193,7 @@ test('old revisions stay stale after settings or archive state return to earlier
   const call=async(route,body)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});return [response.status,await response.json()];};
   try {
     token=(await call('/api/pair',{code:app.code}))[1].token;
-    const a=(await call('/api/bots',{provider:'demo',name:'Ada',instructions:'A'}))[1];
+    const a=(await call('/api/bots',{provider:'live',model:'fixture-offline',name:'Ada',instructions:'A'}))[1];
     const b=(await call(`/api/bots/${a.id}/profile`,{...a,instructions:'B'}))[1];
     const again=(await call(`/api/bots/${a.id}/profile`,{...b,instructions:'A'}))[1];
     assert.notEqual(again.revision,a.revision);
@@ -215,7 +215,7 @@ test('accepted work keeps its captured instructions even if files change or beco
   const call=async(route,body)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});return [response.status,await response.json()];};
   try {
     token=(await call('/api/pair',{code:app.code}))[1].token;
-    const agent=(await call('/api/bots',{provider:'demo',name:'Ada',instructions:'Captured'}))[1];
+    const agent=(await call('/api/bots',{provider:'live',model:'fixture-offline',name:'Ada',instructions:'Captured'}))[1];
     assert.equal((await call('/api/commands',{id:'first',botId:agent.id,content:'hello'}))[1].kind,'accepted');await started;
     await writeFile(join(agent.configDir,'soul.md'),'Changed');
     const originalToml=await readFile(join(agent.configDir,'agent.toml'),'utf8');
@@ -252,7 +252,7 @@ test('a direct edit during publication is preserved and the client save conflict
   const original=fs.symlinkSync;let injected=false;
   try{
     token=(await call('/api/pair',{code:app.code}))[1].token;
-    const before=(await call('/api/bots',{provider:'demo',name:'Ada',instructions:'Original'}))[1];
+    const before=(await call('/api/bots',{provider:'live',model:'fixture-offline',name:'Ada',instructions:'Original'}))[1];
     fs.symlinkSync=(target,path,type)=>{if(!injected&&String(path).includes('.current-')){injected=true;fs.writeFileSync(join(before.configDir,'soul.md'),'Direct edit');}return original(target,path,type);};syncBuiltinESMExports();
     const result=await call(`/api/bots/${before.id}/profile`,{...before,name:'API edit'});
     fs.symlinkSync=original;syncBuiltinESMExports();
@@ -267,7 +267,7 @@ test('a late write to the previous file is retained and blocks new work for revi
   const dir=await mkdtemp(join(tmpdir(),'staf-config-late-')),path=join(dir,'db');let app=startInstance(path),port=await app.listen(),token,handle;
   const call=async(route,body)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});return [response.status,await response.json()];};
   try{
-    token=(await call('/api/pair',{code:app.code}))[1].token;const before=(await call('/api/bots',{provider:'demo',name:'Ada',instructions:'Original'}))[1];
+    token=(await call('/api/pair',{code:app.code}))[1].token;const before=(await call('/api/bots',{provider:'live',model:'fixture-offline',name:'Ada',instructions:'Original'}))[1];
     const oldDir=await realpath(before.configDir);handle=await open(join(before.configDir,'soul.md'),'r+');
     assert.equal((await call(`/api/bots/${before.id}/profile`,{...before,name:'API edit'}))[0],200);
     await handle.truncate(0);await handle.write('Late edit',0,'utf8');await handle.sync();await handle.close();handle=undefined;
@@ -287,7 +287,7 @@ test('an edit to the briefly published revision is retained if publication rolls
   const call=async(route,body)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});return [response.status,await response.json()];};
   const original=fs.renameSync;let injected=false;
   try{
-    token=(await call('/api/pair',{code:app.code}))[1].token;const before=(await call('/api/bots',{provider:'demo',name:'Ada',instructions:'Original'}))[1];const oldDir=await realpath(before.configDir);
+    token=(await call('/api/pair',{code:app.code}))[1].token;const before=(await call('/api/bots',{provider:'live',model:'fixture-offline',name:'Ada',instructions:'Original'}))[1];const oldDir=await realpath(before.configDir);
     fs.renameSync=(from,to)=>{const result=original(from,to);if(!injected&&String(to)===before.configDir){injected=true;newDir=fs.realpathSync(before.configDir);fd=fs.openSync(join(newDir,'soul.md'),'r+');fs.writeFileSync(join(oldDir,'soul.md'),'Old edit');}return result;};syncBuiltinESMExports();
     const result=await call(`/api/bots/${before.id}/profile`,{...before,name:'API edit'});
     fs.renameSync=original;syncBuiltinESMExports();assert.equal(injected,true);assert.equal(result[0],409);
@@ -303,7 +303,7 @@ test('an error after the publication switch reports an uncertain outcome', async
   const call=async(route,body)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});return [response.status,await response.json()];};
   const originalRename=fs.renameSync,originalSync=fs.fsyncSync;
   try{
-    token=(await call('/api/pair',{code:app.code}))[1].token;const before=(await call('/api/bots',{provider:'demo',name:'Before',instructions:'Before instructions'}))[1];
+    token=(await call('/api/pair',{code:app.code}))[1].token;const before=(await call('/api/bots',{provider:'live',model:'fixture-offline',name:'Before',instructions:'Before instructions'}))[1];
     fs.renameSync=(from,to)=>{const result=originalRename(from,to);if(String(to)===before.configDir)armed=true;return result;};
     fs.fsyncSync=fd=>{if(armed){armed=false;throw Error('synthetic directory sync failure');}return originalSync(fd);};syncBuiltinESMExports();
     const result=await call(`/api/bots/${before.id}/profile`,{...before,name:'After',instructions:'After instructions'});
@@ -319,7 +319,7 @@ test('a late edit discovered after publication reports that the save may have ta
   const call=async(route,body)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});return [response.status,await response.json()];};
   const originalRename=fs.renameSync,originalReadDir=fs.readdirSync;
   try{
-    token=(await call('/api/pair',{code:app.code}))[1].token;const before=(await call('/api/bots',{provider:'demo',name:'Before',instructions:'Before'}))[1],oldDir=await realpath(before.configDir);
+    token=(await call('/api/pair',{code:app.code}))[1].token;const before=(await call('/api/bots',{provider:'live',model:'fixture-offline',name:'Before',instructions:'Before'}))[1],oldDir=await realpath(before.configDir);
     fs.renameSync=(from,to)=>{const result=originalRename(from,to);if(String(to)===before.configDir)switched=true;return result;};
     fs.readdirSync=(path,options)=>{if(switched&&!injected){injected=true;fs.writeFileSync(join(oldDir,'soul.md'),'Late edit');}return originalReadDir(path,options);};syncBuiltinESMExports();
     const result=await call(`/api/bots/${before.id}/profile`,{...before,name:'After',instructions:'After'});
@@ -336,7 +336,7 @@ test('background work captures instructions when accepted', async () => {
   const call=async(route,body)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});return [response.status,await response.json()];};
   const completed=async id=>{for(let i=0;i<100;i++){const result=(await call(`/api/tasks/${id}`))[1];if(result.state!=='queued'&&result.state!=='running')return result;await new Promise(resolve=>setTimeout(resolve,10));}throw Error('Task timed out');};
   try{
-    token=(await call('/api/pair',{code:app.code}))[1].token;const agent=(await call('/api/bots',{provider:'demo',name:'Ada',instructions:'Before'}))[1];
+    token=(await call('/api/pair',{code:app.code}))[1].token;const agent=(await call('/api/bots',{provider:'live',model:'fixture-offline',name:'Ada',instructions:'Before'}))[1];
     assert.equal((await call('/api/tasks',{id:'first-task',botId:agent.id,objective:'First'}))[1].kind,'accepted');await started;
     assert.equal((await call(`/api/bots/${agent.id}/profile`,{...agent,instructions:'After'}))[0],200);
     release();assert.equal((await completed('first-task')).state,'completed');
@@ -361,7 +361,7 @@ test('a later direct pathname save takes effect and retains the previous client 
   };
   try {
     token = (await call('/api/pair', { code: app.code }))[1].token;
-    const agent = (await call('/api/bots', {provider:'demo', name: 'Ada', instructions: 'Original' }))[1];
+    const agent = (await call('/api/bots', {provider:'live',model:'fixture-offline', name: 'Ada', instructions: 'Original' }))[1];
     const file = join(agent.configDir, 'soul.md');
     const staleBuffer = await readFile(file, 'utf8');
     const saved = await call(`/api/bots/${agent.id}/profile`, { ...agent, instructions: 'Client save' });
@@ -386,7 +386,7 @@ test('a missing published snapshot cannot silently adopt changed files', async (
   const call=async(route,body)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});return [response.status,await response.json()];};
   try {
     token=(await call('/api/pair',{code:app.code}))[1].token;
-    const agent=(await call('/api/bots',{provider:'demo',name:'Ada',instructions:'Published'}))[1];
+    const agent=(await call('/api/bots',{provider:'live',model:'fixture-offline',name:'Ada',instructions:'Published'}))[1];
     await rename(join(agent.configDir,'.published'),join(agent.configDir,'.published-backup'));
     await writeFile(join(agent.configDir,'soul.md'),'Unexpected edit');
     const result=await call(`/api/bots/${agent.id}`);assert.equal(result[0],422);assert.match(result[1].error,/snapshot is missing/);
@@ -402,7 +402,7 @@ test('invalid UTF-8 in a published file is rejected even when it decodes like th
   const call=async(route,body)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});return [response.status,await response.json()];};
   try {
     token=(await call('/api/pair',{code:app.code}))[1].token;
-    const agent=(await call('/api/bots',{provider:'demo',name:'Ada',instructions:'a\ufffdb'}))[1],file=join(agent.configDir,'soul.md'),bad=Buffer.from([0x61,0xff,0x62]);
+    const agent=(await call('/api/bots',{provider:'live',model:'fixture-offline',name:'Ada',instructions:'a\ufffdb'}))[1],file=join(agent.configDir,'soul.md'),bad=Buffer.from([0x61,0xff,0x62]);
     await writeFile(file,bad);
     const result=await call(`/api/bots/${agent.id}`);assert.equal(result[0],422);assert.match(result[1].error,/valid UTF-8/);assert.deepEqual(await readFile(file),bad);
     await writeFile(file,'a\ufffdb');
@@ -419,7 +419,7 @@ test('an existing file configuration is sealed on startup before client access',
   const call=async(route,body)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});return [response.status,await response.json()];};
   try {
     token=(await call('/api/pair',{code:app.code}))[1].token;
-    const agent=(await call('/api/bots',{provider:'demo',name:'Ada',instructions:'Existing'}))[1];
+    const agent=(await call('/api/bots',{provider:'live',model:'fixture-offline',name:'Ada',instructions:'Existing'}))[1];
     await app.close();
     await rm(join(agent.configDir,'.published'),{recursive:true});await rm(join(agent.configDir,'.sealed'));
     app=startInstance(path);port=await app.listen();
@@ -436,7 +436,7 @@ test('previously retired revisions keep their legacy hash across upgrade', async
   const call=async(route,body)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});return [response.status,await response.json()];};
   try {
     token=(await call('/api/pair',{code:app.code}))[1].token;
-    const agent=(await call('/api/bots',{provider:'demo',name:'Ada',instructions:'First'}))[1],old=await realpath(agent.configDir);
+    const agent=(await call('/api/bots',{provider:'live',model:'fixture-offline',name:'Ada',instructions:'First'}))[1],old=await realpath(agent.configDir);
     const settings=await readFile(join(old,'agent.toml'),'utf8'),soul=await readFile(join(old,'soul.md'),'utf8');
     assert.equal((await call(`/api/bots/${agent.id}/profile`,{...agent,instructions:'Second'}))[0],200);
     const revision=createHash('sha256').update(settings).update('\0').update(soul).update('\0').digest('hex');
@@ -455,7 +455,7 @@ test('a copied instance can read unchanged retained revisions', async () => {
   const call=async(route,body)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});return [response.status,await response.json()];};
   try {
     token=(await call('/api/pair',{code:app.code}))[1].token;
-    const agent=(await call('/api/bots',{provider:'demo',name:'Ada',instructions:'First'}))[1];
+    const agent=(await call('/api/bots',{provider:'live',model:'fixture-offline',name:'Ada',instructions:'First'}))[1];
     assert.equal((await call(`/api/bots/${agent.id}/profile`,{...agent,instructions:'Second'}))[0],200);
     await app.close();await cp(source,copy,{recursive:true,preserveTimestamps:true,verbatimSymlinks:true});
     app=startInstance(join(copy,'db'));port=await app.listen();
@@ -470,7 +470,7 @@ test('service file publication preserves authored TOML when editing instructions
   const call=async(route,body)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});return [response.status,await response.json()];};
   try {
     token=(await call('/api/pair',{code:app.code}))[1].token;
-    const agent=(await call('/api/bots',{provider:'demo',name:'Ada',instructions:'Original'}))[1];
+    const agent=(await call('/api/bots',{provider:'live',model:'fixture-offline',name:'Ada',instructions:'Original'}))[1];
     const file=join(agent.configDir,'agent.toml'),settings='# Owner comment\n'+await readFile(file,'utf8');
     await writeFile(file,settings);const published=await call(`/api/bots/${agent.id}`);assert.equal(published[0],200);
     const edited=await call(`/api/bots/${agent.id}/profile`,{...published[1],instructions:'Updated instructions'});assert.equal(edited[0],200);
@@ -487,8 +487,8 @@ test('GUI-style settings saves retain TOML comments and multiline values', async
   const call=async(route,body)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});return [response.status,await response.json()];};
   try {
     token=(await call('/api/pair',{code:app.code}))[1].token;
-    const agent=(await call('/api/bots',{provider:'demo',name:'Ada',instructions:'Soul'}))[1];
-    const settings=`# Preserve this comment\n"name" = 'Ada' # name note\ndescription = """First line\n# Text inside the value\nLast line"""\nprovider = 'demo' # provider note\nmodel = 'old#model' # model note\n`;
+    const agent=(await call('/api/bots',{provider:'live',model:'fixture-offline',name:'Ada',instructions:'Soul'}))[1];
+    const settings=`# Preserve this comment\n"name" = 'Ada' # name note\ndescription = """First line\n# Text inside the value\nLast line"""\nprovider = 'live' # provider note\nmodel = 'old#model' # model note\n`;
     const file=join(agent.configDir,'agent.toml');await writeFile(file,settings);
     const published=await call(`/api/bots/${agent.id}`);assert.equal(published[0],200);
     const edited=await call(`/api/bots/${agent.id}/profile`,{...published[1],name:'New Ada',model:null});assert.equal(edited[0],200);
@@ -507,7 +507,7 @@ test('the paired CLI observes direct Unicode edits and reports invalid UTF-8', a
   const cli=async(...args)=>(await exec(process.execPath,['dist/cli.js','instance',...args])).stdout;
   try {
     await cli('pair',url,credential,app.code);
-    const agent=JSON.parse(await cli('create',url,credential,'Ada','--instructions','Original','--provider','demo'));
+    const agent=JSON.parse(await cli('create',url,credential,'Ada','--instructions','Original','--provider','live','--model','fixture-offline'));
     const file=join(agent.configDir,'soul.md'),longSoul='界'.repeat(25000);
     await writeFile(file,longSoul);
     assert.equal(JSON.parse(await cli('inspect',url,credential,agent.id)).instructions,longSoul);

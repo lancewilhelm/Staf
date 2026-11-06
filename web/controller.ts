@@ -252,7 +252,7 @@ export class Controller {
     const current=submission,uncertain=current.kind==='unknown'||current.kind==='uncertain-busy'||current.kind==='submitting-uncertain';
     if(!this.save({...draft,text:retry?draft.text:'',submission:{id:current.id,text:current.text,kind:uncertain?'submitting-uncertain':'submitting'}}))return;
     const bot=this.state.bots.find(item=>item.id===botId);
-    const setupError=bot?.provider==='codex'&&this.state.credential==='signed-out'?'Connect ChatGPT in Settings to send.':bot?.provider==='openrouter'&&this.state.openrouter!=='saved'?'Connect OpenRouter in Settings to send.':bot&&bot.provider!=='demo'&&!bot.model?.trim()?'Choose a model for this agent to send.':null;
+    const setupError=bot?.provider==='codex'&&this.state.credential==='signed-out'?'Connect ChatGPT in Settings to send.':bot?.provider==='openrouter'&&this.state.openrouter!=='saved'?'Connect OpenRouter in Settings to send.':bot?.provider==='demo'?'Choose a creation default in Settings to migrate this agent.':bot&&!bot.model?.trim()?'Choose a model for this agent to send.':null;
     if(setupError){this.save({...this.state.draft,submission:{id:current.id,text:current.text,kind:uncertain?'unknown':'rejected',error:setupError}});return}
     await this.submit(botId,current);
   }

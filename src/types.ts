@@ -31,7 +31,7 @@ export interface ToolDefinition {
 export interface ProviderCapabilities {
   toolCalls: boolean;
   incrementalText: boolean;
-  transport: 'chat-completions' | 'codex-cli-planner' | 'responses' | 'demo';
+  transport: 'chat-completions' | 'codex-cli-planner' | 'responses';
 }
 export type ProviderEvent =
   | { type: 'message'; message: AssistantMessage }

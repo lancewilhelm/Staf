@@ -18,11 +18,11 @@ test('versioned defaults survive restart; session overrides and terminal-style d
   const {store,root}=await setup(t);
   await store.update('provider','lmstudio'); await store.update('model.lmstudio','local-model');
   const session=await SettingsSession.begin(store,input);
-  session.setSession('provider','demo',false);
+  session.setSession('provider','live',false);
   assert.equal(session.effective().provider.source,'this session');
   assert.equal((await store.load()).defaults.provider,'lmstudio');
   await session.saveDefault('provider','openrouter');
-  assert.equal(session.effective().provider.value,'demo');
+  assert.equal(session.effective().provider.value,'live');
   assert.equal((await SettingsSession.begin(new SettingsStore(root),input)).effective().provider.value,'openrouter');
   session.setSession('provider','codex',true); assert.equal(session.effective().provider.value,'codex');
   assert.equal((await lstat(store.path)).mode & 0o777,0o600);
@@ -36,7 +36,7 @@ test('effective settings expose saved/file/shell/CLI/session precedence and empt
   assert.deepEqual(resolveSettings({...base,shell:{}}).model,{value:'file',source:'.env'});
   assert.deepEqual(resolveSettings({...base,shell:{STAF_MODEL:''}}).model,{value:'',source:'shell'});
   assert.equal(resolveSettings({...base,file:{},shell:{}}).model.source,'saved default');
-  assert.equal(resolveSettings({...base,saved:{},file:{},shell:{}}).provider.value,'demo');
+  assert.equal(resolveSettings({...base,saved:{},file:{},shell:{}}).provider.value,'');
   const emptyEndpoint=resolveSettings({saved:{provider:'lmstudio'},file:{},shell:{LMSTUDIO_BASE_URL:''},cli:{},session:{}}).endpoint;
   assert.equal(emptyEndpoint.value,'http://localhost:1234/v1/');
   assert.equal(emptyEndpoint.source,'shell');
@@ -74,7 +74,7 @@ test('malformed/unknown-version/unknown-field configs remain unchanged; failure 
   await assert.rejects(new SettingsStore(linkedRoot).load(),/safely/);
   const parentRoot=join(root,'parent-root');await mkdir(parentRoot);
   await symlink(join(root,'config'),join(parentRoot,'config'));
-  await assert.rejects(new SettingsStore(parentRoot).update('provider','demo'),/symlink/);
+  await assert.rejects(new SettingsStore(parentRoot).update('provider','live'),/symlink/);
   assert.equal((await store.load()).defaults.provider,'lmstudio');
 });
 
@@ -103,9 +103,9 @@ test('corrupt settings remain available for recovery; session overrides do not p
   const {root,store}=await setup(t);await mkdir(join(root,'config'));await writeFile(store.path,'broken');
   await assert.rejects(store.load());assert.match(store.path,/settings.json/);assert.equal(await readFile(store.path,'utf8'),'broken');
   await rm(store.path);
-  const session=await SettingsSession.begin(store,input);session.setSession('provider','demo');
+  const session=await SettingsSession.begin(store,input);session.setSession('provider','live');
   const next=await SettingsSession.begin(new SettingsStore(root),input);
-  assert.equal(next.effective().provider.value,'demo');assert.equal(next.effective().provider.source,'built-in');
+  assert.equal(next.effective().provider.value,'');assert.equal(next.effective().provider.source,'built-in');
   assert.deepEqual((await store.load()).defaults,{});
 });
 
@@ -115,7 +115,7 @@ test('settings edits apply to subsequent requests while remembered defaults surv
  assert.match(await settingsCommand(store,session,['set','default','provider','lmstudio']),/Applied to next request and remembered/);
  await settingsCommand(store,session,['set','default','model.lmstudio','local']);
  assert.equal(session.effective().provider.value,'lmstudio');assert.equal(session.effective().model.value,'local');
- session.setSession('provider','demo');assert.equal(session.effective().provider.value,'demo');
+ session.setSession('provider','live');assert.equal(session.effective().provider.value,'live');
  const next=await SettingsSession.begin(new SettingsStore(root),input);
  assert.equal(next.effective().provider.value,'lmstudio');assert.equal(next.effective().model.value,'local');
 });
@@ -128,7 +128,7 @@ test('launch input snapshots cannot be mutated by a caller and later explicit se
   assert.equal(session.effective().provider.value,'openrouter');
   assert.equal(session.effective().model.value,'file-model');
   session.lockSession();
-  session.setSession('provider','demo',false); assert.equal(session.effective().provider.value,'demo');
+  session.setSession('provider','live',false); assert.equal(session.effective().provider.value,'live');
 });
 
 
@@ -147,6 +147,6 @@ test('active proposals reset stale reasoning, expose override/destination warnin
  await session.apply('model.codex','new-model',false);assert.equal(session.effective().reasoning.value,'default');
  const failing=new SettingsStore(root,{},async()=>{throw Error('write failure');});
  const active=await SettingsSession.begin(failing,input);const previous=active.effective();
- await assert.rejects(active.apply('provider','demo',true),/write failure/);assert.deepEqual(active.effective(),previous);
+ await assert.rejects(active.apply('provider','live',true),/write failure/);assert.deepEqual(active.effective(),previous);
  const restarted=await SettingsSession.begin(store,input);assert.equal(restarted.effective().model.value,'mock-model');
 });

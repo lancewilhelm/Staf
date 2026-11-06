@@ -6,6 +6,7 @@ import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/pr
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer } from 'node:net';
+import { createServer as createHttpServer } from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
 
 const run = promisify(execFile);
@@ -31,7 +32,9 @@ test('development command serves one persistent instance and releases its owners
   const direct = JSON.stringify({version:1,issuer:'https://auth.openai.com',subject:'synthetic',clientId:'fixture-client',hostId:'fixture-host',accessToken:'synthetic-access',refreshToken:'synthetic-refresh',idToken:'synthetic-id',scopes:['resource.invoke','chatgpt.tokens.use.direct'],expiresAt:Date.now()+3600000});
   const host = JSON.stringify({version:1,hostId:'fixture-host'}), router = JSON.stringify({key:'synthetic-openrouter-key'});
   for (const [name, value] of [['codex-direct.json', direct], ['codex-host.json', host], ['openrouter.json', router]]) await writeFile(join(connections,'auth',name),value,{mode:0o600});
-  const env = {PATH:process.env.PATH, HOME:process.env.HOME, TMPDIR:temp, STAF_DEV_DATA_DIR:dir, STAF_DEV_CONNECTION_DIR:connections, STAF_DEV_PORT:String(port)};
+  const provider=createHttpServer(async(req,res)=>{for await(const _ of req){} res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({choices:[{message:{role:'assistant',content:'controlled development response'}}]}));});
+  await new Promise(resolve=>provider.listen(0,'127.0.0.1',resolve));
+  const env = {PATH:process.env.PATH, HOME:temp, TMPDIR:temp, STAF_DEV_DATA_DIR:dir, STAF_DEV_CONNECTION_DIR:connections, STAF_DEV_PORT:String(port),STAF_BASE_URL:`http://127.0.0.1:${provider.address().port}/v1/`,STAF_API_KEY:'synthetic-key'};
   let output = '';
   const launch = (extra={},cwd=checkout) => { const child = spawn('corepack', ['pnpm', 'dev'], {cwd, env:{...env,...extra}, detached:true, stdio:['pipe','pipe','pipe']}); child.stdout.on('data', b => output += b); child.stderr.on('data', b => output += b); return child; };
   const stop = async child => { process.kill(-child.pid, 'SIGINT'); await new Promise(resolve => child.once('exit', resolve)); };
@@ -45,7 +48,7 @@ test('development command serves one persistent instance and releases its owners
     assert.equal((await call('/api/codex-auth/credential', token))[1].signedIn, true);
     assert.equal((await call('/api/openrouter-connection', token))[1].saved, true);
     assert.equal((await fetch(url+'/api/bots', {headers:{Origin:'http://evil.example'}})).status,403);
-    const bot = (await call('/api/bots', token, {operationId:'development-test',name:'Development agent',provider:'demo'}))[1];
+    const bot = (await call('/api/bots', token, {operationId:'development-test',name:'Development agent',provider:'live',model:'fixture-offline'}))[1];
     assert.equal((await call('/api/commands', token, {id:'development-command',botId:bot.id,content:'hello'}))[1].kind, 'accepted');
     const rival = launch(); await new Promise(resolve => rival.once('exit', resolve));
     assert.notEqual(rival.exitCode, 0); assert.match(output, /active checkout/i);
@@ -66,7 +69,7 @@ test('development command serves one persistent instance and releases its owners
     assert.equal((await call('/api/commands/development-command', token))[1].state, 'completed');
     for (const [name, value] of [['codex-direct.json', direct], ['codex-host.json', host], ['openrouter.json', router]]) assert.equal(await readFile(join(connections,'auth',name),'utf8'),value);
     assert.doesNotMatch(output,/synthetic-access|synthetic-refresh|synthetic-openrouter-key/);
-  } finally { if (child.exitCode === null && child.signalCode === null) await stop(child); await rm(temp,{recursive:true,force:true}); }
+  } finally { if (child.exitCode === null && child.signalCode === null) await stop(child); await new Promise(resolve=>provider.close(resolve)); await rm(temp,{recursive:true,force:true}); }
 });
 
 test('development startup refuses an interrupted dataset before initializing it', {timeout:30000}, async () => {

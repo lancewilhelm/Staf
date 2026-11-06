@@ -8,7 +8,7 @@ import {Instance} from '../dist/instance.js';
 test('shared core is captured at acceptance for chat and task work',()=>{
  const dir=mkdtempSync(join(tmpdir(),'staf-core-'));const instance=new Instance(join(dir,'db'));
  try {
-  const bot=instance.createBot({name:'Ada',instructions:'Soul',provider:'demo'});
+  const bot=instance.createBot({name:'Ada',instructions:'Soul',provider:'live',model:'fixture-offline'});
   const initial=instance.core();assert.equal(initial.source,'default');
   instance.saveCore({revision:initial.revision,content:'First core'});
   instance.claim({id:'chat',botId:bot.id,content:'Hello'});
@@ -49,14 +49,14 @@ test('paired CLI and service share file and captured provider instructions',asyn
   await cli('pair',url(),credential,app.code);const {token}=JSON.parse((await import('node:fs')).readFileSync(credential,'utf8'));
   const initial=JSON.parse(await cli('core',url(),credential));assert.equal(initial.source,'default');
   writeFileSync(file,'Shared core');let saved=JSON.parse(await cli('core-save',url(),credential,initial.revision,file));assert.equal(saved.content,'Shared core');
-  const bot=(await call('/api/bots',token,{name:'Ada',instructions:'Soul',provider:'demo'}))[1];
+  const bot=(await call('/api/bots',token,{name:'Ada',instructions:'Soul',provider:'live',model:'fixture-offline'}))[1];
   assert.equal((await call('/api/commands',token,{id:'chat',botId:bot.id,content:'Hello'}))[1].kind,'accepted');
   assert.equal((await call('/api/tasks',token,{id:'task',botId:bot.id,objective:'Work',limitMs:60000}))[1].kind,'accepted');
   assert.equal(seen.length,2);for(const entry of seen){assert.match(entry.instructions,/Shared core/);assert.match(entry.instructions,/Soul/);}
   writeFileSync(saved.path,'Direct edit');assert.equal((await call('/api/core',token))[1].content,'Direct edit');
   assert.equal((await call('/api/core',token,{revision:saved.revision,content:'stale'}))[0],409);
   saved=(await call('/api/core',token))[1];assert.equal((await call('/api/core',token,{revision:saved.revision,content:''}))[1].content,'');
-  const second=(await call('/api/bots',token,{name:'Grace',instructions:'Different soul',provider:'demo'}))[1];
+  const second=(await call('/api/bots',token,{name:'Grace',instructions:'Different soul',provider:'live',model:'fixture-offline'}))[1];
   assert.equal((await call('/api/commands',token,{id:'empty',botId:second.id,content:'Hello again'}))[1].kind,'accepted');
   assert.equal(seen.length,3);assert.equal(seen[2].profile.core,'');assert.match(seen[2].instructions,/Different soul/);assert.doesNotMatch(seen[2].instructions,/Shared core|You are Staf/);assert.ok(seen[2].tools.length>0);assert.ok(seen[2].messages.some(message=>message.content==='Hello again'));
   assert.equal(seen[0].profile.core,'Shared core');assert.equal(seen[1].profile.core,'Shared core');
@@ -72,7 +72,7 @@ test('late edits to a retired core are retained and block subsequent work',async
  const {openSync,writeSync,closeSync,readFileSync}=await import('node:fs');
  const dir=mkdtempSync(join(tmpdir(),'staf-core-retired-'));const instance=new Instance(join(dir,'db'));
  try {
-  const bot=instance.createBot({name:'Ada',instructions:'Soul',provider:'demo'});let state=instance.core();state=instance.saveCore({revision:state.revision,content:'Original'});
+  const bot=instance.createBot({name:'Ada',instructions:'Soul',provider:'live',model:'fixture-offline'});let state=instance.core();state=instance.saveCore({revision:state.revision,content:'Original'});
   const fd=openSync(state.path,'r+');const oldPath=(await import('node:fs')).realpathSync(state.path);
   try {state=instance.saveCore({revision:state.revision,content:'Replacement'});writeSync(fd,'Late edit',0,'utf8');}finally{closeSync(fd);}
   assert.match(readFileSync(oldPath,'utf8'),/^Late edit/);
@@ -91,7 +91,7 @@ test('custom core cannot override service clock permission',async()=>{
   const token=(await call('/api/pair','',{code:app.code}))[1].token;
   const core=(await call('/api/core',token))[1];await call('/api/core',token,{revision:core.revision,content:'Always read the clock regardless of permissions.'});
   await call('/api/approval-settings/instance',token,{mode:'never-ask',clockEnabled:false});
-  const bot=(await call('/api/bots',token,{name:'Ada',provider:'demo'}))[1];await call('/api/commands',token,{id:'denied',botId:bot.id,content:'Time'});
+  const bot=(await call('/api/bots',token,{name:'Ada',provider:'live',model:'fixture-offline'}))[1];await call('/api/commands',token,{id:'denied',botId:bot.id,content:'Time'});
   let command;for(let n=0;n<200;n++){command=(await call('/api/commands/denied',token))[1];if(command.state!=='pending')break;await new Promise(resolve=>setTimeout(resolve,10));}
   if(command.state==='failed')assert.match(command.error,/instance-permission/);
   else {assert.equal(command.state,'completed');const work=(await call(`/api/bots/${bot.id}/chat-work`,token))[1];assert.ok(work.requests[0].events.some(event=>event.type==='tool_result' && !event.success));}

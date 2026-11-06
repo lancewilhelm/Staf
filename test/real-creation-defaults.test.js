@@ -5,15 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Instance } from '../dist/instance.js';
 
-// Model a retained pre-removal configuration through its authoritative file.
-// This keeps migration coverage independent of new-provider selection.
-function legacyDemo(instance, name, instructions) {
- const created=instance.createBot({name,instructions,provider:'lmstudio',model:'legacy-fixture'});
- const file=join(created.configDir,'agent.toml');
- const content=readFileSync(file,'utf8').replace('provider = "lmstudio"','provider = "demo"').replace('model = "legacy-fixture"\n','');
- writeFileSync(file,content);
- return instance.bot(created.id);
-}
+import {legacyDemo} from './fixtures/legacy-agent.mjs';
 
 test('real defaults migrate active and archived Demo agents without changing history or other providers', () => {
  const dir=mkdtempSync(join(tmpdir(),'staf-real-defaults-')), path=join(dir,'db'); let instance=new Instance(path);

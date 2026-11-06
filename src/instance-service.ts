@@ -1,3 +1,4 @@
+import {isProviderId} from './provider-ids.js';
 import {registerSkillCapability, skillTracker, skillWorkKey, type SkillTracker} from './skill-actions.js';
 import { z } from 'zod';
 import { ActionDenied, ActionFailed, type Capability, type ActionIdentity } from './work-actions.js';
@@ -342,8 +343,8 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
             const {profile,context,objective,limitMs}=instance.taskExecution(id); instance.taskStart(id);
             taskTimers.set(id,{pause,resume});
             remaining=limitMs; resume();
-            if (!['demo','codex','openrouter','lmstudio','live'].includes(profile.provider)) throw Error('Unsupported provider');
-            if (profile.provider !== 'demo' && !profile.model?.trim()) throw Error('Set a model in the agent profile');
+            if (!isProviderId(profile.provider)) throw Error('Unsupported provider');
+            if (!profile.model?.trim()) throw Error('Set a model in the agent profile');
             const instructions=`${profile.core}${profile.core ? "\n\n" : ""}Bot instructions:\n${profile.instructions}`;
             const taskProfile={...profile,chatId:id};
             const provider=options.providerFactory ? await options.providerFactory(taskProfile,instructions) : (await selectProvider(profile.provider,{env:providerEnv(profile.provider),model:profile.model ?? undefined,reasoning:profile.reasoning ?? undefined,dataDir,sessionId:id,instructions})).provider;
@@ -583,17 +584,17 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
       }
       if(req.url==='/api/provider-defaults') {
         if(req.method==='GET')return json(200,instance.providerDefaults().read());
-        if(req.method==='POST') {if(typeof value.revision!=='string'||typeof value.provider!=='string'||!(value.model===null||typeof value.model==='string')||!(value.reasoning===null||typeof value.reasoning==='string'))return json(400,{error:'Invalid provider defaults'});return json(200,instance.providerDefaults().set(value.revision,value.provider,{model:value.model,reasoning:value.reasoning}));}
+        if(req.method==='POST') {if(typeof value.revision!=='string'||typeof value.provider!=='string'||!isProviderId(value.provider)||!(value.model===null||typeof value.model==='string')||!(value.reasoning===null||typeof value.reasoning==='string'))return json(400,{error:'Invalid provider defaults'});return json(200,instance.providerDefaults().set(value.revision,value.provider,{model:value.model,reasoning:value.reasoning}));}
       }
       if(req.url==='/api/models'&&req.method==='POST') {
-        if(typeof value.provider!=='string'||!['demo','codex','openrouter','lmstudio','live'].includes(value.provider))return json(400,{error:'Invalid provider'});
+        if(typeof value.provider!=='string'||!isProviderId(value.provider))return json(400,{error:'Invalid provider'});
         if(loggingOut)return json(409,{error:'Sign-out in progress'});
         const settings=resolveSettings({saved:{},file:{},shell:env,cli:{provider:value.provider},session:{}});
         const catalog=await discoverModels(settings,{env,dataDir,refresh:true,request:options.modelRequest});selectionCatalogs.set(value.provider,catalog);return json(200,redactValue(catalog,redact));
       }
       const selection=req.url?.match(/^\/api\/bots\/([\w-]+)\/selection$/);
       if(selection?.[1]&&req.method==='POST') {
-        if(typeof value.revision!=='string'||typeof value.provider!=='string'||!['demo','codex','openrouter','lmstudio','live'].includes(value.provider)||(value.model!==undefined&&value.model!==null&&typeof value.model!=='string')||(value.reasoning!==undefined&&value.reasoning!==null&&typeof value.reasoning!=='string'))return json(400,{error:'Invalid selection'});
+        if(typeof value.revision!=='string'||typeof value.provider!=='string'||!isProviderId(value.provider)||(value.model!==undefined&&value.model!==null&&typeof value.model!=='string')||(value.reasoning!==undefined&&value.reasoning!==null&&typeof value.reasoning!=='string'))return json(400,{error:'Invalid selection'});
         const current=instance.bot(selection[1]);
         const advertised=selectionCatalogs.get(value.provider);
         const first=!current?.providerChoices?.[value.provider]&&!instance.providerDefaults().read().providers[value.provider]?.model;
@@ -612,7 +613,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
       if (req.method === 'GET' && req.url === '/api/bots') return json(200,instance.bots());
       if (req.method === 'POST' && req.url === '/api/bots') {
         if (typeof value.name !== 'string' || !value.name.trim() || value.name.length > 200 || (value.instructions !== undefined && (typeof value.instructions !== 'string' || value.instructions.length > 30000))) return json(400,{error:'Invalid name or instructions'});
-        if ((value.reasoning!==undefined&&value.reasoning!==null&&typeof value.reasoning!=='string') || (value.operationId !== undefined && (typeof value.operationId !== 'string' || !/^[\w-]{1,100}$/.test(value.operationId))) || (value.provider !== undefined && (typeof value.provider !== 'string' || !['demo','codex','openrouter','lmstudio','live'].includes(value.provider))) || (value.model !== undefined && value.model !== null && (typeof value.model !== 'string' || value.model.length > 200))) return json(400,{error:'Invalid creation operation'});
+        if ((value.reasoning!==undefined&&value.reasoning!==null&&typeof value.reasoning!=='string') || (value.operationId !== undefined && (typeof value.operationId !== 'string' || !/^[\w-]{1,100}$/.test(value.operationId))) || (value.provider !== undefined && (typeof value.provider !== 'string' || !isProviderId(value.provider))) || (value.model !== undefined && value.model !== null && (typeof value.model !== 'string' || value.model.length > 200))) return json(400,{error:'Invalid creation operation'});
         return json(201,instance.createBot({name:value.name,instructions:typeof value.instructions === 'string' ? value.instructions : '',...(typeof value.operationId === 'string' ? {operationId:value.operationId} : {}),...(typeof value.provider === 'string' ? {provider:value.provider} : {}),...(typeof value.model === 'string' ? {model:value.model} : {}),...(typeof value.reasoning==='string'?{reasoning:value.reasoning}:{}),...(value.toolMode===undefined?{}:{toolMode:parseToolMode(value.toolMode)}),image:parseAgentImageInput(value.image)},typeof value.provider==='string'?selectionCatalogs.get(value.provider)?.defaultModel:undefined));
       }
       const creationMatch=req.url?.match(/^\/api\/bot-creations\/([\w-]+)$/);
@@ -626,7 +627,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
           const updated=instance.setArchived(id,value.revision,action === 'archive');if(action==='archive')processes.stopAgent(id);return json(200,updated);
         }
         if (req.method === 'POST' && action === 'profile') {
-          if ('soul' in value || typeof value.revision !== 'string' || !/^[a-f0-9]{64}$/.test(value.revision) || typeof value.name !== 'string' || !value.name.trim() || value.name.length > 200 || (value.description !== undefined && (typeof value.description !== 'string' || Buffer.byteLength(value.description,'utf8') > 4096)) || typeof value.instructions !== 'string' || value.instructions.length > 30000 || typeof value.provider !== 'string' || !['demo','codex','openrouter','lmstudio','live'].includes(value.provider) || !(value.model === null || typeof value.model === 'string' && value.model.length <= 200) || !(value.reasoning === null || typeof value.reasoning === 'string' && value.reasoning.length <= 100)) return json(400,{error:'Invalid profile'});
+          if ('soul' in value || typeof value.revision !== 'string' || !/^[a-f0-9]{64}$/.test(value.revision) || typeof value.name !== 'string' || !value.name.trim() || value.name.length > 200 || (value.description !== undefined && (typeof value.description !== 'string' || Buffer.byteLength(value.description,'utf8') > 4096)) || typeof value.instructions !== 'string' || value.instructions.length > 30000 || typeof value.provider !== 'string' || !isProviderId(value.provider) || !(value.model === null || typeof value.model === 'string' && value.model.length <= 200) || !(value.reasoning === null || typeof value.reasoning === 'string' && value.reasoning.length <= 100)) return json(400,{error:'Invalid profile'});
           return json(200,instance.editBot(id,{revision:value.revision,name:value.name,...(typeof value.description === 'string' ? {description:value.description} : {}),instructions:value.instructions,provider:value.provider,model:value.model,reasoning:value.reasoning,...(value.toolMode===undefined?{}:{toolMode:parseToolMode(value.toolMode)}),...(value.image===undefined?{}:{image:parseAgentImageInput(value.image)})}));
         }
       }
@@ -754,8 +755,8 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
           };
           void (async () => { try {
             const {profile,session,notices} = instance.execution(id);
-            if (!['demo','codex','openrouter','lmstudio','live'].includes(profile.provider)) throw Error('Unsupported provider');
-            if (profile.provider !== 'demo' && !profile.model?.trim()) throw Error('Set a model in the agent profile');
+            if (!isProviderId(profile.provider)) throw Error('Unsupported provider');
+            if (!profile.model?.trim()) throw Error('Set a model in the agent profile');
             const instructions = `${profile.core}${profile.core ? "\n\n" : ""}Bot instructions:\n${profile.instructions}`;
             const provider = options.providerFactory ? await options.providerFactory(profile,instructions) : (await selectProvider(profile.provider,{env:providerEnv(profile.provider),model:profile.model ?? undefined,reasoning:profile.reasoning ?? undefined,dataDir,sessionId:profile.chatId,instructions})).provider;
             controller.signal.throwIfAborted();

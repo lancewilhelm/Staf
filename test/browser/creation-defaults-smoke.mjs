@@ -14,7 +14,7 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));async function until(fn,label){
 function cdp(method,params={}){return new Promise((resolve,reject)=>{const id=++seq;const timer=setTimeout(()=>reject(Error('CDP timeout')),10000);pending.set(id,{resolve:x=>{clearTimeout(timer);resolve(x)},reject});socket.send(JSON.stringify({id,method,params}))})}
 async function evaluate(expression){const result=await cdp('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});if(result.exceptionDetails)throw Error(JSON.stringify(result.exceptionDetails));return result.result.value}
 try {
- server=spawn(process.execPath,['test/browser/held-instance.mjs',join(temp,'instance.sqlite'),String(port)],{cwd:root,env,stdio:['pipe','pipe','pipe']});server.stdout.on('data',b=>output+=b);server.stderr.on('data',b=>output+=b);
+ server=spawn(process.execPath,['test/browser/held-instance.mjs',join(temp,'instance.sqlite'),String(port),'--legacy-fixture'],{cwd:root,env,stdio:['pipe','pipe','pipe']});server.stdout.on('data',b=>output+=b);server.stderr.on('data',b=>output+=b);
  const code=await until(()=>output.match(/Pairing code: (\S+)/)?.[1],'pairing code');
  browser=spawn(chrome,['--headless=new','--no-first-run','--disable-background-networking','--disable-extensions','--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1',`--user-data-dir=${join(temp,'chrome')}`,'--remote-debugging-port=0',url],{env,stdio:['ignore','ignore','pipe']});
  const debug=await until(async()=>{try{return (await readFile(join(temp,'chrome','DevToolsActivePort'),'utf8')).split('\n')[0]}catch{return null}},'Chrome');
@@ -23,7 +23,7 @@ try {
  await until(()=>evaluate("document.body?.innerText.includes('Pair this browser')"),'pair page');
  await evaluate(`window.input=(el,value)=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(el,value);el.dispatchEvent(new Event('input',{bubbles:true}))};window.clickText=text=>[...document.querySelectorAll('button')].find(b=>b.textContent.trim()===text).click();input(document.querySelector('input'),${JSON.stringify(code)});clickText('Pair')`);
  await until(()=>evaluate("document.body.innerText.includes('Provider connections')"),'settings');
- const legacy=await evaluate("(async()=>{const token=localStorage.getItem('staf-token'),headers={Authorization:'Bearer '+token,'Content-Type':'application/json'};const post=async(path,body)=>await(await fetch(path,{method:'POST',headers,body:JSON.stringify(body)})).json();const a=await post('/api/bots',{name:'Legacy',instructions:'Keep soul',provider:'demo'});const b=await post('/api/bots',{name:'Archived',provider:'demo'});await post('/api/bots/'+b.id+'/archive',{revision:b.revision});return [a.id,b.id]})()");
+ const legacy=await evaluate("(async()=>{const token=localStorage.getItem('staf-token');return (await(await fetch('/api/bots',{headers:{Authorization:'Bearer '+token}})).json()).map(bot=>bot.id)})()");
  await evaluate("document.querySelector('.defaults-editor').open=true");
  await until(()=>evaluate("!!document.querySelector('.defaults-editor fieldset select')"),'creation editor');
  await evaluate("(()=>{const f=document.querySelector('.defaults-editor fieldset'),select=f.querySelector('select');select.value='codex';select.dispatchEvent(new Event('change',{bubbles:true}));input(f.querySelector('input'),'synthetic-model');clickText('Save creation defaults')})()");

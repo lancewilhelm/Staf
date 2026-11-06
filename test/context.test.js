@@ -34,7 +34,7 @@ test('payload proxy includes Staf instructions/tools and pending input but is in
  const detail=contextDetails(used,effective(),undefined,catalog);assert.match(detail,/100000 tokens/);assert.match(detail,/labeled historical request, not the next context/);assert.match(detail,/not a tokenizer/);assert.match(detail,/Output reserve: not configured/);assert.match(detail,/fetched 2026/);
  const native=contextDetails({...used,usage:[{...used.usage[0],provider:'codex:test',source:'Codex fresh exec cumulative usage; total not reported'}]},effective('codex'),undefined,catalog);
  assert.match(native,/cumulative aggregate, NOT native context/);assert.match(native,/next payload/);
- assert.match(contextLine(contextStatus(session,effective('demo'))),/demo \(no model tokens\/window\)/);
+
 });
 
 test('model catalog passive lookup never reads network; explicit metadata can be reused and remains endpoint-scoped',async t=>{
@@ -51,9 +51,8 @@ test('context recomputes after resume without changing ledger, history, settings
  const before=await readFile(store.path(saved.id),'utf8');const resumed=await store.load(saved.id);
  assert.deepEqual(contextStatus(saved,effective(),undefined,catalog),contextStatus(resumed,effective(),undefined,catalog));
  assert.equal(await readFile(store.path(saved.id),'utf8'),before);assert.equal(resumed.usage.length,1);
- const demo=contextDetails(resumed,effective('demo'));
  const switched=contextDetails(resumed,effective('lmstudio'));
- assert.match(demo,/Context: demo/);assert.match(switched,/next payload ~\d+ tokens \(bytes\/4 proxy\) \/ unknown window/);assert.match(switched,/Compaction: not implemented/);assert.ok(!switched.includes('\x1b'));assert.equal(await readFile(store.path(saved.id),'utf8'),before);
+ assert.match(switched,/next payload ~\d+ tokens \(bytes\/4 proxy\) \/ unknown window/);assert.match(switched,/Compaction: not implemented/);assert.ok(!switched.includes('\x1b'));assert.equal(await readFile(store.path(saved.id),'utf8'),before);
 });
 
 
@@ -89,8 +88,7 @@ test('recurring footer is concise; detailed measurements remain only on explicit
  const http=contextStatus(session,effective(),undefined,catalog);assert.match(contextFooter(http),/^Context: ~[0-9.k]+ \/ 8k \(est\.\)$/);assert.ok(contextFooter(http).length<=32);
  assert.match(contextFooter({...http,window:undefined}),/^Context: ~[0-9.k]+ tokens \(est\.\)$/);
  assert.ok(!contextFooter({...http,stale:true}).includes('/ 8k'));
- assert.equal(contextFooter(contextStatus(session,effective('demo'))),'Context: demo');
  assert.match(contextDetails(session,effective('codex')),/Direct|direct|Responses/);
- const footer=contextFooter(contextStatus(session,effective('demo')));
- assert.match(footer,/Context: demo/);assert.ok(!/Measured:|bytes\/4|Compaction:/.test(footer));assert.ok(!footer.includes('\x1b'));
+ const footer=contextFooter(contextStatus(session,effective()));
+ assert.match(footer,/Context:/);assert.ok(!/Measured:|bytes\/4|Compaction:/.test(footer));assert.ok(!footer.includes('\x1b'));
 });

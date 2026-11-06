@@ -55,7 +55,7 @@ again, so cumulative input is not the size of the current prompt.
 | LM Studio | Compatible Chat Completions `usage.prompt_tokens/completion_tokens/total_tokens` | Cache/reasoning/cost not promised by this transport. No transport change for metrics. |
 | Codex direct | Responses input/output/total; input cached subset; output reasoning subset | Inclusive input. Missing fields stay unavailable. No cost/quota inference. |
 | Historical Codex CLI | JSONL execution totals | Old records retain execution scope; not current request occupancy. |
-| Demo | Not applicable | No language model or reported token/cost usage. |
+| Historical Demo records | Not applicable | Retained records have no model token or cost usage. Demo cannot execute. |
 | Legacy HTTP (`live`) | Unavailable | No verified generic usage contract; response fields are not assumed compatible. |
 
 Direct Codex usage comes from the completed Responses event. Failed/incomplete

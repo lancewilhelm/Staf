@@ -6,7 +6,7 @@ import { isAbsolute } from 'node:path';
 test('accepted work keeps its captured context through settings changes and submission retry', () => {
   const instance = new Instance(':memory:');
   try {
-    let bot = instance.createBot({provider:'demo',name:'Binding', instructions:'original', toolMode:'hybrid'});
+    let bot = instance.createBot({provider:'live',model:'fixture-offline',name:'Binding', instructions:'original', toolMode:'hybrid'});
     instance.claim({id:'command', botId:bot.id, content:'hello'});
     instance.acceptTask({id:'attempt', botId:bot.id, objective:'work', limitMs:10000});
     const signal = new AbortController().signal;
@@ -38,7 +38,7 @@ function localChange({authorize=async()=>{},execute}={}) {
     execute:execute ?? (async (input,work)=>{const path=join(work.workingDirectory,'fixture');let before='';try{before=readFileSync(path,'utf8');}catch{}writeFileSync(path,before+input.value);return before+input.value;}),visibleResult:()=> 'Fixture updated'};
 }
 function fixture(redact) {
-  const instance=new Instance(':memory:',redact);const bot=instance.createBot({provider:'demo',name:'Test',instructions:'',toolMode:'hybrid'});instance.claim({id:'c',botId:bot.id,content:'hello'});const controller=new AbortController();return {instance,bot,controller,actions:instance.workActions().open({kind:'command',id:'c'},controller.signal)};
+  const instance=new Instance(':memory:',redact);const bot=instance.createBot({provider:'live',model:'fixture-offline',name:'Test',instructions:'',toolMode:'hybrid'});instance.claim({id:'c',botId:bot.id,content:'hello'});const controller=new AbortController();return {instance,bot,controller,actions:instance.workActions().open({kind:'command',id:'c'},controller.signal)};
 }
 
 test('input normalization cannot introduce a credential before the shared journal boundary',async()=>{
@@ -138,7 +138,7 @@ test('denial and exhausted shared budget cannot be bypassed by switching route',
 
 test('uncertain task effect fences its retry until feature reconciliation',async()=>{
   const instance=new Instance(':memory:');try {
-    const bot=instance.createBot({provider:'demo',name:'Task',instructions:'',toolMode:'hybrid'});instance.acceptTask({id:'t1',botId:bot.id,objective:'work',limitMs:10000});instance.taskStart('t1');
+    const bot=instance.createBot({provider:'live',model:'fixture-offline',name:'Task',instructions:'',toolMode:'hybrid'});instance.acceptTask({id:'t1',botId:bot.id,objective:'work',limitMs:10000});instance.taskStart('t1');
     let calls=0;const cap=localChange({execute:async(input,work)=>{calls++;writeFileSync(join(work.workingDirectory,'fixture'),input.value);if(calls===1)throw Error('lost result');return input.value;}});
     cap.recovery={overlaps:()=>true,reconcile:(input,evidence,work)=>evidence==='inspected' && readFileSync(join(work.workingDirectory,'fixture'),'utf8')===input.value};
     instance.workActions().register(cap);const one=instance.workActions().open({kind:'task',id:'t1'},new AbortController().signal);
@@ -153,7 +153,7 @@ test('uncertain task effect fences its retry until feature reconciliation',async
 test('actual restart marks started task effect uncertain and never reruns it',async()=>{
   const dir=mkdtempSync(join(tmpdir(),'staf-actions-restart-')),path=join(dir,'instance.sqlite');let instance;
   try {
-    instance=new Instance(path);const bot=instance.createBot({provider:'demo',name:'Restart',instructions:'',toolMode:'hybrid'});
+    instance=new Instance(path);const bot=instance.createBot({provider:'live',model:'fixture-offline',name:'Restart',instructions:'',toolMode:'hybrid'});
     instance.acceptTask({id:'before',botId:bot.id,objective:'work',limitMs:10000});instance.taskStart('before');
     let entered;const started=new Promise(resolve=>{entered=resolve;});let executions=0;
     const cap=localChange({execute:async(input,work)=>{executions++;writeFileSync(join(work.workingDirectory,'fixture'),input.value);entered();return await new Promise(()=>{});}});
@@ -172,7 +172,7 @@ test('actual restart marks started task effect uncertain and never reruns it',as
 test('version 31 migration backfills accepted bindings with a protected backup',()=>{
   const dir=mkdtempSync(join(tmpdir(),'staf-actions-migration-')),path=join(dir,'instance.sqlite');let instance;
   try {
-    instance=new Instance(path);const bot=instance.createBot({provider:'demo',name:'Legacy',instructions:'',toolMode:'hybrid'});instance.claim({id:'legacy',botId:bot.id,content:'hi'});
+    instance=new Instance(path);const bot=instance.createBot({provider:'live',model:'fixture-offline',name:'Legacy',instructions:'',toolMode:'hybrid'});instance.claim({id:'legacy',botId:bot.id,content:'hi'});
     const directory=instance.workContext({kind:'command',id:'legacy'},new AbortController().signal).workingDirectory;writeFileSync(join(directory,'kept'),'kept');instance.close();
     const db=new DatabaseSync(path);db.exec('DROP TABLE work_action_resolutions; DROP TABLE work_action_challenges; DROP TABLE work_action_requests; DROP TABLE work_action_invocations; DROP TABLE work_action_state; DROP TABLE work_bindings; PRAGMA user_version=31');db.close();
     instance=new Instance(path);assert.ok(instance.migrationBackup && existsSync(instance.migrationBackup));
@@ -245,7 +245,7 @@ test('recovery fences different changes after a completed opaque effect',async()
 
 test('unregistered uncertain journal effects conservatively fence a task retry',async()=>{
   const {ActionJournal}=await import('../dist/action-journal.js');const instance=new Instance(':memory:');try {
-    const bot=instance.createBot({provider:'demo',name:'Legacy task',instructions:'',toolMode:'hybrid'});instance.acceptTask({id:'old',botId:bot.id,objective:'work',limitMs:10000});instance.taskStart('old');
+    const bot=instance.createBot({provider:'live',model:'fixture-offline',name:'Legacy task',instructions:'',toolMode:'hybrid'});instance.acceptTask({id:'old',botId:bot.id,objective:'work',limitMs:10000});instance.taskStart('old');
     const journal=new ActionJournal(instance.db);const prepared=journal.prepare({id:'old-action',fingerprint:'keyed-fingerprint',work:{kind:'task',id:'old'},summary:'Legacy effect'});journal.start(prepared.permit);journal.finish('old-action','uncertain','Outcome unknown');instance.taskFinish('old','failed','interrupted');
     instance.acceptTask({id:'retry',botId:bot.id,objective:'work',limitMs:10000,predecessor:'old'});instance.taskStart('retry');instance.workActions().register(localChange());
     const actions=instance.workActions().open({kind:'task',id:'retry'},new AbortController().signal);
@@ -274,7 +274,7 @@ test('captured modes enforce direct and guest routes at dispatch',async()=>{
   const instance=new Instance(':memory:');try {
     instance.workActions().register(clockCapability(instance,async()=>{}));
     for(const mode of ['direct','hybrid','code']) {
-      const bot=instance.createBot({provider:'demo',name:mode,instructions:'',toolMode:mode});instance.claim({id:mode,botId:bot.id,content:'hi'});
+      const bot=instance.createBot({provider:'live',model:'fixture-offline',name:mode,instructions:'',toolMode:mode});instance.claim({id:mode,botId:bot.id,content:'hi'});
       const actions=instance.workActions().open({kind:'command',id:mode},new AbortController().signal);
       assert.equal(actions.offers('direct').length,mode==='code'?0:1);assert.equal(actions.offers('guest').length,mode==='direct'?0:1);
       if(mode==='code')await assert.rejects(()=>invoke(actions,source('direct'),'clock',{}),/not offered/);
@@ -285,7 +285,7 @@ test('captured modes enforce direct and guest routes at dispatch',async()=>{
 
 test('a retry cannot overlap a predecessor effect that is still settling',async()=>{
   const instance=new Instance(':memory:');try {
-    const bot=instance.createBot({provider:'demo',name:'Settling',instructions:'',toolMode:'hybrid'});instance.acceptTask({id:'first',botId:bot.id,objective:'work',limitMs:10000});instance.taskStart('first');
+    const bot=instance.createBot({provider:'live',model:'fixture-offline',name:'Settling',instructions:'',toolMode:'hybrid'});instance.acceptTask({id:'first',botId:bot.id,objective:'work',limitMs:10000});instance.taskStart('first');
     let release,entered;const waiting=new Promise(resolve=>{entered=resolve;});const gate=new Promise(resolve=>{release=resolve;});let effects=0;
     instance.workActions().register(localChange({execute:async()=>{effects++;entered();await gate;return 'done';}}));
     const first=instance.workActions().open({kind:'task',id:'first'},new AbortController().signal);const settling=invoke(first,guest(1),'local_change',{value:'x'});await waiting;

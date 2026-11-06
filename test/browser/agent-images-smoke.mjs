@@ -68,7 +68,7 @@ try {
   await act("document.querySelector('[aria-label=\"Collapse sidebar into Focus\"]').click()","document.querySelector('.shell').dataset.sidebar==='focus'",'saved character remains in Focus navigation');
   assert.equal(await evaluate("!!document.querySelector('.side nav .agent-image svg')&&document.querySelector('.side nav button').getAttribute('aria-label')==='Image one'"),true);
   await act("document.querySelector('[aria-label=\"Expand sidebar\"]').click()","document.querySelector('.shell').dataset.sidebar==='expanded'",'restore expanded navigation');
-  const two=await api('/api/bots',{name:'Image two',provider:'demo',image:{kind:'avatar',shape:'circle',color:'sky'}});
+  const two=await api('/api/bots',{name:'Image two',provider:'live',model:'fixture-offline',image:{kind:'avatar',shape:'circle',color:'sky'}});
   await until(()=>evaluate("document.querySelectorAll('.side nav button').length===2"),'second agent appears');
   assert.deepEqual(await evaluate("Array.from(document.querySelectorAll('.side nav .agent-image')).map(node=>!!node.querySelector('svg'))"),[true,true]);
   await act("document.querySelector('[aria-label=\"Open agent settings\"]').click()","!!document.querySelector('.agent-settings input')",'open agent Settings');

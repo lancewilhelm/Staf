@@ -1,3 +1,4 @@
+import {isProviderId} from './provider-ids.js';
 import {parseToolMode,type ToolMode} from './tool-mode.js';
 import {InstanceCore} from './instance-core.js';
 import {ProviderDefaultsStore} from './provider-choices.js';
@@ -417,7 +418,7 @@ export class Instance {
       const id=randomUUID(), chatId=randomUUID(), defaults=this.creationDefaults();
       if (!defaults.provider) throw Error('Choose a creation-default provider and model in Settings first, or run staf settings set-defaults PROVIDER MODEL.');
       this.configs.publish(id,{name:'Staf',description:'',provider:defaults.provider,model:defaults.model,reasoning:defaults.reasoning,toolMode:defaults.toolMode,instructions:starterSoul},false);
-      this.db.prepare('INSERT INTO bots VALUES (?, ?, ?, ?, ?, ?, ?)').run(id,chatId,'','','demo',null,null);
+      this.db.prepare('INSERT INTO bots VALUES (?, ?, ?, ?, ?, ?, ?)').run(id,chatId,'','',defaults.provider,null,null);
       this.db.prepare('INSERT INTO bot_profiles (bot_id,revision,soul,archived) VALUES (?, 1, ?, 0)').run(id,'');
       this.db.prepare('INSERT INTO main_bot VALUES (1,?)').run(id);
       const bot=this.bot(id); this.db.exec('COMMIT'); return bot;
@@ -748,11 +749,12 @@ export class Instance {
       this.requireStoredImage(image);
       const defaults=this.creationDefaults();const provider=input.provider ?? defaults.provider;
       if (!provider) throw Error('Choose a creation-default provider and model in Settings first.');
+      if (!isProviderId(provider)) throw Error('Unsupported provider. Choose a supported provider.');
       const first=this.providerDefaults().read().providers[provider];
       const chosenModel=input.model ?? (input.provider===undefined?defaults.model:first?.model??advertisedModel??null);
       const chosenReasoning=input.reasoning ?? (input.provider===undefined?defaults.reasoning:first?.reasoning??null);
       this.configs.publish(id,{name:input.name,description:'',provider,model:chosenModel,reasoning:chosenReasoning,toolMode:input.toolMode??defaults.toolMode,instructions:input.instructions,providerChoices:{[provider]:{model:chosenModel,reasoning:chosenReasoning}},image},false);
-      this.db.prepare('INSERT INTO bots VALUES (?, ?, ?, ?, ?, ?, ?)').run(id, chatId, '', '', 'demo', null, null);
+      this.db.prepare('INSERT INTO bots VALUES (?, ?, ?, ?, ?, ?, ?)').run(id, chatId, '', '', provider, null, null);
       this.db.prepare('INSERT INTO bot_profiles (bot_id,revision,soul,archived) VALUES (?, 1, ?, 0)').run(id, '');
       if(input.operationId && digest) this.db.prepare('INSERT INTO bot_creation_operations VALUES (?,?,?)').run(input.operationId,digest,id);
       this.db.exec('COMMIT');
@@ -769,7 +771,7 @@ export class Instance {
       const id=String(row.id),identity=this.botIdentity(id);
       if(!identity)throw Error('Invalid agent identity');
       try { return {...identity,...this.configs.read(id,identity.archived)}; }
-      catch(error) { return {...identity,name:'Invalid configuration',description:'',provider:'demo',model:null,reasoning:null,instructions:'',revision:'',configDir:this.configs.location(id),configError:error instanceof Error?error.message:'Invalid configuration'}; }
+      catch(error) { return {...identity,name:'Invalid configuration',description:'',provider:'',model:null,reasoning:null,instructions:'',revision:'',configDir:this.configs.location(id),configError:error instanceof Error?error.message:'Invalid configuration'}; }
     });
   }
   bot(id: string) { const identity=this.botIdentity(id);return identity ? {...identity,...this.configs.read(id,identity.archived)} : undefined; }
@@ -779,6 +781,7 @@ export class Instance {
     return discoverBots({requesterId,query,entries});
   }
   editBot(id: string, edit: BotEdit) {
+    if (!isProviderId(edit.provider)) throw Error('Unsupported provider. Choose a supported provider.');
     this.db.exec('BEGIN IMMEDIATE');
     try {
       const current = this.bot(id);

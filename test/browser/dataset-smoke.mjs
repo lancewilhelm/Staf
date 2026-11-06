@@ -27,6 +27,7 @@ try {
  await until(()=>evaluate("document.body.innerText.includes('Pair this browser')"),'pair page');
  const pair=code=>evaluate(`{const el=document.querySelector('input');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(el,${JSON.stringify(code)});el.dispatchEvent(new Event('input',{bubbles:true}));[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Pair').click()}`);
  await pair(app.code);await until(()=>evaluate("!![...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('New agent'))"),'paired');
+ await evaluate("(async()=>{const h={Authorization:'Bearer '+localStorage.getItem('staf-token'),'Content-Type':'application/json'},d=await(await fetch('/api/creation-defaults',{headers:h})).json();await fetch('/api/creation-defaults',{method:'POST',headers:h,body:JSON.stringify({...d,provider:'live',model:'fixture-offline'})})})()");
  await evaluate("[...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('New agent')).click()");
  await until(()=>evaluate("!!document.querySelector('.agent-settings input')"),'creation form');
  await evaluate("{const el=document.querySelector('.agent-settings input');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(el,'Delayed creation');el.dispatchEvent(new Event('input',{bubbles:true}));window.originalFetch=window.fetch;window.fetch=async(...args)=>{const response=await window.originalFetch(...args);if(args[0]==='/api/bots'&&args[1]?.method==='POST'){window.held=true;await new Promise(resolve=>window.release=resolve)}return response}}");
@@ -38,7 +39,7 @@ try {
  const reset=spawnSync(process.execPath,['scripts/dev-data.mjs','reset'],{cwd:root,env,encoding:'utf8'});assert.equal(reset.status,0,reset.stderr);
  app=startInstance(data,port,{env:{}});await app.listen();
  await until(()=>evaluate("document.body.innerText.includes('Pair this browser')"),'old token rejected');
- await pair(app.code);await until(()=>evaluate("document.body.innerText.includes('Project guide')"),'paired with replacement');
+ await pair(app.code);await until(()=>evaluate("document.body.innerText.includes('Provider connections')"),'paired with replacement');
  await evaluate('window.release()');await sleep(300);
  assert.equal(await evaluate("document.body.innerText.includes('Delayed creation')"),false,'late old response cannot restore old form or agent');
  assert.equal(await evaluate(`localStorage.getItem(${JSON.stringify(oldRecord)})!==null`),true,'old creation stays quarantined');

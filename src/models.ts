@@ -65,7 +65,7 @@ export function cachedModelCatalog(effective: EffectiveSettings): (ModelCatalog 
 export async function discoverModels(effective: EffectiveSettings, options: DiscoveryOptions): Promise<ModelCatalog> {
   const provider = effective.provider.value;
   const source = catalogSource(effective);
-  if (provider === 'demo') return { source: 'built-in demo', fetchedAt: new Date().toISOString(), cached: false, models: [], note: 'Demo has no model or reasoning control.' };
+  if (!['codex','openrouter','lmstudio','live'].includes(provider)) throw new Error('Choose a supported provider before discovering models.');
   const key = `${provider}:${source}`;
   const found = cache.get(key);
   if (!options.refresh && !options.request && !options.codex && found && Date.now() - found.time < 300000) return { ...structuredClone(found.result), cached: true };

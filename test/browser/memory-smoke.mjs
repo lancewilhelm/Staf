@@ -34,7 +34,7 @@ try{
 
  const token=await evaluate("localStorage.getItem('staf-token')");
  const api=async(path,body)=>{const r=await fetch(url+'/api/'+path,{method:body?'POST':'GET',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});assert.ok(r.ok,await r.clone().text());return r.json()};
- const one=await api('bots',{name:'Ada',provider:'demo'}),two=await api('bots',{name:'Grace',provider:'demo'}),archived=await api('bots',{name:'Retired',provider:'demo'});
+ const one=await api('bots',{name:'Ada',provider:'live',model:'fixture-offline'}),two=await api('bots',{name:'Grace',provider:'live',model:'fixture-offline'}),archived=await api('bots',{name:'Retired',provider:'live',model:'fixture-offline'});
  const privatePath='memories/bot/'+one.id,secondPath='memories/bot/'+two.id;
  const privateEntry=await api(privatePath,{text:'Ada private preference\n<img src=x onerror=alert(1)>'+ 'x'.repeat(1000)});
  const foreign=await api(secondPath,{text:'Grace private preference'});

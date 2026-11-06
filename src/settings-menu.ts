@@ -48,7 +48,7 @@ export async function openSettingsMenu(ops: SharedSettingsOperations, view: Term
   function editor(key: 'model' | 'reasoning', defaults = false): void { push({ title: `Enter ${key}`, lines: ['Empty value uses the provider default.'], choices: [], selected: 0, edit: { value: '', cursor: 0, submit: value => confirm(key, value, defaults) } }); }
   current = { title: 'Staf settings', lines: ['Settings belong to this shared bot.', 'New bot defaults are managed separately.'], selected: 0, choices: [
     { label: 'Show bot settings', select: () => run(async active => { const lines = await ops.show(); if (active()) message('Bot settings', lines); }) },
-    { label: 'Provider', select: () => push({ title: 'Provider', lines: ['Endpoints and credentials are configured on the host.'], selected: 0, choices: ['demo', 'codex', 'openrouter', 'lmstudio', 'live'].map(value => ({ label: providerLabel(value), select: () => confirm('provider', value) })) }) },
+    { label: 'Provider', select: () => push({ title: 'Provider', lines: ['Endpoints and credentials are configured on the host.'], selected: 0, choices: ['codex', 'openrouter', 'lmstudio', 'live'].map(value => ({ label: providerLabel(value), select: () => confirm('provider', value) })) }) },
     { label: 'Model', select: () => push({ title: 'Model', lines: [], selected: 0, choices: [
       { label: 'Enter model ID', select: () => editor('model') },
       { label: 'Discover model IDs (metadata request)', select: () => run(async active => { const models = await ops.models(); if (active()) push({ title: 'Models', lines: [], selected: 0, choices: [...models.map(value => ({ label: value, select: () => confirm('model', value) })), { label: 'Back', select: back }] }); }) },
@@ -57,7 +57,7 @@ export async function openSettingsMenu(ops: SharedSettingsOperations, view: Term
     { label: 'Reasoning', select: () => editor('reasoning') },
     { label: 'New bot defaults', select: () => push({ title: 'New bot defaults', lines: ['Only bots created later use these values.'], selected: 0, choices: [
       { label: 'Show defaults', select: () => run(async active => { const lines = await ops.showDefaults(); if (active()) message('New bot defaults', lines); }) },
-      { label: 'Provider', select: () => push({ title: 'Default provider', lines: ['Existing bots keep their settings.'], selected: 0, choices: ['demo', 'codex', 'openrouter', 'lmstudio', 'live'].map(value => ({ label: providerLabel(value), select: () => confirm('provider', value, true) })) }) },
+      { label: 'Provider', select: () => push({ title: 'Default provider', lines: ['Existing bots keep their settings.'], selected: 0, choices: ['codex', 'openrouter', 'lmstudio', 'live'].map(value => ({ label: providerLabel(value), select: () => confirm('provider', value, true) })) }) },
       { label: 'Model', select: () => editor('model', true) },
       { label: 'Reasoning', select: () => editor('reasoning', true) },
       { label: 'Back', select: back },

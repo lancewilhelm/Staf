@@ -16,10 +16,13 @@ const port=await new Promise(resolvePort=>{const s=createServer();s.listen(0,'12
 const url=`http://127.0.0.1:${port}`, env={PATH:process.env.PATH,HOME:temp,TMPDIR:temp,STAF_DEV_DATA_DIR:data,STAF_DEV_PORT:String(port)};
 const sleep=ms=>new Promise(resolveSleep=>setTimeout(resolveSleep,ms));
 async function until(fn,label){for(let i=0;i<300;i++){try{const result=await fn();if(result)return result;}catch{}await sleep(100);}throw Error(`Timed out: ${label}\n${output}`);}
-let launcher,browser,socket,proxy,output='',seq=0;const pending=new Map();
+let launcher,browser,socket,proxy,provider,output='',seq=0;const pending=new Map();
 function cdp(method,params={}){return new Promise((resolveResult,reject)=>{const id=++seq,timer=setTimeout(()=>{pending.delete(id);reject(Error(`CDP timed out: ${method}`));},10000);pending.set(id,{resolve:value=>{clearTimeout(timer);resolveResult(value);},reject});socket.send(JSON.stringify({id,method,params}));});}
 async function evaluate(expression){const result=await cdp('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});if(result.exceptionDetails)throw Error(JSON.stringify(result.exceptionDetails));return result.result.value;}
 try {
+ provider=spawn(process.execPath,[join(source,'test/fixtures/terminal-provider.mjs'),join(temp,'provider.json')],{stdio:'ignore'});
+ const providerInfo=await until(async()=>JSON.parse(await readFile(join(temp,'provider.json'),'utf8')),'controlled provider');
+ env.STAF_BASE_URL=`http://127.0.0.1:${providerInfo.port}/v1/`;env.STAF_API_KEY='synthetic-key';
  await mkdir(checkout);for(const name of ['src','web','scripts','package.json','tsconfig.json','vite.config.ts'])await cp(join(source,name),join(checkout,name),{recursive:true});await symlink(join(source,'node_modules'),join(checkout,'node_modules'),'dir');
  proxy=createServer(socket=>socket.end('HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n'));await new Promise(resolveListen=>proxy.listen(0,'127.0.0.1',resolveListen));
  launcher=spawn('corepack',['pnpm','dev'],{cwd:checkout,env,detached:true,stdio:['pipe','pipe','pipe']});launcher.stdout.on('data',b=>output+=b);launcher.stderr.on('data',b=>output+=b);
@@ -33,14 +36,14 @@ try {
  await until(()=>evaluate("!!localStorage.getItem('staf-token')"),'browser paired');
  const token=await evaluate("localStorage.getItem('staf-token')");
  const call=async(path,body)=>{const response=await fetch(url+path,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});assert.ok(response.ok,`${path}: ${response.status}`);return response.json();};
- const bot=await call('/api/bots',{operationId:'smoke-agent',name:'Smoke agent',provider:'demo'});
+ const bot=await call('/api/bots',{operationId:'smoke-agent',name:'Smoke agent',provider:'live',model:'fixture-offline'});
  await until(()=>evaluate("[...document.querySelectorAll('.side button')].some(b=>b.textContent.includes('Smoke agent'))"),'agent shown');
  await evaluate("[...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('Smoke agent')).click()");
  await until(()=>evaluate("!!document.querySelector('textarea[aria-label=Message]')"),'chat opened');
  await evaluate(`{const el=document.querySelector('textarea');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(el,'draft survives restart');el.dispatchEvent(new Event('input',{bubbles:true}))}`);
  await until(()=>evaluate("document.querySelector('textarea').value==='draft survives restart'"),'draft typed');
  await call('/api/commands',{id:'smoke-command',botId:bot.id,content:'offline smoke'});
- await until(async()=>(await call('/api/commands/smoke-command')).state==='completed','demo response');
+ await until(async()=>(await call('/api/commands/smoke-command')).state==='completed','controlled response');
  await until(()=>evaluate("document.body.innerText.includes('offline smoke')"),'browser sees shared chat');
  // Pre-dataset journals from an older browser: a durable command proves this
  // draft belongs to this agent, while the creation operation proves its origin.
@@ -48,18 +51,18 @@ try {
  const legacyCreation='staf-workspace-v1:creation:smoke-agent';
  const unverifiedDraft=`staf-workspace-v1:unknown-writer:${bot.id}`;
  const unverifiedCreation='staf-workspace-v1:creation:unknown-operation';
- await evaluate(`for(const key of Object.keys(localStorage))if(key.startsWith('staf-workspace-v1:')&&key.endsWith(':'+${JSON.stringify(bot.id)}))localStorage.removeItem(key);localStorage.setItem(${JSON.stringify(legacyDraft)},${JSON.stringify(JSON.stringify({text:'legacy next draft',submission:{id:'smoke-command',text:'offline smoke',kind:'pending'}}))});localStorage.setItem(${JSON.stringify(legacyCreation)},${JSON.stringify(JSON.stringify({kind:'create',operationId:'smoke-agent',name:'Smoke agent',instructions:'',provider:'demo',model:'',status:''}))});localStorage.setItem(${JSON.stringify(unverifiedDraft)},${JSON.stringify(JSON.stringify({text:'unverified saved text\nsecond line',submission:null}))});localStorage.setItem(${JSON.stringify(unverifiedCreation)},${JSON.stringify(JSON.stringify({kind:'create',operationId:'unknown-operation',name:'Unverified agent',instructions:'unverified instructions',provider:'demo',model:'',status:''}))})`);
+ await evaluate(`for(const key of Object.keys(localStorage))if(key.startsWith('staf-workspace-v1:')&&key.endsWith(':'+${JSON.stringify(bot.id)}))localStorage.removeItem(key);localStorage.setItem(${JSON.stringify(legacyDraft)},${JSON.stringify(JSON.stringify({text:'legacy next draft',submission:{id:'smoke-command',text:'offline smoke',kind:'pending'}}))});localStorage.setItem(${JSON.stringify(legacyCreation)},${JSON.stringify(JSON.stringify({kind:'create',operationId:'smoke-agent',name:'Smoke agent',instructions:'',provider:'live',model:'fixture-offline',status:''}))});localStorage.setItem(${JSON.stringify(unverifiedDraft)},${JSON.stringify(JSON.stringify({text:'unverified saved text\nsecond line',submission:null}))});localStorage.setItem(${JSON.stringify(unverifiedCreation)},${JSON.stringify(JSON.stringify({kind:'create',operationId:'unknown-operation',name:'Unverified agent',instructions:'unverified instructions',provider:'live',model:'fixture-offline',status:''}))})`);
  await cdp('Page.reload');
  await until(()=>evaluate("document.body.innerText.includes('Recovered creation. Check status')"),'verified legacy creation recovered');
  await evaluate("[...document.querySelectorAll('.agent-settings button')].find(b=>b.textContent==='Check creation').click()");
  await until(()=>evaluate("!document.querySelector('.agent-settings')"),'verified creation status resolved');
  await until(()=>evaluate("document.querySelector('textarea[aria-label=Message]')?.value==='legacy next draft'"),'verified legacy draft recovered');
  const occupiedOperation='occupied-legacy-creation',occupiedName='Recovered after occupied form';
- await call('/api/bots',{operationId:occupiedOperation,name:occupiedName,provider:'demo'});
+ await call('/api/bots',{operationId:occupiedOperation,name:occupiedName,provider:'live',model:'fixture-offline'});
  await evaluate("[...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('New agent')).click()");
  await until(()=>evaluate("!!document.querySelector('.setup input')"),'another creation form open');
  const occupiedKey='staf-workspace-v1:creation:'+occupiedOperation;
- await evaluate(`{const el=document.querySelector('.setup input');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(el,'Active creation');el.dispatchEvent(new Event('input',{bubbles:true}));localStorage.setItem(${JSON.stringify(occupiedKey)},${JSON.stringify(JSON.stringify({kind:'create',operationId:occupiedOperation,name:occupiedName,instructions:'',provider:'demo',model:'',status:''}))})}`);
+ await evaluate(`{const el=document.querySelector('.setup input');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(el,'Active creation');el.dispatchEvent(new Event('input',{bubbles:true}));localStorage.setItem(${JSON.stringify(occupiedKey)},${JSON.stringify(JSON.stringify({kind:'create',operationId:occupiedOperation,name:occupiedName,instructions:'',provider:'live',model:'fixture-offline',status:''}))})}`);
  await until(()=>evaluate(`localStorage.getItem(${JSON.stringify(occupiedKey)})===null`),'verified creation migrated while form occupied');
  assert.equal(await evaluate("document.querySelector('.setup input').value"),'Active creation','recovery does not overwrite the active form');
  await evaluate("[...document.querySelectorAll('.agent-settings button')].find(b=>b.textContent.trim()==='Cancel').click()");
@@ -74,7 +77,7 @@ try {
  assert.equal(await evaluate(`document.body.innerText.includes(${JSON.stringify('unverified saved text\nsecond line')}) && document.body.innerText.includes('unknown-operation') && document.body.innerText.includes('unverified instructions')`),true,'unverified text and operation are available to copy');
  await evaluate("[...document.querySelectorAll('summary')].find(e=>e.textContent.includes('Earlier browser records')).click()");
  await evaluate(`{const el=document.querySelector('textarea[aria-label=Message]');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(el,'draft survives restart');el.dispatchEvent(new Event('input',{bubbles:true}))}`);
- const otherBot=await call('/api/bots',{operationId:'legacy-lock-agent',name:'Legacy lock agent',provider:'demo'});
+ const otherBot=await call('/api/bots',{operationId:'legacy-lock-agent',name:'Legacy lock agent',provider:'live',model:'fixture-offline'});
  await call('/api/commands',{id:'legacy-lock-command',botId:otherBot.id,content:'locked command'});
  await until(async()=>(await call('/api/commands/legacy-lock-command')).state==='completed','locked command persisted');
  const lockedKey=`staf-workspace-v1:older-tab:${otherBot.id}`;
@@ -106,7 +109,7 @@ try {
  const dataset=(await (await fetch(url+'/api/dataset')).json()).id;
  const creationKey=`staf-workspace-v1:creation:${dataset}:retained-operation`;
  const oldKey='staf-workspace-v1:creation:legacy-operation';
- const record={kind:'create',operationId:'retained-operation',name:'Retained creation',instructions:'Saved text',provider:'demo',model:'',status:''};
+ const record={kind:'create',operationId:'retained-operation',name:'Retained creation',instructions:'Saved text',provider:'live',model:'fixture-offline',status:''};
  await evaluate(`localStorage.setItem(${JSON.stringify(creationKey)},${JSON.stringify(JSON.stringify(record))});localStorage.setItem(${JSON.stringify(oldKey)},${JSON.stringify(JSON.stringify({...record,operationId:'legacy-operation',name:'Legacy creation'}))})`);
  await cdp('Page.reload');
  await until(()=>evaluate("document.body.innerText.includes('Recovered creation. Check status')"),'same dataset restores pending creation');
@@ -120,7 +123,7 @@ try {
  await until(()=>evaluate("document.body.innerText.includes('Pair this browser')"),'reset expires prior pairing');
  assert.equal(await evaluate("document.body.innerText.includes('Retained creation')"),false);
  await evaluate(`{const el=document.querySelector('input');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(el,${JSON.stringify(newCode)});el.dispatchEvent(new Event('input',{bubbles:true}));[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Pair').click()}`);
- await until(()=>evaluate("!!localStorage.getItem('staf-token') && document.body.innerText.includes('Project guide')"),'pair new dataset');
+ await until(()=>evaluate("!!localStorage.getItem('staf-token') && document.body.innerText.includes('Provider connections')"),'pair new dataset');
  assert.equal(await evaluate("document.body.innerText.includes('unverified saved text') || document.body.innerText.includes('Unverified agent')"),false,'unverified old content stays behind explicit recovery after reset');
  assert.equal(await evaluate(`localStorage.getItem(${JSON.stringify(unverifiedDraft)})!==null && localStorage.getItem(${JSON.stringify(unverifiedCreation)})!==null`),true);
  await evaluate("if(typeof window.releaseCreation==='function')window.releaseCreation()");
@@ -136,9 +139,10 @@ try {
  assert.equal((await (await fetch(url+'/api/bots',{headers:{Authorization:`Bearer ${newToken}`}})).json()).some(item=>item.name==='Retained creation'),false);
  process.kill(-launcher.pid,'SIGINT');await new Promise(resolveExit=>launcher.once('exit',resolveExit));
  await until(async()=>{try{await fetch(url,{signal:AbortSignal.timeout(300)});return false;}catch{return true;}},'shutdown with browser still open');
- console.log('PASS development command: browser pairing, shared demo chat, frontend HMR, backend restart, draft retention, reconnection, interrupted command without replay, same-dataset creation recovery, reset pairing and stale-record isolation');
+ console.log('PASS development command: browser pairing, shared controlled chat, frontend HMR, backend restart, draft retention, reconnection, interrupted command without replay, same-dataset creation recovery, reset pairing and stale-record isolation');
 } finally {
  socket?.close();if(browser && browser.exitCode===null){browser.kill('SIGTERM');await new Promise(resolveExit=>browser.once('exit',resolveExit));}
  if(launcher && launcher.exitCode===null && launcher.signalCode===null){process.kill(-launcher.pid,'SIGINT');await new Promise(resolveExit=>launcher.once('exit',resolveExit));}
+ if(provider&&provider.exitCode===null){provider.kill('SIGTERM');await new Promise(resolveExit=>provider.once('exit',resolveExit));}
  if(proxy)await new Promise(resolveClose=>proxy.close(resolveClose));await rm(temp,{recursive:true,force:true});
 }

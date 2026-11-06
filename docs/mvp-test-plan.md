@@ -1,5 +1,9 @@
 # Staf MVP user test plan
 
+This is a historical test plan. Steps that select or send to Demo are obsolete.
+Demo is no longer a supported provider. For current setup and controlled offline
+checks, use [development](development.md) and [usage](usage.md).
+
 Living draft, 2026-10-31. Use this to record what you personally observe; it is not an acceptance report. The [MVP decisions](mvp.md), [first-delivery specification](first-delivery-spec-handoff.md), and [usage guide](usage.md) describe the intended behavior and current preview. The specification was written before parts of the preview existed; check current usage and the running interface before each run. Work is in progress, so recheck command syntax and labels after the current changes land.
 
 On 2026-11-01 the Advanced browser page was retired. Manual browser steps and

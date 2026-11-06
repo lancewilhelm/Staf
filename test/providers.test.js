@@ -170,7 +170,7 @@ test('direct Codex authentication does not borrow isolated CLI credentials', asy
 test('registry adapters share normalized event contract and explicitly reject unsupported streaming', async t => {
   const { providerEvents } = await import('../dist/provider-events.js');
   const { selectProvider, providerRegistry } = await import('../dist/registry.js');
-  assert.deepEqual(Object.keys(providerRegistry), ['demo', 'openrouter', 'codex', 'lmstudio', 'live']);
+  assert.deepEqual(Object.keys(providerRegistry), ['openrouter', 'codex', 'lmstudio', 'live']);
   await assert.rejects(selectProvider('constructor', { env: {} }), /Provider must/);
   const codex = await codexProvider(undefined, async args => {
     if (args[0] === 'login') return 'Logged in using ChatGPT';

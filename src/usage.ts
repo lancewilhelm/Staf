@@ -83,8 +83,8 @@ export function usageText(session:Session, detail=false):string {
     const groups=new Map<string,UsageObservation[]>();for(const r of rows){const key=r.model?`${r.provider} | reported model ${r.model}`:r.provider;groups.set(key,[...(groups.get(key)||[]),r]);}
     for(const [name,group] of groups)lines.push(...summary(`Provider/model: ${providerLabel(name)}`,group));
     if(detail)for(const row of rows)lines.push(`Call ${row.id}: ${providerLabel(row.provider)}; ${row.outcome}; ${row.status}; scope ${row.scope || 'unknown (older record)'}; observed ${row.observedAt || 'time unavailable'}; ${row.source}; ${JSON.stringify(row.metrics)}`);
-  }else lines.push('No calls observed yet. Demo is not a model; token/cost usage is not applicable.');
+  }else lines.push('No calls observed yet.');
   lines.push('Account quota/remaining subscription allowance: unavailable. Context-window occupancy: unavailable. Dollar estimates: not calculated. Local inference is not a claim of zero operating cost.',`Caching: ${caching}`,'Commands: /usage details (per-call sources) | /usage help');
   return lines.join('\n');
 }
-export const usageHelp='Usage: /usage [details|help]. No provider or account request is made. Metrics are optional provider reports, not estimates. OpenRouter costCredits is reported account credits, not upstream cost or a dollar estimate. ChatGPT reports fresh-exec totals, not account quota or dollar charges. Demo is not applicable; legacy HTTP and failed calls may be unavailable. '+caching;
+export const usageHelp='Usage: /usage [details|help]. No provider or account request is made. Metrics are optional provider reports, not estimates. OpenRouter costCredits is reported account credits, not upstream cost or a dollar estimate. ChatGPT reports fresh-exec totals, not account quota or dollar charges. Historical Demo usage is not applicable; legacy HTTP and failed calls may be unavailable. '+caching;

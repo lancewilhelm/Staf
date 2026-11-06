@@ -57,8 +57,8 @@ export async function runTurn({ session, store, provider, text, emit = () => {},
   const observe = (report: UsageReport | undefined, outcome: UsageObservation['outcome']) => {
     usage.push({ observedAt: new Date().toISOString(), ...(report?.scope === 'request' || report?.scope === 'execution' ? {scope: report.scope} : {}), id: randomUUID(), attempt, turnStart: history.messages.length, provider: redact(provider.name),
       latencyMs: Math.max(0, performance.now() - (started ?? performance.now())), outcome,
-      status: report?.status === 'reported' || report?.status === 'not-applicable' ? report.status : provider.name === 'demo' ? 'not-applicable' : 'unavailable',
-      source: redact(report?.source || (provider.name === 'demo' ? 'Offline demo, no model' : 'No usage returned for this call')),
+      status: report?.status === 'reported' || report?.status === 'not-applicable' ? report.status : 'unavailable',
+      source: redact(report?.source || 'No usage returned for this call'),
       ...(report?.model && redact(report.model) === report.model ? {model: report.model} : {}), metrics: sanitizeMetrics(report?.metrics) });
     started = undefined;
   };
