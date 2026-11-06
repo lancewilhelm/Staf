@@ -13,13 +13,29 @@ async function resize(id:string){try{await controller.resizeProcess(id,cols.valu
 async function showOutput(id:string,append=false) { try { const page=await controller.processOutput(id,append ? cursors.value[id]?.next ?? 0 : 0);outputs.value[id]=(append ? outputs.value[id] ?? '' : '')+(page.gap?'Earlier output expired.\n':'')+page.chunks.map(chunk=>`[${chunk.stream}] ${chunk.text ?? '[binary or incomplete UTF-8 chunk; see base64 output in API]'} `).join('');cursors.value[id]={next:page.nextCursor,more:page.hasMore}; } catch {outputs.value[id]='Could not load output.';} }
 const props = defineProps<{work: ChatWork | undefined; inbox: InboxItem[]}>();
 const approvals = computed(() => props.inbox.filter(item => item.kind === 'approval' && item.work.kind === 'command' && item.work.id === props.work?.id));
+const calls = computed(() => {
+  const rows: Array<{key:string;name:string;start:string|null;result:string|null;success:number|null;done:boolean}> = [];
+  const byId = new Map<string,number>();
+  for (const event of props.work?.events ?? []) {
+    const index = event.callId ? byId.get(event.callId) : undefined;
+    if (event.type === 'tool_result' && index !== undefined) {
+      const row = rows[index];
+      if (row && !row.done) { row.done=true;row.success=event.success;row.result=event.detail;continue; }
+    }
+    const row={key:event.callId ?? `legacy-${event.id}`,name:event.name,start:event.type==='tool_start'?event.arguments:null,result:event.type==='tool_result'?event.detail:null,success:event.success,done:event.type==='tool_result'};
+    if (event.type==='tool_start' && event.callId && !byId.has(event.callId)) byId.set(event.callId,rows.length);
+    rows.push(row);
+  }
+  return rows;
+});
 </script>
 
 <template>
   <div v-if="work" class="chat-work" aria-label="Agent work">
-    <details v-for="event in work.events" :key="event.id">
-      <summary>{{ event.name }} · {{ event.type === 'tool_start' ? 'Requested' : event.success ? 'Succeeded' : 'Failed' }}</summary>
-      <pre v-if="event.detail">{{ event.detail }}</pre>
+    <details v-for="call in calls" :key="call.key" class="tool-call">
+      <summary>{{ call.name }} · {{ !call.done ? (['accepted','running','stopping'].includes(work.progress.state) ? 'Requested' : 'No result') : call.success ? 'Succeeded' : 'Failed' }}</summary>
+      <template v-if="call.start !== null"><p>Arguments</p><pre>{{ call.start }}</pre></template>
+      <template v-if="call.result !== null"><p>Result</p><pre>{{ call.result }}</pre></template>
     </details>
     <details v-for="execution in work.codeExecutions" :key="execution.id">
       <summary>Code execution · {{ execution.outcome }}</summary>
@@ -47,6 +63,5 @@ const approvals = computed(() => props.inbox.filter(item => item.kind === 'appro
       <button v-if="cursors[process.id]?.more" type="button" @click="showOutput(process.id,true)">More output</button>
     </details>
     <ApprovalItem v-for="item in approvals" :key="item.id" :item="item" />
-    <div v-if="work.events.length" class="meta">{{ approvals.length ? 'Waiting for approval' : work.progress.state === 'running' ? 'Working' : work.progress.state }}</div>
   </div>
 </template>
