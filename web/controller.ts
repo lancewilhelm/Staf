@@ -285,7 +285,14 @@ export class Controller {
       const command=await this.api<{state:string;error:string|null}>('/api/commands/'+submission.id);
       if(this.state.selected!==botId||this.state.draft.submission?.id!==submission.id)return;
       const {id,text}=submission;
-      if(command.state==='completed'||command.state==='stopped'){this.save({...this.state.draft,submission:null});void this.refresh()}
+      if(command.state==='completed'||command.state==='stopped'){
+        await this.refresh();
+        if(this.state.selected!==botId||this.state.draft.submission?.id!==id)return;
+        const index=this.state.messages.findIndex(message=>message.id==='command-user-'+id);
+        const answer=this.state.messages[index+1];
+        const work=this.state.work.find(item=>item.id===id);
+        if(index>=0 && answer && ['assistant','assistant_stopped'].includes(answer.role) && work?.progress.state===command.state)this.save({...this.state.draft,submission:null});
+      }
       else if(command.state==='failed'||command.state==='interrupted')this.save({...this.state.draft,submission:{id,text,kind:command.state,error:command.error}});
       else this.save({...this.state.draft,submission:{id,text,kind:'pending'}});
     }catch(e){
