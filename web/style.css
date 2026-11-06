@@ -108,6 +108,11 @@ p {
   border-color: #ffffff18;
 }
 
+.agent-divider {
+  border-top: 1px solid var(--divider);
+  margin: 4px 0 8px;
+}
+
 .minor a {
   text-decoration: none;
   color: var(--nav-text);
@@ -1008,9 +1013,17 @@ summary {
   margin-bottom: 5px;
 }
 
-.composer:focus-within {
+:root[data-keyboard-focus=true] .composer:has(textarea:focus-visible) {
   border-color: var(--action);
   box-shadow: 0 0 0 2px color-mix(in srgb,var(--action) 9%,transparent);
+}
+
+.header-agent-name {
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font: inherit;
 }
 
 .composer-picker {
@@ -1985,6 +1998,15 @@ summary {
 
 .settings-content .row {
   gap: 8px;
+}
+
+.settings-content .agent-settings-actions {
+  margin-top: 20px;
+  align-items: center;
+}
+
+.agent-settings-actions .archive-action {
+  margin-left: auto;
 }
 
 .settings-content .provider-settings {
