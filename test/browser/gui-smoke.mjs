@@ -323,8 +323,12 @@ try{
  await cdp('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',windowsVirtualKeyCode:13,nativeVirtualKeyCode:13});
  await cdp('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13,nativeVirtualKeyCode:13});
  await until(()=>evaluate("document.body.innerText.includes('Demo (offline): Hello from GUI') && !document.querySelector('.submission')"),'Enter sends the message');console.log('PASS Enter sends the message');
- await evaluate("window.streamTestFetch=window.fetch;window.fetch=(...args)=>{if(/\\/response$/.test(String(args[0])))throw Error('Response snapshot polling is disabled by the test');return window.streamTestFetch(...args)};testInput('[aria-label=Message]','Streaming markdown fixture');testClick('Send')");
+ await evaluate("window.streamTestFetch=window.fetch;window.sendGate=new Promise(resolve=>window.releaseSend=resolve);window.fetch=async(...args)=>{if(/\\/response$/.test(String(args[0])))throw Error('Response snapshot polling is disabled by the test');if(args[0]==='/api/commands' && args[1]?.method==='POST')await window.sendGate;return window.streamTestFetch(...args)};testInput('[aria-label=Message]','Streaming markdown fixture');testClick('Send')");
+ await until(()=>evaluate("!!document.querySelector('.working-indicator')"),'response appears before send acknowledgement');
+ await evaluate("window.responseElement=document.querySelector('.working-indicator').closest('.message');window.releaseSend()");
  await until(()=>evaluate("document.querySelector('.provisional h1')?.textContent==='Streaming heading' && !!document.querySelector('.provisional pre code')"),'streaming markdown');
+ assert.equal(await evaluate("window.responseElement===document.querySelector('.provisional')"),true,'submission and streaming use the same response element');
+ assert.equal(await evaluate("!!document.querySelector('.working-indicator') && ![...document.querySelectorAll('.user-bubble .who')].length"),true,'working response has no user label');
  // Exercise the actual streaming conversation and composer at narrow widths in each appearance.
  const chatAppearance=await evaluate("document.documentElement.dataset.appearance");
  await cdp('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
@@ -347,6 +351,7 @@ try{
  await evaluate("window.fetch=window.streamTestFetch");console.log('PASS SSE reconnect recovers progress without snapshot polling');
  await evaluate("(()=>{const node=document.querySelector('.messages');node.scrollTop=node.scrollHeight;node.dispatchEvent(new Event('scroll'))})()");server.stdin.write('stream-next\n');
  await until(()=>evaluate("!document.querySelector('.provisional') && document.body.innerText.includes('Finished.')"),'stream completion');
+ assert.equal(await evaluate("window.responseElement.isConnected && window.responseElement.innerText.includes('Finished.')"),true,'stream completion updates the same response element');
  assert.equal(await evaluate("document.querySelector('[aria-label=Message]').value"),'Next draft');
  assert.equal(await evaluate("(()=>{const n=document.querySelector('.messages');return n.scrollHeight-n.scrollTop-n.clientHeight<40})()"),true);console.log('PASS streaming markdown, safe HTML, code copy, draft, and scroll behavior');
  await until(()=>evaluate("![...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Send').disabled"),'ready for stop');
@@ -513,7 +518,7 @@ try{
  server.stdin.write('drop-response-streams\n');
  await approvalCopy.eval("[...document.querySelectorAll('.item button')].find(b=>b.textContent==='Deny').click()");
  await until(()=>evaluate("!document.querySelector('.messages .item') && [...document.querySelectorAll('.chat-work')].some(e=>e.innerText.includes('Failed'))"),'cross-client denial and failure');
- assert.equal(await evaluate("document.querySelectorAll('.chat-work details').length"),eventCount+2,'success and denied request each have their own records');
+ assert.equal(await evaluate("document.querySelectorAll('.chat-work details').length"),eventCount+1,'success and denied call each have one row');
  assert.equal(await evaluate(`(async()=>{const headers={Authorization:'Bearer '+localStorage.getItem('staf-token'),'Content-Type':'application/json'};return (await fetch('/api/approvals/${denyId}/approve',{method:'POST',headers,body:'{}'})).status})()`),409,'stale denial cannot approve another action');
  await browserCdp('Target.closeTarget',{targetId:approvalCopy.id});
  await until(()=>evaluate("!![...document.querySelectorAll('.submission button')].find(b=>b.textContent==='Dismiss')"),'failed request has explicit recovery');
@@ -521,6 +526,8 @@ try{
  await until(()=>evaluate("document.querySelector('.composer-control')?.getAttribute('aria-label')==='Send' && !document.querySelector('.composer-control').disabled"),'denied response settles after stream recovery');
 
  await evaluate("(async()=>{const t=localStorage.getItem('staf-token');await fetch('/api/approval-settings/instance',{method:'POST',headers:{Authorization:'Bearer '+t,'Content-Type':'application/json'},body:JSON.stringify({mode:'never-ask',clockEnabled:true})})})()");
+ await act("testInput('[aria-label=Message]','Repeated clock fixture');testClick('Send')","document.querySelector('.messages').innerText.includes('Repeated clocks completed.')",'repeated clock calls complete');
+ assert.equal(await evaluate("(()=>{const row=[...document.querySelectorAll('.message')].find(e=>e.innerText.includes('Repeated clocks completed.'));const calls=[...row.querySelectorAll('.tool-call')];return calls.length===2 && calls.every(c=>!c.open && c.innerText.includes('Succeeded'))})()"),true,'repeated calls remain separate collapsed rows');
  await act("testInput('[aria-label=Message]','Scripted clock fixture');testClick('Send')","document.querySelector('.messages').innerText.includes('Scripted clock completed.')",'scripted clock completes in chat');
  await until(()=>evaluate("[...document.querySelectorAll('.chat-work details summary')].some(e=>e.textContent.includes('Code execution · return'))"),'code execution inspection appears');
  await evaluate("[...document.querySelectorAll('.chat-work details summary')].find(e=>e.textContent.includes('Code execution · return')).click()");

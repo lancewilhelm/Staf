@@ -9,7 +9,7 @@ export type Bot={revision?:string;id:string;name:string;provider:string;model:st
 export type BotProfile=Bot & {image:AgentImage;revision:string;instructions:string;description:string;reasoning:string|null;configDir:string;toolMode:ToolMode;providerChoices?:Record<string,{model:string|null;reasoning:string|null}>};
 export type Message={id:string;role:string;content:string};
 export type ResponseProgress={id:string;botId:string;state:'accepted'|'running'|'stopping'|'stopped'|'completed'|'failed'|'interrupted';text:string;error:string|null};
-export type ChatWork={id:string;processes:Array<{id:string;state:string;mode:string;retained:boolean;inputClosed:boolean;cols:number|null;rows:number|null;exitCode:number|null;exitSignal:string|null}>;progress:ResponseProgress;codeExecutions:Array<{id:string;source:string;sourceHash:string;outcome:string;result:unknown;actions:string[]}>;events:Array<{id:number;type:string;name:string;success:number|null;detail:string|null}>};
+export type ChatWork={id:string;processes:Array<{id:string;state:string;mode:string;retained:boolean;inputClosed:boolean;cols:number|null;rows:number|null;exitCode:number|null;exitSignal:string|null}>;progress:ResponseProgress;codeExecutions:Array<{id:string;source:string;sourceHash:string;outcome:string;result:unknown;actions:string[]}>;events:Array<{id:number;type:string;name:string;success:number|null;detail:string|null;arguments:string|null;callId:string|null}>};
 export type InboxItem={kind:'question';id:string;botId:string|null;attemptId:string;text:string}|{kind:'approval';approvalKind:'clock'|'web'|'search'|'shell'|'disclosure';id:string;botId:string|null;work:{kind:'task'|'command';id:string};detail:unknown};
 type SubmissionIdentity={id:string;text:string};
 export type Submission=SubmissionIdentity & (
@@ -96,7 +96,7 @@ export class Controller {
           if(!isRecord(event))throw Error('Invalid response stream event');
           const previous=this.state.response;
           let next:ResponseProgress|null;
-          if(event.type==='snapshot' && (event.response===null || isResponseProgress(event.response,botId)))next=event.response;
+          if(event.type==='snapshot' && (event.response===null || isResponseProgress(event.response,botId)))next=event.response?.state==='completed' && previous?.id===event.response.id ? {...event.response,text:previous.text} : event.response;
           else if(event.type==='delta' && typeof event.id==='string' && typeof event.text==='string' && previous?.id===event.id && previous.state==='running')next={...previous,text:previous.text+event.text};
           else throw Error('Invalid response stream event');
           this.update({response:next});

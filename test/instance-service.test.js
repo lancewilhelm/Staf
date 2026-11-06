@@ -259,6 +259,7 @@ test('paired clients see safe live tool progress and reported usage without prov
   const pending=(await call('/api/commands/clock-indicator',token))[1];
   assert.deepEqual(pending.runtimeEvents,[{type:'tool_start',name:'clock'}]);
   const chatPending=(await call(`/api/bots/${bot.id}/chat-work`,token))[1];assert.equal(chatPending.requests[0].id,'clock-indicator');assert.equal(chatPending.requests[0].events[0].name,'clock');
+  assert.equal(typeof chatPending.requests[0].events[0].callId,'string');assert.equal(chatPending.requests[0].events[0].arguments,'{}');
   const other=(await call('/api/bots',token,{name:'Other'}))[1];assert.deepEqual((await call(`/api/bots/${other.id}/chat-work`,token))[1].requests,[]);
 
   assert.equal((await call('/api/codex-auth/logout',token,{}))[0],409);
@@ -270,8 +271,49 @@ test('paired clients see safe live tool progress and reported usage without prov
   assert.doesNotMatch(JSON.stringify({usage,context}),/what time is it|Demo tool result/);
   await app.close();app=startInstance(path,0,{env:{}});port=await app.listen();
   assert.deepEqual((await call('/api/commands/clock-indicator',token))[1].runtimeEvents,completed.runtimeEvents);
-  const recovered=(await call(`/api/bots/${bot.id}/chat-work`,token))[1];assert.equal(recovered.requests[0].events.length,2);assert.equal(recovered.requests[0].events.at(-1).success,1);assert.deepEqual((await call(`/api/bots/${bot.id}/chat-work`,token))[1],recovered);
+  const recovered=(await call(`/api/bots/${bot.id}/chat-work`,token))[1];assert.equal(recovered.requests[0].events.length,2);assert.equal(recovered.requests[0].events.at(-1).success,1);assert.equal(recovered.requests[0].events[0].callId,recovered.requests[0].events[1].callId);assert.deepEqual((await call(`/api/bots/${bot.id}/chat-work`,token))[1],recovered);
  } finally {await app.close();rmSync(dir,{recursive:true,force:true});}
+});
+
+test('chat work keeps repeated tool calls distinct even when a provider reuses an ID in a later step', async () => {
+ const dir=mkdtempSync(join(tmpdir(),'staf-call-identity-')),path=join(dir,'db');let step=0;
+ const factory=async()=>({name:'fixture',capabilities:{toolCalls:true,incrementalText:false,transport:'demo'},async complete(){
+  if(step++===0)return {role:'assistant',content:null,tool_calls:['same','other'].map(id=>({id,type:'function',function:{name:'clock',arguments:'{}'}}))};
+  if(step===2)return {role:'assistant',content:null,tool_calls:[{id:'same',type:'function',function:{name:'clock',arguments:'{}'}}]};
+  return {role:'assistant',content:'finished'};
+ }});
+ let app=startInstance(path,0,{providerFactory:factory}),port=await app.listen();
+ const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return r.json()};
+ try {
+  const token=(await call('/api/pair','',{code:app.code})).token,bot=await call('/api/bots',token,{name:'Calls',toolMode:'direct'});
+  await call('/api/approval-settings/instance',token,{mode:'never-ask',clockEnabled:true});
+  await call('/api/commands',token,{id:'repeated',botId:bot.id,content:'Use clock'});
+  let work;for(let i=0;i<200;i++){work=(await call(`/api/bots/${bot.id}/chat-work`,token)).requests[0];if(work?.progress.state!=='pending' && work?.progress.state!=='accepted' && work?.progress.state!=='running')break;await new Promise(r=>setTimeout(r,10));}
+  assert.equal(work.progress.state,'completed');assert.equal(work.events.length,6);
+  const starts=work.events.filter(event=>event.type==='tool_start'),results=work.events.filter(event=>event.type==='tool_result');
+  assert.equal(new Set(starts.map(event=>event.callId)).size,3);
+  assert.deepEqual(results.map(event=>event.callId),starts.map(event=>event.callId));
+  assert.ok(starts.every(event=>event.arguments==='{}'));assert.ok(results.every(event=>event.success===1));
+  await app.close();app=startInstance(path,0,{providerFactory:factory});port=await app.listen();
+  assert.deepEqual((await call(`/api/bots/${bot.id}/chat-work`,token)).requests[0].events,work.events);
+ }finally{await app.close();rmSync(dir,{recursive:true,force:true});}
+});
+
+test('pre-identity tool events survive migration without invented call IDs', async () => {
+ const {DatabaseSync}=await import('node:sqlite');const dir=mkdtempSync(join(tmpdir(),'staf-legacy-calls-')),path=join(dir,'db');
+ let instance=new Instance(path);const bot=instance.createBot({name:'Legacy',instructions:'',provider:'demo'});instance.claim({id:'old',botId:bot.id,content:'hello'});instance.close();
+ let db=new DatabaseSync(path);db.exec("INSERT INTO command_runtime_events (command_id,type,name,success,detail) VALUES ('old','tool_start','clock',NULL,NULL),('old','tool_result','clock',1,'old result')");db.exec('ALTER TABLE command_runtime_events DROP COLUMN call_id');db.exec('PRAGMA user_version=36');db.close();
+ try {instance=new Instance(path);assert.ok(instance.migrationBackup);const events=instance.chatWork(bot.id).requests[0].events;assert.deepEqual(events.map(event=>event.callId),[null,null]);assert.equal(events[1].detail,'old result');instance.close();}
+ finally {rmSync(dir,{recursive:true,force:true});}
+});
+
+test('retained tool arguments redact credentials and escaped unsafe URLs before storage', async () => {
+ const {DatabaseSync}=await import('node:sqlite');const dir=mkdtempSync(join(tmpdir(),'staf-call-redaction-')),path=join(dir,'db');let step=0;
+ const factory=async()=>({name:'fixture',capabilities:{toolCalls:true,incrementalText:false,transport:'demo'},async complete(){return step++ ? {role:'assistant',content:'done'} : {role:'assistant',content:null,tool_calls:[{id:'sensitive',type:'function',function:{name:'unknown',arguments:'{"secret":"synthetic-secret","url":"https://example.com/path\\u003ftoken=private"}'}}]};}});
+ const app=startInstance(path,0,{providerFactory:factory,env:{OPENROUTER_API_KEY:'synthetic-secret'}}),port=await app.listen();let closed=false;
+ const call=async(route,token,body)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return response.json()};
+ try {const token=(await call('/api/pair','',{code:app.code})).token,bot=await call('/api/bots',token,{name:'Safe'});await call('/api/commands',token,{id:'safe',botId:bot.id,content:'check'});let work;for(let i=0;i<200;i++){work=(await call(`/api/bots/${bot.id}/chat-work`,token)).requests[0];if(work?.events.length>=2)break;await new Promise(r=>setTimeout(r,10));}const args=work.events[0].arguments;assert.match(args,/\[REDACTED\]/);assert.match(args,/\[redacted URL\]/);assert.doesNotMatch(args,/synthetic-secret|token=private/);await app.close();closed=true;const db=new DatabaseSync(path,{readOnly:true});const saved=db.prepare('SELECT detail FROM command_runtime_events WHERE type=?').get('tool_start').detail;db.close();assert.equal(saved,args);}
+ finally {if(!closed)await app.close();rmSync(dir,{recursive:true,force:true});}
 });
 
 test('compatible providers use host endpoints and profile prompts; discovery is explicit', async () => {

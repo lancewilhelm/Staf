@@ -62,7 +62,7 @@ export async function runTurn({ session, store, provider, text, emit = () => {},
       ...(report?.model && redact(report.model) === report.model ? {model: report.model} : {}), metrics: sanitizeMetrics(report?.metrics) });
     started = undefined;
   };
-  const report = (event: RuntimeEvent) => { events.push(event); emit(event); };
+  const report = (event: RuntimeEvent) => { events.push(event.type === 'tool_start' ? {type:event.type,id:event.id,name:event.name} : event); emit(event); };
   messages.push({ role: 'user', content: text });
   try {
     for (let step = 0; step < maxSteps; step++) {
@@ -152,12 +152,12 @@ export async function runTurn({ session, store, provider, text, emit = () => {},
         if(!task && name==='start_background_task')deferredBackground=true;
         if (task?.hasPending()) {
           const content='Tool not executed because owner input is pending.';
-          report({type:'tool_start',id:call.id,name});
+          report({type:'tool_start',id:call.id,name,arguments:call.function.arguments});
           messages.push({role:'tool',tool_call_id:call.id,content});
           report({type:'tool_result',id:call.id,name,success:false,content});
           continue;
         }
-        report({ type: 'tool_start', id: call.id, name });
+        report({ type: 'tool_start', id: call.id, name, arguments:call.function.arguments });
         if(actions?.closedReason()) {
           const content='Tool not executed: action admission is closed.';
           messages.push({role:'tool',tool_call_id:call.id,content});report({type:'tool_result',id:call.id,name,success:false,content});continue;
