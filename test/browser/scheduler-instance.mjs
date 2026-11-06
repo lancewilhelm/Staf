@@ -1,7 +1,7 @@
 import { createInterface } from 'node:readline';
 import { createServer } from 'node:http';
 import { startInstance } from '../../dist/instance-service.js';
-import { demoProvider } from '../../dist/providers.js';
+import { demoProvider } from '../fixtures/echo-provider.mjs';
 
 const [path, port] = process.argv.slice(2);
 let now = Date.parse('2024-03-01T11:59:00Z');

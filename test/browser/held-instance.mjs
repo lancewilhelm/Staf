@@ -1,7 +1,8 @@
 import { createInterface } from 'node:readline';
 import { createServer } from 'node:http';
 import { startInstance } from '../../dist/instance-service.js';
-import { demoProvider, openRouterProvider } from '../../dist/providers.js';
+import { openRouterProvider } from '../../dist/providers.js';
+import { demoProvider } from '../fixtures/echo-provider.mjs';
 import { loadOpenRouterKey } from '../../dist/openrouter-credential.js';
 import {mkdir,writeFile} from 'node:fs/promises';
 import {join,dirname} from 'node:path';

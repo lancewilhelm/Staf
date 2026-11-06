@@ -1,12 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { startInstance } from '../dist/instance-service.js';
-import { demoProvider } from '../dist/providers.js';
+import { demoProvider } from './fixtures/echo-provider.mjs';
 
 test('paired discovery reports ambiguous and busy bots without exposing private instructions', async () => {
- const original=demoProvider.complete; let release; const gate=new Promise(resolve=>{release=resolve});
- demoProvider.complete=async (...args)=>{await gate;return original(...args)};
- const app=startInstance(':memory:',0,{env:{}}); const port=await app.listen();
+ let release; const gate=new Promise(resolve=>{release=resolve});
+ const providerFactory=async()=>({...demoProvider,async complete(...args){await gate;return demoProvider.complete(...args)}});
+ const app=startInstance(':memory:',0,{env:{},providerFactory}); const port=await app.listen();
  const call=async(path,token,body)=>{const response=await fetch(`http://127.0.0.1:${port}${path}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return [response.status,await response.json()];};
  try {
   assert.equal((await call('/api/bot-discovery',null,{requesterId:'x',query:'x'}))[0],401);
@@ -26,7 +26,7 @@ test('paired discovery reports ambiguous and busy bots without exposing private 
   assert.doesNotMatch(JSON.stringify(result),/private secret/);
   assert.equal((await call('/api/bot-discovery',token,{requesterId:requester.id,query:'private'}))[1].kind,'no-match');
   assert.equal((await call('/api/bot-discovery',token,{requesterId:'missing',query:'Researcher'}))[0],404);
- } finally {release();demoProvider.complete=original;await app.close();}
+ } finally {release();await app.close();}
 });
 
 test('paired task acceptance records only an explicit boolean helper clock scope', async () => {

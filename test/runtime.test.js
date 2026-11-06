@@ -1,3 +1,4 @@
+import {demoProvider} from './fixtures/echo-provider.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm, readFile } from 'node:fs/promises';
@@ -5,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../dist/store.js';
 import { runTurn } from '../dist/runtime.js';
-import { demoProvider, liveProvider } from '../dist/providers.js';
+import { liveProvider } from '../dist/providers.js';
 
 async function fixture(t) {
   const root = await mkdtemp(join(tmpdir(), 'staf-test-'));

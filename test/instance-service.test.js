@@ -77,10 +77,10 @@ test('paired clients share records and credentials survive restart', async () =>
 });
 
 test('competing client keeps its unsent message while the bot is busy', async () => {
- const {demoProvider}=await import('../dist/providers.js'); const original=demoProvider.complete;
+ const {demoProvider}=await import('./fixtures/echo-provider.mjs');
  let release; const gate=new Promise(resolve=>{release=resolve});
- demoProvider.complete=async (...args)=>{await gate;return original(...args)};
- const dir=mkdtempSync(join(tmpdir(),'staf-busy-')); const app=startInstance(join(dir,'db')); const port=await app.listen();
+ const providerFactory=async()=>({...demoProvider,async complete(...args){await gate;return demoProvider.complete(...args)}});
+ const dir=mkdtempSync(join(tmpdir(),'staf-busy-')); const app=startInstance(join(dir,'db'),0,{providerFactory}); const port=await app.listen();
  const call=async (path, token, body)=>{const r=await fetch(`http://127.0.0.1:${port}${path}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return r.json()};
  try {
   const a=(await call('/api/pair',null,{code:app.code})).token;
@@ -94,7 +94,7 @@ test('competing client keeps its unsent message while the bot is busy', async ()
   release();
   for (let i=0;i<20;i++) {if ((await call('/api/commands/first',b)).state==='completed') break;}
   assert.equal((await call('/api/commands/first',b)).state,'completed');
- } finally {release();demoProvider.complete=original;await app.close();rmSync(dir,{recursive:true,force:true});}
+ } finally {release();await app.close();rmSync(dir,{recursive:true,force:true});}
 });
 
 test('bot profiles detect stale edits and archive preserves shared chat across restart', async () => {

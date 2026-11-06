@@ -9,7 +9,7 @@ import {parseModels,cachedModelCatalog,discoverModels} from '../dist/models.js';
 import {resolveSettings} from '../dist/settings.js';
 import {Store} from '../dist/store.js';
 import {runTurn} from '../dist/runtime.js';
-import {demoProvider} from '../dist/providers.js';
+import {demoProvider} from './fixtures/echo-provider.mjs';
 const effective=(provider='openrouter',model='test')=>resolveSettings({saved:{},file:{},shell:{},cli:{provider,model:provider==='demo'?undefined:model},session:{}});
 const catalog={source:'synthetic catalog',fetchedAt:'2026-10-26T00:00:00Z',cached:true,models:[{id:'test',label:'Test',reasoning:null,reasoningStatus:'unknown',contextWindow:8000}],note:'mock'};
 const session={version:1,id:'00000000-0000-0000-0000-000000000000',provider:'openrouter:test',messages:[{role:'user',content:'hello'},{role:'assistant',content:'world'}],events:[]};

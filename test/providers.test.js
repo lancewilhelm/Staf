@@ -178,7 +178,8 @@ test('registry adapters share normalized event contract and explicitly reject un
     await writeFile(args[args.indexOf('--output-last-message') + 1], JSON.stringify({ kind: 'text', text: 'hello' }));
     return '';
   });
-  const { lmStudioProvider, demoProvider } = await import('../dist/providers.js');
+  const { lmStudioProvider } = await import('../dist/providers.js');
+  const { demoProvider } = await import('./fixtures/echo-provider.mjs');
   const request = async () => Response.json({ choices: [{ message: { role: 'assistant', content: 'hello' } }] });
   const adapters = [demoProvider, codex, lmStudioProvider({}, 'model', request)];
   for (const provider of adapters) {
