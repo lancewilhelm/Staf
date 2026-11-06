@@ -267,8 +267,8 @@ registration remains unverified by the offline checks. See
   Reload to check persistence. Collapse the sidebar: the agent rail stays visible
   and the expand icon moves to the header. Open the composer model popup; check
   arrow/Home/End navigation, Tab/Escape dismissal with focus return,
-  selection checkmarks, and outside-click dismissal. New agent opens a modal:
-  expect Name focus, trapped Tab navigation, and Escape returning focus.
+  selection checkmarks, and outside-click dismissal. New agent opens the shared
+  editor with Name focused. Navigate away and return to check draft retention.
   The agent name and avatar open agent settings. Archive and ChatGPT sign-out
   open in-app confirmations; Escape cancels and returns focus. The message
   composer shows a focus indicator for keyboard navigation without a border

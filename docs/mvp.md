@@ -16,8 +16,8 @@ built from the ground up, with usability before full Hermes parity.
   follows later. Closing a client does not stop agent work.
 - Bot setup is quick: name and instructions are sufficient. Creation copies
   initial provider/model/reasoning values into the bot's own configuration.
-  Later creation-default changes affect future bots only; existing bots change
-  through explicit edits. Each bot has a persistent main chat and easy customization.
+  Later creation-default changes leave existing real-provider bots unchanged.
+  Saving a real default also migrates remaining Demo bots. Each bot has a persistent main chat and easy customization.
 - Main chats stay available while longer tasks run in the background. Bots may
   decide to start a task within existing permissions and announce it; users can
   explicitly request background work. Ordinary conversation stays in main chat.

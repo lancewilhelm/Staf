@@ -201,7 +201,7 @@ try{
  await until(()=>evaluate("document.documentElement.dataset.palette==='ink' && getComputedStyle(document.documentElement).getPropertyValue('--body')==='16px'"),'palette and text preferences apply');
  await evaluate("const saved=JSON.parse(localStorage.getItem('staf-design'));saved.logo=4;localStorage.setItem('staf-design',JSON.stringify(saved))");
  await cdp('Page.reload');
- await until(()=>evaluate("document.documentElement.dataset.palette==='ink' && document.querySelector('.brand svg circle').getAttribute('cx')==='50'"),'design preferences persist');
+ await until(()=>evaluate("document.documentElement?.dataset.palette==='ink' && document.querySelector('.brand svg circle')?.getAttribute('cx')==='50'"),'design preferences persist');
  await evaluate(`window.testInput=(selector,value)=>{const el=document.querySelector(selector);Object.getOwnPropertyDescriptor(el.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,'value').set.call(el,value);el.dispatchEvent(new Event('input',{bubbles:true}))}; window.testClick=text=>{const b=[...document.querySelectorAll('button')].find(x=>x.textContent.trim()===text);if(!b)throw Error('Missing button '+text);b.click()}`);
  await evaluate("[...document.querySelectorAll('.side button')].find(b=>b.getAttribute('aria-label')==='Settings').click()");
  await until(()=>evaluate("!!document.querySelector('.appearance-details')"),'return to appearance');
@@ -686,6 +686,7 @@ try{
  assert.equal(await evaluate(`localStorage.getItem(${JSON.stringify(creationRecord[0])})`),null,'settled creation record removed');
  await evaluate("window.testInput=(selector,value)=>{const el=document.querySelector(selector);Object.getOwnPropertyDescriptor(el.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,'value').set.call(el,value);el.dispatchEvent(new Event('input',{bubbles:true}))};window.testClick=text=>{const b=[...document.querySelectorAll('button')].find(x=>x.textContent.trim()===text);if(!b)throw Error('Missing button '+text);b.click()}");
  console.log('PASS obsolete cleanup preserves active creation and retry-safe refresh recovery');
+ await evaluate("(async()=>{const t=localStorage.getItem('staf-token'),headers={Authorization:'Bearer '+t,'Content-Type':'application/json'};const defaults=await(await fetch('/api/creation-defaults',{headers})).json();const response=await fetch('/api/creation-defaults',{method:'POST',headers,body:JSON.stringify({...defaults,provider:'lmstudio',model:'fixture-model'})});if(!response.ok)throw Error(await response.text())})()");
  await act("[...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('New agent')).focus();[...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('New agent')).click()","document.body.innerText.includes('Create agent')",'name-only creation form');
  await cdp('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
  assert.equal(await evaluate("document.querySelector('.editor-label label').textContent"),'Instructions');
@@ -708,7 +709,7 @@ try{
  await cdp('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',text:'\r',unmodifiedText:'\r',windowsVirtualKeyCode:13,nativeVirtualKeyCode:13});
  await cdp('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13,nativeVirtualKeyCode:13});
  await until(()=>evaluate("document.querySelector('.title')?.textContent==='Name only'"),'name-only agent created');
- const nameOnly=await evaluate("(async()=>{const t=localStorage.getItem('staf-token');return (await (await fetch('/api/bots',{headers:{Authorization:'Bearer '+t}})).json()).find(b=>b.name==='Name only')})()");assert.equal(nameOnly.instructions,'');assert.equal(nameOnly.provider,'demo');
+ const nameOnly=await evaluate("(async()=>{const t=localStorage.getItem('staf-token');return (await (await fetch('/api/bots',{headers:{Authorization:'Bearer '+t}})).json()).find(b=>b.name==='Name only')})()");assert.equal(nameOnly.instructions,'');assert.equal(nameOnly.provider,'lmstudio');assert.equal(nameOnly.model,'fixture-model');
  await act("document.querySelector('button[aria-label=\"Open agent settings\"]').click()","document.body.innerText.includes('AGENT SETTINGS')",'header opens name-only settings');await until(()=>evaluate("!!document.querySelector('.setup textarea')"),'name-only settings loaded');
  await act("[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Archive agent').focus();testClick('Archive agent')","document.querySelector('dialog')?.matches(':modal')",'open archive confirmation');
  assert.equal(await evaluate("document.activeElement.textContent.trim()"),'Cancel','archive confirmation starts on Cancel');

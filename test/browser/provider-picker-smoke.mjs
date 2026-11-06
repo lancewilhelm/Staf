@@ -35,18 +35,18 @@ try{
  await evaluate("document.querySelector('.defaults-editor').open=true");
  const api=async(path,body)=>evaluate(`(async()=>{const r=await fetch('/api/'+${JSON.stringify(path)},{method:${JSON.stringify(body?'POST':'GET')},headers:{Authorization:'Bearer '+localStorage.getItem('staf-token'),'Content-Type':'application/json'},${body?'body:JSON.stringify('+JSON.stringify(body)+'),':''}});return r.json()})()`);
  await evaluate("window.confirm=()=>true");
- await evaluate("document.querySelector('[aria-label=\"Provider defaults\"] .provider-choices select').value='openrouter';document.querySelector('[aria-label=\"Provider defaults\"] .provider-choices select').dispatchEvent(new Event('change',{bubbles:true}))");
- await until(()=>evaluate("document.querySelector('[aria-label=\"Provider defaults\"] .provider-choices select').value==='openrouter'"),'provider defaults selection settled');
- await evaluate("testClick('List models')");
- await until(()=>evaluate("document.querySelector('[aria-label=\"Provider defaults\"] .provider-choices [role=status]')?.textContent.includes('2 models loaded')"),'model discovery reports loaded models');
+ await evaluate("document.querySelector('.provider-pair-defaults .provider-choices select').value='openrouter';document.querySelector('.provider-pair-defaults .provider-choices select').dispatchEvent(new Event('change',{bubbles:true}))");
+ await until(()=>evaluate("document.querySelector('.provider-pair-defaults .provider-choices select').value==='openrouter'"),'provider defaults selection settled');
+ await evaluate("[...document.querySelectorAll('.provider-pair-defaults button')].find(b=>b.textContent.trim()==='List models').click()");
+ await until(()=>evaluate("document.querySelector('.provider-pair-defaults .provider-choices [role=status]')?.textContent.includes('2 models loaded')"),'model discovery reports loaded models');
  assert.equal(await evaluate("document.querySelector('[aria-label=\"Available models\"]')?.options.length"),3,'loaded models have a visible picker');
  if(process.env.STAF_SETTINGS_SCREENSHOT){const shot=await cdp('Page.captureScreenshot',{format:'png'});await writeFile(process.env.STAF_SETTINGS_SCREENSHOT,Buffer.from(shot.data,'base64'))}
  assert.equal(await evaluate("(()=>{const form=document.querySelector('.setup'),scroller=form.closest('.settings-scroll');return !!scroller&&Math.abs(scroller.getBoundingClientRect().right-document.querySelector('.main').getBoundingClientRect().right)<2})()"),true,'Settings scrolls at the pane edge');
- assert.equal(await evaluate("(()=>{const section=document.querySelector('[aria-label=\"Provider defaults\"]');return section.querySelector('.provider-default-actions button').getBoundingClientRect().top-section.querySelector('fieldset').getBoundingClientRect().bottom>=12})()"),true,'provider actions have space below their group');
- await evaluate("testInput('[aria-label=\"Provider defaults\"] input','owner/model');testClick('Save provider defaults')");
+ assert.equal(await evaluate("(()=>{const section=document.querySelector('[aria-label=\"Provider defaults\"]');return section.querySelector('.provider-default-actions button').getBoundingClientRect().top-section.querySelector('.provider-pair-defaults fieldset').getBoundingClientRect().bottom>=12})()"),true,'provider actions have space below their group');
+ await evaluate("testInput('.provider-pair-defaults input','owner/model');testClick('Save provider defaults')");
  await until(async()=>(await api('provider-defaults')).providers.openrouter?.model==='owner/model','owner defaults persist');await until(()=>evaluate("document.body.innerText.includes('Defaults saved.')"),'defaults save settled');
  // An empty successful catalog is distinct from both loaded choices and failure.
- await evaluate("window.realPickerFetch=window.fetch;window.fetch=async(...args)=>args[0]==='/api/models'?new Response(JSON.stringify({models:[]}),{status:200,headers:{'Content-Type':'application/json','X-Staf-Dataset':args[1].headers['X-Staf-Dataset']}}):window.realPickerFetch(...args);testClick('List models')");
+ await evaluate("window.realPickerFetch=window.fetch;window.fetch=async(...args)=>args[0]==='/api/models'?new Response(JSON.stringify({models:[]}),{status:200,headers:{'Content-Type':'application/json','X-Staf-Dataset':args[1].headers['X-Staf-Dataset']}}):window.realPickerFetch(...args);[...document.querySelectorAll('.provider-pair-defaults button')].find(b=>b.textContent.trim()==='List models').click()");
  await until(()=>evaluate("document.body.innerText.includes('No models were returned.') && !document.querySelector('[aria-label=\"Available models\"]')"),'empty catalog explains manual entry');
  await evaluate("window.fetch=window.realPickerFetch");
  for(const appearance of ['light','dark','system']){
@@ -58,7 +58,7 @@ try{
  // A malformed response must leave the form usable for manual entry and retry.
  await evaluate("window.realPickerFetch=window.fetch;window.fetch=async(...args)=>args[0]==='/api/provider-defaults'?new Response(JSON.stringify({revision:'r',providers:{codex:{model:42}}}),{status:200,headers:{'Content-Type':'application/json','X-Staf-Dataset':args[1].headers['X-Staf-Dataset']}}):window.realPickerFetch(...args);testClick('Compare latest defaults')");
  await until(()=>evaluate("document.body.innerText.includes('Invalid provider defaults response')"),'malformed defaults remain recoverable');
- await evaluate("window.fetch=async(...args)=>args[0]==='/api/models'?new Response(JSON.stringify({models:[null]}),{status:200,headers:{'Content-Type':'application/json','X-Staf-Dataset':args[1].headers['X-Staf-Dataset']}}):window.realPickerFetch(...args);testClick('List models')");
+ await evaluate("window.fetch=async(...args)=>args[0]==='/api/models'?new Response(JSON.stringify({models:[null]}),{status:200,headers:{'Content-Type':'application/json','X-Staf-Dataset':args[1].headers['X-Staf-Dataset']}}):window.realPickerFetch(...args);[...document.querySelectorAll('.provider-pair-defaults button')].find(b=>b.textContent.trim()==='List models').click()");
  await until(()=>evaluate("document.body.innerText.includes('Invalid model catalog') && document.body.innerText.includes('Enter a model ID manually')"),'malformed catalog offers recovery');
  await evaluate("window.fetch=window.realPickerFetch");
  await evaluate("[...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('New agent')).click()");

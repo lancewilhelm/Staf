@@ -66,7 +66,8 @@ async function compare() {
     <ChoiceFields real-only :provider="creationProvider" :model="creationModel" :reasoning="creationReasoning" @change="changeCreation" />
     <div class="row"><button :disabled="!creation" @click="saveCreation">Save creation defaults</button><button class="quiet" @click="compareCreation">Compare creation defaults</button></div><p role="status">{{ creationStatus }}</p>
     <ToolModeSelect v-model="toolMode" /><div class="row"><button :disabled="!creation" @click="saveMode">Save tool mode default</button><button class="quiet" @click="compareMode">Compare latest tool mode</button></div><p role="status">{{ modeStatus }}</p>
-    <ChoiceFields :provider="provider" :model="model" :reasoning="reasoning" @change="change" />
+    <h3>First-use provider choices</h3><p>These choices apply when an agent switches to a provider for the first time.</p>
+    <div class="provider-pair-defaults"><ChoiceFields :provider="provider" :model="model" :reasoning="reasoning" @change="change" /></div>
     <div class="row provider-default-actions"><button :disabled="!state" @click="save">Save provider defaults</button><button class="quiet" @click="compare">Compare latest defaults</button></div>
     <p role="status">{{ status }}</p>
     </details>
