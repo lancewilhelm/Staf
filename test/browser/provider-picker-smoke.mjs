@@ -34,20 +34,19 @@ try{
 
  await evaluate("document.querySelector('.defaults-editor').open=true");
  const api=async(path,body)=>evaluate(`(async()=>{const r=await fetch('/api/'+${JSON.stringify(path)},{method:${JSON.stringify(body?'POST':'GET')},headers:{Authorization:'Bearer '+localStorage.getItem('staf-token'),'Content-Type':'application/json'},${body?'body:JSON.stringify('+JSON.stringify(body)+'),':''}});return r.json()})()`);
- await evaluate("window.confirm=()=>true");
+ await evaluate("window.confirm=()=>{throw Error('Unexpected native confirmation')}");
  await evaluate("document.querySelector('.provider-pair-defaults .provider-choices select').value='openrouter';document.querySelector('.provider-pair-defaults .provider-choices select').dispatchEvent(new Event('change',{bubbles:true}))");
  await until(()=>evaluate("document.querySelector('.provider-pair-defaults .provider-choices select').value==='openrouter'"),'provider defaults selection settled');
- await evaluate("[...document.querySelectorAll('.provider-pair-defaults button')].find(b=>b.textContent.trim()==='List models').click()");
  await until(()=>evaluate("document.querySelector('.provider-pair-defaults .provider-choices [role=status]')?.textContent.includes('2 models loaded')"),'model discovery reports loaded models');
- assert.equal(await evaluate("document.querySelector('[aria-label=\"Available models\"]')?.options.length"),3,'loaded models have a visible picker');
+ assert.equal(await evaluate("document.querySelector('.provider-pair-defaults [aria-label=\"Available models\"]')?.options.length"),3,'loaded models have a visible picker');
  if(process.env.STAF_SETTINGS_SCREENSHOT){const shot=await cdp('Page.captureScreenshot',{format:'png'});await writeFile(process.env.STAF_SETTINGS_SCREENSHOT,Buffer.from(shot.data,'base64'))}
  assert.equal(await evaluate("(()=>{const form=document.querySelector('.setup'),scroller=form.closest('.settings-scroll');return !!scroller&&Math.abs(scroller.getBoundingClientRect().right-document.querySelector('.main').getBoundingClientRect().right)<2})()"),true,'Settings scrolls at the pane edge');
  assert.equal(await evaluate("(()=>{const section=document.querySelector('[aria-label=\"Provider defaults\"]');return section.querySelector('.provider-default-actions button').getBoundingClientRect().top-section.querySelector('.provider-pair-defaults fieldset').getBoundingClientRect().bottom>=12})()"),true,'provider actions have space below their group');
  await evaluate("testInput('.provider-pair-defaults input','owner/model');testClick('Save provider defaults')");
  await until(async()=>(await api('provider-defaults')).providers.openrouter?.model==='owner/model','owner defaults persist');await until(()=>evaluate("document.body.innerText.includes('Defaults saved.')"),'defaults save settled');
  // An empty successful catalog is distinct from both loaded choices and failure.
- await evaluate("window.realPickerFetch=window.fetch;window.fetch=async(...args)=>args[0]==='/api/models'?new Response(JSON.stringify({models:[]}),{status:200,headers:{'Content-Type':'application/json','X-Staf-Dataset':args[1].headers['X-Staf-Dataset']}}):window.realPickerFetch(...args);[...document.querySelectorAll('.provider-pair-defaults button')].find(b=>b.textContent.trim()==='List models').click()");
- await until(()=>evaluate("document.body.innerText.includes('No models were returned.') && !document.querySelector('[aria-label=\"Available models\"]')"),'empty catalog explains manual entry');
+ await evaluate("window.realPickerFetch=window.fetch;window.fetch=async(...args)=>args[0]==='/api/models'?new Response(JSON.stringify({models:[]}),{status:200,headers:{'Content-Type':'application/json','X-Staf-Dataset':args[1].headers['X-Staf-Dataset']}}):window.realPickerFetch(...args);(()=>{const p=document.querySelector('.provider-pair-defaults .provider-choices select');p.value='codex';p.dispatchEvent(new Event('change',{bubbles:true}));setTimeout(()=>{p.value='openrouter';p.dispatchEvent(new Event('change',{bubbles:true}))},0)})()");
+ await until(()=>evaluate("document.body.innerText.includes('No models were returned.') && !document.querySelector('.provider-pair-defaults [aria-label=\"Available models\"]')"),'empty catalog explains manual entry');
  await evaluate("window.fetch=window.realPickerFetch");
  for(const appearance of ['light','dark','system']){
   await evaluate(`document.querySelector('input[name=appearance][value=${appearance}]').click()`);
@@ -55,21 +54,30 @@ try{
   assert.equal(await evaluate("(()=>{const scroller=document.querySelector('.settings-scroll');return document.documentElement.scrollWidth<=innerWidth && scroller.scrollHeight>scroller.clientHeight && Math.abs(scroller.getBoundingClientRect().right-document.querySelector('.main').getBoundingClientRect().right)<2})()"),true,appearance+' narrow Settings scrolls at pane edge without overflow');
   await cdp('Emulation.clearDeviceMetricsOverride');
  }
+ // A late catalog for the previous provider must not replace the current choices.
+ await evaluate("window.fetch=async(...args)=>{if(args[0]!=='/api/models')return window.realPickerFetch(...args);const p=JSON.parse(args[1].body).provider;const body=p==='codex'?{models:[{id:'old/model',label:'Old',reasoning:null,reasoningStatus:'unknown'}]}:{models:[{id:'new/model',label:'New',reasoning:null,reasoningStatus:'unknown'}]};if(p==='codex')await new Promise(r=>window.releaseOldCatalog=r);return new Response(JSON.stringify(body),{status:200,headers:{'Content-Type':'application/json','X-Staf-Dataset':args[1].headers['X-Staf-Dataset']}})};(()=>{const p=document.querySelector('.provider-pair-defaults .provider-choices select');p.value='codex';p.dispatchEvent(new Event('change',{bubbles:true}))})()");
+ await until(()=>evaluate("typeof window.releaseOldCatalog==='function'"),'older catalog held');
+ await evaluate("(()=>{const p=document.querySelector('.provider-pair-defaults .provider-choices select');p.value='openrouter';p.dispatchEvent(new Event('change',{bubbles:true}))})()");
+ await until(()=>evaluate("!!document.querySelector('.provider-pair-defaults option[value=\"new/model\"]')"),'newer catalog shown');
+ await evaluate("window.releaseOldCatalog();window.fetch=window.realPickerFetch");
+ await sleep(100);
+ assert.equal(await evaluate("!!document.querySelector('.provider-pair-defaults option[value=\"new/model\"]') && !document.querySelector('.provider-pair-defaults option[value=\"old/model\"]')"),true,'late catalog is ignored');
  // A malformed response must leave the form usable for manual entry and retry.
  await evaluate("window.realPickerFetch=window.fetch;window.fetch=async(...args)=>args[0]==='/api/provider-defaults'?new Response(JSON.stringify({revision:'r',providers:{codex:{model:42}}}),{status:200,headers:{'Content-Type':'application/json','X-Staf-Dataset':args[1].headers['X-Staf-Dataset']}}):window.realPickerFetch(...args);testClick('Compare latest defaults')");
  await until(()=>evaluate("document.body.innerText.includes('Invalid provider defaults response')"),'malformed defaults remain recoverable');
- await evaluate("window.fetch=async(...args)=>args[0]==='/api/models'?new Response(JSON.stringify({models:[null]}),{status:200,headers:{'Content-Type':'application/json','X-Staf-Dataset':args[1].headers['X-Staf-Dataset']}}):window.realPickerFetch(...args);[...document.querySelectorAll('.provider-pair-defaults button')].find(b=>b.textContent.trim()==='List models').click()");
+ await evaluate("window.fetch=async(...args)=>args[0]==='/api/models'?new Response(JSON.stringify({models:[null]}),{status:200,headers:{'Content-Type':'application/json','X-Staf-Dataset':args[1].headers['X-Staf-Dataset']}}):window.realPickerFetch(...args);(()=>{const p=document.querySelector('.provider-pair-defaults .provider-choices select');p.value='codex';p.dispatchEvent(new Event('change',{bubbles:true}));setTimeout(()=>{p.value='openrouter';p.dispatchEvent(new Event('change',{bubbles:true}))},0)})()");
  await until(()=>evaluate("document.body.innerText.includes('Invalid model catalog') && document.body.innerText.includes('Enter a model ID manually')"),'malformed catalog offers recovery');
- await evaluate("window.fetch=window.realPickerFetch");
+ await evaluate("window.fetch=window.realPickerFetch;document.querySelector('.provider-pair-defaults button').click()");
+ await until(()=>evaluate("document.querySelector('.provider-pair-defaults .model-discovery-status')?.textContent.includes('2 models loaded')"),'retry recovers catalog');
  await evaluate("[...document.querySelectorAll('.side button')].find(b=>b.textContent.includes('New agent')).click()");
  await until(()=>evaluate("document.body.innerText.includes('Create agent')"),'creation choices');
  await evaluate("(()=>{const p=document.querySelector('.setup fieldset select');p.value='openrouter';p.dispatchEvent(new Event('change',{bubbles:true}))})()");
  await until(()=>evaluate("document.querySelector('.setup fieldset input').value==='owner/model' && [...document.querySelector('.setup select[aria-label=Reasoning]')?.options??[]].some(o=>o.value==='high')"),'creation defaults and reasoning options');
- await evaluate("window.fetch=async(...args)=>{const response=await window.realPickerFetch(...args);if(args[0]!=='/api/models')return response;const catalog=await response.json();catalog.models.push({id:'fixture/unknown',label:'Unknown reasoning',reasoning:null,reasoningStatus:'unknown'});return new Response(JSON.stringify(catalog),{status:200,headers:{'Content-Type':'application/json','X-Staf-Dataset':args[1].headers['X-Staf-Dataset']}})};(()=>{const r=document.querySelector('.setup select[aria-label=Reasoning]');r.value='high';r.dispatchEvent(new Event('change',{bubbles:true}));testClick('List models')})()");
- await until(()=>evaluate("document.querySelectorAll('.setup datalist option').length===3 && document.querySelector('.setup select[aria-label=Reasoning]').value==='high'"),'creation catalog and reasoning');
- await evaluate("testInput('.setup fieldset input','fixture/unknown')");assert.equal(await evaluate("document.querySelector('.setup select[aria-label=Reasoning]').value"),'high','unknown metadata preserves reasoning');await evaluate("window.fetch=window.realPickerFetch");
- await evaluate("testInput('.setup fieldset input','fixture/plain')");
- try{await until(()=>evaluate("document.querySelector('.setup select[aria-label=Reasoning]').value==='default' && document.body.innerText.includes('Reasoning changed to Provider default')"),'creation visibly resets unsupported reasoning')}catch(e){console.error(await evaluate("({text:document.querySelector('.setup').innerText,values:[...document.querySelectorAll('.setup fieldset select')].map(e=>e.value),model:document.querySelector('.setup fieldset input').value})"));throw e}
+ await evaluate("window.fetch=async(...args)=>{const response=await window.realPickerFetch(...args);if(args[0]!=='/api/models')return response;const catalog=await response.json();catalog.models.push({id:'fixture/unknown',label:'Unknown reasoning',reasoning:null,reasoningStatus:'unknown'});return new Response(JSON.stringify(catalog),{status:200,headers:{'Content-Type':'application/json','X-Staf-Dataset':args[1].headers['X-Staf-Dataset']}})};(()=>{const r=document.querySelector('.setup select[aria-label=Reasoning]');r.value='high';r.dispatchEvent(new Event('change',{bubbles:true}));const p=document.querySelector('.setup fieldset select');p.value='codex';p.dispatchEvent(new Event('change',{bubbles:true}));setTimeout(()=>{p.value='openrouter';p.dispatchEvent(new Event('change',{bubbles:true}))},0)})()");
+ await until(()=>evaluate("document.querySelectorAll('.setup datalist option').length===3"),'creation catalog and reasoning');
+ await evaluate("(()=>{const r=document.querySelector('.setup select[aria-label=Reasoning]');r.value='high';r.dispatchEvent(new Event('change',{bubbles:true}))})();testInput('.setup fieldset input','fixture/unknown')");assert.equal(await evaluate("document.querySelector('.setup select[aria-label=Reasoning]').value"),'high','unknown metadata preserves reasoning');await evaluate("window.fetch=window.realPickerFetch");
+ await evaluate("document.querySelector('.setup fieldset input').focus();testInput('.setup fieldset input','fixture/plain');document.querySelector('.setup fieldset input').blur()");
+ try{await until(()=>evaluate("document.querySelector('.setup select[aria-label=Reasoning]').value==='default' && document.body.innerText.includes('Reasoning changed to Automatic')"),'creation visibly resets unsupported reasoning')}catch(e){console.error(await evaluate("({text:document.querySelector('.setup').innerText,values:[...document.querySelectorAll('.setup fieldset select')].map(e=>e.value),model:document.querySelector('.setup fieldset input').value})"));throw e}
  await evaluate("testClick('Cancel')");
  const bot=await api('bots',{name:'Picker agent',provider:'demo'});
  await until(()=>evaluate("document.querySelector('.side nav button')?.textContent.includes('Picker agent')"),'agent appears');
@@ -78,32 +86,41 @@ try{
  await evaluate("testInput('[aria-label=Message]','Retained picker draft');document.querySelector('.model-button').click()");
  await until(()=>evaluate("!!document.querySelector('[aria-label=\"Provider picker\"] [data-provider]')"),'picker opens');
  const change=async(value)=>evaluate(`document.querySelector('[aria-label="Provider picker"] [data-provider="'+${JSON.stringify(value)}+'"]').click()`);
- await evaluate('window.confirm=()=>false');await change('openrouter');
+ await change('openrouter');
+ await until(()=>evaluate("!!document.querySelector('[aria-label=\"Confirm provider change\"]')"),'inline provider confirmation');
+ await evaluate("document.querySelector('[data-cancel-provider]').click()");
+ assert.equal(await evaluate("document.activeElement?.dataset.provider"),'openrouter','cancel restores provider focus');
  assert.equal((await api('bots/'+bot.id)).provider,'demo');
- await evaluate("window.confirm=()=>true;window.fetch=async(...args)=>String(args[0]).endsWith('/selection')?new Response(JSON.stringify({id:'bad'}),{status:200,headers:{'Content-Type':'application/json','X-Staf-Dataset':args[1].headers['X-Staf-Dataset']}}):window.realPickerFetch(...args)");await change('openrouter');
+ await evaluate("window.fetch=async(...args)=>String(args[0]).endsWith('/selection')?new Response(JSON.stringify({id:'bad'}),{status:200,headers:{'Content-Type':'application/json','X-Staf-Dataset':args[1].headers['X-Staf-Dataset']}}):window.realPickerFetch(...args)");await change('openrouter');await evaluate("testClick('Change provider')");
  await until(()=>evaluate("document.body.innerText.includes('Invalid selection response') && document.body.innerText.includes('Compare')"),'malformed selection offers comparison');
  assert.equal((await api('bots/'+bot.id)).provider,'demo');await evaluate("window.fetch=window.realPickerFetch");
- await change('openrouter');
+ await change('openrouter');await evaluate("testClick('Change provider')");
  await until(async()=>(await api('bots/'+bot.id)).model==='owner/model','provider selection applies defaults immediately');
  await until(()=>evaluate("!document.querySelector('[aria-label=\"Provider picker\"] fieldset').disabled"),'selection settled');
- await evaluate("testClick('List models')");
  await until(()=>evaluate("document.querySelectorAll('[aria-label=\"Provider picker\"] datalist option').length===2"),'synthetic catalog listed');
- await evaluate("document.querySelector('[data-model=\"fixture/model\"]').click()");
+ const beforeRepeat=await api('bots/'+bot.id);
+ await evaluate("document.querySelector('[data-model=\"owner/model\"]').click()");
+ assert.equal((await api('bots/'+bot.id)).revision,beforeRepeat.revision,'reselecting the current model does not write');
+ await evaluate("document.querySelector('[data-model=\"fixture/model\"]').focus();document.querySelector('[data-model=\"fixture/model\"]').click()");
  await until(async()=>(await api('bots/'+bot.id)).model==='fixture/model','catalog model selection saves without blur');
+ assert.equal(await evaluate("document.querySelector('.composer-picker').hidden"),false,'selection keeps picker open');
+ assert.equal(await evaluate("document.querySelector('[data-model=\"fixture/model\"]').getAttribute('aria-checked')"),'true','selected model is marked');
  await until(()=>evaluate("!document.querySelector('[aria-label=\"Provider picker\"] fieldset').disabled"),'model settled');
+ assert.equal(await evaluate("document.activeElement?.dataset.model"),'fixture/model','selection restores keyboard focus after save');
  await evaluate("if(document.querySelector('.composer-picker').hidden) document.querySelector('.model-button').click();document.querySelector('[data-reasoning=high]').click()");
  await until(async()=>(await api('bots/'+bot.id)).reasoning==='high','reasoning saves immediately');
  await until(()=>evaluate("!document.querySelector('[aria-label=\"Provider picker\"] fieldset').disabled"),'reasoning settled');
+ await until(()=>evaluate("document.querySelector('.model-button').textContent.includes('high')"),'trigger shows selected reasoning');
  await evaluate("document.querySelector('[aria-label=\"Provider picker\"] input').focus();testInput('[aria-label=\"Provider picker\"] input','fixture/plain')");
  await sleep(150);
  assert.equal(await evaluate("document.querySelector('.composer-picker').hidden"),false,'typing a catalog ID prefix does not close manual entry');
  assert.equal((await api('bots/'+bot.id)).model,'fixture/model','typing keeps the saved model until entry is completed');
  await evaluate("document.querySelector('[aria-label=\"Provider picker\"] input').blur()");
- await until(()=>evaluate("document.body.innerText.includes('Reasoning changed to Provider default')"),'visible unsupported reasoning reset');
+ await until(()=>evaluate("document.body.innerText.includes('Reasoning changed to Automatic')"),'visible unsupported reasoning reset');
  assert.equal((await api('bots/'+bot.id)).reasoning,null);
- await evaluate("if(document.querySelector('.composer-picker').hidden) document.querySelector('.model-button').click()");await change('demo');await until(async()=>(await api('bots/'+bot.id)).provider==='demo','switch away');
+ await evaluate("if(document.querySelector('.composer-picker').hidden) document.querySelector('.model-button').click()");await change('demo');await evaluate("testClick('Change provider')");await until(async()=>(await api('bots/'+bot.id)).provider==='demo','switch away');
  await until(()=>evaluate("!document.querySelector('[aria-label=\"Provider picker\"] fieldset').disabled"),'switch settled');
- await change('openrouter');await until(async()=>(await api('bots/'+bot.id)).model==='fixture/plain','remembered pair restored');
+ await change('openrouter');await evaluate("testClick('Change provider')");await until(async()=>(await api('bots/'+bot.id)).model==='fixture/plain','remembered pair restored');
  assert.equal(await evaluate("document.querySelector('[aria-label=Message]').value"),'Retained picker draft');
  assert.equal((await api('bots/'+bot.id+'/messages')).length,0);
  await cdp('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});

@@ -610,26 +610,30 @@ An uncertain start, stop or cleanup blocks further scratch commands and daemon c
 
 ## Provider choices
 
-Open the composer model control to choose provider, model and reasoning. Provider
-and reasoning selections and listed model choices save immediately; manual model text saves when leaving
-the field. **List models** reports how many models loaded and shows an **Available models**
-dropdown. If no models are returned, it says so; you can still enter a
-model ID manually or retry. Discovery errors remain beside the controls. Model
-listing reads metadata only and does not verify account access or run inference.
-Model IDs absent from the list remain valid manual entries. Provider default reasoning leaves the effort unset. A model
-with explicitly incompatible advertised reasoning resets the effort visibly.
-Missing metadata leaves the saved effort intact; generation can still reject it.
-Changing providers asks for confirmation before saving. Drafts stay in place.
-The agent settings form uses the shared choice fields but stages them with the other
-fields until Save. The composer picker saves its selection separately.
+Open the composer model control to choose provider, model and reasoning. The
+picker loads model metadata when opened or when the provider changes. Creation,
+agent settings, and provider defaults also load metadata automatically. Choose a
+listed model or enter a model ID. The selected listed model is marked. If
+metadata is unavailable, the entered ID remains editable and you can retry.
+Discovery reads metadata only. It does not verify authentication, account access,
+or inference.
 
-Global Settings → Provider defaults configures each provider's first-use pair.
-Returning to a provider restores that agent's remembered pair. Changing defaults
-does not update existing selections. Creation without an explicit provider keeps
-the copied creation defaults. An explicit provider instead uses its own defaults or an explicit choice; after
-discovery, an advertised default model can fill an unset model. It does not
-inherit another provider’s reasoning.
-Configuration does not verify model/account access.
+The composer saves provider, listed model, and reasoning choices immediately.
+Manual model text saves when you leave the field. The picker stays open until
+you click outside it or press Escape. A provider change asks for confirmation in
+the picker because the next request may send conversation history to that
+provider. The message draft remains editable. Agent settings and creation stage
+choices with the other fields until you save or create the agent.
+
+**Automatic** leaves reasoning to the provider. Known model metadata limits the
+explicit choices. Choosing a model that advertises incompatible reasoning resets
+the effort visibly; unknown metadata preserves it. A later request can still
+reject an explicit effort. Global Settings → Provider defaults configures each
+provider's first-use pair. Returning to a provider restores that agent's
+remembered pair. Changing first-use pairs does not update existing selections.
+Saving a real creation default also migrates existing Demo agents to that pair.
+An explicit provider uses its own defaults or an explicit choice. Discovery alone
+does not change a saved selection.
 
 Paired CLI clients can inspect and select the same state:
 
