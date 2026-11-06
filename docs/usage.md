@@ -630,8 +630,9 @@ explicit choices. Choosing a model that advertises incompatible reasoning resets
 the effort visibly; unknown metadata preserves it. A later request can still
 reject an explicit effort. Global Settings → Provider defaults configures each
 provider's first-use pair. Returning to a provider restores that agent's
-remembered pair. Changing defaults does not update existing selections. An
-explicit provider uses its own defaults or an explicit choice. Discovery alone
+remembered pair. Changing first-use pairs does not update existing selections.
+Saving a real creation default also migrates existing Demo agents to that pair.
+An explicit provider uses its own defaults or an explicit choice. Discovery alone
 does not change a saved selection.
 
 Paired CLI clients can inspect and select the same state:

@@ -26,7 +26,8 @@ provider's default in effect; it does not mean reasoning is disabled. LM Studio
 and live do not support a nondefault effort through these adapters.
 
 Profile edits affect new requests and are shared with other clients. New bot
-creation defaults are separate and do not change existing bots. Changing the
+creation defaults apply to new bots. Saving a real creation default also migrates
+existing Demo agents to that provider and model. Changing the
 provider may send existing conversation history to the newly selected provider.
 See [settings](settings.md) and [provider setup](usage.md#configure-a-provider).
 The shared provider integration has synthetic coverage and has not been live
