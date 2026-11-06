@@ -101,7 +101,7 @@ try {
  const reset=spawnSync(process.execPath,['scripts/dev-data.mjs','reset'],{cwd:root,env,encoding:'utf8'});assert.equal(reset.status,0,reset.stderr);
  app=startInstance(data,port,{env:{}});await app.listen();
  await until(()=>evaluate("document.body.innerText.includes('Pair this browser')"),'old token rejected');
- await pair(app.code);await until(()=>evaluate("document.body.innerText.includes('Provider connections')"),'paired with replacement');
+ await pair(app.code);await until(()=>evaluate("!!document.querySelector('.side')"),'paired with replacement');
  assert.equal(await evaluate(`localStorage.getItem(${JSON.stringify(resetLegacy)})`),valueB,'dataset reset cannot confirm old discard');
  assert.equal(await evaluate("!!document.querySelector('dialog[open]')"),false,'dataset change closes old confirmation');
  await evaluate('window.release()');await sleep(300);

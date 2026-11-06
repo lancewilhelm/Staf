@@ -22,6 +22,8 @@ try {
  socket=new WebSocket(page.webSocketDebuggerUrl);await new Promise((resolve,reject)=>{socket.onopen=resolve;socket.onerror=reject});socket.onmessage=e=>{const m=JSON.parse(e.data),p=pending.get(m.id);if(p){pending.delete(m.id);m.error?p.reject(Error(m.error.message)):p.resolve(m.result)}};
  await until(()=>evaluate("document.body?.innerText.includes('Pair this browser')"),'pair page');
  await evaluate(`window.input=(el,value)=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(el,value);el.dispatchEvent(new Event('input',{bubbles:true}))};window.clickText=text=>[...document.querySelectorAll('button')].find(b=>b.textContent.trim()===text).click();input(document.querySelector('input'),${JSON.stringify(code)});clickText('Pair')`);
+ await until(()=>evaluate("!!document.querySelector('.side button[aria-label=Settings]')"),'workspace');
+ await evaluate("document.querySelector('.side button[aria-label=Settings]').click()");
  await until(()=>evaluate("document.body.innerText.includes('Provider connections')"),'settings');
  const legacy=await evaluate("(async()=>{const token=localStorage.getItem('staf-token');return (await(await fetch('/api/bots',{headers:{Authorization:'Bearer '+token}})).json()).map(bot=>bot.id)})()");
  await evaluate("document.querySelector('.defaults-editor').open=true");

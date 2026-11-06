@@ -13,7 +13,7 @@ export function seedDemoTerminal(root) {
  const endpoint=join(root,'fixture-endpoint.json');
  const child=spawn(process.execPath,[new URL('./terminal-provider.mjs',import.meta.url).pathname,endpoint],{detached:true,stdio:'ignore'});child.unref();
  for(let i=0;i<500&&!existsSync(endpoint);i++)Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,10);
- if(!existsSync(endpoint))throw Error('Controlled provider did not start');
+ if(!existsSync(endpoint)){child.kill('SIGTERM');throw Error('Controlled provider did not start');}
  return terminalFixtureEnv(root);
 }
 export function terminalFixtureEnv(root){const {port}=JSON.parse(readFileSync(join(root,'fixture-endpoint.json'),'utf8'));return {STAF_API_KEY:'synthetic-fixture-key',STAF_BASE_URL:`http://127.0.0.1:${port}/v1/`};}

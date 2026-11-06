@@ -23,6 +23,9 @@ test('paired API rejects Demo and fresh setup makes no inference',async()=>{
   const token=(await(await post('/api/pair',{code:app.code})).json()).token;writeFileSync(credential,JSON.stringify({token}));
   assert.equal((await post('/api/bots',{name:'No selection'},token)).status,400);
   for(const [route,body] of [['/api/bots',{name:'Demo',provider:'demo'}],['/api/models',{provider:'demo'}],['/api/provider-defaults',{revision:'invalid',provider:'demo',model:null,reasoning:null}]])assert.equal((await post(route,body,token)).status,400,route);
+  const created=await(await post('/api/bots',{name:'Selected',provider:'live',model:'fixture-offline'},token)).json();
+  assert.equal((await post(`/api/bots/${created.id}/selection`,{revision:created.revision,provider:'demo'},token)).status,400);
+  assert.equal((await post(`/api/bots/${created.id}/profile`,{...created,provider:'demo'},token)).status,400);
   assert.equal(calls,0);
  } finally {await app.close();rmSync(root,{recursive:true,force:true});}
 });
@@ -45,7 +48,7 @@ test('legacy Demo history stays readable and cannot execute before setup, then m
   instance.claim({id:'history',botId:id,content:'Preserved'});instance.complete('history','Answer');instance.close();
   let calls=0;const app=startInstance(path,0,{env:{},providerFactory:async()=>{calls++;throw Error('unexpected inference')}});const port=await app.listen(),url=`http://127.0.0.1:${port}`;
   const post=async(route,body,token)=>fetch(url+route,{method:'POST',headers:{'Content-Type':'application/json',...(token?{Authorization:`Bearer ${token}`}:{})},body:JSON.stringify(body)});
-  try {const token=(await(await post('/api/pair',{code:app.code})).json()).token;await post('/api/commands',{id:'blocked',botId:id,content:'Do not infer'},token);await new Promise(resolve=>setTimeout(resolve,50));assert.equal(calls,0);const defaults=await(await fetch(url+'/api/creation-defaults',{headers:{Authorization:`Bearer ${token}`}})).json();assert.equal(defaults.provider,'');assert.equal((await post('/api/creation-defaults',{...defaults,provider:'codex',model:'fixture'},token)).status,200);}finally{await app.close();}
+  try {const token=(await(await post('/api/pair',{code:app.code})).json()).token;await post('/api/commands',{id:'blocked',botId:id,content:'Do not infer'},token);let state;for(let i=0;i<200;i++){state=await(await fetch(url+'/api/commands/blocked',{headers:{Authorization:`Bearer ${token}`}})).json();if(state.state!=='pending')break;await new Promise(resolve=>setTimeout(resolve,5));}assert.equal(state.state,'failed');assert.match(state.error,/retired provider.*Choose a supported provider/i);assert.equal(calls,0);const defaults=await(await fetch(url+'/api/creation-defaults',{headers:{Authorization:`Bearer ${token}`}})).json();assert.equal(defaults.provider,'');assert.equal((await post('/api/creation-defaults',{...defaults,provider:'codex',model:'fixture'},token)).status,200);}finally{await app.close();}
   instance=new Instance(path);assert.equal(instance.bot(id).provider,'codex');assert.equal(instance.bot(id).chatId,chatId);assert.equal(instance.bot(id).instructions,'Keep soul');assert.deepEqual(instance.messages(id).slice(0,2).map(m=>m.content),['Preserved','Answer']);
  } finally {try{instance.close()}catch{}rmSync(root,{recursive:true,force:true});}
 });

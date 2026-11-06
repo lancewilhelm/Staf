@@ -34,7 +34,7 @@ test('development command serves one persistent instance and releases its owners
   for (const [name, value] of [['codex-direct.json', direct], ['codex-host.json', host], ['openrouter.json', router]]) await writeFile(join(connections,'auth',name),value,{mode:0o600});
   const provider=createHttpServer(async(req,res)=>{for await(const _ of req){} res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({choices:[{message:{role:'assistant',content:'controlled development response'}}]}));});
   await new Promise(resolve=>provider.listen(0,'127.0.0.1',resolve));
-  const env = {PATH:process.env.PATH, HOME:temp, TMPDIR:temp, STAF_DEV_DATA_DIR:dir, STAF_DEV_CONNECTION_DIR:connections, STAF_DEV_PORT:String(port),STAF_BASE_URL:`http://127.0.0.1:${provider.address().port}/v1/`,STAF_API_KEY:'synthetic-key'};
+  const env = {PATH:process.env.PATH, HOME:temp, TMPDIR:temp, STAF_DEV_DATA_DIR:dir, STAF_DEV_CONNECTION_DIR:connections, STAF_DEV_PORT:String(port),STAF_BASE_URL:`http://127.0.0.1:${provider.address().port}/v1/`,STAF_API_KEY:'synthetic-key',npm_config_verify_deps_before_run:'false'};
   let output = '';
   const launch = (extra={},cwd=checkout) => { const child = spawn('corepack', ['pnpm', 'dev'], {cwd, env:{...env,...extra}, detached:true, stdio:['pipe','pipe','pipe']}); child.stdout.on('data', b => output += b); child.stderr.on('data', b => output += b); return child; };
   const stop = async child => { process.kill(-child.pid, 'SIGINT'); await new Promise(resolve => child.once('exit', resolve)); };

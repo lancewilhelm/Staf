@@ -13,7 +13,7 @@ const checkout=join(temp,'checkout'), data=join(temp,'data');
 const cached=join(homedir(),'Library/Caches/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-mac-arm64/chrome-headless-shell');
 const chrome=process.env.CHROME_PATH || (existsSync(cached)?cached:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome');
 const port=await new Promise(resolvePort=>{const s=createServer();s.listen(0,'127.0.0.1',()=>{const p=s.address().port;s.close(()=>resolvePort(p));});});
-const url=`http://127.0.0.1:${port}`, env={PATH:process.env.PATH,HOME:temp,TMPDIR:temp,STAF_DEV_DATA_DIR:data,STAF_DEV_PORT:String(port)};
+const url=`http://127.0.0.1:${port}`, env={PATH:process.env.PATH,HOME:temp,TMPDIR:temp,STAF_DEV_DATA_DIR:data,STAF_DEV_PORT:String(port),npm_config_verify_deps_before_run:'false'};
 const sleep=ms=>new Promise(resolveSleep=>setTimeout(resolveSleep,ms));
 async function until(fn,label){for(let i=0;i<300;i++){try{const result=await fn();if(result)return result;}catch{}await sleep(100);}throw Error(`Timed out: ${label}\n${output}`);}
 let launcher,browser,socket,proxy,provider,output='',seq=0;const pending=new Map();
@@ -23,7 +23,7 @@ try {
  provider=spawn(process.execPath,[join(source,'test/fixtures/terminal-provider.mjs'),join(temp,'provider.json')],{stdio:'ignore'});
  const providerInfo=await until(async()=>JSON.parse(await readFile(join(temp,'provider.json'),'utf8')),'controlled provider');
  env.STAF_BASE_URL=`http://127.0.0.1:${providerInfo.port}/v1/`;env.STAF_API_KEY='synthetic-key';
- await mkdir(checkout);for(const name of ['src','web','scripts','package.json','tsconfig.json','vite.config.ts'])await cp(join(source,name),join(checkout,name),{recursive:true});await symlink(join(source,'node_modules'),join(checkout,'node_modules'),'dir');
+ await mkdir(checkout);for(const name of ['src','web','scripts','package.json','tsconfig.json','vite.config.ts','pnpm-workspace.yaml','pnpm-lock.yaml'])await cp(join(source,name),join(checkout,name),{recursive:true});await symlink(join(source,'node_modules'),join(checkout,'node_modules'),'dir');
  proxy=createServer(socket=>socket.end('HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n'));await new Promise(resolveListen=>proxy.listen(0,'127.0.0.1',resolveListen));
  launcher=spawn('corepack',['pnpm','dev'],{cwd:checkout,env,detached:true,stdio:['pipe','pipe','pipe']});launcher.stdout.on('data',b=>output+=b);launcher.stderr.on('data',b=>output+=b);
  const code=await until(()=>output.match(/Pairing code: (\S+)/)?.[1],'backend ready');
@@ -79,7 +79,7 @@ try {
  await evaluate(`{const el=document.querySelector('textarea[aria-label=Message]');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(el,'draft survives restart');el.dispatchEvent(new Event('input',{bubbles:true}))}`);
  const otherBot=await call('/api/bots',{operationId:'legacy-lock-agent',name:'Legacy lock agent',provider:'live',model:'fixture-offline'});
  await call('/api/commands',{id:'legacy-lock-command',botId:otherBot.id,content:'locked command'});
- await until(async()=>(await call('/api/commands/legacy-lock-command')).state==='completed','locked command persisted');
+ let lockedCommand;for(let i=0;i<300;i++){lockedCommand=await call('/api/commands/legacy-lock-command');if(lockedCommand.state!=='pending')break;await sleep(100)}assert.equal(lockedCommand.state,'completed',JSON.stringify(lockedCommand));
  const lockedKey=`staf-workspace-v1:older-tab:${otherBot.id}`;
  await evaluate(`localStorage.setItem(${JSON.stringify(lockedKey)},${JSON.stringify(JSON.stringify({text:'draft from older tab',submission:{id:'legacy-lock-command',text:'locked command',kind:'pending'}}))});void navigator.locks.request('staf-draft:'+${JSON.stringify(lockedKey)},async()=>{window.legacyLockHeld=true;await new Promise(resolve=>window.releaseLegacyLock=resolve)})`);
  await until(()=>evaluate('window.legacyLockHeld'),'older tab owns its draft');
@@ -124,16 +124,16 @@ try {
  assert.equal(await evaluate("document.body.innerText.includes('Retained creation')"),false);
  await evaluate(`{const el=document.querySelector('input');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(el,${JSON.stringify(newCode)});el.dispatchEvent(new Event('input',{bubbles:true}));[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Pair').click()}`);
  await until(()=>evaluate("!!localStorage.getItem('staf-token') && document.body.innerText.includes('Provider connections')"),'pair new dataset');
- assert.equal(await evaluate("document.body.innerText.includes('unverified saved text') || document.body.innerText.includes('Unverified agent')"),false,'unverified old content stays behind explicit recovery after reset');
+ assert.equal(await evaluate("!!document.querySelector('.settings-content .earlier-record') && !document.querySelector('.agent-settings')"),true,'unverified records are available only in Settings after reset');
  assert.equal(await evaluate(`localStorage.getItem(${JSON.stringify(unverifiedDraft)})!==null && localStorage.getItem(${JSON.stringify(unverifiedCreation)})!==null`),true);
  await evaluate("if(typeof window.releaseCreation==='function')window.releaseCreation()");
  await sleep(200);
- assert.equal(await evaluate("document.body.innerText.includes('Retained creation')"),false,'old creation is not shown after reset');
+ assert.equal(await evaluate("!!document.querySelector('.agent-settings') || !!document.querySelector('.side nav')?.textContent.includes('Retained creation')"),false,'old creation is not reopened after reset');
  assert.equal(await evaluate(`localStorage.getItem(${JSON.stringify(creationKey)})!==null && localStorage.getItem(${JSON.stringify(oldKey)})!==null`),true,'old records remain quarantined');
  assert.equal(await evaluate("document.body.innerText.includes('Recovered creation. Check status')"),false);
  await cdp('Page.reload');
- const reloaded=await until(()=>evaluate("document.readyState==='complete' && document.body?.innerText.includes('Project guide') && localStorage.getItem('staf-token') ? {text:document.body.innerText,token:localStorage.getItem('staf-token')} : null"),'new dataset reload');
- assert.equal(reloaded.text.includes('Retained creation') || reloaded.text.includes('Legacy creation'),false);
+ const reloaded=await until(()=>evaluate("document.readyState==='complete' && document.querySelector('.side') && localStorage.getItem('staf-token') ? {text:document.body.innerText,token:localStorage.getItem('staf-token')} : null"),'new dataset reload');
+ assert.equal(await evaluate("!!document.querySelector('.agent-settings') || !!document.querySelector('.side nav')?.textContent.includes('Retained creation')"),false,'reload does not resume an old creation');
  const newToken=reloaded.token;
  const stale=await fetch(url+'/api/bots',{method:'POST',headers:{Authorization:`Bearer ${newToken}`,'Content-Type':'application/json','X-Staf-Dataset':dataset},body:JSON.stringify({operationId:'retained-operation',name:'Retained creation'})});assert.equal(stale.status,409);
  assert.equal((await (await fetch(url+'/api/bots',{headers:{Authorization:`Bearer ${newToken}`}})).json()).some(item=>item.name==='Retained creation'),false);
