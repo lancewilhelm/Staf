@@ -94,7 +94,12 @@ sending. The obsolete `staf-draft` and `staf-pending` pre-journal keys are delet
 under Web Locks without importing or backing them up. The `staf-workspace-v1:`
 journal is retained, including unclaimed closed-tab drafts and uncertain commands;
 the retired manual picker also listed these current records. No journal-wide
-legacy cleanup is safe. Clearing browser storage removes the journal.
+legacy cleanup is safe. Earlier records without a dataset identity migrate only
+when a stored command or creation operation establishes their origin. Otherwise,
+Settings offers Copy and confirmed Discard for each record. Discard takes the
+record's Web Lock and compares its saved value and dataset again before removal.
+It leaves changed records, records owned by another tab, and scoped journals in
+place. Clearing browser storage removes the journal.
  A keyed
 bot-creation operation stores its fingerprint and result with the bot in one
 transaction. Version 27 backs up an existing database before adding the journal.
