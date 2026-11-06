@@ -415,9 +415,9 @@ configuration history and uncertain-save recovery. See
 ## Simplify the agent workspace after the main-branch review
 
 On 2026-11-05 the owner requested the following changes after reviewing the
-development instance. These are requirements for a future implementation, not
-verified runtime behavior. They revise the corresponding iteration-4 choices
-above. Recommendations from the subsequent interview remain open until accepted.
+development instance. The interview settled these requirements, which revise the
+corresponding iteration-4 choices above. Delivery is tracked separately in the
+[integration PR](https://github.com/lancewilhelm/Staf/pull/100).
 
 - Use the default pentagon-dot Staf logo and remove logo selection.
 - Remove the Agents heading, add a divider above the agent list, and move
@@ -527,7 +527,12 @@ CLI, and persisted configuration and history. Controlled providers exercise tool
 continuation and failures. Live model quality and cache hits remain separate
 evidence. The published specification is
 [Simplify the agent workspace, remove Demo, and add editable Staf core guidance](https://github.com/lancewilhelm/Staf/issues/89).
-Implementation-ticket granularity and blocking edges await the owner's review.
+The owner approved the ticket breakdown by invoking implement-spec. Child issues
+90 through 99 are implemented on the integration branch for PR review. Independent
+Standards and Spec reviews found four issues, addressed with behavior regressions:
+complete core backups, invalid-agent migration isolation, explicit creation
+choices, and delayed default reads. Verification uses controlled providers and
+disposable data, not live-provider, model-quality, or cache-hit evidence.
 A blank agent Instructions field does not mean Staf sends no base instructions.
 Separate chat sessions, provider icons, and generated progress narration remain
 deferred from this workspace cleanup.
