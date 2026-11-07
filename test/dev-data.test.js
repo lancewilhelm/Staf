@@ -1,24 +1,61 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fork, spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Instance, INSTANCE_SCHEMA_VERSION } from '../dist/instance.js';
-import { startInstance } from '../dist/instance-service.js';
+import { startInstance } from './fixtures/controlled-instance.mjs';
 import { DatabaseSync } from 'node:sqlite';
 import { prepareUpgrade, finishUpgrade } from '../scripts/dev-upgrade.mjs';
+import { saveBackup } from '../scripts/dev-storage.mjs';
 
 const command = (root, action) => spawnSync(process.execPath, ['scripts/dev-data.mjs', action], {cwd:process.cwd(), env:{...process.env,STAF_DEV_DATA_DIR:root}, encoding:'utf8'});
-test('reset builds fresh representative data while retaining connections and a complete backup', () => {
+test('restore replaces core guidance with the backed-up revision history', () => {
+  const root=realpathSync(mkdtempSync(join(tmpdir(),'staf-core-restore-'))),path=join(root,'instance.sqlite');let instance;
+  try {
+    instance=new Instance(path);instance.saveCore({revision:instance.core().revision,content:'Earlier'});instance.saveCore({revision:instance.core().revision,content:'Core A'});instance.close();
+    const originalRevisions=readdirSync(join(root,'core','revisions')).sort(),originalLink=readlinkSync(join(root,'core','current'));
+    const db=new DatabaseSync(path);const backup=saveBackup({dataRoot:root,db,existed:true,reason:'core-test'});db.close();
+    instance=new Instance(path);instance.saveCore({revision:instance.core().revision,content:'Core B'});instance.close();instance=undefined;
+    const result=spawnSync(process.execPath,['scripts/dev-data.mjs','restore',backup],{cwd:process.cwd(),env:{...process.env,STAF_DEV_DATA_DIR:root},encoding:'utf8'});assert.equal(result.status,0,result.stderr);
+    instance=new Instance(path);assert.equal(instance.core().content,'Core A');assert.deepEqual(readdirSync(join(root,'core','revisions')).sort(),originalRevisions);assert.equal(readlinkSync(join(root,'core','current')),originalLink);instance.close();instance=undefined;
+    const undo=result.stdout.match(/Backup: (.+)/)?.[1];assert.ok(undo);
+    const undoResult=spawnSync(process.execPath,['scripts/dev-data.mjs','restore',undo],{cwd:process.cwd(),env:{...process.env,STAF_DEV_DATA_DIR:root},encoding:'utf8'});assert.equal(undoResult.status,0,undoResult.stderr);
+    instance=new Instance(path);assert.equal(instance.core().content,'Core B');instance.close();instance=undefined;
+  } finally {instance?.close();rmSync(root,{recursive:true,force:true});}
+});
+test('reset and older backups without core select the shipped default, and upgrade captures an empty override', () => {
+  const root=realpathSync(mkdtempSync(join(tmpdir(),'staf-core-legacy-'))),path=join(root,'instance.sqlite');let instance;
+  try {
+    instance=new Instance(path);instance.saveCore({revision:instance.core().revision,content:''});instance.close();instance=undefined;
+    const db=new DatabaseSync(path);db.exec('PRAGMA user_version=29');db.close();
+    const upgrade=prepareUpgrade(root);assert.ok(upgrade);assert.ok(existsSync(join(upgrade.backup,'core','current')));
+    assert.equal(command(root,'recover').status,0);instance=new Instance(path);assert.equal(instance.core().source,'override');assert.equal(instance.core().content,'');instance.close();instance=undefined;
+    const reset=command(root,'reset');assert.equal(reset.status,0,reset.stderr);const backup=reset.stdout.match(/Backup: (.+)/)?.[1];assert.ok(backup);
+    instance=new Instance(path);assert.equal(instance.core().source,'default');instance.close();instance=undefined;
+    rmSync(join(backup,'core'),{recursive:true,force:true});
+    const restore=spawnSync(process.execPath,['scripts/dev-data.mjs','restore',backup],{cwd:process.cwd(),env:{...process.env,STAF_DEV_DATA_DIR:root},encoding:'utf8'});assert.equal(restore.status,0,restore.stderr);
+    instance=new Instance(path);assert.equal(instance.core().source,'default');instance.close();instance=undefined;
+  } finally {instance?.close();rmSync(root,{recursive:true,force:true});}
+});
+test('backup does not bless a late edit to a retired core revision', () => {
+  const root=realpathSync(mkdtempSync(join(tmpdir(),'staf-core-late-backup-'))),path=join(root,'instance.sqlite');let instance;
+  try {
+    instance=new Instance(path);instance.saveCore({revision:instance.core().revision,content:'First'});const retired=realpathSync(instance.core().path);instance.saveCore({revision:instance.core().revision,content:'Second'});writeFileSync(retired,'Late edit');instance.close();instance=undefined;
+    const reset=command(root,'reset');assert.equal(reset.status,0,reset.stderr);const backup=reset.stdout.match(/Backup: (.+)/)?.[1];assert.ok(backup);
+    const restored=spawnSync(process.execPath,['scripts/dev-data.mjs','restore',backup],{cwd:process.cwd(),env:{...process.env,STAF_DEV_DATA_DIR:root},encoding:'utf8'});assert.equal(restored.status,0,restored.stderr);
+    instance=new Instance(path);assert.throws(()=>instance.core(),/previous core revision was edited/i);
+  } finally {instance?.close();rmSync(root,{recursive:true,force:true});}
+});
+test('reset creates an unconfigured dataset while retaining connections and a complete backup', () => {
   const root=mkdtempSync(join(tmpdir(),'staf-dev-data-')), path=join(root,'instance.sqlite');
   try {
     mkdirSync(join(root,'auth')); writeFileSync(join(root,'auth','codex-host.json'),'synthetic-registration');
-    let prior=new Instance(path); const bot=prior.createBot({name:'Before reset',instructions:'Keep this soul',provider:'demo'}); prior.close();
+    let prior=new Instance(path); const bot=prior.createBot({name:'Before reset',instructions:'Keep this soul',provider:'live',model:'fixture-offline'}); prior.close();
     const result=command(root,'reset'); assert.equal(result.status,0,result.stderr);
     assert.equal(readFileSync(join(root,'auth','codex-host.json'),'utf8'),'synthetic-registration');
-    const next=new Instance(path); const bots=next.bots(); assert.ok(bots.length>=3); assert.ok(!bots.some(item=>item.id===bot.id));
-    assert.ok(bots.some(item=>next.messages(item.id).length>=8)); next.close();
+    const next=new Instance(path); assert.deepEqual(next.bots(),[]); assert.equal(next.creationDefaults().provider,''); next.close();
     assert.match(result.stdout,/backup/i);
     const backup=result.stdout.match(/Backup: (.+)/)?.[1]; assert.ok(backup);
     prior=new Instance(join(backup,'instance.sqlite')); assert.equal(prior.bot(bot.id).instructions,'Keep this soul'); prior.close();
@@ -48,12 +85,21 @@ test('published SQLite journal stays beside its database during maintenance', as
   }
 });
 
-async function interrupt(root, action) {
-  const child=fork('scripts/dev-data.mjs',[action],{cwd:process.cwd(),env:{...process.env,STAF_DEV_DATA_DIR:root,STAF_DEV_TEST_PAUSE:'database-published'},stdio:['ignore','ignore','pipe','ipc']});
+async function interrupt(root, action, checkpoint='database-published') {
+  const child=fork('scripts/dev-data.mjs',[action],{cwd:process.cwd(),env:{...process.env,STAF_DEV_DATA_DIR:root,STAF_DEV_TEST_PAUSE:checkpoint},stdio:['ignore','ignore','pipe','ipc']});
   let errors='';child.stderr.on('data',data=>errors+=data);
   await new Promise((resolve,reject)=>{child.once('message',resolve);child.once('exit',()=>reject(Error('Exited before checkpoint: '+errors)));});
   child.kill('SIGKILL');await new Promise(resolve=>child.once('exit',resolve));
 }
+test('interrupted reset recovers the original core revision tree', async () => {
+  const root=realpathSync(mkdtempSync(join(tmpdir(),'staf-core-interrupted-'))),path=join(root,'instance.sqlite');let instance;
+  try {
+    instance=new Instance(path);instance.saveCore({revision:instance.core().revision,content:'Original core'});instance.saveCore({revision:instance.core().revision,content:'Current core'});instance.close();instance=undefined;
+    const revisions=readdirSync(join(root,'core','revisions')).sort();
+    await interrupt(root,'reset','files-published');const result=command(root,'recover');assert.equal(result.status,0,result.stderr);
+    instance=new Instance(path);assert.equal(instance.core().content,'Current core');assert.deepEqual(readdirSync(join(root,'core','revisions')).sort(),revisions);instance.close();instance=undefined;
+  } finally {instance?.close();rmSync(root,{recursive:true,force:true});}
+});
 // Models the older constructor's schema gate; actual older-build startup is
 // checked separately so this test does not depend on Git history in CI.
 function legacySchemaGate(path) {
@@ -76,7 +122,7 @@ test('published and interrupted replacements reject an older schema-aware writer
 test('reset and repeated recovery interruptions retain a usable complete backup', async () => {
   const root=mkdtempSync(join(tmpdir(),'staf-dev-crash-')),path=join(root,'instance.sqlite');
   try {
-    let instance=new Instance(path);const bot=instance.createBot({name:'Retained agent',instructions:'Retained soul',provider:'demo'});instance.claim({id:'before',botId:bot.id,content:'Saved message'});instance.complete('before','Saved response');instance.close();
+    let instance=new Instance(path);const bot=instance.createBot({name:'Retained agent',instructions:'Retained soul',provider:'live',model:'fixture-offline'});instance.claim({id:'before',botId:bot.id,content:'Saved message'});instance.complete('before','Saved response');instance.close();
     await interrupt(root,'reset');assert.ok(existsSync(path+'.maintenance.json'));assert.throws(()=>new Instance(path),/maintenance/i);
     await interrupt(root,'recover');assert.ok(existsSync(path+'.maintenance.json'));assert.throws(()=>new Instance(path),/maintenance/i);
     const result=command(root,'recover');assert.equal(result.status,0,result.stderr);assert.equal(existsSync(path+'.maintenance.json'),false);
@@ -111,7 +157,7 @@ test('recovery preserves older writes after a crash before the original is fence
 });
 test('recovery unfences the unchanged original after a prepared operation crashes', async () => {
   const root=mkdtempSync(join(tmpdir(),'staf-dev-prepared-fence-')),path=join(root,'instance.sqlite');
-  let instance=new Instance(path);const bot=instance.createBot({name:'Original',instructions:'Original soul',provider:'demo'});instance.close();
+  let instance=new Instance(path);const bot=instance.createBot({name:'Original',instructions:'Original soul',provider:'live',model:'fixture-offline'});instance.close();
   const child=fork('scripts/dev-data.mjs',['reset'],{cwd:process.cwd(),env:{...process.env,STAF_DEV_DATA_DIR:root,STAF_DEV_TEST_PAUSE:'original-fenced'},stdio:['ignore','ignore','pipe','ipc']});
   let errors='';child.stderr.on('data',data=>errors+=data);
   try {
@@ -131,7 +177,7 @@ test('a committed but still fenced publication can be finalized after a crash', 
     child.kill('SIGKILL');await new Promise(resolve=>child.once('exit',resolve));
     assert.throws(()=>legacySchemaGate(path),/newer database/);
     const result=command(root,'recover');assert.equal(result.status,0,result.stderr);
-    const instance=new Instance(path);assert.ok(instance.bots().length>=3);instance.close();
+    const instance=new Instance(path);assert.equal(instance.bots().length,0);assert.equal(instance.creationDefaults().provider,'');instance.close();
   } finally {if(child.exitCode===null&&child.signalCode===null)child.kill('SIGKILL');rmSync(root,{recursive:true,force:true});}
 });
 test('restoring an empty backup and interrupted recovery never exposes an unfenced path', async () => {
@@ -150,7 +196,7 @@ test('restoring an empty backup and interrupted recovery never exposes an unfenc
     await pause(['restore',empty]);
     await pause(['recover']);
     const result=command(root,'recover');assert.equal(result.status,0,result.stderr);
-    const instance=new Instance(path);assert.ok(instance.bots().length>=3);instance.close();
+    const instance=new Instance(path);assert.equal(instance.bots().length,0);assert.equal(instance.creationDefaults().provider,'');instance.close();
     const restore=spawnSync(process.execPath,['scripts/dev-data.mjs','restore',empty],{cwd:process.cwd(),env:{...process.env,STAF_DEV_DATA_DIR:root},encoding:'utf8'});assert.equal(restore.status,0,restore.stderr);
     assert.ok(existsSync(path));const emptyInstance=new Instance(path);assert.equal(emptyInstance.bots().length,0);emptyInstance.close();
   } finally {rmSync(root,{recursive:true,force:true});}
@@ -158,14 +204,14 @@ test('restoring an empty backup and interrupted recovery never exposes an unfenc
 test('reset refuses an exclusive database owner', () => {
   const root=mkdtempSync(join(tmpdir(),'staf-dev-busy-')),path=join(root,'instance.sqlite');
   let instance;
-  try {instance=new Instance(path);instance.createBot({name:'Busy',instructions:'',provider:'demo'});const result=command(root,'reset');assert.notEqual(result.status,0);assert.equal(instance.bots()[0].name,'Busy');assert.equal(existsSync(path+'.maintenance.json'),false);}
+  try {instance=new Instance(path);instance.createBot({name:'Busy',instructions:'',provider:'live',model:'fixture-offline'});const result=command(root,'reset');assert.notEqual(result.status,0);assert.equal(instance.bots()[0].name,'Busy');assert.equal(existsSync(path+'.maintenance.json'),false);}
   finally {instance?.close();rmSync(root,{recursive:true,force:true});}
 });
 
 test('development upgrade snapshots the database and agent files before migration', () => {
   const root=mkdtempSync(join(tmpdir(),'staf-dev-upgrade-')),path=join(root,'instance.sqlite');
   try {
-    let instance=new Instance(path);const bot=instance.createBot({name:'Upgrade',instructions:'Soul before upgrade',provider:'demo'});instance.close();
+    let instance=new Instance(path);const bot=instance.createBot({name:'Upgrade',instructions:'Soul before upgrade',provider:'live',model:'fixture-offline'});instance.close();
     let db=new DatabaseSync(path);db.exec('PRAGMA user_version=29');db.close();
     const upgrade=prepareUpgrade(root);assert.ok(upgrade);assert.throws(()=>new Instance(path),/maintenance/i);
     db=new DatabaseSync(join(upgrade.backup,'instance.sqlite'));assert.equal(db.prepare('PRAGMA user_version').get().user_version,29);db.close();
@@ -191,7 +237,7 @@ test('an interrupted upgrade remains fenced before and after initialization', ()
 test('an interrupted upgrade restores the complete pre-upgrade dataset', () => {
   const root=mkdtempSync(join(tmpdir(),'staf-dev-upgrade-recover-')),path=join(root,'instance.sqlite');
   try {
-    let instance=new Instance(path);const bot=instance.createBot({name:'Upgrade recovery',instructions:'Original instructions',provider:'demo'});instance.close();
+    let instance=new Instance(path);const bot=instance.createBot({name:'Upgrade recovery',instructions:'Original instructions',provider:'live',model:'fixture-offline'});instance.close();
     let db=new DatabaseSync(path);db.exec('PRAGMA user_version=29');db.close();prepareUpgrade(root);
     const result=command(root,'recover');assert.equal(result.status,0,result.stderr);
     db=new DatabaseSync(path);assert.equal(db.prepare('PRAGMA user_version').get().user_version,29);db.close();
@@ -230,7 +276,7 @@ test('reset preserves synthetic connections but requires new pairing and does no
 test('explicit restore replaces the complete dataset and preserves its own recovery backup', () => {
   const root=mkdtempSync(join(tmpdir(),'staf-dev-restore-')),path=join(root,'instance.sqlite');
   try {
-    let instance=new Instance(path);const bot=instance.createBot({name:'Restore me',instructions:'Restored instructions',provider:'demo'});const oldIdentity=instance.datasetIdentity();instance.authorize('old-token');instance.close();
+    let instance=new Instance(path);const bot=instance.createBot({name:'Restore me',instructions:'Restored instructions',provider:'live',model:'fixture-offline'});const oldIdentity=instance.datasetIdentity();instance.authorize('old-token');instance.close();
     const reset=command(root,'reset');assert.equal(reset.status,0,reset.stderr);const backup=reset.stdout.match(/Backup: (.+)/)?.[1];assert.ok(backup);
     const restore=spawnSync(process.execPath,['scripts/dev-data.mjs','restore',backup],{cwd:process.cwd(),env:{...process.env,STAF_DEV_DATA_DIR:root},encoding:'utf8'});assert.equal(restore.status,0,restore.stderr);assert.match(restore.stdout,/Backup:/);
     instance=new Instance(path);assert.equal(instance.bot(bot.id).instructions,'Restored instructions');assert.notEqual(instance.datasetIdentity(),oldIdentity);assert.equal(instance.authorized('old-token'),false);instance.close();
@@ -240,7 +286,7 @@ test('explicit restore replaces the complete dataset and preserves its own recov
 test('search action binding migration protects the prior database and preserves agents',()=>{
   const root=mkdtempSync(join(tmpdir(),'staf-search-migration-')),path=join(root,'instance.sqlite');
   try {
-    let instance=new Instance(path);const bot=instance.createBot({name:'Preserved',instructions:'Keep',provider:'demo'});instance.close();
+    let instance=new Instance(path);const bot=instance.createBot({name:'Preserved',instructions:'Keep',provider:'live',model:'fixture-offline'});instance.close();
     let db=new DatabaseSync(path);db.exec('DROP TABLE search_action_bindings; PRAGMA user_version=33');db.close();
     instance=new Instance(path);assert.equal(instance.bot(bot.id).instructions,'Keep');assert.ok(instance.migrationBackup && existsSync(instance.migrationBackup));
     db=new DatabaseSync(instance.migrationBackup,{readOnly:true});assert.equal(db.prepare('PRAGMA user_version').get().user_version,33);assert.equal(db.prepare("SELECT count(*) AS count FROM sqlite_master WHERE name='search_action_bindings'").get().count,0);db.close();instance.close();
@@ -252,7 +298,7 @@ test('both version 34 predecessors retain their tables through the protected com
   for(const predecessor of ['native','search']) {
     const root=mkdtempSync(join(tmpdir(),'staf-combined-migration-')),path=join(root,'instance.sqlite');
     try {
-      let instance=new Instance(path);const bot=instance.createBot({name:'Preserved',instructions:'Keep',provider:'demo'});instance.close();
+      let instance=new Instance(path);const bot=instance.createBot({name:'Preserved',instructions:'Keep',provider:'live',model:'fixture-offline'});instance.close();
       let db=new DatabaseSync(path);
       db.exec('PRAGMA foreign_keys=OFF');
       if(predecessor==='native')db.exec("DROP TABLE search_action_bindings; INSERT INTO native_processes (id,bot_id,work_kind,work_id,action_id,cwd,mode,state,created_ms) VALUES ('preserved','bot','task','work','action','/','pipe','exited',1); INSERT INTO native_process_output VALUES ('preserved',0,'stdout',X'6162')");
@@ -260,7 +306,7 @@ test('both version 34 predecessors retain their tables through the protected com
       db.exec('PRAGMA user_version=34');db.close();
       instance=new Instance(path);assert.equal(instance.bot(bot.id).name,'Preserved');assert.ok(instance.migrationBackup && existsSync(instance.migrationBackup));
       db=new DatabaseSync(instance.migrationBackup,{readOnly:true});assert.equal(db.prepare('PRAGMA user_version').get().user_version,34);const oldTables=db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('native_processes','native_process_output','search_action_bindings') ORDER BY name").all().map(x=>x.name);assert.deepEqual(oldTables,predecessor==='native'?['native_process_output','native_processes']:['search_action_bindings']);db.close();
-      instance.close();db=new DatabaseSync(path,{readOnly:true});assert.equal(db.prepare('PRAGMA user_version').get().user_version,36);assert.deepEqual(db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('native_processes','native_process_output','search_action_bindings') ORDER BY name").all().map(x=>x.name),['native_process_output','native_processes','search_action_bindings']);if(predecessor==='native'){assert.equal(db.prepare("SELECT count(*) AS n FROM native_processes WHERE id='preserved'").get().n,1);assert.equal(db.prepare("SELECT hex(data) AS data FROM native_process_output WHERE process_id='preserved'").get().data,'6162');}else assert.equal(db.prepare("SELECT fingerprint FROM search_action_bindings WHERE action_id='preserved'").get().fingerprint,'fingerprint');db.close();
+      instance.close();db=new DatabaseSync(path,{readOnly:true});assert.equal(db.prepare('PRAGMA user_version').get().user_version,INSTANCE_SCHEMA_VERSION);assert.deepEqual(db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('native_processes','native_process_output','search_action_bindings') ORDER BY name").all().map(x=>x.name),['native_process_output','native_processes','search_action_bindings']);if(predecessor==='native'){assert.equal(db.prepare("SELECT count(*) AS n FROM native_processes WHERE id='preserved'").get().n,1);assert.equal(db.prepare("SELECT hex(data) AS data FROM native_process_output WHERE process_id='preserved'").get().data,'6162');}else assert.equal(db.prepare("SELECT fingerprint FROM search_action_bindings WHERE action_id='preserved'").get().fingerprint,'fingerprint');db.close();
     } finally {rmSync(root,{recursive:true,force:true});}
   }
 });

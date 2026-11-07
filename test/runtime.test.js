@@ -1,3 +1,4 @@
+import {demoProvider} from './fixtures/echo-provider.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm, readFile } from 'node:fs/promises';
@@ -5,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../dist/store.js';
 import { runTurn } from '../dist/runtime.js';
-import { demoProvider, liveProvider } from '../dist/providers.js';
+import { liveProvider } from '../dist/providers.js';
 
 async function fixture(t) {
   const root = await mkdtemp(join(tmpdir(), 'staf-test-'));
@@ -136,11 +137,10 @@ test('save failure does not announce success or alter conversation', async t => 
   assert.equal(events.at(-1), 'error');
 });
 
-test('demo provider remains offline with live environment settings', async t => {
+test('injected fixture stays offline with live environment settings', async t => {
   const { store, session } = await fixture(t);
-  const { selectProvider } = await import('../dist/registry.js');
   t.mock.method(globalThis, 'fetch', () => { throw new Error('NETWORK ATTEMPT'); });
-  const { provider } = await selectProvider('demo', { env: { STAF_API_KEY: 'fake-test-value', STAF_MODEL: 'fake', STAF_BASE_URL: 'https://invalid.example/' } });
+  const provider = demoProvider;
   const events = [];
   await runTurn({ store, session, provider, text: 'time', clock: () => 'fixed', emit: event => events.push(event) });
   await runTurn({ store, session, provider, text: 'hello' });

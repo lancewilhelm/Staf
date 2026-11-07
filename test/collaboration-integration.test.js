@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {startInstance} from '../dist/instance-service.js';
+import {startInstance} from './fixtures/controlled-instance.mjs';
 
 test('default synthetic providers exchange actual messages and requester uses the inbox result',async()=>{
  let helperId,rootCalls=0;const helperInputs=[];
@@ -16,7 +16,7 @@ test('default synthetic providers exchange actual messages and requester uses th
  const call=async(route,token,body)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});const value=await response.json();if(route==='/api/pair' && value.token){const ownerToken=value.token;approvalTimer=setInterval(async()=>{try{const pending=await (await fetch(`http://127.0.0.1:${port}/api/disclosures`,{headers:{Authorization:`Bearer ${ownerToken}`}})).json();for(const item of pending.filter(x=>x.state==='pending'))await fetch(`http://127.0.0.1:${port}/api/disclosures/${item.id}/approve`,{method:'POST',headers:{Authorization:`Bearer ${ownerToken}`,'Content-Type':'application/json'},body:'{}'});}catch{}},5);}return [response.status,value];};
  try {
   const token=(await call('/api/pair','',{code:app.code}))[1].token;
-  const owner=(await call('/api/bots',token,{name:'Owner'}))[1];helperId=(await call('/api/bots',token,{name:'Helper'}))[1].id;
+  const owner=(await call('/api/bots',token,{provider:'live',model:'fixture-offline',name:'Owner'}))[1];helperId=(await call('/api/bots',token,{provider:'live',model:'fixture-offline',name:'Helper'}))[1].id;
   await call('/api/tasks',token,{id:'root',botId:owner.id,objective:'Investigate',delegateClock:false});
   let result;for(let i=0;i<200;i++){result=(await call('/api/tasks/root',token))[1];if(['completed','failed'].includes(result.state))break;await new Promise(resolve=>setTimeout(resolve,10));}
   assert.equal(result.state,'completed');assert.equal(result.outcome,'Synthesized from verified fact');
@@ -30,14 +30,16 @@ test('gated helper clock is blocked when the owner omitted delegated clock scope
  let helperId,rootCalls=0,clockResult;
  const factory=async profile=>({name:'fixture',capabilities:{toolCalls:true},async complete(messages){
   if(profile.chatId==='root') {if(rootCalls++===0)return {role:'assistant',content:null,tool_calls:[{id:'request',type:'function',function:{name:'request_bot_help',arguments:JSON.stringify({helperId,objective:'Read clock',context:'Only this'})}}]};clockResult=JSON.stringify(messages);return {role:'assistant',content:'Observed helper outcome'};}
+  if(messages.at(-1)?.role==='tool')return {role:'assistant',content:messages.at(-1).content};
   return {role:'assistant',content:null,tool_calls:[{id:'clock',type:'function',function:{name:'clock',arguments:'{}'}}]};
  }});
  const app=startInstance(':memory:',0,{env:{},providerFactory:factory,enableCollaboration:true}),port=await app.listen();
  let approvalTimer;
  const call=async(route,token,body)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});const value=await response.json();if(route==='/api/pair' && value.token){const ownerToken=value.token;approvalTimer=setInterval(async()=>{try{const pending=await (await fetch(`http://127.0.0.1:${port}/api/disclosures`,{headers:{Authorization:`Bearer ${ownerToken}`}})).json();for(const item of pending.filter(x=>x.state==='pending'))await fetch(`http://127.0.0.1:${port}/api/disclosures/${item.id}/approve`,{method:'POST',headers:{Authorization:`Bearer ${ownerToken}`,'Content-Type':'application/json'},body:'{}'});}catch{}},5);}return [response.status,value];};
- try {const token=(await call('/api/pair','',{code:app.code}))[1].token,owner=(await call('/api/bots',token,{name:'Owner'}))[1];helperId=(await call('/api/bots',token,{name:'Helper'}))[1].id;
+ try {const token=(await call('/api/pair','',{code:app.code}))[1].token,owner=(await call('/api/bots',token,{provider:'live',model:'fixture-offline',name:'Owner'}))[1];helperId=(await call('/api/bots',token,{provider:'live',model:'fixture-offline',name:'Helper'}))[1].id;
   await call('/api/tasks',token,{id:'root',botId:owner.id,objective:'Investigate'});let root;for(let i=0;i<200;i++){root=(await call('/api/tasks/root',token))[1];if(['completed','failed'].includes(root.state))break;await new Promise(resolve=>setTimeout(resolve,10));}
-  assert.equal(root.state,'completed');assert.match(clockResult,/Clock blocked/);assert.deepEqual(root.collaborations[0].messages.map(message=>message.kind),['request','failure']);
+  assert.equal(root.state,'completed');assert.match(clockResult,/Clock blocked/);assert.deepEqual(root.collaborations[0].messages.map(message=>message.kind),['request','result']);
+  const helper=(await call(`/api/tasks/${root.collaborations[0].assignment.helper_attempt_id}`,token))[1];assert.equal(helper.workActions.length,0);assert.ok(helper.activity.some(event=>event.type==='tool_result' && event.name==='clock' && !event.success));
  } finally {clearInterval(approvalTimer);await app.close();}
 });
 
@@ -50,7 +52,7 @@ test('gated parent stop aborts helper and never delivers a stale result',async()
  const app=startInstance(':memory:',0,{env:{},providerFactory:factory,enableCollaboration:true}),port=await app.listen();
  let approvalTimer;
  const call=async(route,token,body)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});const value=await response.json();if(route==='/api/pair' && value.token){const ownerToken=value.token;approvalTimer=setInterval(async()=>{try{const pending=await (await fetch(`http://127.0.0.1:${port}/api/disclosures`,{headers:{Authorization:`Bearer ${ownerToken}`}})).json();for(const item of pending.filter(x=>x.state==='pending'))await fetch(`http://127.0.0.1:${port}/api/disclosures/${item.id}/approve`,{method:'POST',headers:{Authorization:`Bearer ${ownerToken}`,'Content-Type':'application/json'},body:'{}'});}catch{}},5);}return [response.status,value];};
- try {const token=(await call('/api/pair','',{code:app.code}))[1].token,owner=(await call('/api/bots',token,{name:'Owner'}))[1];helperId=(await call('/api/bots',token,{name:'Helper'}))[1].id;
+ try {const token=(await call('/api/pair','',{code:app.code}))[1].token,owner=(await call('/api/bots',token,{provider:'live',model:'fixture-offline',name:'Owner'}))[1];helperId=(await call('/api/bots',token,{provider:'live',model:'fixture-offline',name:'Helper'}))[1].id;
   await call('/api/tasks',token,{id:'root',botId:owner.id,objective:'Investigate'});await started;await call('/api/tasks/root/stop',token,{});
   let root;for(let i=0;i<200;i++){root=(await call('/api/tasks/root',token))[1];if(root.state==='stopped' && root.collaborations[0].assignment.state==='cancelled')break;await new Promise(resolve=>setTimeout(resolve,10));}
   assert.equal(root.state,'stopped');assert.equal(root.collaborations[0].assignment.state,'cancelled');assert.equal(root.collaborations[0].messages.length,1);assert.equal(root.inbox.inputs.length,0);
@@ -66,7 +68,7 @@ test('gated helper rechecks requester permissions after approval is requested',a
  const app=startInstance(':memory:',0,{env:{},providerFactory:factory,enableCollaboration:true}),port=await app.listen();
  let approvalTimer;
  const call=async(route,token,body)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});const value=await response.json();if(route==='/api/pair' && value.token){const ownerToken=value.token;approvalTimer=setInterval(async()=>{try{const pending=await (await fetch(`http://127.0.0.1:${port}/api/disclosures`,{headers:{Authorization:`Bearer ${ownerToken}`}})).json();for(const item of pending.filter(x=>x.state==='pending'))await fetch(`http://127.0.0.1:${port}/api/disclosures/${item.id}/approve`,{method:'POST',headers:{Authorization:`Bearer ${ownerToken}`,'Content-Type':'application/json'},body:'{}'});}catch{}},5);}return [response.status,value];};
- try {const token=(await call('/api/pair','',{code:app.code}))[1].token,owner=(await call('/api/bots',token,{name:'Owner'}))[1];helperId=(await call('/api/bots',token,{name:'Helper'}))[1].id;
+ try {const token=(await call('/api/pair','',{code:app.code}))[1].token,owner=(await call('/api/bots',token,{provider:'live',model:'fixture-offline',name:'Owner'}))[1];helperId=(await call('/api/bots',token,{provider:'live',model:'fixture-offline',name:'Helper'}))[1].id;
   await call(`/api/approval-settings/bot:${helperId}`,token,{mode:'ask-every-time',clockEnabled:true});
   await call('/api/tasks',token,{id:'root',botId:owner.id,objective:'Investigate',delegateClock:true});
   let approval;for(let i=0;i<200;i++){approval=(await call('/api/approvals',token))[1].find(item=>item.state==='pending');if(approval)break;await new Promise(resolve=>setTimeout(resolve,10));}assert.ok(approval);
@@ -83,7 +85,7 @@ test('gated restart interrupts both attempts without replaying helper work',asyn
  let app=startInstance(path,0,{env:{},providerFactory:factory,enableCollaboration:true}),port=await app.listen();
  let approvalTimer;
  const call=async(route,token,body)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});const value=await response.json();if(route==='/api/pair' && value.token){const ownerToken=value.token;approvalTimer=setInterval(async()=>{try{const pending=await (await fetch(`http://127.0.0.1:${port}/api/disclosures`,{headers:{Authorization:`Bearer ${ownerToken}`}})).json();for(const item of pending.filter(x=>x.state==='pending'))await fetch(`http://127.0.0.1:${port}/api/disclosures/${item.id}/approve`,{method:'POST',headers:{Authorization:`Bearer ${ownerToken}`,'Content-Type':'application/json'},body:'{}'});}catch{}},5);}return [response.status,value];};
- try {const token=(await call('/api/pair','',{code:app.code}))[1].token,owner=(await call('/api/bots',token,{name:'Owner'}))[1];helperId=(await call('/api/bots',token,{name:'Helper'}))[1].id;
+ try {const token=(await call('/api/pair','',{code:app.code}))[1].token,owner=(await call('/api/bots',token,{provider:'live',model:'fixture-offline',name:'Owner'}))[1];helperId=(await call('/api/bots',token,{provider:'live',model:'fixture-offline',name:'Helper'}))[1].id;
   await call('/api/tasks',token,{id:'root',botId:owner.id,objective:'Investigate'});await started;await app.close();app=startInstance(path,0,{env:{},providerFactory:factory,enableCollaboration:true});port=await app.listen();
   const root=(await call('/api/tasks/root',token))[1];assert.equal(root.state,'interrupted');assert.equal(root.collaborations[0].assignment.state,'cancelled');assert.equal(root.collaborations[0].messages.length,1);assert.equal(calls,1);
   const helperAttempt=(await call(`/api/tasks/${root.collaborations[0].assignment.helper_attempt_id}`,token))[1];assert.equal(helperAttempt.state,'interrupted');
@@ -103,7 +105,7 @@ test('gated bots exchange approved and correlated question and answer messages',
  }});
  const app=startInstance(':memory:',0,{env:{},providerFactory:factory,enableCollaboration:true}),port=await app.listen();let timer;
  const call=async(route,token,body)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return [response.status,await response.json()];};
- try {const token=(await call('/api/pair','',{code:app.code}))[1].token,owner=(await call('/api/bots',token,{name:'Owner'}))[1];helperId=(await call('/api/bots',token,{name:'Helper'}))[1].id;
+ try {const token=(await call('/api/pair','',{code:app.code}))[1].token,owner=(await call('/api/bots',token,{provider:'live',model:'fixture-offline',name:'Owner'}))[1];helperId=(await call('/api/bots',token,{provider:'live',model:'fixture-offline',name:'Helper'}))[1].id;
   timer=setInterval(async()=>{try{for(const item of (await call('/api/disclosures',token))[1].filter(x=>x.state==='pending'))await call(`/api/disclosures/${item.id}/approve`,token,{});}catch{}},5);
   await call('/api/tasks',token,{id:'root',botId:owner.id,objective:'Investigate'});let root;for(let i=0;i<300;i++){root=(await call('/api/tasks/root',token))[1];if(['completed','failed'].includes(root.state))break;await new Promise(resolve=>setTimeout(resolve,10));}
   assert.equal(root.state,'completed');assert.equal(helperAnswer,'Use the primary source');assert.deepEqual(root.collaborations[0].messages.map(message=>message.kind),['request','question','answer','result']);
@@ -119,11 +121,11 @@ test('denied request cannot create a helper task or disclose a forged private br
  }});
  const app=startInstance(':memory:',0,{env:{},providerFactory:factory,enableCollaboration:true}),port=await app.listen();
  const call=async(route,token,body)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return [response.status,await response.json()];};
- try {const token=(await call('/api/pair','',{code:app.code}))[1].token,owner=(await call('/api/bots',token,{name:'Owner'}))[1];helperId=(await call('/api/bots',token,{name:'Helper'}))[1].id;
+ try {const token=(await call('/api/pair','',{code:app.code}))[1].token,owner=(await call('/api/bots',token,{provider:'live',model:'fixture-offline',name:'Owner'}))[1];helperId=(await call('/api/bots',token,{provider:'live',model:'fixture-offline',name:'Helper'}))[1].id;
   await call('/api/tasks',token,{id:'root',botId:owner.id,objective:'Investigate'});let disclosure;for(let i=0;i<200;i++){disclosure=(await call('/api/disclosures',token))[1].find(item=>item.state==='pending');if(disclosure)break;await new Promise(resolve=>setTimeout(resolve,10));}
   assert.ok(disclosure);assert.match(disclosure.content,/private transcript secret/);assert.equal(helperCalls,0);assert.equal((await call(`/api/bots/${helperId}/tasks`,token))[1].length,0);assert.equal((await call('/api/tasks/root',token))[1].collaborations.length,0);
-  await call(`/api/disclosures/${disclosure.id}/deny`,token,{});let root;for(let i=0;i<200;i++){root=(await call('/api/tasks/root',token))[1];if(root.state==='failed')break;await new Promise(resolve=>setTimeout(resolve,10));}
-  assert.equal(root.state,'failed');assert.equal(rootCalls,1);assert.equal(helperCalls,0);assert.equal((await call(`/api/bots/${helperId}/tasks`,token))[1].length,0);
+  await call(`/api/disclosures/${disclosure.id}/deny`,token,{});let root;for(let i=0;i<200;i++){root=(await call('/api/tasks/root',token))[1];if(root.state==='completed')break;await new Promise(resolve=>setTimeout(resolve,10));}
+  assert.equal(root.state,'completed');assert.equal(root.outcome,'Request denied');assert.equal(rootCalls,2);assert.equal(helperCalls,0);assert.equal((await call(`/api/bots/${helperId}/tasks`,token))[1].length,0);
  }finally{await app.close();}
 });
 
@@ -135,7 +137,7 @@ test('provider output observed after parent stop stays in helper activity only',
  }});
  const app=startInstance(':memory:',0,{env:{},providerFactory:factory,enableCollaboration:true}),port=await app.listen();
  const call=async(route,token,body)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return [response.status,await response.json()];};
- try {const token=(await call('/api/pair','',{code:app.code}))[1].token,owner=(await call('/api/bots',token,{name:'Owner'}))[1];helperId=(await call('/api/bots',token,{name:'Helper'}))[1].id;
+ try {const token=(await call('/api/pair','',{code:app.code}))[1].token,owner=(await call('/api/bots',token,{provider:'live',model:'fixture-offline',name:'Owner'}))[1];helperId=(await call('/api/bots',token,{provider:'live',model:'fixture-offline',name:'Helper'}))[1].id;
   await call('/api/tasks',token,{id:'root',botId:owner.id,objective:'Investigate'});let disclosure;for(let i=0;i<200;i++){disclosure=(await call('/api/disclosures',token))[1].find(item=>item.kind==='request' && item.state==='pending');if(disclosure)break;await new Promise(resolve=>setTimeout(resolve,10));}assert.ok(disclosure);await call(`/api/disclosures/${disclosure.id}/approve`,token,{});await started;
   const before=(await call('/api/tasks/root',token))[1],childId=before.collaborations[0].assignment.helper_attempt_id;await call('/api/tasks/root/stop',token,{});
   let child;for(let i=0;i<200;i++){child=(await call(`/api/tasks/${childId}`,token))[1];if(child.state==='stopped')break;await new Promise(resolve=>setTimeout(resolve,10));}
@@ -152,7 +154,7 @@ test('service settles a helper when owner input races both result and failure di
  const factory=async profile=>({name:'fixture',capabilities:{toolCalls:true},async complete(){if(profile.chatId==='root'){if(rootCalls++===0)return {role:'assistant',content:null,tool_calls:[{id:'request',type:'function',function:{name:'request_bot_help',arguments:JSON.stringify({helperId,objective:'Check',context:'Only this'})}}]};return {role:'assistant',content:'Stopped sharing'};}return {role:'assistant',content:'private result'};}});
  const app=startInstance(':memory:',0,{env:{},providerFactory:factory,enableCollaboration:true}),port=await app.listen();let timer;
  const call=async(route,token,body)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return [response.status,await response.json()];};
- try{const token=(await call('/api/pair','',{code:app.code}))[1].token,owner=(await call('/api/bots',token,{name:'Owner'}))[1];helperId=(await call('/api/bots',token,{name:'Helper'}))[1].id;
+ try{const token=(await call('/api/pair','',{code:app.code}))[1].token,owner=(await call('/api/bots',token,{provider:'live',model:'fixture-offline',name:'Owner'}))[1];helperId=(await call('/api/bots',token,{provider:'live',model:'fixture-offline',name:'Helper'}))[1].id;
   timer=setInterval(async()=>{try{for(const item of (await call('/api/disclosures',token))[1].filter(x=>x.state==='pending'))await call(`/api/disclosures/${item.id}/approve`,token,{});}catch{}},5);
   await call('/api/tasks',token,{id:'root',botId:owner.id,objective:'Investigate'});let root,child;for(let i=0;i<300;i++){root=(await call('/api/tasks/root',token))[1];if(root.collaborations.length){child=(await call(`/api/tasks/${root.collaborations[0].assignment.helper_attempt_id}`,token))[1];if(child.state==='stopped')break;}await new Promise(resolve=>setTimeout(resolve,10));}
   assert.equal(injectedResult,true);assert.equal(injectedFailure,true);assert.equal(child.state,'stopped');root=(await call('/api/tasks/root',token))[1];assert.equal(root.collaborations[0].assignment.state,'cancelled');assert.doesNotMatch(JSON.stringify(root),/private result/);

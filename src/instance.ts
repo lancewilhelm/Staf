@@ -1,4 +1,6 @@
+import {isProviderId} from './provider-ids.js';
 import {parseToolMode,type ToolMode} from './tool-mode.js';
+import {InstanceCore} from './instance-core.js';
 import {ProviderDefaultsStore} from './provider-choices.js';
 import { DatabaseSync } from 'node:sqlite';
 import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
@@ -30,7 +32,7 @@ import { ApprovalGrants, approvalGrantSchema, type GrantBoundary } from './appro
 const clockAction: Action = { capability:'clock', operation:'read', resource:'utc', effect:'read', limits:{}, risk:'safe' };
 const clockBoundary = { enabledCapabilities:['clock'], actions:[clockAction] };
 const modes: ApprovalMode[] = ['ask-every-time','ask-for-risky-actions','never-ask'];
-export const INSTANCE_SCHEMA_VERSION = 36;
+export const INSTANCE_SCHEMA_VERSION = 39;
 const MAINTENANCE_VERSION = 2147483647;
 
 export const starterSoul = "You are an assistant working for the owner. Be clear and candid. Distinguish observations from assumptions. Follow the owner's role instructions and work within the permissions and task scope granted to you.";
@@ -46,7 +48,9 @@ function parseToolModeFromProfile(raw:unknown) {
 }
 function parseCapturedProfile(profile:unknown) {
   if (!profile || typeof profile !== 'object' || !('provider' in profile) || typeof profile.provider !== 'string' || !('model' in profile) || !(profile.model === null || typeof profile.model === 'string') || !('reasoning' in profile) || !(profile.reasoning === null || typeof profile.reasoning === 'string') || !('instructions' in profile) || typeof profile.instructions !== 'string' || !('chatId' in profile) || typeof profile.chatId !== 'string') throw Error('Invalid captured profile');
-  return {provider:profile.provider,model:profile.model,reasoning:profile.reasoning,instructions:profile.instructions,chatId:profile.chatId,toolMode:parseToolMode('toolMode' in profile ? profile.toolMode : undefined)};
+  const core='core' in profile ? profile.core : 'You are Staf, a helpful assistant. Use clock for the current time.';
+  if (typeof core !== 'string') throw Error('Invalid captured profile');
+  return {provider:profile.provider,model:profile.model,reasoning:profile.reasoning,instructions:profile.instructions,core,chatId:profile.chatId,toolMode:parseToolMode('toolMode' in profile ? profile.toolMode : undefined)};
 }
 
 function freezeCaptured(value:unknown):void {
@@ -76,6 +80,7 @@ function upgradeVersion(path:string, token:string|undefined):number|undefined {
 export class Instance {
   private readonly db: DatabaseSync;
   private readonly configs: AgentConfigStore;
+  private readonly coreStore: InstanceCore;
   private images:AgentImageAssets|undefined;
   private readonly temporaryConfigRoot: string | undefined;
   private readonly agentRoot: string;
@@ -90,6 +95,7 @@ export class Instance {
     this.temporaryConfigRoot = path === ':memory:' ? mkdtempSync(join(tmpdir(),'staf-config-')) : undefined;
     this.agentRoot = resolve(this.temporaryConfigRoot ?? join(dirname(resolve(path)),'agents'));
     this.configs = new AgentConfigStore(this.agentRoot);
+    this.coreStore = new InstanceCore(this.temporaryConfigRoot ?? dirname(resolve(path)));
     if (path !== ':memory:') {
       try { closeSync(openSync(path, 'wx', 0o600)); }
       catch (error) { if (!hasCode(error, 'EEXIST')) throw error; }
@@ -108,7 +114,7 @@ export class Instance {
     this.maintenanceToken=maintenanceToken;
     if (version > INSTANCE_SCHEMA_VERSION) throw new Error(`Database version ${version} is newer than this Staf (maximum ${INSTANCE_SCHEMA_VERSION}). Use a compatible checkout or select another data directory; the database was not reset.`);
     if (hasBots && version < INSTANCE_SCHEMA_VERSION && path !== ':memory:') {
-      this.migrationBackup = `${path}.before-${version < 2 ? 'profiles' : version < 3 ? 'tasks' : version < 4 ? 'approvals' : version < 5 ? 'task-inbox' : version < 6 ? 'memory' : version < 7 ? 'memory-confirmation' : version < 8 ? 'skills' : version < 9 ? 'schedules' : version < 10 ? 'schedule-retries' : version < 11 ? 'schedule-lineage' : version < 12 ? 'bot-description' : version < 13 ? 'delegation-scope' : version < 14 ? 'collaboration' : version < 15 ? 'disclosure' : version < 16 ? 'chat-tasks' : version < 17 ? 'creation-defaults' : version < 18 ? 'web-actions' : version < 19 ? 'search-actions' : version < 20 ? 'scratch-shell' : version < 21 ? 'approval-grants' : version < 22 ? 'schedule-web-scope' : version < 23 ? 'schedule-search-scope' : version < 24 ? 'schedule-shell-scope' : version < 25 ? 'main-bot' : version < 26 ? 'command-events' : version < 27 ? 'bot-creation' : version < 28 ? 'response-progress' : version < 31 ? 'response-stop' : version < 33 ? 'work-actions' : 'search-bindings'}-${randomUUID()}.sqlite`;
+      this.migrationBackup = `${path}.before-${version < 2 ? 'profiles' : version < 3 ? 'tasks' : version < 4 ? 'approvals' : version < 5 ? 'task-inbox' : version < 6 ? 'memory' : version < 7 ? 'memory-confirmation' : version < 8 ? 'skills' : version < 9 ? 'schedules' : version < 10 ? 'schedule-retries' : version < 11 ? 'schedule-lineage' : version < 12 ? 'bot-description' : version < 13 ? 'delegation-scope' : version < 14 ? 'collaboration' : version < 15 ? 'disclosure' : version < 16 ? 'chat-tasks' : version < 17 ? 'creation-defaults' : version < 18 ? 'web-actions' : version < 19 ? 'search-actions' : version < 20 ? 'scratch-shell' : version < 21 ? 'approval-grants' : version < 22 ? 'schedule-web-scope' : version < 23 ? 'schedule-search-scope' : version < 24 ? 'schedule-shell-scope' : version < 25 ? 'main-bot' : version < 26 ? 'command-events' : version < 27 ? 'bot-creation' : version < 28 ? 'response-progress' : version < 31 ? 'response-stop' : version < 33 ? 'work-actions' : version < 36 ? 'search-bindings' : version < 37 ? 'demo-migration' : 'command-call-identity'}-${randomUUID()}.sqlite`;
       const previousUmask = process.umask(0o077);
       try {
         this.db.prepare('VACUUM INTO ?').run(this.migrationBackup);
@@ -196,7 +202,9 @@ export class Instance {
     this.db.exec("UPDATE code_executions SET outcome='interrupted' WHERE outcome='running'");
     if(version < 35) this.db.exec(nativeProcessSchema);
     if(version < 36)for(const [name,definition] of Object.entries({retained:'INTEGER NOT NULL DEFAULT 0',input_closed:'INTEGER NOT NULL DEFAULT 0',input_bytes:'INTEGER NOT NULL DEFAULT 0',cols:'INTEGER',rows:'INTEGER'}))if(!this.db.prepare("SELECT 1 FROM pragma_table_info('native_processes') WHERE name=?").get(name))this.db.exec(`ALTER TABLE native_processes ADD COLUMN ${name} ${definition}`);
+    if(version < 37) this.db.exec("CREATE TABLE IF NOT EXISTS demo_migration (id INTEGER PRIMARY KEY CHECK(id=1)); UPDATE creation_defaults SET provider='',model=NULL,reasoning=NULL WHERE provider='demo' OR model IS NULL OR trim(model)=''; INSERT OR IGNORE INTO demo_migration SELECT 1 FROM creation_defaults WHERE provider<>''");
     if(version < 30 && !this.db.prepare("SELECT 1 FROM pragma_table_info('command_runtime_events') WHERE name='detail'").get())this.db.exec('ALTER TABLE command_runtime_events ADD COLUMN detail TEXT');
+    if(version < 38 && !this.db.prepare("SELECT 1 FROM pragma_table_info('command_runtime_events') WHERE name='call_id'").get())this.db.exec('ALTER TABLE command_runtime_events ADD COLUMN call_id TEXT');
     this.db.exec('CREATE INDEX IF NOT EXISTS command_runtime_events_command ON command_runtime_events(command_id,seq)');
     if (!maintenanceToken) this.db.exec(`PRAGMA user_version=${INSTANCE_SCHEMA_VERSION}`);
     for (const row of this.db.prepare("SELECT id,bot_id FROM task_attempts WHERE state IN ('queued','running','stopping','waiting') ORDER BY rowid").all()) {
@@ -218,6 +226,9 @@ export class Instance {
     this.db.exec('COMMIT');
     // Seal valid pre-existing file configurations before accepting clients.
     this.bots();
+    // A broken file must remain repairable through the service; reads of the
+    // defaults and later attempts to accept work report the pending migration.
+    try { this.resumeDemoMigration(); } catch {}
     } catch (error) { this.db.close(); if(this.temporaryConfigRoot)rmSync(this.temporaryConfigRoot,{recursive:true,force:true}); throw error; }
   }
   private bindWork(work:WorkRef, botId:string) {
@@ -405,8 +416,9 @@ export class Instance {
       const row=this.db.prepare('SELECT bot_id FROM main_bot WHERE id=1').get();
       if (row && typeof row.bot_id === 'string') { const bot=this.bots().find(item=>item.id===row.bot_id); if (!bot) throw Error('Main bot is missing'); this.db.exec('COMMIT'); return bot; }
       const id=randomUUID(), chatId=randomUUID(), defaults=this.creationDefaults();
+      if (!defaults.provider) throw Error('Choose a creation-default provider and model in Settings first, or run staf settings set-defaults PROVIDER MODEL.');
       this.configs.publish(id,{name:'Staf',description:'',provider:defaults.provider,model:defaults.model,reasoning:defaults.reasoning,toolMode:defaults.toolMode,instructions:starterSoul},false);
-      this.db.prepare('INSERT INTO bots VALUES (?, ?, ?, ?, ?, ?, ?)').run(id,chatId,'','','demo',null,null);
+      this.db.prepare('INSERT INTO bots VALUES (?, ?, ?, ?, ?, ?, ?)').run(id,chatId,'','',defaults.provider,null,null);
       this.db.prepare('INSERT INTO bot_profiles (bot_id,revision,soul,archived) VALUES (?, 1, ?, 0)').run(id,'');
       this.db.prepare('INSERT INTO main_bot VALUES (1,?)').run(id);
       const bot=this.bot(id); this.db.exec('COMMIT'); return bot;
@@ -687,18 +699,48 @@ export class Instance {
     return this.editBot(id,{...current,revision,provider,model:model===undefined?pair.model:model,reasoning:reasoning===undefined?pair.reasoning:reasoning});
   }
   creationDefaults() {const row=this.db.prepare('SELECT revision,provider,model,reasoning,tool_mode FROM creation_defaults WHERE id=1').get();if(!row || typeof row.revision !== 'number' || typeof row.provider !== 'string' || !(row.model === null || typeof row.model === 'string') || !(row.reasoning === null || typeof row.reasoning === 'string'))throw Error('Invalid creation defaults');return {revision:row.revision,provider:row.provider,model:row.model,reasoning:row.reasoning,toolMode:parseToolMode(row.tool_mode)};}
+  resumeDemoMigration() {
+    if (!this.db.prepare('SELECT 1 FROM demo_migration WHERE id=1').get()) return;
+    let failure:unknown;
+    try {
+      this.db.exec('BEGIN IMMEDIATE');
+      const defaults=this.creationDefaults();
+      for (const row of this.db.prepare('SELECT id FROM bots ORDER BY rowid').all()) {
+        try {
+          const bot=this.bot(String(row.id));
+          if (!bot || bot.provider!=='demo') continue;
+          this.configs.publish(bot.id,{...bot,provider:defaults.provider,model:defaults.model,reasoning:defaults.reasoning,providerChoices:{...bot.providerChoices,[defaults.provider]:{model:defaults.model,reasoning:defaults.reasoning}}},bot.archived,bot.revision);
+        } catch(error) {failure ??= error;}
+      }
+      if(!failure)this.db.exec('DELETE FROM demo_migration WHERE id=1');
+      this.db.exec('COMMIT');
+    } catch(error) {
+      try { this.db.exec('ROLLBACK'); } catch {}
+      failure=error;
+    }
+    if(failure)throw new BotConflict(`Demo migration incomplete. Resolve the agent configuration error and retry saving the same defaults: ${failure instanceof Error ? failure.message : 'unknown error'}`);
+  }
   setCreationDefaults(input:{revision:number;provider:string;model:string|null;reasoning:string|null;toolMode?:ToolMode}) {
-    if(!Number.isSafeInteger(input.revision) || input.revision<1 || !['demo','codex','openrouter','lmstudio','live'].includes(input.provider) || !(input.model === null || typeof input.model === 'string' && input.model.length <= 200) || !(input.reasoning === null || typeof input.reasoning === 'string' && input.reasoning.length <= 100))throw Error('Invalid creation defaults');
+    if(!Number.isSafeInteger(input.revision) || input.revision<1 || !['','codex','openrouter','lmstudio','live'].includes(input.provider) || (input.provider!=='' && !(typeof input.model==='string' && input.model.trim() && input.model.length<=200)) || (input.provider==='' && input.model!==null) || !(input.reasoning === null || typeof input.reasoning === 'string' && input.reasoning.length <= 100))throw Error('Choose a real provider and model for creation defaults');
+    this.resumeDemoMigration();
     const toolMode=input.toolMode===undefined?this.creationDefaults().toolMode:parseToolMode(input.toolMode);
-    const result=this.db.prepare('UPDATE creation_defaults SET revision=revision+1,provider=?,model=?,reasoning=?,tool_mode=? WHERE id=1 AND revision=?').run(input.provider,input.model,input.reasoning,toolMode,input.revision);
-    if(!result.changes)throw new BotConflict('Creation defaults changed. Refresh before editing.');return this.creationDefaults();
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const result=this.db.prepare('UPDATE creation_defaults SET revision=revision+1,provider=?,model=?,reasoning=?,tool_mode=? WHERE id=1 AND revision=?').run(input.provider,input.model,input.reasoning,toolMode,input.revision);
+      if(!result.changes)throw new BotConflict('Creation defaults changed. Refresh before editing.');
+      if(input.provider) this.db.exec('INSERT OR IGNORE INTO demo_migration VALUES (1)');
+      this.db.exec('COMMIT');
+    } catch(error) {this.db.exec('ROLLBACK');throw error;}
+    this.resumeDemoMigration();return this.creationDefaults();
   }
   private imageAssets() {return this.images??=new AgentImageAssets(join(dirname(dirname(this.configs.location('placeholder'))),'.images'));}
   agentImage(assetId:string) {return this.imageAssets().read(assetId);}
   private requireStoredImage(image:AgentImage,previous?:AgentImage) {
     if(image.kind==='upload' && !(previous?.kind==='upload' && previous.assetId===image.assetId) && !this.imageAssets().read(image.assetId)) throw Error('The selected image is unavailable. Upload it again or choose another image.');
   }
-  createBot(input: {name: string; instructions: string; provider?: string; model?: string; reasoning?: string; operationId?: string;toolMode?:ToolMode;image?:AgentImageInput}, advertisedModel?:string) {
+  core() { return this.coreStore.read(); }
+  saveCore(input:{revision:string;content:string|null}) { return this.coreStore.save(input.revision,input.content); }
+  createBot(input: {name: string; instructions: string; provider?: string; model?: string|null; reasoning?: string|null; operationId?: string;toolMode?:ToolMode;image?:AgentImageInput}, advertisedModel?:string) {
     if (!input.name.trim() || (input.provider !== undefined && !input.provider.trim())) throw new Error('Name and provider are required');
     if(input.toolMode!==undefined)parseToolMode(input.toolMode);
     const id = randomUUID(), chatId = randomUUID();
@@ -706,15 +748,17 @@ export class Instance {
     try {
       const image:AgentImage=input.image?.kind==='upload-data'?this.imageAssets().accept(input.image):input.image??{kind:'initials'};
       const savedImage=imageSetting(image);
-      const digest=input.operationId ? createHmac('sha256',this.fingerprintKey).update(JSON.stringify([input.name,input.instructions,input.provider ?? null,input.model ?? null,input.reasoning ?? null,...(savedImage===null?[]:[savedImage]),...(input.toolMode===undefined?[]:['toolMode',input.toolMode])])).digest('hex') : null;
+      const digest=input.operationId ? createHmac('sha256',this.fingerprintKey).update(JSON.stringify([input.name,input.instructions,input.provider ?? null,input.model ?? null,input.reasoning ?? null,...(savedImage===null?[]:[savedImage]),...(input.toolMode===undefined?[]:['toolMode',input.toolMode]),...(input.model===null?['explicit-null-model']:[]),...(input.reasoning===null?['explicit-null-reasoning']:[])])).digest('hex') : null;
       if(input.operationId) { const existing=this.db.prepare('SELECT digest,bot_id FROM bot_creation_operations WHERE id=?').get(input.operationId); if(existing) { if(existing.digest!==digest || typeof existing.bot_id!=='string') throw new BotConflict('Creation operation ID conflict'); const bot=this.bot(existing.bot_id); this.db.exec('COMMIT'); return bot; } }
       this.requireStoredImage(image);
       const defaults=this.creationDefaults();const provider=input.provider ?? defaults.provider;
+      if (!provider) throw Error('Choose a creation-default provider and model in Settings first.');
+      if (!isProviderId(provider)) throw Error('Unsupported provider. Choose a supported provider.');
       const first=this.providerDefaults().read().providers[provider];
-      const chosenModel=input.model ?? (input.provider===undefined?defaults.model:first?.model??advertisedModel??null);
-      const chosenReasoning=input.reasoning ?? (input.provider===undefined?defaults.reasoning:first?.reasoning??null);
+      const chosenModel=input.model !== undefined ? input.model : (input.provider===undefined?defaults.model:first?.model??advertisedModel??null);
+      const chosenReasoning=input.reasoning !== undefined ? input.reasoning : (input.provider===undefined?defaults.reasoning:first?.reasoning??null);
       this.configs.publish(id,{name:input.name,description:'',provider,model:chosenModel,reasoning:chosenReasoning,toolMode:input.toolMode??defaults.toolMode,instructions:input.instructions,providerChoices:{[provider]:{model:chosenModel,reasoning:chosenReasoning}},image},false);
-      this.db.prepare('INSERT INTO bots VALUES (?, ?, ?, ?, ?, ?, ?)').run(id, chatId, '', '', 'demo', null, null);
+      this.db.prepare('INSERT INTO bots VALUES (?, ?, ?, ?, ?, ?, ?)').run(id, chatId, '', '', provider, null, null);
       this.db.prepare('INSERT INTO bot_profiles (bot_id,revision,soul,archived) VALUES (?, 1, ?, 0)').run(id, '');
       if(input.operationId && digest) this.db.prepare('INSERT INTO bot_creation_operations VALUES (?,?,?)').run(input.operationId,digest,id);
       this.db.exec('COMMIT');
@@ -731,7 +775,7 @@ export class Instance {
       const id=String(row.id),identity=this.botIdentity(id);
       if(!identity)throw Error('Invalid agent identity');
       try { return {...identity,...this.configs.read(id,identity.archived)}; }
-      catch(error) { return {...identity,name:'Invalid configuration',description:'',provider:'demo',model:null,reasoning:null,instructions:'',revision:'',configDir:this.configs.location(id),configError:error instanceof Error?error.message:'Invalid configuration'}; }
+      catch(error) { return {...identity,name:'Invalid configuration',description:'',provider:'',model:null,reasoning:null,instructions:'',revision:'',configDir:this.configs.location(id),configError:error instanceof Error?error.message:'Invalid configuration'}; }
     });
   }
   bot(id: string) { const identity=this.botIdentity(id);return identity ? {...identity,...this.configs.read(id,identity.archived)} : undefined; }
@@ -741,6 +785,7 @@ export class Instance {
     return discoverBots({requesterId,query,entries});
   }
   editBot(id: string, edit: BotEdit) {
+    if (!isProviderId(edit.provider)) throw Error('Unsupported provider. Choose a supported provider.');
     this.db.exec('BEGIN IMMEDIATE');
     try {
       const current = this.bot(id);
@@ -808,6 +853,7 @@ export class Instance {
       }
       const bot = this.bot(input.botId);
       if (!bot) throw Error('Agent not found');
+      if (bot.provider==='demo' && this.db.prepare('SELECT 1 FROM demo_migration WHERE id=1').get()) throw new BotConflict('Demo migration is incomplete for this agent. Repair its configuration and reload creation defaults.');
       if (bot.archived) throw new BotConflict('Agent is archived');
       const active = this.taskAttempts(input.botId).find(a => ['queued','running','stopping','waiting'].includes(String(a.state)));
       if (active) return {kind:'busy' as const, attempt:active};
@@ -827,7 +873,8 @@ export class Instance {
       }
       if (!this.db.prepare('SELECT 1 FROM tasks WHERE id=?').get(taskId)) this.db.prepare('INSERT INTO tasks VALUES (?,?,?)').run(taskId,input.botId,visibleObjective);
       const previousCapture=input.predecessor ? this.db.prepare('SELECT profile,context FROM task_attempts WHERE id=?').get(input.predecessor) : undefined;
-      const capturedProfile=typeof previousCapture?.profile==='string' ? previousCapture.profile : JSON.stringify(bot);
+      const effectiveCore=this.core().content;
+      const capturedProfile=typeof previousCapture?.profile==='string' ? previousCapture.profile : JSON.stringify({...bot,core:effectiveCore});
       const capturedContext=typeof previousCapture?.context==='string' ? previousCapture.context : JSON.stringify(isolated ? [] : this.taskContext(input.botId));
       this.db.prepare("INSERT INTO task_attempts (id,task_id,bot_id,predecessor,profile,context,state,limit_ms) VALUES (?,?,?,?,?,?,'queued',?)").run(input.id,taskId,input.botId,input.predecessor ?? null,capturedProfile,capturedContext,input.limitMs);
       if (input.delegateClock) this.db.prepare('UPDATE task_attempts SET delegation_clock=1 WHERE id=?').run(input.id);
@@ -952,7 +999,7 @@ export class Instance {
       if(this.db.prepare("SELECT 1 FROM task_attempts WHERE bot_id=? AND state='waiting'").get(previous.botId)) throw new BotConflict('A replacement is already waiting');
       const bot=this.bot(previous.botId);if(!bot || bot.archived) throw new BotConflict('Agent unavailable');
       const taskId=randomUUID();this.db.prepare('INSERT INTO tasks VALUES (?,?,?)').run(taskId,previous.botId,visibleObjective);
-      this.db.prepare("INSERT INTO task_attempts (id,task_id,bot_id,predecessor,profile,context,state,limit_ms) VALUES (?,?,?,?,?,?,'waiting',?)").run(input.id,taskId,previous.botId,input.predecessor,JSON.stringify(bot),JSON.stringify(this.taskContext(previous.botId)),input.limitMs);
+      this.db.prepare("INSERT INTO task_attempts (id,task_id,bot_id,predecessor,profile,context,state,limit_ms) VALUES (?,?,?,?,?,?,'waiting',?)").run(input.id,taskId,previous.botId,input.predecessor,JSON.stringify({...bot,core:this.core().content}),JSON.stringify(this.taskContext(previous.botId)),input.limitMs);
       if (input.delegateClock) this.db.prepare('UPDATE task_attempts SET delegation_clock=1 WHERE id=?').run(input.id);
       this.bindWork({kind:'task',id:input.id},previous.botId);
       this.captureTaskSkills(input.id,previous.botId);
@@ -1098,7 +1145,12 @@ export class Instance {
   messages(botId: string) { return this.db.prepare('SELECT id, role, content FROM messages WHERE bot_id=? ORDER BY seq').all(botId); }
   hasBot(botId:string) {return !!this.botIdentity(botId);}
   command(id: string) { const row=this.db.prepare('SELECT c.id,c.bot_id AS botId,c.content,c.state,c.error,p.profile AS capturedProfile FROM commands c LEFT JOIN command_profiles p ON p.command_id=c.id WHERE c.id=?').get(id);if(!row)return undefined;const {capturedProfile,...command}=row;return {id:command.id,botId:command.botId,content:command.content,state:command.state,error:command.error,toolMode:parseToolModeFromProfile(capturedProfile)}; }
-  responseProgress(id:string) {return this.db.prepare("SELECT c.id,c.bot_id AS botId,CASE WHEN c.state='pending' THEN CASE WHEN EXISTS(SELECT 1 FROM response_stops s WHERE s.command_id=c.id) THEN 'stopping' WHEN p.command_id IS NULL THEN 'accepted' ELSE 'running' END ELSE c.state END AS state,COALESCE(p.text,'') AS text,c.error FROM commands c LEFT JOIN response_progress p ON p.command_id=c.id WHERE c.id=?").get(id);}
+  responseProgress(id:string) {
+    const progress=this.db.prepare("SELECT c.id,c.bot_id AS botId,CASE WHEN c.state='pending' THEN CASE WHEN EXISTS(SELECT 1 FROM response_stops s WHERE s.command_id=c.id) THEN 'stopping' WHEN p.command_id IS NULL THEN 'accepted' ELSE 'running' END ELSE c.state END AS state,COALESCE(p.text,'') AS text,c.error FROM commands c LEFT JOIN response_progress p ON p.command_id=c.id WHERE c.id=?").get(id);
+    if(!progress)return undefined;
+    const events=this.db.prepare("SELECT seq AS id,type,name,success,CASE WHEN type IN ('tool_result','assistant_message') THEN detail END AS detail,CASE WHEN type='tool_start' THEN detail END AS arguments,call_id AS callId FROM command_runtime_events WHERE command_id=? ORDER BY seq").all(id);
+    return {id:progress.id,botId:progress.botId,state:progress.state,text:progress.text,error:progress.error,events};
+  }
   latestResponse(botId:string) {const row=this.db.prepare('SELECT id FROM commands WHERE bot_id=? ORDER BY rowid DESC LIMIT 1').get(botId);return typeof row?.id==='string'?this.responseProgress(row.id):null;}
   updateResponse(id:string,text:string) {this.db.prepare("INSERT INTO response_progress(command_id,text) SELECT id,? FROM commands WHERE id=? AND state='pending' ON CONFLICT(command_id) DO UPDATE SET text=excluded.text").run(text,id);}
   requestResponseStop(id:string) {
@@ -1119,14 +1171,23 @@ export class Instance {
       this.db.exec('COMMIT');
     } catch(error) {this.db.exec('ROLLBACK');throw error;}
   }
-  commandRuntimeEvent(id:string, event:{type:'tool_start'|'tool_result';name:string;success?:boolean}, detail:string|null=null) {
-    this.db.prepare('INSERT INTO command_runtime_events (command_id,type,name,success,detail) VALUES (?,?,?,?,?)').run(id,event.type,event.name,event.success === undefined ? null : Number(event.success),detail);
+  commandRuntimeEvent(id:string, event:{type:'tool_start'|'tool_result';name:string;success?:boolean;callId:string|null}, detail:string|null=null) {
+    this.db.prepare('INSERT INTO command_runtime_events (command_id,type,name,success,detail,call_id) VALUES (?,?,?,?,?,?)').run(id,event.type,event.name,event.success === undefined ? null : Number(event.success),detail,event.callId);
   }
   commandRuntimeEvents(id:string) {
-    return this.db.prepare('SELECT type,name,success FROM command_runtime_events WHERE command_id=? ORDER BY seq').all(id).map(row=>row.type === 'tool_result' ? {type:'tool_result' as const,name:String(row.name),success:row.success === 1} : {type:'tool_start' as const,name:String(row.name)});
+    return this.db.prepare("SELECT type,name,success FROM command_runtime_events WHERE command_id=? AND type IN ('tool_start','tool_result') ORDER BY seq").all(id).map(row=>row.type === 'tool_result' ? {type:'tool_result' as const,name:String(row.name),success:row.success === 1} : {type:'tool_start' as const,name:String(row.name)});
+  }
+  commandResponseMessage(id:string,text:string) {
+    // Schema 39 also fences older readers that treat every non-result as a tool start.
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      this.db.prepare("INSERT INTO command_runtime_events (command_id,type,name,detail) VALUES (?,'assistant_message','',?)").run(id,text);
+      this.updateResponse(id,'');
+      this.db.exec('COMMIT');
+    } catch(error) {this.db.exec('ROLLBACK');throw error;}
   }
   chatWork(botId:string) {
-    const events=this.db.prepare('SELECT e.command_id,e.seq AS id,e.type,e.name,e.success,e.detail FROM command_runtime_events e JOIN commands c ON c.id=e.command_id WHERE c.bot_id=? ORDER BY e.seq').all(botId);
+    const events=this.db.prepare("SELECT e.command_id,e.seq AS id,e.type,e.name,e.success,CASE WHEN e.type IN ('tool_result','assistant_message') THEN e.detail END AS detail,CASE WHEN e.type='tool_start' THEN e.detail END AS arguments,e.call_id AS callId FROM command_runtime_events e JOIN commands c ON c.id=e.command_id WHERE c.bot_id=? ORDER BY e.seq").all(botId);
     const byCommand=new Map<string,typeof events>();
     for(const event of events){const id=String(event.command_id);const group=byCommand.get(id) ?? [];group.push(event);byCommand.set(id,group);}
     const requests=this.db.prepare('SELECT c.id,p.profile AS capturedProfile FROM commands c LEFT JOIN command_profiles p ON p.command_id=c.id WHERE c.bot_id=? ORDER BY c.rowid').all(botId).map(row=>{
@@ -1158,13 +1219,14 @@ export class Instance {
       }
       const bot = this.bot(input.botId);
       if (!bot) throw new Error('Agent not found');
+      if (bot.provider==='demo' && this.db.prepare('SELECT 1 FROM demo_migration WHERE id=1').get()) throw new BotConflict('Demo migration is incomplete for this agent. Repair its configuration and reload creation defaults.');
       if (bot.archived) throw new BotConflict('Agent is archived');
       if (this.db.prepare("SELECT id FROM commands WHERE bot_id=? AND state='pending'").get(input.botId)) {
         this.db.exec('COMMIT'); return {kind: 'busy' as const};
       }
       this.db.prepare("INSERT INTO commands VALUES (?, ?, ?, 'pending', NULL)").run(input.id, input.botId, visibleContent);
       this.db.prepare('INSERT INTO command_fingerprints VALUES (?, ?)').run(input.id, digest);
-      this.db.prepare('INSERT INTO command_profiles VALUES (?, ?)').run(input.id, JSON.stringify(bot));
+      this.db.prepare('INSERT INTO command_profiles VALUES (?, ?)').run(input.id, JSON.stringify({...bot,core:this.core().content}));
       this.bindWork({kind:'command',id:input.id},input.botId);
       this.db.prepare('INSERT INTO command_notices SELECT ?,message_id FROM task_notices WHERE bot_id=? AND delivered=0').run(input.id,input.botId);
       this.db.prepare("INSERT INTO messages VALUES (?, ?, 'user', ?, (SELECT COALESCE(MAX(seq),0)+1 FROM messages WHERE bot_id=?))").run('command-user-'+input.id, input.botId, visibleContent, input.botId);

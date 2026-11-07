@@ -7,7 +7,7 @@ import { startInstance } from './instance-service.js';
 export async function instanceCommand(args: string[]) {
   const [requested,...rest]=args;
   const action=requested?.startsWith('chatgpt-auth-') ? requested.replace('chatgpt-auth-','codex-auth-') : requested;
-  if (!action || action === 'help' || action === '--help') {console.log('Usage: instance serve [DATABASE_PATH] [PORT]\n       instance COMMAND URL CREDENTIAL_FILE [ARGUMENTS]\nCommands: processes, process, process-output, process-input, process-eof, process-resize, process-stop, reconcile-action, pair, clients, revoke, bots, create, inspect, edit, archive, restore, read, send, status, response-follow, response-stop, discover, defaults, defaults-set, provider-defaults, provider-defaults-set, select, tasks, task, task-follow, task-start, task-stop, task-retry, task-replace, task-direct, task-answer, approvals, approve, deny, approval-settings, set-approval-settings, disclosures, disclosure-approve, disclosure-deny, web-permission, web-permission-set, web-approvals, web-approve, web-deny, search-config, search-config-set, search-permission, search-permission-set, search-approvals, search-approve, search-deny, shell-config, shell-config-set, shell-permission, shell-permission-set, shell-approvals, shell-approve, shell-deny, shell-uncertain, shell-review, approval-grants, approval-grant-revoke, approval-grant-edit, openrouter-status, openrouter-set, openrouter-disconnect, chatgpt-auth-start, chatgpt-auth-current, chatgpt-auth-status, chatgpt-auth-cancel, chatgpt-auth-credential, chatgpt-auth-logout, memory-*, skill-*, schedule-*\nProvider changes with select require --confirm-provider-change after reviewing the history-disclosure warning.\nSee docs/usage.md for arguments and examples.');return;}
+  if (!action || action === 'help' || action === '--help') {console.log('Usage: instance serve [DATABASE_PATH] [PORT]\n       instance COMMAND URL CREDENTIAL_FILE [ARGUMENTS]\nCommands: core, core-save, core-reset, processes, process, process-output, process-input, process-eof, process-resize, process-stop, reconcile-action, pair, clients, revoke, bots, create, inspect, edit, archive, restore, read, send, status, response-follow, response-stop, discover, defaults, defaults-set, provider-defaults, provider-defaults-set, select, tasks, task, task-follow, task-start, task-stop, task-retry, task-replace, task-direct, task-answer, approvals, approve, deny, approval-settings, set-approval-settings, disclosures, disclosure-approve, disclosure-deny, web-permission, web-permission-set, web-approvals, web-approve, web-deny, search-config, search-config-set, search-permission, search-permission-set, search-approvals, search-approve, search-deny, shell-config, shell-config-set, shell-permission, shell-permission-set, shell-approvals, shell-approve, shell-deny, shell-uncertain, shell-review, approval-grants, approval-grant-revoke, approval-grant-edit, openrouter-status, openrouter-set, openrouter-disconnect, chatgpt-auth-start, chatgpt-auth-current, chatgpt-auth-status, chatgpt-auth-cancel, chatgpt-auth-credential, chatgpt-auth-logout, memory-*, skill-*, schedule-*\nProvider changes with select require --confirm-provider-change after reviewing the history-disclosure warning.\nSee docs/usage.md for arguments and examples.');return;}
   if (action === 'serve') {
     const path=resolve(rest[0] || '.staf/instance.sqlite'); const port=Number(rest[1] || 3210);
     if (!Number.isInteger(port) || port<1 || port>65535) throw Error('Invalid port');
@@ -50,6 +50,10 @@ export async function instanceCommand(args: string[]) {
   const saved: unknown=JSON.parse(await readFile(credential,'utf8'));
   if (!saved || typeof saved !== 'object' || !('token' in saved) || typeof saved.token !== 'string') throw Error('Invalid client credential');
   const token=saved.token; let result:unknown;
+  async function saveCore(body:object) {
+    try {return await request('/api/core',token,body);}
+    catch(error) {if(error instanceof Error && error.message.startsWith('Instance request failed'))throw error;throw Error('Core save may have taken effect. Inspect core before retrying.');}
+  }
   const memoryPath = (scope:string) => {
     if (scope === 'user') return '/api/memories/user';
     if (/^bot:[\w-]+$/.test(scope)) return '/api/memories/bot/' + scope.slice(4);
@@ -60,7 +64,10 @@ export async function instanceCommand(args: string[]) {
     if(values.length!==4 || values[3]!=='--acknowledge-stored-action' || !['bot','all-bots'].includes(values[1]??'') || !['task','remembered'].includes(values[2]??''))throw Error('Use ID [bot|all-bots task|remembered --acknowledge-stored-action]');
     return {grant:{scope:values[1],lifetime:values[2],retentionAcknowledged:true}};
   };
-  if(action==='processes' && values.length===0) result=await request('/api/processes',token);
+  if(action==='core' && values.length===0) result=await request('/api/core',token);
+  else if(action==='core-save' && values.length===2 && values[0] && values[1]) result=await saveCore({revision:values[0],content:new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(await readFile(values[1]))});
+  else if(action==='core-reset' && values.length===1 && values[0]) result=await saveCore({revision:values[0],content:null});
+  else if(action==='processes' && values.length===0) result=await request('/api/processes',token);
   else if(action==='process' && values.length===1 && values[0]) result=await request(`/api/processes/${encodeURIComponent(values[0])}`,token);
   else if(action==='process-output' && (values.length===1 || values.length===2) && values[0]) result=await request(`/api/processes/${encodeURIComponent(values[0])}/output${values[1] ? `?cursor=${encodeURIComponent(values[1])}` : ''}`,token);
   else if(action==='process-input' && values.length===2 && values[0]) result=await request(`/api/processes/${encodeURIComponent(values[0])}/input`,token,{data:values[1]});

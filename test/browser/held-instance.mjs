@@ -1,12 +1,16 @@
 import { createInterface } from 'node:readline';
 import { createServer } from 'node:http';
 import { startInstance } from '../../dist/instance-service.js';
-import { demoProvider, openRouterProvider } from '../../dist/providers.js';
+import { Instance } from '../../dist/instance.js';
+import { legacyDemo } from '../fixtures/legacy-agent.mjs';
+import { openRouterProvider } from '../../dist/providers.js';
+import { demoProvider } from '../fixtures/echo-provider.mjs';
 import { loadOpenRouterKey } from '../../dist/openrouter-credential.js';
 import {mkdir,writeFile} from 'node:fs/promises';
 import {join,dirname} from 'node:path';
 
 const [path, port] = process.argv.slice(2);
+if (process.argv.includes('--legacy-fixture')) {const instance=new Instance(path);try {legacyDemo(instance,'Legacy','Keep soul');const archived=legacyDemo(instance,'Archived');instance.setArchived(archived.id,archived.revision,true);} finally {instance.close();}}
 let releaseInputTask, releaseStream, releaseRouter;
 let routerFailed=false;
 function makeProvider() {
@@ -49,6 +53,22 @@ return {
     if (options?.currentUserInput==='Native process fixture') {
       if (messages.at(-1)?.role==='tool') return {role:'assistant',content:'Native fixture started.'};
       return {role:'assistant',content:null,tool_calls:[{id:'native-fixture',type:'function',function:{name:'terminal_run',arguments:JSON.stringify({retain:true,command:"printf 'native browser output'; exec sleep 30"})}}]};
+    }
+    if (options?.currentUserInput==='Repeated clock fixture') {
+      if(messages.at(-1)?.role==='tool')return {role:'assistant',content:'Repeated clocks completed.'};
+      return {role:'assistant',content:null,tool_calls:['first-clock','second-clock'].map(id=>({id,type:'function',function:{name:'clock',arguments:'{}'}}))};
+    }
+    if (options?.currentUserInput==='Alternating timeline fixture') {
+      const results=messages.slice(messages.findLastIndex(message=>message.role==='user')+1).filter(message=>message.role==='tool').length;
+      if(results===2)return {role:'assistant',content:'Final timeline answer.'};
+      return {role:'assistant',content:results===1?'First timeline answer.':null,tool_calls:[{id:'timeline-'+results,type:'function',function:{name:'clock',arguments:'{}'}}]};
+    }
+    if (options?.currentUserInput==='Denied greeting fixture') {
+      if(messages.at(-1)?.role==='tool') {
+        if(!messages.at(-1).content.includes('denied'))throw Error('Expected a denied clock result');
+        return {role:'assistant',content:'Hello after the denied clock.'};
+      }
+      return calls([['clock',{}]]);
     }
     if (options?.currentUserInput==='Scripted clock fixture') {
       if (messages.at(-1)?.role==='tool') return {role:'assistant',content:'Scripted clock completed.'};
@@ -170,6 +190,11 @@ const app = startInstance(path, Number(port), { env: {}, modelRequest:async()=>n
   },undefined,instructions);
   const provider=makeProvider();
   return {...provider,async *stream(messages,tools,options){
+    if(options?.currentUserInput==='Alternating timeline fixture'){
+      const message=await provider.complete(messages,tools,options);
+      if(message.content){yield {type:'text_delta',text:message.content+' '};if(message.tool_calls?.length)await new Promise(resolve=>{releaseStream=resolve});}
+      yield {type:'message',message};return;
+    }
     if(options?.currentUserInput!=='Streaming markdown fixture'){yield {type:'message',message:await provider.complete(messages,tools,options)};return;}
     const first='# Streaming heading\n\n- First item\n- [safe link](https://example.com)\n\n```js\nconst n = 1;\n```\n\n<img src=x onerror="window.pwned=1">\n\n'+Array.from({length:100},(_,i)=>`Line ${i}`).join('\n\n')+'\n\n';
     yield {type:'text_delta',text:first};

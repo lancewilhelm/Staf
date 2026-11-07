@@ -2,7 +2,7 @@
 
 Run these commands from the repository root on the Docker host. Docker Compose builds the image using the repository lockfile. The build downloads the pinned pnpm version and dependencies. The Node base image uses a mutable tag, so rebuilding later can select a newer Node 22 image.
 
-For OpenRouter, use global Settings or the paired CLI to save a key in the instance credential store after startup. The shared instance ignores `OPENROUTER_API_KEY` from the host environment. Keep the instance data volume private; the stored key is plaintext and Docker administrators can access it. Demo mode does not require a key.
+For OpenRouter, use global Settings or the paired CLI to save a key in the instance credential store after startup. The shared instance ignores `OPENROUTER_API_KEY` from the host environment. Keep the instance data volume private; the stored key is plaintext and Docker administrators can access it.
 
 ```sh
 docker compose up -d --build
@@ -39,7 +39,7 @@ docker compose -p staf-restored build
 docker compose -p staf-restored run --rm -T --no-deps --user 0 --entrypoint tar staf -C /data -xf - < staf-backup.tar
 ```
 
-Stop the original service before starting the restored project with `docker compose -p staf-restored up -d`. Verify the restored bots and chats before relying on the copy. A stopped-volume copy and restore were tested locally with offline demo data. Restore to another host and a full upgrade with a schema change have not been verified.
+Stop the original service before starting the restored project with `docker compose -p staf-restored up -d`. Verify the restored bots and chats before relying on the copy. A stopped-volume copy and restore were tested locally with historical offline data. Restore to another host and a full upgrade with a schema change have not been verified.
 
 Before an owner-initiated update, make a backup, then update the checkout and run `docker compose up -d --build`. The service creates a database backup before supported schema migrations when applicable. Keep the separate backup until you have verified the updated instance. Reverting code after a migration may require restoring the previous backup.
 

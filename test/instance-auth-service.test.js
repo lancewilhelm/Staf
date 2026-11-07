@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {startInstance} from '../dist/instance-service.js';
+import {startInstance} from './fixtures/controlled-instance.mjs';
 
 test('paired instance CLI can disconnect a saved ChatGPT credential',async()=>{
  const {mkdtempSync,mkdirSync,writeFileSync,existsSync,rmSync}=await import('node:fs');
@@ -112,7 +112,7 @@ test('sign-out cannot race an in-flight synthetic model-discovery token refresh'
  globalThis.fetch=async(input,init)=>{const url=String(input);if(url.startsWith('http://127.0.0.1:'))return original(input,init);if(url==='https://auth.openai.com/api/accounts/oauth/token'){entered();await gate;return Response.json({access_token:'new-token',refresh_token:'new-refresh',token_type:'Bearer',expires_in:3600,scope:'resource.invoke chatgpt.tokens.use.direct'});}if(url==='https://api.openai.com/v1/models')return Response.json({models:[{slug:'fixture'}]});throw Error('Unexpected network');};
  const app=startInstance(join(dir,'db'),0,{dataDir:dir,env:{}}),port=await app.listen();
  const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return [r.status,await r.json()];};
- try{const a=(await call('/api/pair','',{code:app.code}))[1].token,b=(await call('/api/pair','',{code:app.issueCode()}))[1].token,bot=(await call('/api/bots',a,{name:'A'}))[1];await call(`/api/bots/${bot.id}/profile`,a,{revision:bot.revision,name:'A',instructions:'',provider:'codex',model:'fixture',reasoning:null});
+ try{const a=(await call('/api/pair','',{code:app.code}))[1].token,b=(await call('/api/pair','',{code:app.issueCode()}))[1].token,bot=(await call('/api/bots',a,{provider:'live',model:'fixture-offline',name:'A'}))[1];await call(`/api/bots/${bot.id}/profile`,a,{revision:bot.revision,name:'A',instructions:'',provider:'codex',model:'fixture',reasoning:null});
   const discovery=call(`/api/bots/${bot.id}/models`,a,{});await refreshing;assert.equal((await call('/api/codex-auth/logout',b,{}))[0],409);release();assert.equal((await discovery)[0],200);assert.equal((await call('/api/codex-auth/logout',b,{}))[0],200);assert.equal(existsSync(path),false);
  }finally{release();await app.close();globalThis.fetch=original;rmSync(dir,{recursive:true,force:true});}
 });

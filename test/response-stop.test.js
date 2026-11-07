@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { startInstance } from '../dist/instance-service.js';
+import { startInstance } from './fixtures/controlled-instance.mjs';
 
 const run=promisify(execFile);
 test('another client can stop a pending response without admitting work until it settles',async()=>{
@@ -18,7 +18,7 @@ test('another client can stop a pending response without admitting work until it
  const wait=async fn=>{for(let i=0;i<200;i++){const result=await fn();if(result)return result;await new Promise(resolve=>setTimeout(resolve,10));}throw Error('timed out')};
  try{
   await cli('pair',url(),credential,app.code);const token=(await call('/api/pair','',{code:app.issueCode()}))[1].token;
-  const bot=(await call('/api/bots',token,{name:'Ada'}))[1];
+  const bot=(await call('/api/bots',token,{provider:'live',model:'fixture-offline',name:'Ada'}))[1];
   assert.equal((await call('/api/commands',token,{id:'first',botId:bot.id,content:'first'}))[1].kind,'accepted');
   await wait(async()=>((await call('/api/commands/first',token))[1].responseProgress.text.includes('Partial response.')));
   assert.equal((await call('/api/commands/first/stop','',{}))[0],401);
@@ -46,7 +46,7 @@ test('restart during stopping leaves an interrupted outcome without repeating th
  let app=startInstance(path,0,{env:{},providerFactory:factory}),port=await app.listen();
  const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return r.json()};
  try{
-  const token=(await call('/api/pair','',{code:app.code})).token,bot=await call('/api/bots',token,{name:'Ada'});
+  const token=(await call('/api/pair','',{code:app.code})).token,bot=await call('/api/bots',token,{provider:'live',model:'fixture-offline',name:'Ada'});
   const input={id:'interrupted-stop',botId:bot.id,content:'Hold'};await call('/api/commands',token,input);await started;
   assert.equal((await call('/api/commands/interrupted-stop/stop',token,{})).state,'stopping');
   await app.close();release();app=startInstance(path,0,{env:{},providerFactory:factory});port=await app.listen();

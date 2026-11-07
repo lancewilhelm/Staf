@@ -27,7 +27,7 @@ export function validateSetting(key: string, value: string, secrets: Environment
   if (!settingKeys.includes(key)) throw new Error('Unknown setting; use settings keys');
   if (!value || value.length > 2048 || redactor(secrets)(value) !== value || /sk-[A-Za-z0-9_-]+/i.test(value)) throw new Error('Setting must be nonempty and nonsecret; keep credentials outside settings');
   if (key === 'provider') {
-    if (!providers.includes(value)) throw new Error('Provider must be demo, openrouter, codex, lmstudio or live');
+    if (!providers.includes(value)) throw new Error('Provider must be openrouter, codex, lmstudio or live');
   } else if (key.startsWith('reasoning.')) {
     validateEffort(key.slice('reasoning.'.length), value);
   } else if (key.startsWith('model.')) {
@@ -46,7 +46,8 @@ function parseDocument(raw: unknown, secrets: Environment): SettingsDocument {
   const defaults: SettingsValues = {};
   for (const [key, value] of Object.entries(raw.defaults)) {
     if (typeof value !== 'string') throw new Error('Malformed settings value');
-    validateSetting(key, value, secrets); defaults[key] = value;
+    if (key !== 'provider' || value !== 'demo') validateSetting(key, value, secrets);
+    defaults[key] = value;
   }
   return { version: 1, defaults };
 }
@@ -108,10 +109,12 @@ export class SettingsStore {
 export function resolveSettings(input: SettingsInput): EffectiveSettings {
   const { saved, file, shell, cli, session } = input;
   const secrets = { ...file, ...shell };
-  for (const values of [saved, session]) for (const [key, value] of Object.entries(values)) validateSetting(key, value, secrets);
+  for (const [key,value] of Object.entries(saved)) if (key !== 'provider' || value !== 'demo') validateSetting(key,value,secrets);
+  for (const [key,value] of Object.entries(session)) validateSetting(key,value,secrets);
   const provider: EffectiveValue = session.provider ? { value: session.provider, source: 'this session' }
     : cli.provider ? { value: cli.provider, source: 'CLI' }
-    : saved.provider ? { value: saved.provider, source: 'saved default' } : { value: 'demo', source: 'built-in' };
+    : saved.provider && saved.provider !== 'demo' ? { value: saved.provider, source: 'saved default' } : { value: '', source: 'built-in' };
+  if (!provider.value) return {provider,model:{value:'',source:'built-in'},reasoning:{value:'default',source:'built-in'},endpoint:{value:'',source:'built-in'},warnings:['Choose a provider and model before chatting.']};
   validateSetting('provider', provider.value, secrets);
   const name = provider.value;
   function field(key: string, variable: string, fallback: string, cliValue?: string): EffectiveValue {
@@ -126,14 +129,12 @@ export function resolveSettings(input: SettingsInput): EffectiveSettings {
     return result;
   }
   const modelVar = name === 'codex' ? 'STAF_CODEX_MODEL' : name === 'lmstudio' ? 'LMSTUDIO_MODEL' : 'STAF_MODEL';
-  const model: EffectiveValue = name === 'demo' ? { value: '', source: 'built-in' } : field(`model.${name}`, modelVar, '', cli.model);
-  if (name === 'demo' && cli.model && session.provider !== 'demo') throw new Error('--model requires a live provider');
+  const model: EffectiveValue = field(`model.${name}`, modelVar, '', cli.model);
   const endpoint: EffectiveValue = name === 'lmstudio' ? field('endpoint.lmstudio', 'LMSTUDIO_BASE_URL', 'http://localhost:1234/v1/')
     : name === 'live' ? field('endpoint.live', 'STAF_BASE_URL', 'https://api.openai.com/v1/')
     : { value: name === 'openrouter' ? 'https://openrouter.ai/api/v1/' : '', source: 'built-in' };
   const reasoningVar = name === 'openrouter' ? 'OPENROUTER_REASONING_EFFORT' : name === 'codex' ? 'STAF_CODEX_REASONING' : name === 'lmstudio' ? 'LMSTUDIO_REASONING_EFFORT' : 'STAF_REASONING_EFFORT';
-  const reasoning: EffectiveValue = name === 'demo' ? { value: 'default', source: 'built-in' } : field(`reasoning.${name}`, reasoningVar, 'default', cli.reasoning);
-  if (name === 'demo' && cli.reasoning && cli.reasoning !== 'default') throw new Error('Demo has no reasoning control');
+  const reasoning: EffectiveValue = field(`reasoning.${name}`, reasoningVar, 'default', cli.reasoning);
   validateEffort(name, reasoning.value);
   const warnings: string[] = [];
   if (['openrouter', 'live', 'lmstudio', 'codex'].includes(name) && !model.value) warnings.push('A model identifier is required before chatting.');
@@ -179,7 +180,7 @@ export class SettingsSession {
       delete cli.model; delete cli.reasoning;
       notes.push('Provider changes use its own model settings; generic launch model/reasoning overrides are cleared.');
     }
-    if (target !== 'demo' && (changingProvider || key.startsWith('model.'))) {
+    if (changingProvider || key.startsWith('model.')) {
       overrides[`reasoning.${target}`] = 'default';
       related[`reasoning.${target}`] = 'default';
       notes.push('Reasoning resets to provider default; choose a supported effort for the selected model separately.');

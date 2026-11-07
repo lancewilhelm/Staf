@@ -411,3 +411,128 @@ file editing, and retry-safe creation apply. Accepted images are retained for
 configuration history and uncertain-save recovery. See
 [image usage](usage.md#agent-images) and the
 [configuration/API reference](reference.md#agent-image-configuration-and-api).
+
+## Simplify the agent workspace after the main-branch review
+
+On 2026-11-05 the owner requested the following changes after reviewing the
+development instance. The interview settled these requirements, which revise the
+corresponding iteration-4 choices above. Delivery is tracked separately in the
+[integration PR](https://github.com/lancewilhelm/Staf/pull/100).
+
+- Use the default pentagon-dot Staf logo and remove logo selection.
+- Remove the Agents heading, add a divider above the agent list, and move
+  New agent to the bottom of the sidebar.
+- Open agent settings from both the header avatar and agent name. Remove the
+  header settings gear to distinguish agent settings from instance Settings.
+- Improve spacing and alignment around settings action buttons. Remove the
+  composer's focus border when the user clicks the message input.
+- Use one agent settings editor for creation and later edits. Creation uses
+  Create and Cancel. Memory, archive, and configuration-path controls appear
+  after creation. Remove the creation name placeholder and introductory
+  sentence. Show provider, model, and reasoning choices expanded. Put
+  instructions and tool-mode explanations behind information icons beside
+  their labels. All editor fields remain unsaved until Create or Save. Cancel
+  discards those edits. The composer picker remains an immediate-save control.
+- Load available models automatically. Retain a model field that a listed
+  selection populates, with manual model entry available where needed.
+- Arrange the composer picker into separate provider, model, and reasoning
+  columns. Show reasoning alongside provider and model on its trigger. Remove
+  redundant List models, Agent settings, and Close picker actions. Report
+  successful saves through a temporary notification. Save picker choices
+  immediately, and keep the picker open after a selection. Clicking outside or
+  pressing Escape closes it. Confirm provider changes inside the picker.
+- Replace browser alert and confirmation dialogs with confirmations inside Staf.
+- Remove Demo as a product provider. Settings holds an explicit instance
+  creation-default provider and model. Until configured, creation asks the owner
+  to choose. Creating an agent does not require a connected provider. Sending
+  requires the selected connection and model to work. Copy creation defaults
+  into new agents, leaving existing agents unchanged. Never switch providers
+  automatically during an outage. As an explicit migration exception, move all
+  existing Demo agents to the instance default once the owner chooses that
+  default. Preserve their conversations and other agent configuration. This
+  migration removes the need to configure each Demo agent separately.
+- Call the provider-selected reasoning behavior Automatic. Explain that choice
+  through its information icon and offer supported explicit reasoning levels.
+- Remove the Sidebar selector from Layout and typography. Retain the sidebar's
+  collapse control and compact icon rail.
+- Keep ordinary draft and interrupted-send recovery automatic. Move the old
+  browser-record viewer to Settings, visible only when such records exist. Give
+  those records Copy and Discard controls. Hide the section once resolved.
+- Keep an agent response area present while the agent works, then update that
+  area with the response. Avoid transient canned progress messages. Combine a
+  tool request and its outcome into one updating item. Align tool items with
+  agent responses and remove their separate colored bubbles. Remove YOU from
+  user message bubbles. Replace routine pending-message text with the stable
+  response area and an animation. Keep actionable delivery errors and Retry
+  beside the affected message. Collapse tool arguments and results by default,
+  while keeping approvals and actionable errors visible when needed.
+
+The owner accepted these additional details in interview answers Q1 through Q9.
+The proposed retain-and-reconfigure workflow for existing Demo agents was
+rejected in Q10 and replaced by the bulk migration accepted in Q14. Existing
+recovery and copied creation-default guarantees remain in effect except for that
+explicit migration.
+
+In Q11 through Q13 the owner accepted the following prompt behavior:
+
+- Ship useful default Staf core guidance, separate from each agent's soul.
+  Advanced Settings provides an inspectable, editable, resettable instance-wide
+  override. Core guidance covers appropriate tool use, follow-through after tool
+  results, and explanations of limitations. Editing the shared core affects all
+  agents in the instance. Permissions remain enforced by the service. See
+  [ADR-0006](adr/0006-editable-instance-core-guidance.md).
+- Ordinary tool failures and denials return to the model so it can respond
+  usefully when possible. Explicit Stop and cancellation still end work. A plain
+  greeting normally receives a direct answer without a clock call. If the owner
+  actually needs current time and the tool fails, explain that limitation.
+- Relevant configuration-save feedback can briefly state that the change may
+  reduce prompt-cache reuse. Keep the notice nonblocking, apply saved changes
+  to the next message, and avoid additional cache confirmation dialogs. Do not
+  interrupt ordinary messages or claim a guaranteed cache miss or cost increase.
+
+In Q15 through Q18 the owner accepted the following configuration behavior:
+
+- The Advanced editor shows the complete editable core, initially populated
+  with Staf's built-in text. A saved core override replaces that built-in core.
+  Each agent's soul, offered tool definitions, and runtime context remain
+  separate inputs.
+- Saved core edits affect every agent's next accepted message. Work already
+  underway retains its captured instructions. No restart or new chat is needed.
+  The editor identifies the change as affecting the whole instance.
+- A normal Markdown file is authoritative for core guidance. Advanced Settings,
+  the CLI, and direct edits operate on that same file, with service validation
+  and conflicting-save protection.
+- Navigating away from an agent editor retains its unsaved draft. Returning
+  restores the draft. Save commits it, while Cancel explicitly discards it.
+  Navigation does not require repeated confirmation dialogs.
+
+In Q19 and Q20 the owner accepted the remaining core-maintenance rules:
+
+- Upgrades preserve a custom core override. Instances without an override use
+  the updated built-in core. Reset replaces the override with the latest
+  shipped default, which the owner can inspect before adopting.
+- An intentionally empty override is valid and supplies no Staf core guidance.
+  Each agent's soul, actual tool definitions, and runtime context remain
+  separate inputs. Advanced Settings identifies the empty state explicitly.
+  Empty content does not silently restore the built-in core.
+
+System-prompt assembly, editable core guidance, prompt-cache stability, and the
+reported greeting that called the clock without a useful answer require
+evaluation. The [system-prompt research](research/system-prompt-assembly.md)
+records source-backed findings and proposed evaluations. The interview decisions
+above select product behavior separately from that evidence. The owner confirmed
+the consolidated scope and requested progression to specification and ticket
+planning. Verification uses visible behavior in the served GUI, paired API and
+CLI, and persisted configuration and history. Controlled providers exercise tool
+continuation and failures. Live model quality and cache hits remain separate
+evidence. The published specification is
+[Simplify the agent workspace, remove Demo, and add editable Staf core guidance](https://github.com/lancewilhelm/Staf/issues/89).
+The owner approved the ticket breakdown by invoking implement-spec. Child issues
+90 through 99 are implemented on the integration branch for PR review. Independent
+Standards and Spec reviews found four issues, addressed with behavior regressions:
+complete core backups, invalid-agent migration isolation, explicit creation
+choices, and delayed default reads. Verification uses controlled providers and
+disposable data, not live-provider, model-quality, or cache-hit evidence.
+A blank agent Instructions field does not mean Staf sends no base instructions.
+Separate chat sessions, provider icons, and generated progress narration remain
+deferred from this workspace cleanup.

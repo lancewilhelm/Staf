@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { startInstance } from '../dist/instance-service.js';
+import { startInstance } from './fixtures/controlled-instance.mjs';
 
 test('background task and chat run independently, retain activity, and survive restart', async () => {
   const dir=mkdtempSync(join(tmpdir(),'staf-task-')), path=join(dir,'db');
@@ -13,7 +13,7 @@ test('background task and chat run independently, retain activity, and survive r
   const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return [r.status,await r.json()];};
   const wait=async(route,token,predicate)=>{for(let i=0;i<200;i++){const v=(await call(route,token))[1];if(predicate(v))return v;await new Promise(r=>setTimeout(r,5));}throw Error('timed out');};
   try {
-    const token=(await call('/api/pair','',{code:app.code}))[1].token, bot=(await call('/api/bots',token,{name:'A'}))[1];
+    const token=(await call('/api/pair','',{code:app.code}))[1].token, bot=(await call('/api/bots',token,{provider:'live',model:'fixture-offline',name:'A'}))[1];
     const req={id:'attempt-one',botId:bot.id,objective:'Investigate',limitMs:10000};
     assert.equal((await call('/api/tasks',token,req))[1].kind,'accepted'); await started;
     assert.equal((await call('/api/tasks',token,{...req,id:'other'}))[1].kind,'busy');
@@ -40,7 +40,7 @@ test('failure retains tool activity and explicit retry survives interruption', a
   let app=startInstance(path,0,{providerFactory:factory}),port=await app.listen();
   const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return [r.status,await r.json()];};
   const wait=async(route,token,predicate)=>{for(let i=0;i<200;i++){const v=(await call(route,token))[1];if(predicate(v))return v;await new Promise(r=>setTimeout(r,5));}throw Error('timed out');};
-  try {const token=(await call('/api/pair','',{code:app.code}))[1].token,bot=(await call('/api/bots',token,{name:'A'}))[1];
+  try {const token=(await call('/api/pair','',{code:app.code}))[1].token,bot=(await call('/api/bots',token,{provider:'live',model:'fixture-offline',name:'A'}))[1];
     await call('/api/tasks',token,{id:'failed-attempt',botId:bot.id,objective:'Inspect'});
     const failed=await wait('/api/tasks/failed-attempt',token,t=>t.state==='failed');
     assert.ok(failed.activity.some(e=>e.type==='tool_result'));assert.equal(failed.usage[0].metrics.input,3);
@@ -64,7 +64,7 @@ test('replacement waits for settlement, preserves late text, and chat sees actua
  const app=startInstance(path,0,{providerFactory:factory});const port=await app.listen();
  const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return [r.status,await r.json()];};
  const wait=async(route,token,predicate)=>{for(let i=0;i<200;i++){const v=(await call(route,token))[1];if(predicate(v))return v;await new Promise(r=>setTimeout(r,5));}throw Error('timed out');};
- try {const token=(await call('/api/pair','',{code:app.code}))[1].token,bot=(await call('/api/bots',token,{name:'A'}))[1];
+ try {const token=(await call('/api/pair','',{code:app.code}))[1].token,bot=(await call('/api/bots',token,{provider:'live',model:'fixture-offline',name:'A'}))[1];
   await call('/api/commands',token,{id:'before',botId:bot.id,content:'first chat'});await wait('/api/commands/before',token,c=>c.state==='completed');
   await call('/api/tasks',token,{id:'old-task',botId:bot.id,objective:'Original objective'});await started;
   await call('/api/commands',token,{id:'unrelated',botId:bot.id,content:'Please tell me something else'});await wait('/api/commands/unrelated',token,c=>c.state==='completed');
@@ -81,8 +81,8 @@ test('replacement waits for settlement, preserves late text, and chat sees actua
 
 test('completed task data and terminal state commit together', async () => {
  const {Instance}=await import('../dist/instance.js');const dir=mkdtempSync(join(tmpdir(),'staf-task-atomic-')),path=join(dir,'db');let store=new Instance(path);
- try {const bot=store.createBot({name:'A',instructions:'',provider:'demo'});store.acceptTask({id:'atomic',botId:bot.id,objective:'test',limitMs:300000});store.taskStart('atomic');
-  const session={version:1,id:'atomic',provider:'demo',messages:[{role:'user',content:'test'},{role:'assistant',content:'real answer'}],events:[],usage:[]};
+ try {const bot=store.createBot({name:'A',instructions:'',provider:'live',model:'fixture-offline'});store.acceptTask({id:'atomic',botId:bot.id,objective:'test',limitMs:300000});store.taskStart('atomic');
+  const session={version:1,id:'atomic',provider:'live',model:'fixture-offline',messages:[{role:'user',content:'test'},{role:'assistant',content:'real answer'}],events:[],usage:[]};
   store.db.exec("CREATE TRIGGER reject_completion BEFORE UPDATE OF state ON task_attempts WHEN NEW.state='completed' BEGIN SELECT RAISE(ABORT,'injected failure'); END;");
   assert.throws(()=>store.taskComplete('atomic',session),/injected failure/);assert.equal(store.taskAttempt('atomic').state,'running');assert.ok(!store.taskAttempt('atomic').activity.some(e=>e.type==='assistant'));
   store.db.exec('DROP TRIGGER reject_completion');store.taskComplete('atomic',session);store.close();store=new Instance(path);
@@ -93,7 +93,7 @@ test('completed task data and terminal state commit together', async () => {
 test('CLI lists and follows the same completed task as the service', async () => {
  const {execFile}=await import('node:child_process'),{promisify}=await import('node:util'),run=promisify(execFile);const dir=mkdtempSync(join(tmpdir(),'staf-task-cli-')),app=startInstance(join(dir,'db'));const port=await app.listen(),url=`http://127.0.0.1:${port}`,credential=join(dir,'client.json');
  const cli=async(...args)=>(await run(process.execPath,['dist/cli.js','instance',...args])).stdout;
- try {await cli('pair',url,credential,app.code);const bot=JSON.parse(await cli('create',url,credential,'A'));const submitted=await cli('task-start',url,credential,bot.id,'Look at the task');const id=submitted.match(/Task attempt ID: ([\w-]+)/)?.[1];assert.ok(id);
+ try {await cli('pair',url,credential,app.code);const bot=JSON.parse(await cli('create',url,credential,'A','--provider','live','--model','fixture-offline'));const submitted=await cli('task-start',url,credential,bot.id,'Look at the task');const id=submitted.match(/Task attempt ID: ([\w-]+)/)?.[1];assert.ok(id);
   const followed=JSON.parse(await cli('task-follow',url,credential,id));assert.equal(followed.state,'completed');const listed=JSON.parse(await cli('tasks',url,credential,bot.id));assert.equal(listed[0].id,id);assert.equal(JSON.parse(await cli('task',url,credential,id)).outcome,followed.outcome);
  } finally {await app.close();rmSync(dir,{recursive:true,force:true});}
 });
@@ -108,7 +108,7 @@ test('explicit directions reach a held task in order, and an explicit clarificat
  const app=startInstance(path,0,{providerFactory:factory}),port=await app.listen();let closed=false;
  const call=async(route,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return [r.status,await r.json()];};
  let token='';const wait=async(predicate)=>{for(let i=0;i<300;i++){const v=(await call('/api/tasks/task'))[1];if(predicate(v))return v;await new Promise(r=>setTimeout(r,5));}throw Error('timed out');};
- try {token=(await call('/api/pair',{code:app.code}))[1].token;const bot=(await call('/api/bots',{name:'A'}))[1];await call('/api/tasks',{id:'task',botId:bot.id,objective:'Inspect'});await started;
+ try {token=(await call('/api/pair',{code:app.code}))[1].token;const bot=(await call('/api/bots',{provider:'live',model:'fixture-offline',name:'A'}))[1];await call('/api/tasks',{id:'task',botId:bot.id,objective:'Inspect'});await started;
   const one={id:'one',kind:'direction',text:'First'},two={id:'two',kind:'direction',text:'Second'};
   const accepted=(await call('/api/tasks/task/input',one))[1];assert.equal(accepted.kind,'accepted');assert.ok(!('digest' in accepted.input));
   const existing=(await call('/api/tasks/task/input',one))[1];assert.equal(existing.kind,'existing');assert.ok(!('digest' in existing.input));
@@ -129,7 +129,7 @@ test('explicit directions reach a held task in order, and an explicit clarificat
 
 test('stopped and interrupted attempts cancel unapplied input atomically', async () => {
  const {Instance}=await import('../dist/instance.js');const dir=mkdtempSync(join(tmpdir(),'staf-unapplied-')),path=join(dir,'db');let store=new Instance(path);
- try {const bot=store.createBot({name:'A',instructions:'',provider:'demo'});
+ try {const bot=store.createBot({name:'A',instructions:'',provider:'live',model:'fixture-offline'});
   store.acceptTask({id:'stopped',botId:bot.id,objective:'One',limitMs:300000});store.taskStart('stopped');
   store.taskInput({attemptId:'stopped',commandId:'input-one',kind:'direction',text:'first'},'first');
   store.taskStop('stopped','Stop');store.taskFinish('stopped','stopped','Stopped');
@@ -146,7 +146,7 @@ test('direction accepted during provider setup merges with objective before the 
  const factory=async()=>{entered();await gate;return {name:'fixture',capabilities:{toolCalls:true,incrementalText:false,transport:'demo'},async complete(messages){seen=structuredClone(messages);return {role:'assistant',content:'done'};}};};
  const app=startInstance(path,0,{providerFactory:factory}),port=await app.listen();let token='',closed=false;
  const call=async(route,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return await r.json();};
- try{token=(await call('/api/pair',{code:app.code})).token;const bot=await call('/api/bots',{name:'A'});await call('/api/tasks',{id:'setup',botId:bot.id,objective:'Inspect'});await started;await call('/api/tasks/setup/input',{id:'input',kind:'direction',text:'focus here'});release();
+ try{token=(await call('/api/pair',{code:app.code})).token;const bot=await call('/api/bots',{provider:'live',model:'fixture-offline',name:'A'});await call('/api/tasks',{id:'setup',botId:bot.id,objective:'Inspect'});await started;await call('/api/tasks/setup/input',{id:'input',kind:'direction',text:'focus here'});release();
   for(let i=0;i<200;i++){if((await call('/api/tasks/setup')).state==='completed')break;await new Promise(r=>setTimeout(r,5));}
   assert.equal(seen.length,1);assert.match(seen[0].content,/Inspect[\s\S]*focus here/);await app.close();closed=true;
   const {DatabaseSync}=await import('node:sqlite');const db=new DatabaseSync(path);const session=JSON.parse(db.prepare('SELECT session FROM task_attempts WHERE id=?').get('setup').session);db.close();const {validSession}=await import('../dist/validation.js');assert.ok(validSession(session,'setup'));

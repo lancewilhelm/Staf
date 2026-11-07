@@ -62,23 +62,18 @@ Models and reasoning belong to the bot profile, not environment variables.
 | `STAF_BASE_URL` | live | API root; defaults to `https://api.openai.com/v1/`. |
 | `STAF_API_KEY` | live | Required API key. |
 
-The supported bot providers are demo, ChatGPT, OpenRouter, LM Studio, and live.
-Live providers require an explicit bot model. The demo echoes messages without a
-model. OpenRouter uses its fixed Chat Completions endpoint. The live adapter uses
+The supported bot providers are ChatGPT, OpenRouter, LM Studio, and live.
+Each requires an explicit bot model. OpenRouter uses its fixed Chat Completions endpoint. The live adapter uses
 a generic OpenAI-compatible Chat Completions endpoint and can incur API charges.
 ChatGPT uses direct Responses and a separate Staf OAuth grant. A credential alone
 does not select a provider. Per-bot endpoint overrides are not implemented.
 See [model selection](model-selection.md) and [ChatGPT sign-in](codex-direct.md).
 
-In the browser's agent settings, Demo is always selectable and ChatGPT or
-OpenRouter is selectable when the instance reports a saved connection. Existing
-disconnected or host-configured selections remain visible. LM Studio and live
-are configured on the host and are not offered as new browser choices. The
-browser retains the model on a provider change, asks the owner to review it,
-and confirms possible conversation-history disclosure before saving. This
-selection policy is a browser convenience; the paired service, CLI, and direct
-files continue to accept supported provider configurations independently of
-connection presence.
+In the browser's agent settings, supported providers remain selectable without a
+saved connection. Selecting a provider stages its remembered or default model
+and reasoning for review. Saving a changed provider requires confirmation of
+possible conversation-history disclosure. The paired service, CLI, and direct
+files accept supported provider configurations independently of connection presence.
 
 ## Scripts
 
@@ -151,6 +146,11 @@ The workspace journals per-agent drafts and command IDs locally. It recovers an
 uncertain submission automatically with the same command ID; busy and definitive
 failures have inline Retry and Dismiss controls. A failed accepted command needs
 a new ID for an explicit retry.
+Earlier records without dataset identity are recovered only when durable service
+records verify their origin. Other records appear under **Settings > Earlier
+browser records** while present. Copy exports the selected record's text. Discard
+requires confirmation and removes only a still-matching, unlocked old record;
+scoped journals and pairing remain intact.
 
 The workspace is served at `/`. Its persistent agent list selects main chats,
 and duplicate names display the last four characters of their stable IDs.
@@ -164,21 +164,30 @@ values use Light. System follows the device color scheme. This preference is
 not an instance configuration or a shared API setting.
 `staf-design` stores browser-local sidebar (`expanded`/`focus`), palette
 (`green`/`ink`), font (`sans`/`system`), body (13–17px), space (14–32px),
-corner (0–22px), and logo (0–4) choices. Defaults are expanded, green, sans,
-14, 20, 10, and 1 (Orbit). Invalid fields use their defaults; existing saved
-appearance choices remain honored. Storage failure still allows changes for the
-current page. Reset appearance restores these seven defaults and Light.
+and corner (0–22px) choices. Defaults are expanded, green, sans,
+14, 20, and 10. Invalid fields use their defaults. An old logo preference is
+ignored; Staf uses the fixed pentagon-dot logo. Storage failure still allows
+changes for the current page. Reset appearance restores these defaults and Light.
 Authenticated `GET /api/inbox` projects pending questions and approvals.
 `GET /api/task-updates` returns task summaries for the inbox. `POST /api/bots`
 requires a nonblank `name` and accepts optional `instructions`, `provider`,
 `model`, and `operationId`. An omitted provider uses the copied instance
-default. An omitted model uses the default when the provider is omitted, or
+default, and fails with a setup error if it is unset. A creation default requires a real provider and a nonblank model. An omitted model uses the default when the provider is omitted, or
 is empty when a provider is specified. A model can override the default.
+The browser uses one settings form for creation and editing. Profile saves submit
+name, image, instructions, tool mode, provider, model, and reasoning together
+with the original revision. Navigation retains unsaved form state in the current
+tab. Cancel discards it; uncertain saves retain it for comparison. The composer
+selection control remains an immediate service operation.
+
 For retry-safe creation, clients supply an `operationId`;
 `GET /api/bot-creations/OPERATION_ID` recovers a recorded result. Reusing an
 operation ID with different input conflicts. The transaction copies remaining
 creation defaults into the new bot. The version 27 migration adds the creation
-journal after a database backup. These operations do not change existing bots.
+journal after a database backup. Saving a real creation default migrates Demo agents, including archived agents; existing real-provider agents remain unchanged. The migration is resumable after interruption and preserves accepted-work snapshots.
+For `POST /api/bots`, omitted model and reasoning fields use the applicable
+defaults; explicit `null` leaves the corresponding value unset. Reusing an
+operation ID with a different choice, including omission instead of `null`, conflicts.
 The workspace automatically restores an unfinished creation using its original
 operation ID, guarded by a browser Web Lock. Check creation and Retry same creation
 use that ID. Unscoped legacy records are adopted only with matching durable command
@@ -198,7 +207,7 @@ The CLI prints the generated operation ID before submission; callers can reuse
 it with unchanged arguments. A direct API creation without an operation ID is
 not retry-safe. The server stores
 SHA-256 token hashes in SQLite and limits ordinary JSON request bodies to 64 KiB.
-Skill import and update requests are limited to 1,600,000 bytes. Authenticated
+Skill import and update requests are limited to 1,600,000 bytes. Core updates are limited to 200,000 bytes. Authenticated
 agent create/profile requests using the dedicated image media type have a
 1 MiB limit; see [agent image configuration and API](#agent-image-configuration-and-api).
 Newly created databases have owner-only permissions, independent of a permissive umask. Existing file permissions are not changed. Restrict the containing directory and any existing database separately. On the tested platform, SQLite rollback journals inherit the owner-only database mode.
@@ -208,13 +217,28 @@ credentials are required for protected writes. No network transport beyond
 loopback is implemented here. ChatGPT and OpenRouter use instance-owned credentials; LM Studio and live use host configuration. Each requires an explicit bot model. Paired clients have derived
 identifiers; any paired client can list and revoke them. Every paired client is trusted to act for the sole owner, including managing approvals and settings; there is no separate owner role check.
 
-Paired clients can read the latest main-chat progress with `GET /api/bots/{id}/response`, or `responseProgress` within `GET /api/commands/{id}`. The response has the command ID, bot ID, accepted/running/stopping/stopped/completed/failed/interrupted state, provisional text and a safe error. `instance response-follow URL CREDENTIAL_FILE COMMAND_ID` polls and prints changed progress as JSON lines until a terminal state. Text that could complete a known credential may be withheld at chunk boundaries. The service also holds unfinished words for safe URL handling. Provisional snapshots stop growing at one million UTF-16 code units per provider step; the completed response remains available. Version 28 adds a progress table after a database backup; incomplete output is retained separately from committed conversation messages. ChatGPT direct and OpenRouter can emit deltas; LM Studio, generic Chat Completions and demo adapters are buffered. No live provider verification was performed for this change.
+Paired clients can read the latest main-chat progress with `GET /api/bots/{id}/response`, or `responseProgress` within `GET /api/commands/{id}`. The response has the command ID, bot ID, accepted/running/stopping/stopped/completed/failed/interrupted state, provisional text and a safe error. `instance response-follow URL CREDENTIAL_FILE COMMAND_ID` polls and prints changed progress as JSON lines until a terminal state. Text that could complete a known credential may be withheld at chunk boundaries. The service also holds unfinished words for safe URL handling. Provisional snapshots stop growing at one million UTF-16 code units per provider step; the completed response remains available. Version 28 adds a progress table after a database backup; incomplete output is retained separately from committed conversation messages. ChatGPT direct and OpenRouter can emit deltas; LM Studio and generic Chat Completions adapters are buffered. No live provider verification was performed for this change.
 
 Paired clients request Stop with `POST /api/commands/{id}/stop` or `instance response-stop URL CREDENTIAL_FILE COMMAND_ID`. The result is the current progress, including `stopping` while cancellation settles and `stopped` afterward. Repeating a request against the same command returns its current outcome and cannot stop a newer command. The accepted command keeps the per-agent busy lock while stopping; a noncooperative provider can delay settlement. Restart while stopping reports `interrupted`. Version 29 adds the stop journal after a database backup. Stopped partial output is retained as an `assistant_stopped` conversation message, excluded from provider replay.
 
-The paired `GET /api/bots/{id}/response/stream` endpoint returns `text/event-stream` and requires a bearer authorization header and the same origin checks as other instance requests. An initial `snapshot` event contains the current progress or null. Later JSON events contain either a `snapshot` with `response`, or a `delta` with `id` and text to append. Completed snapshots have empty text; clients read the completed answer from the conversation. Failed, interrupted, stopping, and stopped snapshots retain provisional text. Each reconnection begins with a new snapshot; clients do not resubmit a command. Heartbeat comments keep idle connections open. Revocation closes the revoked client's connections. The instance allows up to 256 response streams and disconnects clients whose pending output exceeds 2 MB; they can reconnect for a current snapshot. The workspace uses authenticated `fetch` to consume the stream. Chat work and pending approvals use polling.
+The paired `GET /api/bots/{id}/response/stream` endpoint returns `text/event-stream` and requires a bearer authorization header and the same origin checks as other instance requests. An initial `snapshot` event contains the current progress or null. Later JSON events contain either a `snapshot` with `response`, or a `delta` with `id` and text to append. Completed snapshots have empty text; clients read the completed answer from the conversation. Failed, interrupted, stopping, and stopped snapshots retain provisional text. Each reconnection begins with a new snapshot; clients do not resubmit a command. Heartbeat comments keep idle connections open. Revocation closes the revoked client's connections. The instance allows up to 256 response streams and disconnects clients whose pending output exceeds 2 MB; they can reconnect for a current snapshot. The workspace uses authenticated `fetch` to consume the stream. Progress snapshots include ordered `events` with tool calls and completed intermediate assistant messages. A changed event boundary sends a snapshot even if text is unchanged. Chat work and pending approvals also use polling.
 
 An optional profile description is directory metadata visible to other bots. A profile edit that omits it preserves its current value. The paired `POST /api/bot-discovery` endpoint accepts `requesterId` and `query`, and returns matching active or busy bots by name and description, without selecting a helper. Archived bots and the requester are excluded. Matching and limits are provisional; discovery itself does not execute collaboration. The version 12 migration backs up existing databases and initializes descriptions as empty strings. Version 13 separately records an owner-selected helper clock scope on task acceptance. Version 14 installs the collaboration journal and interrupts active assignments on restart. Version 15 installs the exact-message disclosure approval journal; pending and unused approvals are interrupted on restart. The exchange runtime has been exercised with synthetic providers, not live providers. Every request, question, answer, and result requires approval of its exact recipient and text. The helper clock scope defaults to false, retries retain it, and it does not enable a disabled capability. Version 16 journals main-chat task starts by command and tool-call ID. Version 17 adds revision-safe bot creation defaults.
+
+Paired `GET /api/core` returns `source` (`default` or `override`), effective
+`content`, `defaultContent`, host `path`, and a `revision`. `POST /api/core`
+accepts that revision and `content`; a string replaces the core and `null`
+removes the override. Empty strings are valid. Content is UTF-8, limited to
+30,000 UTF-16 code units and 120,000 bytes, and cannot contain NUL. A stale
+revision returns 409. An unreadable or invalid file and an edit to a retired
+revision return 422 with `invalid_core_configuration`. An uncertain publication
+returns 503 with `configuration_save_uncertain`. New work is rejected while
+core configuration is invalid. A lost response also requires inspection before
+retrying. Advanced Settings uses these same endpoints. It retains the draft on
+failure and requires comparison before another save. Reset removes the override;
+it does not write a copy of the default. The paired CLI uses `core`, `core-save`,
+and `core-reset`; see
+[shared core guidance](usage.md#shared-core-guidance).
 
 `GET /api/bots/ID` returns `configDir`, `instructions`, and the current
 configuration `revision`. `POST /api/bots/ID/profile` accepts `revision`,
@@ -330,9 +354,11 @@ An explicitly advertised catalog `default_model` may seed a first selection afte
 discovery; list order is never a default. Without a remembered pair, owner default
 or advertised default, the model remains unset and chatting requires a choice.
 
+Browser choice controls load model metadata on open and provider change. The composer saves explicit selections immediately; agent editors and provider defaults stage changes until saved. **Automatic** sends no explicit reasoning effort. Discovery does not authenticate or verify model access.
+
 ### Chat work records
 
-Paired `GET /api/bots/{id}/chat-work` returns `messages` (excluding background-task notices) and ordered `requests`. Each request contains its command `id`, service-owned response `progress`, and ordered `events` with stable numeric `id`, `type`, `name`, nullable numeric `success`, nullable `detail`, and its `command_id`. Tool-result detail is redacted and capped at 16,000 characters. Re-fetch replaces the snapshot; clients must not append duplicate events. Pending chat approvals come from `/api/inbox` and are matched by bot and command ID. Existing exact-ID approval decision endpoints and permission enforcement are unchanged. Background tasks remain available through explicit task endpoints and CLI operations, but are not offered to ordinary chat providers.
+Paired `GET /api/bots/{id}/chat-work` returns `messages` (excluding background-task notices) and ordered `requests`. Each request contains its command `id`, service-owned response `progress`, and ordered `events` with stable numeric `id`, `type`, `name`, nullable numeric `success`, nullable `detail`, nullable `arguments`, nullable `callId`, and its `command_id`. Event types are `tool_start`, `tool_result`, and `assistant_message`. The latter retains intermediate assistant text in `detail` (up to 1,000,000 characters), with null `callId`, arguments, and success. Schema 39 fences older readers that cannot distinguish message boundaries. The CLI runtime-event summary still contains only tools. New start and result events share a service-generated call ID. Older events have a null call ID and cannot be reliably paired. Argument and result details are redacted and capped at 16,000 characters. Re-fetch replaces the snapshot; clients must not append duplicate events. Pending chat approvals come from `/api/inbox` and are matched by bot and command ID. Existing exact-ID approval decision endpoints and permission enforcement are unchanged. Background tasks remain available through explicit task endpoints and CLI operations, but are not offered to ordinary chat providers.
 
 ## Agent image configuration and API
 
@@ -427,6 +453,16 @@ guest catalog and schemas; child capability progress uses the registered name.
 Version 33 adds execution records and marks running records
 interrupted on restart without replay. See the [action service](work-actions.md)
 for limits, recovery and adapter entry points.
+
+An ordinary failed tool result is paired with its provider call ID before the
+next provider step. Explicit action denial also permits a follow-up while the
+service keeps action admission closed. An unoffered clock call reports that it
+was not executed. Stop terminates work; failed live authority checks and fatal execution errors
+can terminate it. The default limit is four provider steps, including the
+initial request; a tool call on the last step may execute without a subsequent
+provider response. A failed chat turn does not commit its provider history;
+command progress, safe tool events, usage and action journals remain available
+where persistence succeeds.
 
 ## Host file actions
 

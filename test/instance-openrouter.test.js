@@ -16,7 +16,7 @@ test('paired OpenRouter connection survives restart, replaces and disconnects wi
   assert.deepEqual((await call('/api/openrouter-connection',token))[1],{saved:false});
   assert.deepEqual((await call('/api/openrouter-connection',token,{key:'secret-one'}))[1],{saved:true});
   assert.equal(statSync(join(dir,'auth','openrouter.json')).mode & 0o777,0o600);
-  assert.equal((await call('/api/bots',token,{name:'secret-one'}))[0],400);
+  assert.equal((await call('/api/bots',token,{provider:'live',model:'fixture-offline',name:'secret-one'}))[0],400);
   assert.equal((await call('/api/openrouter-connection',token,{key:''}))[0],400);
   assert.equal((await call('/api/openrouter-connection',token,{key:'\\'.repeat(4096)}))[0],400);
   assert.deepEqual((await call('/api/openrouter-connection',token))[1],{saved:true});
@@ -48,7 +48,7 @@ test('managed keys drive independent agents without fallback or secret persisten
  const settle=async(id,token)=>{for(let i=0;i<100;i++){const result=(await call('/api/commands/'+id,token))[1];if(result.state!=='pending')return result;await new Promise(r=>setTimeout(r,5));}throw Error('Command timeout');};
  try{
   const token=(await call('/api/pair','',{code:app.code}))[1].token;
-  const a=(await call('/api/bots',token,{name:'A'}))[1],b=(await call('/api/bots',token,{name:'B'}))[1];
+  const a=(await call('/api/bots',token,{provider:'live',model:'fixture-offline',name:'A'}))[1],b=(await call('/api/bots',token,{provider:'live',model:'fixture-offline',name:'B'}))[1];
   for(const [bot,model] of [[a,'first/model'],[b,'second/model']]) assert.equal((await call(`/api/bots/${bot.id}/profile`,token,{revision:bot.revision,name:bot.name,instructions:'',provider:'openrouter',model,reasoning:null}))[0],200);
   await call('/api/commands',token,{id:'missing',botId:a.id,content:'hello'});assert.equal((await settle('missing',token)).state,'failed');assert.equal(requests.length,0);
   await call('/api/openrouter-connection',token,{key:'synthetic-managed-one'});
@@ -66,8 +66,8 @@ test('damaged credentials can be repaired after restart and do not block agent c
  const {mkdirSync,writeFileSync}=await import('node:fs');const dir=mkdtempSync(join(tmpdir(),'staf-router-repair-'));mkdirSync(join(dir,'auth'));writeFileSync(join(dir,'auth','openrouter.json'),'invalid');
  const app=startInstance(join(dir,'db'),0,{env:{}}),port=await app.listen();
  const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return [r.status,await r.json()]};
- try{const token=(await call('/api/pair','',{code:app.code}))[1].token;assert.equal((await call('/api/openrouter-connection',token))[0],400);assert.equal((await call('/api/bots',token,{name:'XYZ'}))[0],201);
-  assert.deepEqual((await call('/api/openrouter-connection',token,{key:'a'}))[1],{saved:true});assert.equal((await call('/api/bots',token,{name:'XYZ'}))[0],201);
+ try{const token=(await call('/api/pair','',{code:app.code}))[1].token;assert.equal((await call('/api/openrouter-connection',token))[0],400);assert.equal((await call('/api/bots',token,{provider:'live',model:'fixture-offline',name:'XYZ'}))[0],201);
+  assert.deepEqual((await call('/api/openrouter-connection',token,{key:'a'}))[1],{saved:true});assert.equal((await call('/api/bots',token,{provider:'live',model:'fixture-offline',name:'XYZ'}))[0],201);
   assert.deepEqual((await call('/api/openrouter-connection/disconnect',token,{}))[1],{saved:false});
  }finally{await app.close();rmSync(dir,{recursive:true,force:true});}
 });
@@ -78,14 +78,14 @@ test('provider profile saves are revision checked, independent and do not reques
  const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return [r.status,await r.json()]};
  try{
   const token=(await call('/api/pair','',{code:app.code}))[1].token;
-  const a=(await call('/api/bots',token,{name:'A',provider:'demo'}))[1],b=(await call('/api/bots',token,{name:'B',provider:'demo'}))[1];
+  const a=(await call('/api/bots',token,{name:'A',provider:'live',model:'fixture-offline'}))[1],b=(await call('/api/bots',token,{name:'B',provider:'live',model:'fixture-offline'}))[1];
   const edit={revision:a.revision,name:a.name,instructions:'',provider:'openrouter',model:'fixture/model',reasoning:null};
   assert.equal((await call(`/api/bots/${a.id}/profile`,'',edit))[0],401);
   await call('/api/openrouter-connection',token,{key:'synthetic-key'});
   assert.equal((await call(`/api/bots/${a.id}/profile`,token,edit))[0],200);
   assert.notEqual((await call(`/api/bots/${a.id}/profile`,token,edit))[0],200);
   const saved=(await call(`/api/bots/${a.id}`,token))[1],other=(await call(`/api/bots/${b.id}`,token))[1];
-  assert.equal(saved.provider,'openrouter');assert.equal(saved.model,'fixture/model');assert.equal(other.provider,'demo');assert.equal(other.revision,b.revision);
+  assert.equal(saved.provider,'openrouter');assert.equal(saved.model,'fixture/model');assert.equal(other.provider,'live');assert.equal(other.revision,b.revision);
   assert.match(readFileSync(join(saved.configDir,'agent.toml'),'utf8'),/openrouter/);
   await call('/api/openrouter-connection/disconnect',token,{});
   assert.equal((await call(`/api/bots/${a.id}`,token))[1].provider,'openrouter');
@@ -114,7 +114,7 @@ test('paired service and actual CLI use streaming OpenRouter tool calls, recover
  const until=async fn=>{for(let i=0;i<1500;i++){const result=await fn();if(result)return result;await new Promise(r=>setTimeout(r,10));}throw Error('timeout');};
  try{
   await cli('pair',url,credential,app.code);const token=JSON.parse(readFileSync(credential,'utf8')).token;
-  const bot=JSON.parse(await cli('create',url,credential,'Router'));await call(`/api/bots/${bot.id}/profile`,token,{revision:bot.revision,name:bot.name,instructions:'Use tools',provider:'openrouter',model:'fixture/model',reasoning:null});
+  const bot=JSON.parse(await cli('create',url,credential,'Router','--provider','live','--model','fixture-offline'));await call(`/api/bots/${bot.id}/profile`,token,{revision:bot.revision,name:bot.name,instructions:'Use tools',provider:'openrouter',model:'fixture/model',reasoning:null});
   await call('/api/approval-settings/instance',token,{mode:'never-ask',clockEnabled:true});
   assert.equal(requests.length,0);await call('/api/openrouter-connection',token,{key:'synthetic-stream-key'});assert.equal(requests.length,0);
   const send=await cli('send',url,credential,bot.id,'Use clock'),id=send.match(/Command ID: ([\w-]+)/)[1];

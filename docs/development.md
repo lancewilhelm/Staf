@@ -97,9 +97,8 @@ corepack pnpm dev:reset
 corepack pnpm dev
 ```
 
-The reset prints a complete backup directory and creates new agent IDs. The seed
-contains Demo agents, short and long conversations, memories, an empty chat, and
-a synthetic failed request. It does not authenticate or call a provider. Normal
+The reset prints a complete backup directory and creates new agent IDs. The reset creates an empty, unconfigured instance. Choose a provider and model
+before creating agents. Reset does not authenticate or call a provider. Normal
 starts retain edits and never run the reset. Reset leaves the `auth` directory
 and any selected `STAF_DEV_CONNECTION_DIR` intact. Use the same environment
 variables for reset, recovery, and startup.
@@ -109,13 +108,15 @@ with a new launcher code. Browser drafts and pending creations are scoped to a
 dataset; records from a prior dataset stay separate. On an ordinary upgrade,
 older unscoped drafts with a matching stored command and agent, and creations
 with a matching stored operation, can recover automatically. Other unscoped
-records remain in browser storage. Open **Earlier browser records** to inspect
-and copy their text and operation IDs; Staf cannot establish their origin or
-submit them automatically. Copy needed text before resetting. Normal backend
+records remain in browser storage. Open **Settings > Earlier browser records**
+to copy their text and operation IDs or discard an individual record. Staf cannot
+establish their origin or submit them automatically. Discard leaves changed or
+locked records in place. Copy needed text before resetting. Normal backend
 restarts keep the dataset identity and recover current records.
 
 Staf writes a backup under the development data directory before reset and before
-a supported schema upgrade. It includes SQLite and authoritative agent files,
+a supported schema upgrade. It includes SQLite, authoritative agent files, and the
+complete core revision tree,
 but not provider credentials. Protect the backup like the original conversations.
 If startup reports interrupted maintenance, stop all instances and run:
 
@@ -140,6 +141,8 @@ Restore saves the current dataset first. It retains current provider connections
 clears restored client authorizations, and assigns a fresh browser dataset identity.
 When the backup predates the first database, restore leaves an empty SQLite database
 ready for initialization, so the database path remains protected during publication.
+Backups without a core tree restore the current built-in core. An empty core
+override in a newer backup remains empty. Reset also selects the built-in core.
 Use code compatible with the restored schema. The command does not automatically
 start Staf. If restore is interrupted, `dev:recover` restores the state from before
 that restore. Keep backups until you have checked the restored content. An abrupt
@@ -148,7 +151,7 @@ process termination can leave private staging directories in the data directory.
 For a disposable offline check, run `node --test test/dev-launch.test.js` and
 `node test/browser/dev-smoke.mjs` and `node test/browser/dataset-smoke.mjs` after installing dependencies. The latter
 requires the Chrome executable described below. These checks use synthetic
-credentials and demo responses; they do not prove live sign-in, token refresh,
+credentials and controlled responses; they do not prove live sign-in, token refresh,
 provider access, or inference.
 With commit `d2ab6fc` available in local Git history, `node test/manual/older-writer-probe.mjs`
 also runs its actual older constructor against a paused replacement and after a
@@ -185,6 +188,16 @@ For a workspace change, run the served GUI smoke journey after building:
 node test/browser/gui-smoke.mjs
 ```
 
+For shared core settings changes, also run the disposable paired browser and CLI
+journey after building:
+
+```sh
+node test/browser/core-settings-smoke.mjs
+```
+
+It uses synthetic settings and a controlled provider. It does not verify live
+provider behavior or cache reuse.
+
 For memory settings changes, also run the focused read-only browser journey:
 
 ```sh
@@ -202,7 +215,7 @@ instance and uses synthetic provider and sign-in fixtures. It does not verify
 live provider access. The chat journey covers the circular Send/Stop action,
 keyboard submission and Stop, delayed cancellation settlement, editable next
 drafts, cross-tab Stop, long Markdown responses, scroll following, code Copy,
-and narrow Light/Dark/System layouts. Docker-specific tests may be skipped without Docker;
+repeated tool calls, response element continuity, and narrow Light/Dark/System layouts. Docker-specific tests may be skipped without Docker;
 report those skips separately.
 
 The combined basic-tool checks use the same disposable-instance boundary:
@@ -231,8 +244,9 @@ node test/browser/held-instance.mjs .staf/chat-review/instance.sqlite 3211
 ```
 
 Open `http://127.0.0.1:3211`, pair with the code printed by that process,
-and create a Demo agent from **New agent**. This fixture uses synthetic providers
-and stores review data separately under `.staf/chat-review`.
+and create an agent from **New agent** with provider `lmstudio` and model
+`fixture-model`. This fixture supplies a synthetic provider and stores review
+data separately under `.staf/chat-review`; it does not contact LM Studio.
 
 **Connect ChatGPT** opens a loopback page labeled **Simulated ChatGPT sign-in**.
 Choose **Complete simulated sign-in** to exercise the connected state. This does
@@ -266,8 +280,13 @@ registration remains unverified by the offline checks. See
   Reload to check persistence. Collapse the sidebar: the agent rail stays visible
   and the expand icon moves to the header. Open the composer model popup; check
   arrow/Home/End navigation, Tab/Escape dismissal with focus return,
-  selection checkmarks, and outside-click dismissal. New agent opens a modal:
-  expect Name focus, trapped Tab navigation, and Escape returning focus.
+  selection checkmarks, and outside-click dismissal. New agent opens the shared
+  editor with Name focused. Navigate away and return to check draft retention.
+  Cancel to discard the unsaved form.
+  The agent name and avatar open agent settings. Archive and ChatGPT sign-out
+  open in-app confirmations; Escape cancels and returns focus. The message
+  composer shows a focus indicator for keyboard navigation without a border
+  change when clicked.
   Settings should show theme cards, palette swatches, provider cards and an
   Edit defaults disclosure. Buttons
   keep their appearance on pointer hover and show keyboard focus.
@@ -282,7 +301,7 @@ exact-action Approve once/Deny controls, and a retained tool outcome. Refresh or
 use another paired client to decide; the original conversation updates on its
 next poll.
 
-For an offline basic-tool review, use a Demo agent and repeat these steps with
+For an offline basic-tool review, use the controlled fixture agent and repeat these steps with
 **Agent settings → Tool mode** set to Direct, Hybrid and Code Mode:
 
 1. Send `Scripted clock fixture`. Expect the time and an action record. Hybrid
@@ -369,6 +388,36 @@ distinguish synthetic coverage from live provider, VM, or Docker acceptance.
 For docs-only changes, report the relevant documentation checks instead of
 requiring an application launch.
 
+## Review the agent editor
+
+On the implementation branch, stop another development launcher using the same
+port and data directory, then run `corepack pnpm dev`. Reuse the paired browser
+at `http://127.0.0.1:3210/`. Open **New agent**, enter a name and change an image
+or another field. Navigate to Settings and return to **New agent**; expect the
+unsaved values to return. Select **Cancel**, reopen the form, and expect a fresh
+form. Create an agent, then open its settings from the chat header. Change several
+fields, including provider and model. Navigate to another agent and back; expect
+the draft to remain. Select **Save settings**, cancel the provider confirmation,
+and expect the draft to remain. Confirm a subsequent save and expect all values
+to appear together when settings reopen. No provider request is needed.
+
+For controlled offline checks, build and run `node test/browser/agent-images-smoke.mjs`
+and `node test/browser/gui-smoke.mjs`. These use disposable instances and scripted
+providers; they do not prove live provider behavior.
+
+## Use Lucide icons
+
+Use [Icônes](https://icones.js.org/collection/lucide) to browse the Lucide set.
+The Vue workspace imports individual components from the pinned `@lucide/vue`
+development dependency. Vite bundles the selected inline SVGs locally, with no
+icon API or CDN request. See [Lucide's Vue guide](https://lucide.dev/guide/vue/getting-started).
+
+Import each icon by name, as `InfoHelp.vue` imports `Info`. Use `currentColor`,
+a stroke width of 2, and a size that fits its control. Keep an accessible name on
+the button and mark its decorative SVG `aria-hidden="true"`. Preserve keyboard
+focus and the existing hover, focus, click, and touch help interactions.
+The fixed Staf logo and agent avatars keep their own renderers.
+
 ## Review agent images
 
 On the implementation branch, stop another development launcher using the same
@@ -417,10 +466,24 @@ and expect the process to reach an observed exited state. This is a controlled p
 
 `node --test test/task-work-actions.test.js` after `corepack pnpm exec tsc -p tsconfig.json` exercises paired disposable tasks with controlled providers and the real QuickJS worker. It covers all modes, owner input and a differently configured helper. Existing `test/background-task.test.js`, `test/clock-approval.test.js`, and `test/collaboration-integration.test.js` exercise task lifecycle and CLI behavior. These are local synthetic-provider checks; they do not establish GUI, live-provider, Docker or production behavior.
 
-For a manual CLI check, start the controlled fixture as described in [Review chat locally without a provider](#review-chat-locally-without-a-provider). Pair the CLI with `node dist/cli.js instance pair http://127.0.0.1:3211 .staf/chat-review/client.json PAIRING_CODE`. Create a Demo agent in the workspace and select a tool mode. Use `node dist/cli.js instance bots http://127.0.0.1:3211 .staf/chat-review/client.json` to find its ID, then run `node dist/cli.js instance task-start http://127.0.0.1:3211 .staf/chat-review/client.json AGENT_ID "Scripted clock fixture"`. Inspect the printed attempt ID with `instance task` using the same URL and credential path. Expect a completed task and a succeeded clock action. Hybrid and Code Mode also show a returned code execution. Repeat after changing the agent mode; each new attempt uses the selected mode.
+For a manual CLI check, start the controlled fixture as described in [Review chat locally without a provider](#review-chat-locally-without-a-provider). Pair the CLI with `node dist/cli.js instance pair http://127.0.0.1:3211 .staf/chat-review/client.json PAIRING_CODE`. Create a controlled fixture agent in the workspace and select a tool mode. Use `node dist/cli.js instance bots http://127.0.0.1:3211 .staf/chat-review/client.json` to find its ID, then run `node dist/cli.js instance task-start http://127.0.0.1:3211 .staf/chat-review/client.json AGENT_ID "Scripted clock fixture"`. Inspect the printed attempt ID with `instance task` using the same URL and credential path. Expect a completed task and a succeeded clock action. Hybrid and Code Mode also show a returned code execution. Repeat after changing the agent mode; each new attempt uses the selected mode.
 
 ### Interactive terminal verification
 
 After one build, run `node --test test/native-interactive.test.js` for the paired real pipe/PTY, retained-work, EOF/resize, cross-client/CLI, Stop, privacy and input-recovery checks. Reuse these disposable fixtures for focused development; run the required check/full suite at completed integration and the combined GUI/CLI journey at final feature acceptance. No extra test environment or live provider is needed. The distribution test packs Staf, installs production dependencies, and executes a real PTY command using the installed native binding. Linux runtime is separate from macOS arm64 evidence.
 
-For a manual offline check, use the existing controlled instance above, create a Hybrid Demo agent and send `Interactive process fixture`. Its process should remain running after the response. Open process details, set a size and select Resize terminal, type `hello` and select Send line, then refresh output. Expect `answer:hello` in the terminal stream. Select Stop process and expect an observed exit. The same resource is inspectable and controllable from the paired CLI.
+For a manual offline check, use the existing controlled instance above, create a Hybrid fixture agent and send `Interactive process fixture`. Its process should remain running after the response. Open process details, set a size and select Resize terminal, type `hello` and select Send line, then refresh output. Expect `answer:hello` in the terminal stream. Select Stop process and expect an observed exit. The same resource is inspectable and controllable from the paired CLI.
+
+## Creation defaults and legacy Demo data
+
+Use a disposable instance when testing default selection or migration. Set a real provider and synthetic model in Settings without signing in. Saving the choice migrates Demo agents, including archived records. To test a failed migration, make a disposable agent configuration invalid, save the default, repair the file, and reload the defaults. Other valid agents can still accept work. The migration retries without replacing agents already moved to a real provider.
+## Verify shared core guidance
+
+After building, run `node --test test/instance-core.test.js`. The disposable
+fixture exercises paired CLI and API saves, direct edits, revision conflicts,
+late writes, reset, and captured chat and task instructions. It uses controlled
+providers and does not measure live model behavior or cache reuse.
+
+## Verify the model picker
+
+For model picker changes, build the application and run `node test/browser/provider-picker-smoke.mjs` and `node test/browser/gui-smoke.mjs`. The picker journey uses a disposable paired instance and controlled metadata. It does not verify live provider access or inference.

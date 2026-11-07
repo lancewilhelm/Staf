@@ -42,7 +42,7 @@ to agents. See the [consolidated plan](chat-polish-plan.md).
 | Name and instructions | Require a nonblank owner-supplied name. Role instructions are optional. Creation needs no model request or working provider. | Revised by owner on 2026-11-01 |
 | Description | Optional owner-editable text, initially blank. Do not add another required setup field or a model-generated description. | Agreed B2 |
 | Soul | Start with a deterministic neutral template. One soul.md contains personality, role, and standing guidance. No automatic self-rewriting in this delivery. | B3 amended by owner on 2026-11-01 |
-| Provider, model and reasoning | Copy initial values into the bot at creation. Later creation-default changes do not alter existing bots. The owner edits each bot's own values. | Agreed B7; replaces live inheritance |
+| Provider, model and reasoning | Copy initial values into the bot at creation. Later creation-default changes leave existing real-provider bots unchanged. Saving a real default also migrates remaining Demo bots. The owner edits each bot's own values. | Agreed B7; replaces live inheritance |
 | Main chat | Create exactly one durable main chat with the bot, as one all-or-nothing operation. | Agreed chat; recommended B4 atomic creation |
 | Revision | Version accepted profile edits. An edit based on an old revision reports a conflict instead of overwriting a newer edit. | Agreed B5 |
 | Lifecycle | Active or archived. Archive/restore preserves the profile and history. Permanent deletion waits for later MVP work. | Agreed B6 |
@@ -93,7 +93,7 @@ next action. Copying configuration never freezes or expands authority.
 
 An authenticated owner can create or edit a bot before live credentials or model
 selection are ready. Report missing setup when execution is requested and keep
-settings usable. The existing offline demo remains available. Do not silently
+settings usable. The former offline demo was removed after this agreement. Do not silently
 switch providers, select an invented model, or make a live call just to save a
 profile. Provider credentials stay in the instance credential/configuration
 boundary; profiles and clients receive readiness, not the underlying credentials.

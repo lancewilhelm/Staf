@@ -27,7 +27,7 @@ export async function runCode(input:{actions:WorkActions;responseId:string;callI
       if(message.type==='emit') {emitted.push(keep(message.value));persist();return {ok:true as const,value:null};}
       if(message.type==='reuse') {const value=receipts.get(message.receipt);if(value===undefined)return {ok:false as const,error:'Receipt unavailable'};return {ok:true as const,value};}
       const eventId=`${id}:${message.seq}`;
-      input.emit?.({type:'tool_start',id:eventId,name:message.name});
+      input.emit?.({type:'tool_start',id:eventId,name:message.name,arguments:JSON.stringify(safe(message.input))});
       let result:Awaited<ReturnType<WorkActions['invoke']>>;
       try {result=await actions.invoke({source:{kind:'guest',executionId:id,sequence:message.seq},name:message.name,input:message.input,intent:message.intent ?? {kind:'new'}});}
       catch(error) {input.emit?.({type:'tool_result',id:eventId,name:message.name,success:false,content:'Capability call failed'});throw error;}
@@ -57,6 +57,7 @@ export async function runCode(input:{actions:WorkActions;responseId:string;callI
   let result:Json={emitted};
   if(end.outcome==='return' && !fatal) {try {result={emitted,value:keep(end.value)};} catch { /* limit closed admission */ }}
   actions.finishExecution(id,fatal?'closed':end.outcome,JSON.stringify(result));
+  if(fatal==='Action denied' && !actions.context.workSignal.aborted) return JSON.stringify({executionId:id,outcome:'denied',notice:'Action denied. No further actions are admitted for this work.'});
   if(fatal) throw Error(fatal);
   if(end.outcome!=='return') {
     const manifest=actions.beginRecovery();

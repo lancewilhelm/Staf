@@ -1,3 +1,4 @@
+import {isProviderId} from './provider-ids.js';
 import {registerSkillCapability, skillTracker, skillWorkKey, type SkillTracker} from './skill-actions.js';
 import { z } from 'zod';
 import { ActionDenied, ActionFailed, type Capability, type ActionIdentity } from './work-actions.js';
@@ -17,19 +18,20 @@ import { readWebSource, checkedOwnerWebUrl, containsUnsafeWebUrl, type Dependenc
 import type { WorkRef } from './action-journal.js';
 import type { GrantBoundary } from './approval-grants.js';
 type GrantChoice = {scope:'bot'|'all-bots';lifetime:'task'|'remembered'};
+const retiredProviderMessage = 'This work uses a retired provider. Choose a supported provider and submit new work.';
 import { InstanceAuth } from './instance-auth.js';
 import { prepareDirectLogin, completeDirectLogin, loadDirectCredential, directAuth, authorizationUrl } from './codex-direct-auth.js';
 import { createServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { assertDatasetAvailable, BotConflict, Instance } from './instance.js';
 import { AgentConfigConflict, AgentConfigInvalid, AgentConfigUncertain } from './agent-config.js';
+import {CoreInvalid} from './instance-core.js';
 import {agentImageBodyType,agentImageBodyLimit,parseAgentImageInput} from './agent-image.js';
 import { MemoryConflict, type MemoryScope } from './memory.js';
 import { selectProvider } from './registry.js';
 import { runTurn } from './runtime.js';
 import { redactor, streamingRedactor, byteStreamRedactor, credentialRedactionOverlap, redactValue, type Environment } from './config.js';
-import { chatSystemMessage } from './prompts.js';
 import { SkillConflict } from './skill-catalog.js';
 import { dirname, resolve } from 'node:path';
 import { readFileSync } from 'node:fs';
@@ -47,6 +49,16 @@ import { loadOpenRouterKey, saveOpenRouterKey, disconnectOpenRouter } from './op
 export function startInstance(path: string, port = 0, options: {dataDir?: string; publicOrigin?: string; maintenanceToken?:string; env?: Environment; enableCollaboration?: boolean; enableReusableApprovals?: boolean; localBootstrapToken?: string; authNow?:()=>number; authLifetimeMs?:number; webDependencies?:WebDependencies; searchTransport?:SearchTransport; shellExecutor?:typeof executeShellSandbox; modelRequest?:typeof fetch; authHooks?: {prepare:typeof prepareDirectLogin; complete:typeof completeDirectLogin; authorizationUrl?:typeof authorizationUrl}; providerFactory?: (profile: {provider:string; model:string | null; reasoning:string | null; instructions:string; chatId:string}, instructions:string) => Promise<Provider>} = {}) {
   assertDatasetAvailable(path,options.maintenanceToken);
   const selectionCatalogs=new Map<string,ModelCatalog>();
+  const catalogRequests=new Map<string,number>();
+  async function selectionCatalog(settings:Parameters<typeof discoverModels>[0], discoveryOptions:Parameters<typeof discoverModels>[1]) {
+    const provider=settings.provider.value;
+    const request=(catalogRequests.get(provider)??0)+1;
+    catalogRequests.set(provider,request);
+    selectionCatalogs.delete(provider);
+    const catalog=await discoverModels(settings,discoveryOptions);
+    if(catalogRequests.get(provider)===request) selectionCatalogs.set(provider,catalog);
+    return catalog;
+  }
   const env = options.env ?? process.env;
   const dataDir = options.dataDir ?? resolve(dirname(path));
   const knownKeys = new Set<string>();
@@ -59,7 +71,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
   if (options.localBootstrapToken) instance.bootstrapLocal(options.localBootstrapToken);
   const active = new Set<AbortController>();
   const responseControllers = new Map<string,AbortController>();
-  type ResponseSubscriber={botId:string;token:string;response:ServerResponse;last:{id:string;state:string;text:string}|null};
+  type ResponseSubscriber={botId:string;token:string;response:ServerResponse;last:{id:string;state:string;text:string;eventId:number}|null};
   const responseSubscribers=new Set<ResponseSubscriber>();
   function publishResponse(botId:string) {
     if(![...responseSubscribers].some(subscriber=>subscriber.botId===botId))return;
@@ -71,12 +83,13 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
       if(subscriber.response.writableLength>2_000_000){subscriber.response.destroy();continue;}
       const last=subscriber.last;
       if(progress && typeof progress.id==='string' && typeof progress.state==='string' && typeof progress.text==='string') {
+        const eventId=Number(progress.events.at(-1)?.id ?? 0);
         const visible=progress.state==='completed'?{...progress,text:''}:progress;
-        if(last && last.id===progress.id && last.state==='running' && progress.state==='running' && progress.text.startsWith(last.text)) {
+        if(last && last.id===progress.id && last.eventId===eventId && last.state==='running' && progress.state==='running' && progress.text.startsWith(last.text)) {
           const text=progress.text.slice(last.text.length);
           if(text)subscriber.response.write(`data: ${JSON.stringify({type:'delta',id:progress.id,text})}\n\n`);
         } else subscriber.response.write(`data: ${JSON.stringify({type:'snapshot',response:visible})}\n\n`);
-        subscriber.last={id:progress.id,state:progress.state,text:progress.state==='completed'?'':progress.text};
+        subscriber.last={id:progress.id,state:progress.state,text:progress.state==='completed'?'':progress.text,eventId};
       } else {subscriber.response.write(`data: ${JSON.stringify({type:'snapshot',response:null})}\n\n`);subscriber.last=null;}
     }
   }
@@ -270,6 +283,11 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
     if(current.outcome === 'block') { if(workKind === 'task') instance.taskEvent(workId,{type:'approval_blocked',reason:current.reason}); throw Error('Clock blocked by '+current.reason); }
   }
 
+  function clockUnavailable(botId:string,kind:'command'|'task',id:string):string {
+    const decision=instance.clockDecision(botId,kind,id);
+    return decision.outcome==='block' ? `Clock blocked by ${decision.reason}` : 'Clock authorization failed';
+  }
+
   const processes=instance.processes(()=>byteStreamRedactor(env,()=>[...knownKeys]));
   const workActions=instance.workActions();
   const nativeAllowed=(work:import('./work-actions.js').WorkContext)=>instance.nativeProcessAllowed(work.work);
@@ -342,9 +360,9 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
             const {profile,context,objective,limitMs}=instance.taskExecution(id); instance.taskStart(id);
             taskTimers.set(id,{pause,resume});
             remaining=limitMs; resume();
-            if (!['demo','codex','openrouter','lmstudio','live'].includes(profile.provider)) throw Error('Unsupported provider');
-            if (profile.provider !== 'demo' && !profile.model?.trim()) throw Error('Set a model in the agent profile');
-            const instructions=`${chatSystemMessage.content}\n\nBot instructions:\n${profile.instructions}`;
+            if (!isProviderId(profile.provider)) throw Error(retiredProviderMessage);
+            if (!profile.model?.trim()) throw Error('Set a model in the agent profile');
+            const instructions=`${profile.core}${profile.core ? "\n\n" : ""}Bot instructions:\n${profile.instructions}`;
             const taskProfile={...profile,chatId:id};
             const provider=options.providerFactory ? await options.providerFactory(taskProfile,instructions) : (await selectProvider(profile.provider,{env:providerEnv(profile.provider),model:profile.model ?? undefined,reasoning:profile.reasoning ?? undefined,dataDir,sessionId:id,instructions})).provider;
             controller.signal.throwIfAborted();
@@ -363,9 +381,9 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
             const skills=skillTracker(skillAccess(instance.taskAttempt(id)!.botId,instance.taskSkills(id)),redact);
             skillTrackers.set(skillWorkKey(skillWork),skills);
             const actions=workActions.open(skillWork,controller.signal);
-            try {await runTurn({session,provider,actions,clockUnavailable:()=>`Clock blocked by ${instance.clockDecision(actions.context.botId,'task',id).reason}`,skills,requestText:objective,memory:query=>instance.isHelperAttempt(id) ? [] : recall(instance.taskAttempt(id)!.botId,query),text:notices.length ? `Task updates in captured chat:\n${notices.join('\n')}\n\nTask objective:\n${objective}` : objective,redact,signal:controller.signal,preserveObservedAfterAbort:true,authorizeClock:()=>authorizeClock(instance.taskAttempt(id)!.botId,'task',id,controller.signal,pause,resume),emit:event=>{if(event.type !== 'assistant') instance.taskEvent(id,event.type === 'error' ? {type:'error',message:'Provider request failed'} : event)},task,store:{save:async updated=>instance.taskSave(id,updated)}});} finally {actions.dispose();taskActionHooks.delete(id);skillTrackers.delete(skillWorkKey(skillWork));}
+            try {await runTurn({session,provider,actions,clockUnavailable:()=>clockUnavailable(actions.context.botId,'task',id),skills,requestText:objective,memory:query=>instance.isHelperAttempt(id) ? [] : recall(instance.taskAttempt(id)!.botId,query),text:notices.length ? `Task updates in captured chat:\n${notices.join('\n')}\n\nTask objective:\n${objective}` : objective,redact,signal:controller.signal,preserveObservedAfterAbort:true,authorizeClock:()=>authorizeClock(instance.taskAttempt(id)!.botId,'task',id,controller.signal,pause,resume),emit:event=>{if(event.type !== 'assistant') instance.taskEvent(id,event.type === 'error' ? {type:'error',message:'Provider request failed'} : event)},task,store:{save:async updated=>instance.taskSave(id,updated)}});} finally {actions.dispose();taskActionHooks.delete(id);skillTrackers.delete(skillWorkKey(skillWork));}
           } catch (error) {
-            if (!closing) { try { let stopped=controller.signal.aborted; const outcome=stopped?'Task stopped':error instanceof Error && (error.message === 'Set a model in the agent profile' || error.message === 'Selected skill is no longer available' || error.message.startsWith('Clock ')) ? error.message : 'Provider request failed';let disclosureId:string|undefined;const assignment=instance.helperAssignment(id);if(!stopped && assignment && assignment.state === 'active' && instance.taskAttempt(String(assignment.parent_attempt_id))?.state === 'running'){try{disclosureId=await authorizeDisclosure({parentAttemptId:String(assignment.parent_attempt_id),senderBotId:String(assignment.helper_bot_id),recipientBotId:String(assignment.requester_bot_id),kind:'failure',content:outcome},controller.signal,pause,resume);}catch{stopped=true;try{instance.taskStop(id,'Helper disclosure denied');}catch{}}}nextId=instance.taskFinish(id,stopped?'stopped':'failed',stopped?'Task stopped':outcome,disclosureId); } catch {try{if(instance.isHelperAttempt(id)){instance.taskStop(id,'Helper could not deliver its outcome');nextId=instance.taskFinish(id,'stopped','Task stopped');}}catch{}} }
+            if (!closing) { try { let stopped=controller.signal.aborted; const outcome=stopped?'Task stopped':error instanceof Error && (error.message === 'Set a model in the agent profile' || error.message === retiredProviderMessage || error.message === 'Tool iteration limit reached' || error.message === 'Selected skill is no longer available' || error.message.startsWith('Clock ')) ? error.message : 'Provider request failed';let disclosureId:string|undefined;const assignment=instance.helperAssignment(id);if(!stopped && assignment && assignment.state === 'active' && instance.taskAttempt(String(assignment.parent_attempt_id))?.state === 'running'){try{disclosureId=await authorizeDisclosure({parentAttemptId:String(assignment.parent_attempt_id),senderBotId:String(assignment.helper_bot_id),recipientBotId:String(assignment.requester_bot_id),kind:'failure',content:outcome},controller.signal,pause,resume);}catch{stopped=true;try{instance.taskStop(id,'Helper disclosure denied');}catch{}}}nextId=instance.taskFinish(id,stopped?'stopped':'failed',stopped?'Task stopped':outcome,disclosureId); } catch {try{if(instance.isHelperAttempt(id)){instance.taskStop(id,'Helper could not deliver its outcome');nextId=instance.taskFinish(id,'stopped','Task stopped');}}catch{}} }
           } finally { if(timer) clearTimeout(timer); active.delete(controller); taskControllers.delete(id); taskTimers.delete(id); processes.finishWork({kind:'task',id}); if(!closing) abortDelegatedChildren(id); if(nextId && !closing) executeTask(nextId); }})();
   }
   function tickSchedules() {
@@ -404,7 +422,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
           const credential=req.headers.authorization?.match(/^Bearer ([A-Za-z0-9_-]+)$/)?.[1];
           if(!credential || !instance.authorized(credential))return rejectBody(401,'Unauthorized');
         } else if (!req.headers['content-type']?.startsWith('application/json')) return rejectBody(415,'JSON required');
-        const bodyLimit=imageBody ? agentImageBodyLimit : (req.url === '/api/skills' || /^\/api\/skills\/[\w-]+\/update$/.test(req.url ?? '')) ? 1600000 : 65536;
+        const bodyLimit=imageBody ? agentImageBodyLimit : req.url === '/api/core' ? 200000 : (req.url === '/api/skills' || /^\/api\/skills\/[\w-]+\/update$/.test(req.url ?? '')) ? 1600000 : 65536;
         const chunks:Buffer[]=[];let size=0;
         for await (const chunk of req) { const bytes=Buffer.isBuffer(chunk)?chunk:Buffer.from(chunk);size+=bytes.length;if(size>bodyLimit)chunks.length=0;else chunks.push(bytes); }
         if(size>bodyLimit)return rejectBody(413,'Body too large');
@@ -427,6 +445,14 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
         res.writeHead(200,{'Content-Type':'image/png','Content-Length':bytes.length});return res.end(bytes);
       }
       if(req.method==='POST' && (req.url==='/api/bots' || req.url==='/api/creation-defaults' || req.url==='/api/provider-defaults' || /^\/api\/bots\/[\w-]+\/selection$/.test(req.url??'') || /^\/api\/bots\/[\w-]+\/profile$/.test(req.url ?? '')) && JSON.stringify(redactValue(value,redact))!==JSON.stringify(value)) return json(400,{error:'Agent configuration cannot contain a credential'});
+      if(req.url==='/api/core') {
+        if(req.method==='GET') return json(200,instance.core());
+        if(req.method==='POST') {
+          if(typeof value.revision!=='string' || !/^[a-f0-9]{64}$/.test(value.revision) || !(value.content===null || typeof value.content==='string')) return json(400,{error:'Invalid core'});
+          if(typeof value.content==='string' && redact(value.content)!==value.content) return json(400,{error:'Core cannot contain a credential'});
+          return json(200,instance.saveCore({revision:value.revision,content:value.content}));
+        }
+      }
       if(req.url==='/api/openrouter-connection') {
         if(req.method==='GET') return json(200,{saved:!!loadOpenRouterKey(dataDir)});
         if(req.method==='POST') {saveOpenRouterKey({root:dataDir,key:value.key});if(typeof value.key==='string') knownKeys.add(value.key);return json(200,{saved:true});}
@@ -575,17 +601,17 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
       }
       if(req.url==='/api/provider-defaults') {
         if(req.method==='GET')return json(200,instance.providerDefaults().read());
-        if(req.method==='POST') {if(typeof value.revision!=='string'||typeof value.provider!=='string'||!(value.model===null||typeof value.model==='string')||!(value.reasoning===null||typeof value.reasoning==='string'))return json(400,{error:'Invalid provider defaults'});return json(200,instance.providerDefaults().set(value.revision,value.provider,{model:value.model,reasoning:value.reasoning}));}
+        if(req.method==='POST') {if(typeof value.revision!=='string'||typeof value.provider!=='string'||!isProviderId(value.provider)||!(value.model===null||typeof value.model==='string')||!(value.reasoning===null||typeof value.reasoning==='string'))return json(400,{error:'Invalid provider defaults'});return json(200,instance.providerDefaults().set(value.revision,value.provider,{model:value.model,reasoning:value.reasoning}));}
       }
       if(req.url==='/api/models'&&req.method==='POST') {
-        if(typeof value.provider!=='string'||!['demo','codex','openrouter','lmstudio','live'].includes(value.provider))return json(400,{error:'Invalid provider'});
+        if(typeof value.provider!=='string'||!isProviderId(value.provider))return json(400,{error:'Invalid provider'});
         if(loggingOut)return json(409,{error:'Sign-out in progress'});
         const settings=resolveSettings({saved:{},file:{},shell:env,cli:{provider:value.provider},session:{}});
-        const catalog=await discoverModels(settings,{env,dataDir,refresh:true,request:options.modelRequest});selectionCatalogs.set(value.provider,catalog);return json(200,redactValue(catalog,redact));
+        const catalog=await selectionCatalog(settings,{env,dataDir,refresh:true,request:options.modelRequest});return json(200,redactValue(catalog,redact));
       }
       const selection=req.url?.match(/^\/api\/bots\/([\w-]+)\/selection$/);
       if(selection?.[1]&&req.method==='POST') {
-        if(typeof value.revision!=='string'||typeof value.provider!=='string'||!['demo','codex','openrouter','lmstudio','live'].includes(value.provider)||(value.model!==undefined&&value.model!==null&&typeof value.model!=='string')||(value.reasoning!==undefined&&value.reasoning!==null&&typeof value.reasoning!=='string'))return json(400,{error:'Invalid selection'});
+        if(typeof value.revision!=='string'||typeof value.provider!=='string'||!isProviderId(value.provider)||(value.model!==undefined&&value.model!==null&&typeof value.model!=='string')||(value.reasoning!==undefined&&value.reasoning!==null&&typeof value.reasoning!=='string'))return json(400,{error:'Invalid selection'});
         const current=instance.bot(selection[1]);
         const advertised=selectionCatalogs.get(value.provider);
         const first=!current?.providerChoices?.[value.provider]&&!instance.providerDefaults().read().providers[value.provider]?.model;
@@ -597,15 +623,15 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
         return json(200,result);
       }
       if(req.url === '/api/creation-defaults') {
-        if(req.method === 'GET') return json(200,instance.creationDefaults());
+        if(req.method === 'GET') {instance.resumeDemoMigration();return json(200,instance.creationDefaults());}
         if(req.method === 'POST') {if(typeof value.revision !== 'number' || typeof value.provider !== 'string' || !(value.model === null || typeof value.model === 'string') || !(value.reasoning === null || typeof value.reasoning === 'string'))return json(400,{error:'Invalid creation defaults'});return json(200,instance.setCreationDefaults({revision:value.revision,provider:value.provider,model:value.model,reasoning:value.reasoning,...(value.toolMode===undefined?{}:{toolMode:parseToolMode(value.toolMode)})}));}
       }
       if (req.method === 'POST' && req.url === '/api/main-bot') return json(200,instance.mainBot());
       if (req.method === 'GET' && req.url === '/api/bots') return json(200,instance.bots());
       if (req.method === 'POST' && req.url === '/api/bots') {
         if (typeof value.name !== 'string' || !value.name.trim() || value.name.length > 200 || (value.instructions !== undefined && (typeof value.instructions !== 'string' || value.instructions.length > 30000))) return json(400,{error:'Invalid name or instructions'});
-        if ((value.reasoning!==undefined&&value.reasoning!==null&&typeof value.reasoning!=='string') || (value.operationId !== undefined && (typeof value.operationId !== 'string' || !/^[\w-]{1,100}$/.test(value.operationId))) || (value.provider !== undefined && (typeof value.provider !== 'string' || !['demo','codex','openrouter','lmstudio','live'].includes(value.provider))) || (value.model !== undefined && value.model !== null && (typeof value.model !== 'string' || value.model.length > 200))) return json(400,{error:'Invalid creation operation'});
-        return json(201,instance.createBot({name:value.name,instructions:typeof value.instructions === 'string' ? value.instructions : '',...(typeof value.operationId === 'string' ? {operationId:value.operationId} : {}),...(typeof value.provider === 'string' ? {provider:value.provider} : {}),...(typeof value.model === 'string' ? {model:value.model} : {}),...(typeof value.reasoning==='string'?{reasoning:value.reasoning}:{}),...(value.toolMode===undefined?{}:{toolMode:parseToolMode(value.toolMode)}),image:parseAgentImageInput(value.image)},typeof value.provider==='string'?selectionCatalogs.get(value.provider)?.defaultModel:undefined));
+        if ((value.reasoning!==undefined&&value.reasoning!==null&&typeof value.reasoning!=='string') || (value.operationId !== undefined && (typeof value.operationId !== 'string' || !/^[\w-]{1,100}$/.test(value.operationId))) || (value.provider !== undefined && (typeof value.provider !== 'string' || !isProviderId(value.provider))) || (value.model !== undefined && value.model !== null && (typeof value.model !== 'string' || value.model.length > 200))) return json(400,{error:'Invalid creation operation'});
+        return json(201,instance.createBot({name:value.name,instructions:typeof value.instructions === 'string' ? value.instructions : '',...(typeof value.operationId === 'string' ? {operationId:value.operationId} : {}),...(typeof value.provider === 'string' ? {provider:value.provider} : {}),...(value.model===null || typeof value.model === 'string' ? {model:value.model} : {}),...(value.reasoning===null || typeof value.reasoning==='string'?{reasoning:value.reasoning}:{}),...(value.toolMode===undefined?{}:{toolMode:parseToolMode(value.toolMode)}),image:parseAgentImageInput(value.image)},typeof value.provider==='string'?selectionCatalogs.get(value.provider)?.defaultModel:undefined));
       }
       const creationMatch=req.url?.match(/^\/api\/bot-creations\/([\w-]+)$/);
       if(req.method==='GET' && creationMatch?.[1]) {const bot=instance.creationOperation(creationMatch[1]);return bot ? json(200,bot) : json(404,{error:'Creation operation not found'});}
@@ -618,7 +644,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
           const updated=instance.setArchived(id,value.revision,action === 'archive');if(action==='archive')processes.stopAgent(id);return json(200,updated);
         }
         if (req.method === 'POST' && action === 'profile') {
-          if ('soul' in value || typeof value.revision !== 'string' || !/^[a-f0-9]{64}$/.test(value.revision) || typeof value.name !== 'string' || !value.name.trim() || value.name.length > 200 || (value.description !== undefined && (typeof value.description !== 'string' || Buffer.byteLength(value.description,'utf8') > 4096)) || typeof value.instructions !== 'string' || value.instructions.length > 30000 || typeof value.provider !== 'string' || !['demo','codex','openrouter','lmstudio','live'].includes(value.provider) || !(value.model === null || typeof value.model === 'string' && value.model.length <= 200) || !(value.reasoning === null || typeof value.reasoning === 'string' && value.reasoning.length <= 100)) return json(400,{error:'Invalid profile'});
+          if ('soul' in value || typeof value.revision !== 'string' || !/^[a-f0-9]{64}$/.test(value.revision) || typeof value.name !== 'string' || !value.name.trim() || value.name.length > 200 || (value.description !== undefined && (typeof value.description !== 'string' || Buffer.byteLength(value.description,'utf8') > 4096)) || typeof value.instructions !== 'string' || value.instructions.length > 30000 || typeof value.provider !== 'string' || !isProviderId(value.provider) || !(value.model === null || typeof value.model === 'string' && value.model.length <= 200) || !(value.reasoning === null || typeof value.reasoning === 'string' && value.reasoning.length <= 100)) return json(400,{error:'Invalid profile'});
           return json(200,instance.editBot(id,{revision:value.revision,name:value.name,...(typeof value.description === 'string' ? {description:value.description} : {}),instructions:value.instructions,provider:value.provider,model:value.model,reasoning:value.reasoning,...(value.toolMode===undefined?{}:{toolMode:parseToolMode(value.toolMode)}),...(value.image===undefined?{}:{image:parseAgentImageInput(value.image)})}));
         }
       }
@@ -636,7 +662,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
           if(loggingOut)return json(409,{error:'Sign-out in progress'});
           const provider=String(bot.provider),model=typeof bot.model === 'string' ? bot.model : undefined;
           const settings=resolveSettings({saved:{},file:{},shell:env,cli:{provider,...(model ? {model} : {})},session:{}});
-          const controller=new AbortController();active.add(controller);try{const catalog=await discoverModels(settings,{env,dataDir,refresh:true,request:options.modelRequest});selectionCatalogs.set(provider,catalog);return json(200,redactValue(catalog,redact));}finally{active.delete(controller);}
+          const controller=new AbortController();active.add(controller);try{const catalog=await selectionCatalog(settings,{env,dataDir,refresh:true,request:options.modelRequest});return json(200,redactValue(catalog,redact));}finally{active.delete(controller);}
         }
       }
       const botSkillsMatch = req.url?.match(/^\/api\/bots\/([\w-]+)\/skills$/);
@@ -732,9 +758,13 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
           if (intent) { instance.completeMemoryCommand(id,intent.input,intent.reply,intent.operation,intent.proposal);publishResponse(botId); return json(200,claim); }
           const controller = new AbortController(); active.add(controller); responseControllers.set(id,controller);
           let observed='', progressFull=false;
-          const responseProgress=(event:{type:'start'}|{type:'delta';text:string})=>{
+          const responseProgress=(event:{type:'start'}|{type:'delta'|'message';text:string})=>{
             if(controller.signal.aborted)return;
             if(event.type==='start'){observed='';progressFull=false;instance.updateResponse(id,'');publishResponse(botId);return;}
+            if(event.type==='message'){
+              const text=redact(event.text).replace(/https?:\/\/[^\s<>"']+/gi,url=>containsUnsafeWebUrl(url)?'[redacted URL]':url).slice(0,1000000);
+              instance.commandResponseMessage(id,text);observed='';publishResponse(botId);return;
+            }
             if(progressFull)return;
             if(observed.length+event.text.length>1000000){progressFull=true;return;}
             observed+=event.text;
@@ -746,26 +776,27 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
           };
           void (async () => { try {
             const {profile,session,notices} = instance.execution(id);
-            if (!['demo','codex','openrouter','lmstudio','live'].includes(profile.provider)) throw Error('Unsupported provider');
-            if (profile.provider !== 'demo' && !profile.model?.trim()) throw Error('Set a model in the agent profile');
-            const instructions = `${chatSystemMessage.content}\n\nBot instructions:\n${profile.instructions}`;
+            if (!isProviderId(profile.provider)) throw Error(retiredProviderMessage);
+            if (!profile.model?.trim()) throw Error('Set a model in the agent profile');
+            const instructions = `${profile.core}${profile.core ? "\n\n" : ""}Bot instructions:\n${profile.instructions}`;
             const provider = options.providerFactory ? await options.providerFactory(profile,instructions) : (await selectProvider(profile.provider,{env:providerEnv(profile.provider),model:profile.model ?? undefined,reasoning:profile.reasoning ?? undefined,dataDir,sessionId:profile.chatId,instructions})).provider;
             controller.signal.throwIfAborted();
             const skillWork={kind:'command' as const,id};
             const skills=skillTracker(skillAccess(botId,instance.skills.availableToBot(botId).slice(0,32).map(({id,revision,name,description,digest})=>({id,revision,name,description,digest})),event=>instance.commandSkillLoaded(id,event)),redact);
             skillTrackers.set(skillWorkKey(skillWork),skills);
             const actions=workActions.open(skillWork,controller.signal);
-            try {await runTurn({session, provider, responseProgress, actions, clockUnavailable:()=>`Clock blocked by ${instance.clockDecision(botId,'command',id).reason}`,  skills, requestText:content, memory:query=>recall(botId,query), text:notices.length ? `Task updates since your last chat turn:\n${notices.join('\n')}\n\nUser message:\n${content}` : content, redact, signal:controller.signal, emit:event=>{if(event.type === 'tool_start' || event.type === 'tool_result'){const allowed=['clock','code_mode','read_web','search_web','run_scratch_shell','select_skill','start_background_task','memory_search','memory_read','memory_remember','memory_update','memory_forget','memory_proposal_status'];const name=actions.recognizes(event.name) || allowed.includes(event.name) ? event.name : 'tool';instance.commandRuntimeEvent(id,event.type === 'tool_start' ? {type:event.type,name} : {type:event.type,name,success:event.success},event.type==='tool_result' ? redact(event.content).slice(0,16000) : null);}}, store:{save:async updated => instance.saveExecution(id,updated,updated.messages.length > session.messages.length)}});} finally {actions.dispose();skillTrackers.delete(skillWorkKey(skillWork));}
+            const callIds=new Map<string,string>();
+            try {await runTurn({session, provider, responseProgress, actions, clockUnavailable:()=>clockUnavailable(botId,'command',id),  skills, requestText:content, memory:query=>recall(botId,query), text:notices.length ? `Task updates since your last chat turn:\n${notices.join('\n')}\n\nUser message:\n${content}` : content, redact, signal:controller.signal, emit:event=>{if(event.type === 'tool_start' || event.type === 'tool_result'){const allowed=['clock','code_mode','read_web','search_web','run_scratch_shell','select_skill','start_background_task','memory_search','memory_read','memory_remember','memory_update','memory_forget','memory_proposal_status'];const name=actions.recognizes(event.name) || allowed.includes(event.name) ? event.name : 'tool';const callId=event.type==='tool_start' ? randomUUID() : callIds.get(event.id) ?? null;if(event.type==='tool_start' && callId)callIds.set(event.id,callId);else if(event.type==='tool_result')callIds.delete(event.id);let detail=event.type==='tool_result' ? event.content : event.arguments;if(event.type==='tool_start' && detail!==undefined){try{detail=JSON.stringify(JSON.parse(detail));}catch{detail='[Invalid arguments omitted]';}}const safe=detail===undefined ? null : redact(detail).replace(/https?:\/\/[^\s<>"']+/gi,url=>containsUnsafeWebUrl(url)?'[redacted URL]':url).slice(0,16000);instance.commandRuntimeEvent(id,event.type === 'tool_start' ? {type:event.type,name,callId} : {type:event.type,name,success:event.success,callId},safe);publishResponse(botId);}}, store:{save:async updated => instance.saveExecution(id,updated,updated.messages.length > session.messages.length)}});} finally {actions.dispose();skillTrackers.delete(skillWorkKey(skillWork));}
           } catch (error) {
             const message = error instanceof Error ? error.message : '';
-            const safe = message.startsWith('Clock ') || message === 'Action denied' || message === 'Action limit reached' || message.startsWith('Guest ') || message.startsWith('Source cannot be retained') || message.startsWith('Action admission closed') || message === 'Selected skill is no longer available' ? message : message === 'Set a model in the agent profile' ? message : /requires OPENROUTER_API_KEY/.test(message) ? 'Connect OpenRouter in Settings' : /HTTP 401/.test(message) || /credential|sign.in|login/i.test(message) ? 'Configure the selected provider credentials on the instance host' : /HTTP 402/.test(message) ? 'Provider credits are required' : /HTTP 429/.test(message) ? 'Provider rate limit reached; retry later' : /OpenRouter HTTP 40[034]/.test(message) ? 'Check the selected OpenRouter model, access and supported capabilities' : /OpenRouter (response|interrupted)|Invalid OpenRouter|Incomplete OpenRouter|Unsupported OpenRouter/.test(message) ? 'OpenRouter response was incomplete or unsupported; retry or choose another model' : /reasoning|effort/i.test(message) ? 'Check the model and reasoning settings in the agent profile' : /connection|timed out/i.test(message) ? 'Provider connection failed or timed out; check host network access' : 'Provider request failed. Check the instance host configuration.';
+            const safe = message.startsWith('Clock ') || message === 'Action denied' || message === 'Action limit reached' || message === 'Tool iteration limit reached' || message.startsWith('Guest ') || message.startsWith('Source cannot be retained') || message.startsWith('Action admission closed') || message === 'Selected skill is no longer available' ? message : (message === 'Set a model in the agent profile' || message === retiredProviderMessage) ? message : /requires OPENROUTER_API_KEY/.test(message) ? 'Connect OpenRouter in Settings' : /HTTP 401/.test(message) || /credential|sign.in|login/i.test(message) ? 'Configure the selected provider credentials on the instance host' : /HTTP 402/.test(message) ? 'Provider credits are required' : /HTTP 429/.test(message) ? 'Provider rate limit reached; retry later' : /OpenRouter HTTP 40[034]/.test(message) ? 'Check the selected OpenRouter model, access and supported capabilities' : /OpenRouter (response|interrupted)|Invalid OpenRouter|Incomplete OpenRouter|Unsupported OpenRouter/.test(message) ? 'OpenRouter response was incomplete or unsupported; retry or choose another model' : /reasoning|effort/i.test(message) ? 'Check the model and reasoning settings in the agent profile' : /connection|timed out/i.test(message) ? 'Provider connection failed or timed out; check host network access' : 'Provider request failed. Check the instance host configuration.';
             if (!closing && !instance.responseStopping(id)) { try { instance.fail(id,safe); } catch { /* A prior state transition won. */ } }
           } finally { if(!closing){if(instance.responseStopping(id))instance.settleResponseStop(id);publishResponse(botId);}processes.finishWork({kind:'command',id});responseControllers.delete(id);active.delete(controller); } })();
         }
         return json(200,claim);
       }
       return json(404,{error:'Not found'});
-    } catch (error) { if(error instanceof ActionFailed)return json(400,{error:error.safeResult});if(error instanceof AgentConfigInvalid)return json(422,{error:error.message,code:'invalid_agent_configuration'});if(error instanceof AgentConfigUncertain)return json(503,{error:error.message,code:'configuration_save_uncertain'});return json((error instanceof BotConflict || error instanceof AgentConfigConflict || error instanceof MemoryConflict || error instanceof SkillConflict || error instanceof ScheduleConflict) ? 409 : 400,{error:error instanceof Error ? error.message : 'Request failed'}); }
+    } catch (error) { if(error instanceof ActionFailed)return json(400,{error:error.safeResult});if(error instanceof CoreInvalid)return json(422,{error:error.message,code:'invalid_core_configuration'});if(error instanceof AgentConfigInvalid)return json(422,{error:error.message,code:'invalid_agent_configuration'});if(error instanceof AgentConfigUncertain)return json(503,{error:error.message,code:'configuration_save_uncertain'});return json((error instanceof BotConflict || error instanceof AgentConfigConflict || error instanceof MemoryConflict || error instanceof SkillConflict || error instanceof ScheduleConflict) ? 409 : 400,{error:error instanceof Error ? error.message : 'Request failed'}); }
   });
   return { server, code, migrationBackup: instance.migrationBackup, finishUpgrade: (token:string)=>instance.finishUpgrade(token), issueCode: () => (code = randomBytes(18).toString('base64url')), close: () => new Promise<void>((resolve,reject)=>{closing=true; instanceAuth?.shutdown(); if(scheduleTimer) clearInterval(scheduleTimer); for(const subscriber of responseSubscribers)subscriber.response.end();for(const controller of active) controller.abort(); server.close(error=>{void processes.shutdown().then(()=>{instance.close(); if(error)reject(error);else resolve();},reject);});}), listen: () => new Promise<number>((resolve,reject)=>{server.once('error',reject);server.listen(port,'127.0.0.1',()=>{const a=server.address();if(a && typeof a !== 'string') { tickSchedules(); scheduleTimer=setInterval(tickSchedules,30000); resolve(a.port); }else reject(Error('Listen failed'));});}) };
 }

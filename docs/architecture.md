@@ -9,10 +9,11 @@ service remains authoritative for connections and shared data. See the
 Development reset builds the seed through `Instance` in a separate directory.
 The launcher and maintenance commands share a data-directory owner port, and
 maintenance also takes the SQLite exclusive lock. Before publishing a database
-and agent-file replacement, maintenance saves both and writes a durable marker.
+and file replacement, maintenance saves the database, agents, and core revision
+tree and writes a durable marker.
 Instance startup checks that marker before initialization and again after taking
 the database lock. Maintenance fences the original and replacement SQLite files
-with an unsupported schema version until the database and agent files are durable,
+with an unsupported schema version until the database, agent files, and core tree are durable,
 so an older checkout cannot open a partially published dataset even after a crash.
 Maintenance reopens SQLite at the published path before further writes so its
 rollback journal stays beside the active database.
@@ -48,8 +49,7 @@ send existing conversation history to the new provider on the next request.
 
 Provider adapters normalize messages and tools for the runtime. ChatGPT uses direct
 Responses with a Staf-owned grant and model-bound replay. OpenRouter, LM Studio,
-and the generic live adapter use Chat Completions. The demo returns deterministic
-responses. ChatGPT and OpenRouter stream provisional text through the shared service; LM Studio and the generic live adapter buffer provider output. Only completed provider responses are committed as completed replies; stopped partial output is labeled separately. The terminal displays provisional text, command status and persisted tool progress. The service applies permissions and approval
+and the generic live adapter use Chat Completions. ChatGPT and OpenRouter stream provisional text through the shared service; LM Studio and the generic live adapter buffer provider output. Only completed provider responses are committed as completed replies; stopped partial output is labeled separately. The terminal displays provisional text, command status and persisted tool progress. The service applies permissions and approval
 rules before supported actions. See [direct Responses](direct-responses.md),
 [settings](settings.md), and [usage](usage.md).
 
@@ -71,8 +71,10 @@ Appearance and layout are browser-local preferences (`web/appearance.ts` and
 `web/design.ts`); the default is Light/Evergreen with an expanded sidebar.
 The bundled DM Sans font needs no external request. The composer popup renders grouped menu choices through the existing choice and
 save boundary, while agent settings use the full form. Both keep service-backed
-discovery, manual model entry, reasoning and conflict recovery. Creation uses a
-native modal dialog over the chat; its durable state remains in the controller.
+automatic metadata discovery, manual model entry, reasoning and conflict recovery. Discovery results never save a choice. Concurrent catalog requests cannot replace newer metadata with an older response, and a failed refresh clears metadata used for later selection decisions. Creation uses the same fields and layout as agent settings. Editor drafts stay in
+the browser tab across navigation, including their original profile revisions.
+Explicit Cancel discards unsaved edits; creation operation recovery remains in
+the controller.
 CSS follows the device color scheme when System is selected. These preferences
 are not stored by the shared instance.
 
@@ -92,7 +94,12 @@ sending. The obsolete `staf-draft` and `staf-pending` pre-journal keys are delet
 under Web Locks without importing or backing them up. The `staf-workspace-v1:`
 journal is retained, including unclaimed closed-tab drafts and uncertain commands;
 the retired manual picker also listed these current records. No journal-wide
-legacy cleanup is safe. Clearing browser storage removes the journal.
+legacy cleanup is safe. Earlier records without a dataset identity migrate only
+when a stored command or creation operation establishes their origin. Otherwise,
+Settings offers Copy and confirmed Discard for each record. Discard takes the
+record's Web Lock and compares its saved value and dataset again before removal.
+It leaves changed records, records owned by another tab, and scoped journals in
+place. Clearing browser storage removes the journal.
  A keyed
 bot-creation operation stores its fingerprint and result with the bot in one
 transaction. Version 27 backs up an existing database before adding the journal.
@@ -133,7 +140,7 @@ CLI client uses a separate credential file. Commands claim a bot and append the
 user message transactionally; completed responses are stored with the command
 state. Stop records a durable request while retaining the pending command and its unique busy lock, aborts the running provider and pending operations, and settles only after the turn returns. A late provider result cannot commit after Stop. The partial output is stored as a stopped conversation entry and excluded from provider replay. Restart marks pending or stopping commands interrupted; it does not resume them. SQLite exclusive locking
 prevents a second process from treating active commands as interrupted. The
-service runs demo, ChatGPT, OpenRouter, LM Studio and live with instance or host credentials and an explicit bot model for each non-demo provider. This preview does not implement the LAN,
+service runs ChatGPT, OpenRouter, LM Studio and live with instance or host credentials and an explicit bot model. This preview does not implement the LAN,
 all operational features described in the plans above.
 
 Agent settings and instructions live under `agents/ID/current` beside the
@@ -154,9 +161,34 @@ Archive state and operational records remain in SQLite. Unpublished revision dir
 remain after an interrupted save; they are not read as active configuration.
 Old database-owned profiles are not migrated by this feature.
 
+The shared core override lives at `core/current/core.md` beside the instance
+database. The `current` link selects a revision directory. An absent file uses
+the built-in core; an empty file is an intentional override. Direct edits are
+validated when read. Publication fsyncs a new revision and switches the link.
+Staf checks retired revisions for late edits and blocks acceptance for owner
+reconciliation. Direct writes can overwrite changes that Staf never observed.
+Accepted chat and task profiles capture the effective core separately from the
+agent soul. Retries preserve their predecessor's profile. Existing profiles
+without a captured core use the earlier clock instruction. Tool definitions,
+context, permissions, approval checks, and cancellation remain service-owned.
+For an ordinary tool failure or explicit denial, the runtime records a matching
+result and can ask the provider to continue. Denial closes action admission,
+including for a Code Mode guest; a later provider step cannot reopen it. Stop,
+fatal guest errors and provider errors retain their termination behavior.
+Live authority failures close admission and can terminate the turn. A completed reply is persisted only after the
+provider returns it. Scripted service and browser checks cover these paths;
+they do not reproduce the owner's reported greeting or establish model behavior.
+The Advanced Settings editor uses the paired core API and retains its draft
+across workspace navigation. A failed or uncertain save requires a fresh read
+before retry. Cache-impact feedback compares committed request-relevant settings:
+core and soul text, tool mode, provider, and provider-supported model or reasoning
+fields. The direct adapter's local key covers model, instructions, and sorted
+tools, while reasoning changes the request separately. Neither a local key nor a
+changed prefix establishes provider cache use. Controlled-provider and scripted
+browser tests cover construction and feedback, not model behavior or cache reuse.
+
 Discovery uses names and owner-edited descriptions. Each accepted command and
-task captures its settings and instructions. The offline demo does not follow
-instructions. The private execution session retains tool history, usage and
+task captures its settings and instructions. The private execution session retains tool history, usage and
 model-bound replay separately from visible chat. Permissions and revocations
 remain service-controlled. Live provider execution remains unverified.
 The shared chat-completions adapter passes caller cancellation and its timeout
@@ -193,7 +225,7 @@ The collaboration runtime journals actual bot messages and separate helper attem
 
 Shared-instance ChatGPT sign-in owns a short-lived in-memory attempt bound to its initiating paired client and the service loopback callback. The credential adapter checks that client remains authorized at the locked credential commit boundary. Callback parameters are not returned in the response. The browser reserves a tab synchronously from the connection action and navigates it after asynchronous authorization setup. A blocked tab leaves a manual link for the same attempt. The browser keeps the sign-in URL only for the attempt that produced it and offers cancellation and retry if it is lost or the attempt fails. Paired CLI and GUI sign-out use the same guarded service operation. Credential status is local and does not verify account or model access. This integration has synthetic service, CLI, and served-browser tests and has not been verified with live authorization.
 
-The shared main-chat runtime may request one background task per command through a host-controlled tool. A durable journal binds the command, tool call, objective, and task attempt, so duplicate submissions do not start duplicate work. Explicit main-chat task direction and stop use the attempt ID and do not expand permissions. New bots copy the instance provider, model, and reasoning creation defaults in the creation transaction; later default changes do not alter existing bots. These paths have offline synthetic coverage; live provider behavior remains unverified.
+The shared main-chat runtime may request one background task per command through a host-controlled tool. A durable journal binds the command, tool call, objective, and task attempt, so duplicate submissions do not start duplicate work. Explicit main-chat task direction and stop use the attempt ID and do not expand permissions. New bots copy the instance provider, model, and reasoning creation defaults in the creation transaction; later default changes leave existing real-provider bots unchanged and migrate any remaining Demo bots. These paths have offline synthetic coverage; live provider behavior remains unverified.
 
 Public web reads use a per-hop action broker. The action journal records generic summaries and keyed fingerprints; an authenticated owner sees the exact pending hop in memory and approves or denies it before DNS. Current permissions are checked again before dispatch, and permission revocation or task stop aborts the operation. The read path pins a validated public IPv4 address, validates each redirect, and bounds the returned untrusted text. Started actions become uncertain on restart and are not automatically replayed. Conversation and provider replay retention remains separate from the generic action journal; unknown secrets in source text cannot be reliably detected. The integration has synthetic coverage only.
 
@@ -214,11 +246,10 @@ configuration writes. In-flight work may retain a previous key. Service, CLI,
 and served-browser coverage uses synthetic credentials and streaming provider responses, including tool calls and recovery; live OpenRouter conversation and remote-instance access remain unverified.
 
 The agent editor combines its revisioned profile with the authenticated ChatGPT
-and OpenRouter presence statuses to offer configured shared connections and the
-offline Demo provider. It retains an existing disconnected provider, blocks a
+and OpenRouter presence statuses to offer configured shared connections. It retains an existing disconnected provider, blocks a
 new unavailable selection, and keeps unsaved edits mounted while the owner
-visits global Settings. Model text is retained and must be reviewed on a switch;
-the browser confirms the potential history disclosure before its profile save.
+visits global Settings. The editor stages the chosen provider and model; the browser confirms the
+potential history disclosure before its profile save.
 The service still accepts supported configurations without requiring a saved
 connection, so direct edits and other clients can configure an agent before
 connecting. The editor does not run inference or verify provider access.
@@ -226,8 +257,8 @@ connecting. The editor does not run inference or verify provider access.
 ## Shared provider choice ownership
 
 Agent files own remembered provider pairs; the active top-level pair is folded
-into that history on reads and revision-checked service writes. The composer,
-agent settings and terminal use the same selection operation. Existing captured
+into that history on reads and revision-checked service writes. The composer and terminal use the selection operation. Agent settings submits
+the staged fields together through the revision-checked profile operation. Existing captured
 response profiles remain unchanged by later selections. Global nonsecret defaults
 use atomic JSON replacement and content revisions beside the agent directories.
 They seed first selections, never live inheritance. Creation still copies its
@@ -252,7 +283,7 @@ local saved credentials still do not establish provider or model access.
 
 ### Inline main-chat execution
 
-The workspace reads service-owned command progress and persisted tool records through `/api/bots/{id}/chat-work`; it associates records and exact pending approvals with the command user message. Snapshot replacement avoids duplicate delivery. Tool outcomes remain stored independently of later provider success or failure. Database version 30 adds bounded result detail to command runtime events after a protected migration backup. The CLI summary contract remains unchanged. Ordinary chat no longer receives the background-task creation adapter; unsolicited calls fail without starting work. The task engine and explicit API/CLI remain intact. Synthetic checks do not prove live provider behavior.
+The workspace reads service-owned command progress and persisted tool records through `/api/bots/{id}/chat-work`; it associates records and exact pending approvals with the command user message. Snapshot replacement avoids duplicate delivery. Tool outcomes remain stored independently of later provider success or failure. Database version 30 adds bounded result detail to command runtime events after a protected migration backup. Version 38 adds service-generated call identities and redacted bounded arguments to new events; older events remain unpaired. The GUI uses each identity to update one tool row and keeps the response container keyed by command through streaming and final persistence. The CLI summary contract remains unchanged. Ordinary chat no longer receives the background-task creation adapter; unsolicited calls fail without starting work. The task engine and explicit API/CLI remain intact. Synthetic checks do not prove live provider behavior.
 
 ### Shared agent images
 
@@ -366,3 +397,22 @@ recovery epoch. Task retries can resolve eligible predecessor actions. Original
 outcomes remain unchanged, closed work stays closed, and a matching resolved
 uncertain change still requires a repeat challenge. There is no generic force
 resolution or model reconciliation tool. See [the contract](work-actions.md).
+
+## Creation defaults and Demo migration
+
+Demo is not selectable or executable. Before a real default is chosen, legacy Demo agents and their records remain in place and need setup. Database version 37 records pending Demo migration separately from the saved creation default. The service commits the selected provider and model before publishing revision-checked agent files. It retries pending migration on restart and when clients read or save defaults. It reports file conflicts and blocks acceptance for affected legacy agents until their configuration is repaired. Invalid files do not block healthy agents. Already-real agents are skipped on retry. Conversation records and accepted-work profiles are not rewritten. These checks use disposable offline instances and do not establish live provider behavior.
+
+## Ordered chat messages and tool calls
+
+Schema 39 adds `assistant_message` boundaries to the command event journal.
+A validated intermediate provider message is retained before its tool calls,
+separately from the current streaming text. Response snapshots carry the ordered
+events, so live updates and history use the same boundaries. The GUI groups each
+run of tools before the next agent name and message. Request and result updates
+keep their call identity. Stop, failure, and restart retain observed messages;
+legacy records without boundaries keep their prior grouping. The CLI tool-event
+summary excludes message boundaries.
+
+The built-in core describes general assistant behavior without naming tools.
+Capability definitions and service enforcement remain separate. Custom and empty
+core overrides keep their existing upgrade and reset behavior.

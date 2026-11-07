@@ -12,13 +12,13 @@ cd Staf
 pnpm install --frozen-lockfile
 pnpm run build
 pnpm link --global
+staf settings set-defaults codex MODEL_ID
 staf
 ```
 
 The terminal starts a local shared instance in `~/.staf/terminal-instance` when needed and reconnects to its
-persistent main chat. Type `show settings`, `set provider to demo`, or `/help`.
-`/quit` closes the terminal client while the instance continues. The offline
-demo echoes messages and does not use a language model. See the [terminal setup
+persistent main chat. On a fresh instance, first run `staf settings set-defaults codex MODEL_ID` with your chosen provider and model. Type `show settings` or `/help`.
+`/quit` closes the terminal client while the instance continues. See the [terminal setup
 guide](docs/usage.md#start-the-shared-terminal) for provider credentials and
 one-shot commands.
 
@@ -37,11 +37,12 @@ tab; Continue sign-in is available if the browser blocks it. Workspace notices
 appear as dismissible toasts, with actionable errors retained beside controls. A saved sign-in does not
 verify account or model access. It also offers Light, Dark, and System appearance for this browser;
 Light is the default; System follows the device setting. Settings also offers
-Evergreen/Ink palettes, a Focus agent rail, font, text size, spacing, corners, and logo preferences. The persistent agent list switches between main chats; each agent has its own configuration, which you can edit from its chat. Submitted messages appear immediately, and per-agent drafts and uncertain submissions recover automatically after a reload or reopening a closed tab in the same browser. Unfinished agent creation also recovers with its original operation ID for the same dataset. Older records without a dataset identity recover when matching server records establish their origin; otherwise **Earlier browser records** lets you inspect and copy them.
+Evergreen/Ink palettes, font, text size, spacing, and corners. The sidebar toggle opens a Focus agent rail. The persistent agent list switches between main chats; each agent has its own configuration, which you can edit from its chat. Submitted messages appear immediately, and per-agent drafts and uncertain submissions recover automatically after a reload or reopening a closed tab in the same browser. Unfinished agent creation also recovers with its original operation ID for the same dataset. Older records without a dataset identity recover when matching server records establish their origin; otherwise **Settings > Earlier browser records** lets you copy or discard them.
 Instructions live in its `soul.md` file; settings live in `agent.toml`. You can
 [edit these files directly](docs/usage.md#agent-configuration-files) on the instance host.
-Connect an instance-wide OpenRouter key in global Settings or through the paired CLI; saved presence does not verify account or model access. New agent opens a modal; you can create an agent with just a name before connecting a provider. Agent settings
-offer a saved tool mode, Demo and configured shared connections, retain disconnected selections, and ask for confirmation before switching providers. Review the agent's model after a switch. Open full agent settings from the chat header avatar. Agent settings include archive; reveal Archived agents in the Agents sidebar to restore them. Tool requests, observed outcomes, and exact-action approvals appear in the chat conversation. The previous Advanced page has been retired.
+Shared Staf core guidance is separate from each agent's soul. The built-in guidance covers general assistant behavior without naming individual tools. Use **Settings → Advanced Settings** or a paired CLI or API client to inspect, replace, or reset it. You can also edit the same Markdown file on the host. Changes apply to newly accepted work. See [shared core guidance](docs/usage.md#shared-core-guidance).
+
+Connect an instance-wide OpenRouter key in global Settings or through the paired CLI; saved presence does not verify account or model access. In Settings, choose a real provider and model as creation defaults. New agent copies these values and can be created before connecting a provider. Saving defaults moves existing Demo agents, including archived agents, to that choice. Agent settings offer a saved tool mode and configured shared connections, retain disconnected selections, and ask for confirmation when saving a provider change. All form fields save together, and navigating away retains the draft in the current browser tab. Open full agent settings from the chat header avatar. Agent settings include archive; reveal Archived agents in the sidebar to restore them. Tool requests, observed outcomes, and exact-action approvals appear in the chat conversation.
 Tool mode controls clock, scoped memory, configured search, web reading, scratch shell, skill selection, host file actions, and native host commands in chat and eligible tasks: Direct offers individual capabilities, Hybrid offers them and code, and Code Mode offers code with those capabilities. Native commands run with the service account’s host access; known credentials are filtered before process output storage, and pipe and PTY backends support input, EOF, resize, retained processes and cross-client Stop. Recovery keeps uncertain effects fenced until supported service evidence is reconciled through the paired owner API/CLI; it never automatically repeats them. Unselected read receipts expire with work. See [tool mode usage](docs/usage.md#save-a-tool-mode). Other management features remain available through the service and CLI while
 their GUI is developed. Shared-instance ChatGPT sign-in has synthetic coverage
 but is not live verified. Background-task creation from main chat is deferred. Explicit task API and CLI operations remain available.
@@ -63,6 +64,9 @@ Settings. Images are shared across paired clients and survive restarts. See
 [agent images](docs/usage.md#agent-images) for formats, limits, and storage.
 
 The shared instance supports per-action approval and permission controls for its clock tool. See [clock approvals](docs/usage.md#clock-approvals-in-the-shared-instance) for setup and current limits.
+
+Ordinary tool failures and denials can be followed by a provider reply; a denial
+does not authorize further actions. See [tool outcomes](docs/usage.md#local-shared-instance-offline-preview) for response and failure status.
 
 The shared instance includes a provisional daily and weekly schedule preview for UTC clock reads, one exact separately approved public web read, one exact separately approved search, or one exact separately approved scratch command per occurrence. See [recurring schedules](docs/usage.md#recurring-schedules-preview) for authorization, recovery, and availability limits.
 

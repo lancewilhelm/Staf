@@ -39,7 +39,7 @@ export async function settingsCommand(store: SettingsStore, session: SettingsSes
   }
   if ((command === 'model' || command === 'reasoning') && (scope === 'session' || scope === 'default') && key && !rest.length) {
     const provider = session.effective().provider.value;
-    if (provider === 'demo') throw new Error('Demo has no model or reasoning controls; select a provider first');
+    if (!provider) throw new Error('Choose a provider first');
     return settingsCommand(store, session, ['set', scope, `${command === 'model' ? 'model' : 'reasoning'}.${provider}`, key], locked, terminal);
   }
   if (command === 'show') return JSON.stringify({ effective: session.effective(), savedDefaults: await session.saved(), timing: 'Confirmed chat edits apply to the next request; remembered edits also persist. Terminal defaults affect future launches.' }, null, 2);

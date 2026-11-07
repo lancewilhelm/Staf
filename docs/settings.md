@@ -20,8 +20,8 @@ menu. A provider change displays the destination and asks you to enter `/confirm
 menu can also offer discovered models. `/settings models` is an alias for `/models`, and `/settings reasoning` prints the current profile. You can enter a model ID manually when
 discovery fails. Model availability is not guaranteed by a saved profile.
 
-The supported providers are `demo`, `codex`, `openrouter`, `lmstudio`, and
-`live`. A live provider needs an explicit model. Demo does not use a model.
+The supported providers are `codex`, `openrouter`, `lmstudio`, and `live`.
+Each needs an explicit model.
 Provider, model, and reasoning changes affect future work, including work in an
 existing conversation. The next provider may receive the conversation history.
 

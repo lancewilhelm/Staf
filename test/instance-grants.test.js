@@ -4,7 +4,7 @@ import { Instance } from '../dist/instance.js';
 
 function setup() {
  const instance=new Instance(':memory:');
- const bot=instance.createBot({name:'Ada',instructions:'',provider:'demo'});
+ const bot=instance.createBot({name:'Ada',instructions:'',provider:'live',model:'fixture-offline'});
  instance.claim({id:'command',botId:bot.id,content:'read'});
  instance.setWebPermission('instance',true);instance.setWebPermission('bot:'+bot.id,true);
  const work={kind:'command',id:'command'}, boundary={kind:'web',url:'https://example.com/a'};
@@ -26,7 +26,7 @@ test('exact boundary, live permissions and ask-every-time remain enforced',()=>{
 test('a different payload or work permit cannot be substituted for the approved action',()=>{
  for(const crossWork of [false,true]){const x=setup();try{
   const work=crossWork?{kind:'command',id:'other'}:x.work;
-  if(crossWork){const bot=x.instance.createBot({name:'B',instructions:'',provider:'demo'});x.instance.claim({id:'other',botId:bot.id,content:'read'});}
+  if(crossWork){const bot=x.instance.createBot({name:'B',instructions:'',provider:'live',model:'fixture-offline'});x.instance.claim({id:'other',botId:bot.id,content:'read'});}
   const other=x.instance.webIdentity(work,'other-call',0,'https://example.com/b');
   const unrelated=x.journal.prepare({...other,work,summary:'Read public web page'});
   assert.throws(()=>x.instance.claimGrantedAction({work:x.work,callId:'call',hop:0,boundary:x.boundary,journal:x.journal,permit:unrelated.permit,controller:x.controller}));

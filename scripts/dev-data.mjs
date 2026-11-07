@@ -4,7 +4,7 @@ import { cpSync, existsSync, mkdtempSync, readFileSync, renameSync, rmSync } fro
 import { join, relative, isAbsolute, resolve } from 'node:path';
 import { acquireOwner, devContext } from './dev-context.mjs';
 import { seed } from './dev-seed.mjs';
-import { copyAgents, MAINTENANCE_VERSION, saveBackup, sync, syncTree, writeMarker } from './dev-storage.mjs';
+import { copyAgents, copyCore, MAINTENANCE_VERSION, saveBackup, sync, syncTree, writeMarker } from './dev-storage.mjs';
 
 async function main() {
 const action=process.argv[2];
@@ -13,6 +13,8 @@ const context=await devContext(), {dataRoot,connectionRoot}=context;
 const path=join(dataRoot,'instance.sqlite'), marker=path+'.maintenance.json', backupRoot=join(dataRoot,'backups');
 const agentRoot=join(dataRoot,'agents'), connectionInAgents=relative(agentRoot,connectionRoot);
 if (!connectionInAgents || (!connectionInAgents.startsWith('..') && !isAbsolute(connectionInAgents))) throw Error('Connection directory cannot be inside the replaced agents directory');
+const coreRoot=join(dataRoot,'core'), connectionInCore=relative(coreRoot,connectionRoot);
+if (!connectionInCore || (!connectionInCore.startsWith('..') && !isAbsolute(connectionInCore))) throw Error('Connection directory cannot be inside the replaced core directory');
 function interrupted() {if(existsSync(marker))throw Error('Dataset maintenance was interrupted. Run pnpm dev:recover.');}
 async function testCheckpoint(name) {
   if(process.env.STAF_DEV_TEST_PAUSE !== name || !process.send) return;
@@ -67,6 +69,7 @@ try {
     stage=mkdtempSync(join(dataRoot,'.recovery-'));
     if(manifest.database)cpSync(join(target,'instance.sqlite'),join(stage,'instance.sqlite'));
     copyAgents(join(target,'agents'),join(stage,'agents'));
+    copyCore(join(target,'core'),join(stage,'core'));
     if(action==='restore' && manifest.database) {
       const restored=new DatabaseSync(join(stage,'instance.sqlite'));
       try {
@@ -104,7 +107,10 @@ try {
   await testCheckpoint('database-published');
   rmSync(agentRoot,{recursive:true,force:true});
   if(existsSync(join(stage,'agents')))renameSync(join(stage,'agents'),agentRoot);
+  rmSync(coreRoot,{recursive:true,force:true});
+  if(existsSync(join(stage,'core')))renameSync(join(stage,'core'),coreRoot);
   sync(dataRoot);
+  await testCheckpoint('files-published');
   const record=JSON.parse(readFileSync(marker,'utf8'));
   if(record.version!==1||typeof record.backup!=='string')throw Error('Invalid maintenance marker.');
   writeMarker({dataRoot,backup:record.backup,publishedVersion:targetVersion});

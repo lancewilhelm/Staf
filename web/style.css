@@ -108,6 +108,11 @@ p {
   border-color: #ffffff18;
 }
 
+.agent-divider {
+  border-top: 1px solid var(--divider);
+  margin: 4px 0 8px;
+}
+
 .minor a {
   text-decoration: none;
   color: var(--nav-text);
@@ -722,10 +727,12 @@ summary {
 }
 
 .chat-work {
-  margin-top: 12px;
+  margin-bottom: 12px;
   text-align: left;
   font-size: 14px;
 }
+.chat-work:empty { display: none; }
+.response-part + .response-part { margin-top: 18px; }
 
 .chat-work details {
   margin: 6px 0;
@@ -734,6 +741,24 @@ summary {
   padding: 12px;
   border-radius: var(--corner);
 }
+
+.chat-work details.tool-call {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 2px 0;
+}
+
+.working-indicator {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: response-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes response-pulse { 50% { opacity: .3; } }
+@media (prefers-reduced-motion: reduce) { .working-indicator { animation: none; } }
 
 .chat-work pre {
   white-space: pre-wrap;
@@ -1008,9 +1033,17 @@ summary {
   margin-bottom: 5px;
 }
 
-.composer:focus-within {
+:root[data-keyboard-focus=true] .composer:has(textarea:focus-visible) {
   border-color: var(--action);
   box-shadow: 0 0 0 2px color-mix(in srgb,var(--action) 9%,transparent);
+}
+
+.header-agent-name {
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font: inherit;
 }
 
 .composer-picker {
@@ -1987,6 +2020,15 @@ summary {
   gap: 8px;
 }
 
+.settings-content .agent-settings-actions {
+  margin-top: 20px;
+  align-items: center;
+}
+
+.agent-settings-actions .archive-action {
+  margin-left: auto;
+}
+
 .settings-content .provider-settings {
   margin: 0;
   max-width: none;
@@ -2682,4 +2724,45 @@ button {
   .image-previews>.image-size-80 { width:64px;height:64px; }
   .image-crop-controls { gap:10px; }
   .image-crop { width:115px;height:115px; }
+}
+
+.editor-label { display: flex; align-items: center; gap: 7px; margin: 14px 0 0; }
+.settings-content .editor-label label { margin: 0; }
+.info-help { position: relative; display: inline-block; font-size: 11px; }
+.info-help button { display: grid; place-items: center; width: 20px; height: 20px; padding: 0; border: 0; background: transparent; color: var(--muted-ink); cursor: pointer; }
+.info-help button:hover, .info-help button:focus-visible { color: var(--ink); }
+.info-help span { position: absolute; z-index: 4; top: 20px; left: 0; width: 240px; padding: 10px; background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: var(--corner); box-shadow: 0 4px 12px #0002; font-weight: 400; visibility: hidden; }
+.info-help:hover span, .info-help:focus-within span, .info-help[data-open=true] span { visibility: visible; }
+.settings-content.core-settings textarea,
+.settings-content .core-settings textarea {
+  height: 240px;
+  min-height: 160px;
+  resize: vertical;
+}
+
+/* The picker has one scrolling surface, with independent choice columns. */
+.composer .model-control .composer-picker {
+  width: 720px;
+  max-width: min(720px, calc(100% + 42px));
+  overflow-y: auto;
+}
+.menu-choices {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(180px, 2fr) minmax(110px, 1fr);
+  gap: 8px;
+}
+.menu-choices .model-menu-group {
+  min-width: 0;
+  max-height: none;
+  overflow: visible;
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+.menu-manual { display: block; padding: 0 9px; font-size: 10px; color: var(--muted-ink); }
+.picker-confirm { margin: 8px; padding: 8px; border: 1px solid var(--line); border-radius: 6px; }
+.picker-confirm button { margin-right: 8px; }
+@media (max-width: 600px) {
+  .menu-choices { grid-template-columns: 1fr; }
+  .menu-choices .model-menu-group + .model-menu-group { border-top: 1px solid var(--line); padding-top: 5px; }
 }

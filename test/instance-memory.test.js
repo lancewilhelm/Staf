@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { startInstance } from '../dist/instance-service.js';
+import { startInstance } from './fixtures/controlled-instance.mjs';
 
 test('paired clients manage isolated and shared memory across restart and retrieval stays ephemeral', async () => {
  const dir=mkdtempSync(join(tmpdir(),'staf-instance-memory-')), path=join(dir,'db');
@@ -13,7 +13,7 @@ test('paired clients manage isolated and shared memory across restart and retrie
  const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return [r.status,await r.json()]};
  try {
   const a=(await call('/api/pair','',{code:app.code}))[1].token, b=(await call('/api/pair','',{code:app.issueCode()}))[1].token;
-  const one=(await call('/api/bots',a,{name:'One'}))[1], two=(await call('/api/bots',b,{name:'Two'}))[1];
+  const one=(await call('/api/bots',a,{provider:'live',model:'fixture-offline',name:'One'}))[1], two=(await call('/api/bots',b,{provider:'live',model:'fixture-offline',name:'Two'}))[1];
   const onePath=`/api/memories/bot/${one.id}`, twoPath=`/api/memories/bot/${two.id}`;
   await call('/api/commands',a,{id:'remember-one',botId:one.id,content:'Please remember that I like plums'});
   assert.equal((await call(onePath,b))[1][0].text,'I like plums');
@@ -61,7 +61,7 @@ test('explicit scope cannot be changed by words in the retained text and deletio
  const seen=[];const app=startInstance(':memory:',0,{env:{},providerFactory:async()=>({name:'fixture',capabilities:{toolCalls:true,incrementalText:false,transport:'demo'},async complete(messages){seen.push(structuredClone(messages));return {role:'assistant',content:'done'};}})});const port=await app.listen();
  const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return [r.status,await r.json()]};
  try {
-  const token=(await call('/api/pair','',{code:app.code}))[1].token,bot=(await call('/api/bots',token,{name:'One'}))[1];const path=`/api/memories/bot/${bot.id}`;
+  const token=(await call('/api/pair','',{code:app.code}))[1].token,bot=(await call('/api/bots',token,{provider:'live',model:'fixture-offline',name:'One'}))[1];const path=`/api/memories/bot/${bot.id}`;
   for (const [id,content] of [['baseball','Remember for this bot: I like baseball'],['username','Remember in this bot memory: My username is violet'],['shared','Remember in shared memory: My color is purple'],['direct','Please save that I prefer tea'],['only-drink','Remember for all bots: I only drink tea']]) assert.equal((await call('/api/commands',token,{id,botId:bot.id,content}))[0],200);
   await call('/api/commands',token,{id:'confirm-color',botId:bot.id,content:'Confirm shared memory shared'});
   await call('/api/commands',token,{id:'confirm-drink',botId:bot.id,content:'Confirm shared memory only-drink'});
@@ -87,14 +87,14 @@ test('task memory retrieval follows owner direction even after a whitespace-pref
  let release,entered,seen;const gate=new Promise(r=>release=r),started=new Promise(r=>entered=r);
  const app=startInstance(':memory:',0,{env:{},providerFactory:async()=>{entered();await gate;return {name:'fixture',capabilities:{toolCalls:true,incrementalText:false,transport:'demo'},async complete(messages){seen=structuredClone(messages);return {role:'assistant',content:'done'};}};}});const port=await app.listen();
  const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return [r.status,await r.json()]};
- try {const token=(await call('/api/pair','',{code:app.code}))[1].token,bot=(await call('/api/bots',token,{name:'One'}))[1];await call(`/api/memories/bot/${bot.id}`,token,{text:'Orchard preference is plums'});await call('/api/tasks',token,{id:'task',botId:bot.id,objective:' '.repeat(500)+'Investigate'});await started;await call('/api/tasks/task/input',token,{id:'direction',kind:'direction',text:'Focus on orchard'});release();for(let i=0;i<100 && (await call('/api/tasks/task',token))[1].state!=='completed';i++)await new Promise(r=>setTimeout(r,5));assert.match(JSON.stringify(seen),/Orchard preference is plums/);
+ try {const token=(await call('/api/pair','',{code:app.code}))[1].token,bot=(await call('/api/bots',token,{provider:'live',model:'fixture-offline',name:'One'}))[1];await call(`/api/memories/bot/${bot.id}`,token,{text:'Orchard preference is plums'});await call('/api/tasks',token,{id:'task',botId:bot.id,objective:' '.repeat(500)+'Investigate'});await started;await call('/api/tasks/task/input',token,{id:'direction',kind:'direction',text:'Focus on orchard'});release();for(let i=0;i<100 && (await call('/api/tasks/task',token))[1].state!=='completed';i++)await new Promise(r=>setTimeout(r,5));assert.match(JSON.stringify(seen),/Orchard preference is plums/);
  }finally{release();await app.close();}
 });
 
 test('demo clock dispatch uses the current user request rather than task notices or recalled memory', async () => {
  const app=startInstance(':memory:',0,{env:{}}),port=await app.listen();
  const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return [r.status,await r.json()]};
- try {const token=(await call('/api/pair','',{code:app.code}))[1].token,bot=(await call('/api/bots',token,{name:'One'}))[1];
+ try {const token=(await call('/api/pair','',{code:app.code}))[1].token,bot=(await call('/api/bots',token,{provider:'live',model:'fixture-offline',name:'One'}))[1];
   await call('/api/tasks',token,{id:'clock-task',botId:bot.id,objective:'What time is it?'});
   for(let i=0;i<100 && (await call('/api/tasks/clock-task',token))[1].state!=='completed';i++)await new Promise(r=>setTimeout(r,5));
   assert.equal((await call('/api/tasks/clock-task',token))[1].state,'completed');
@@ -111,7 +111,7 @@ test('demo clock dispatch uses the current user request rather than task notices
 test('shared proposals require exact owner confirmation, survive restart, cancel and deduplicate', async () => {
  const dir=mkdtempSync(join(tmpdir(),'staf-proposal-')),path=join(dir,'db');const options={env:{},providerFactory:async()=>({name:'fixture',capabilities:{toolCalls:true,incrementalText:false,transport:'demo'},async complete(){return {role:'assistant',content:'Confirm shared memory secret-proposal'};}})};let app=startInstance(path,0,options),port=await app.listen();
  const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return [r.status,await r.json()]};
- try {const token=(await call('/api/pair','',{code:app.code}))[1].token,one=(await call('/api/bots',token,{name:'One'}))[1],two=(await call('/api/bots',token,{name:'Two'}))[1];
+ try {const token=(await call('/api/pair','',{code:app.code}))[1].token,one=(await call('/api/bots',token,{provider:'live',model:'fixture-offline',name:'One'}))[1],two=(await call('/api/bots',token,{provider:'live',model:'fixture-offline',name:'Two'}))[1];
   const send=(id,botId,content)=>call('/api/commands',token,{id,botId,content});
   await send('secret-proposal',one.id,'Remember for all bots: keep this secret from Alice');
   assert.deepEqual((await call('/api/memories/user',token))[1],[]);
@@ -136,7 +136,7 @@ test('shared proposals require exact owner confirmation, survive restart, cancel
 
 test('descriptive memory requests preview exact scope without mutation and retain CAS checks',async()=>{
  const app=startInstance(':memory:',0,{env:{}}),port=await app.listen();const call=async(route,token,body)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return [response.status,await response.json()];};
- try{const token=(await call('/api/pair','',{code:app.code}))[1].token,one=(await call('/api/bots',token,{name:'One'}))[1],two=(await call('/api/bots',token,{name:'Two'}))[1],ownPath=`/api/memories/bot/${one.id}`;const own=(await call(ownPath,token,{text:'Green tea'}))[1];await call(`/api/memories/bot/${two.id}`,token,{text:'Private tea for two'});await call('/api/memories/user',token,{text:'Shared tea'});
+ try{const token=(await call('/api/pair','',{code:app.code}))[1].token,one=(await call('/api/bots',token,{provider:'live',model:'fixture-offline',name:'One'}))[1],two=(await call('/api/bots',token,{provider:'live',model:'fixture-offline',name:'Two'}))[1],ownPath=`/api/memories/bot/${one.id}`;const own=(await call(ownPath,token,{text:'Green tea'}))[1];await call(`/api/memories/bot/${two.id}`,token,{text:'Private tea for two'});await call('/api/memories/user',token,{text:'Shared tea'});
   const send=async(id,content)=>{await call('/api/commands',token,{id,botId:one.id,content});return (await call(`/api/bots/${one.id}/messages`,token))[1].at(-1).content;};
   const found=await send('find','What do you remember about tea?');assert.match(found,/Green tea/);assert.match(found,new RegExp(own.id));assert.match(found,/version 1/);assert.doesNotMatch(found,/Private tea|Shared tea/);
   const shared=await send('shared-find','Find memories about tea in shared memory');assert.match(shared,/Shared tea/);assert.doesNotMatch(shared,/Green tea|Private tea/);
@@ -152,7 +152,7 @@ test('agent memory language preserves scope and retains bot phrasing compatibili
  const app=startInstance(':memory:',0,{env:{}}),port=await app.listen();
  const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return [r.status,await r.json()]};
  try {
-  const token=(await call('/api/pair','',{code:app.code}))[1].token, agent=(await call('/api/bots',token,{name:'Botanist bot'}))[1];
+  const token=(await call('/api/pair','',{code:app.code}))[1].token, agent=(await call('/api/bots',token,{provider:'live',model:'fixture-offline',name:'Botanist bot'}))[1];
   const send=async(id,content)=>{await call('/api/commands',token,{id,botId:agent.id,content});return (await call(`/api/bots/${agent.id}/messages`,token))[1].at(-1).content};
   assert.match(await send('own-agent','Remember for this agent: I like tea'),/this agent.s memory/);
   const own=(await call(`/api/memories/bot/${agent.id}`,token))[1];assert.equal(own[0].text,'I like tea');

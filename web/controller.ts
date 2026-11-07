@@ -2,14 +2,22 @@ import {agentImageBodyType,agentImageByteLimit,parseAgentImage,parseAgentImageIn
 import {parseToolMode,type ToolMode} from '../src/tool-mode';
 import type {ToastNotice} from './toast-notice';
 import {responseEvents} from './response-stream';
+import {z} from 'zod';
 import type { Memory, MemoryScope } from '../src/memory-types';
 
 export type ModelCatalog={models:Array<{id:string;label:string;reasoning:string[]|null;reasoningStatus:string}>;defaultModel?:string};
 export type Bot={revision?:string;id:string;name:string;provider:string;model:string|null;archived:boolean;image?:AgentImage};
 export type BotProfile=Bot & {image:AgentImage;revision:string;instructions:string;description:string;reasoning:string|null;configDir:string;toolMode:ToolMode;providerChoices?:Record<string,{model:string|null;reasoning:string|null}>};
+export type Core = {source:'default'|'override';content:string;defaultContent:string;path:string;revision:string};
+function parseCore(value:unknown):Core {
+  if (!isRecord(value) || (value.source!=='default' && value.source!=='override') || typeof value.content!=='string' || typeof value.defaultContent!=='string' || typeof value.path!=='string' || typeof value.revision!=='string' || !/^[a-f0-9]{64}$/.test(value.revision)) throw Error('Invalid core response');
+  return {source:value.source,content:value.content,defaultContent:value.defaultContent,path:value.path,revision:value.revision};
+}
 export type Message={id:string;role:string;content:string};
-export type ResponseProgress={id:string;botId:string;state:'accepted'|'running'|'stopping'|'stopped'|'completed'|'failed'|'interrupted';text:string;error:string|null};
-export type ChatWork={id:string;processes:Array<{id:string;state:string;mode:string;retained:boolean;inputClosed:boolean;cols:number|null;rows:number|null;exitCode:number|null;exitSignal:string|null}>;progress:ResponseProgress;codeExecutions:Array<{id:string;source:string;sourceHash:string;outcome:string;result:unknown;actions:string[]}>;events:Array<{id:number;type:string;name:string;success:number|null;detail:string|null}>};
+const chatEventSchema=z.object({id:z.number().int(),type:z.enum(['tool_start','tool_result','assistant_message']),name:z.string(),success:z.number().nullable(),detail:z.string().nullable(),arguments:z.string().nullable(),callId:z.string().nullable()});
+export type ChatEvent=z.infer<typeof chatEventSchema>;
+export type ResponseProgress={id:string;botId:string;state:'accepted'|'running'|'stopping'|'stopped'|'completed'|'failed'|'interrupted';text:string;error:string|null;events?:ChatEvent[]};
+export type ChatWork={id:string;processes:Array<{id:string;state:string;mode:string;retained:boolean;inputClosed:boolean;cols:number|null;rows:number|null;exitCode:number|null;exitSignal:string|null}>;progress:ResponseProgress;codeExecutions:Array<{id:string;source:string;sourceHash:string;outcome:string;result:unknown;actions:string[]}>;events:ChatEvent[]};
 export type InboxItem={kind:'question';id:string;botId:string|null;attemptId:string;text:string}|{kind:'approval';approvalKind:'clock'|'web'|'search'|'shell'|'disclosure';id:string;botId:string|null;work:{kind:'task'|'command';id:string};detail:unknown};
 type SubmissionIdentity={id:string;text:string};
 export type Submission=SubmissionIdentity & (
@@ -19,8 +27,8 @@ export type Submission=SubmissionIdentity & (
 );
 export type Draft={text:string;submission:Submission|null};
 export type Connection={kind:'connecting'}|{kind:'pairing';message:string}|{kind:'ready'}|{kind:'offline';message:string};
-export type Setup={kind:'closed'}|{kind:'create';name:string;instructions:string;provider:string;model:string;reasoning?:string;toolMode?:ToolMode;image?:AgentImageInput;operationId:string|null;status:string};
-export type Workspace={connection:Connection;setup:Setup;bots:Bot[];selected:string|null;messages:Message[];work:ChatWork[];response:ResponseProgress|null;responseConnection:'connecting'|'connected'|'reconnecting';inbox:InboxItem[];credential:'signed-in'|'signed-out'|'unknown';openrouter:'saved'|'missing'|'unknown'|'error';authAttempt:{id:string;phase:string}|null;authUrl:string;authUrlAttemptId:string;freshness:string;notice:string;notices:ToastNotice[];authStarting:boolean;authStatus:string;actionError:string;draft:Draft;draftReady:boolean;legacyRecords:Array<{key:string;value:string}>};
+export type Setup={kind:'closed'}|{kind:'create';name:string;instructions:string;provider:string;model:string;reasoning?:string;toolMode?:ToolMode;image?:AgentImageInput;operationId:string|null;explicitChoices?:boolean;status:string};
+export type Workspace={datasetIdentity:string|null;connection:Connection;setup:Setup;bots:Bot[];selected:string|null;messages:Message[];work:ChatWork[];response:ResponseProgress|null;responseConnection:'connecting'|'connected'|'reconnecting';inbox:InboxItem[];credential:'signed-in'|'signed-out'|'unknown';openrouter:'saved'|'missing'|'unknown'|'error';authAttempt:{id:string;phase:string}|null;authUrl:string;authUrlAttemptId:string;freshness:string;notice:string;notices:ToastNotice[];authStarting:boolean;authStatus:string;actionError:string;draft:Draft;draftReady:boolean;legacyRecords:Array<{key:string;value:string}>};
 class ApiError extends Error {constructor(message:string,readonly status:number){super(message);}}
 const isRecord=(value:unknown):value is Record<string,unknown>=>typeof value==='object'&&value!==null&&!Array.isArray(value);
 type ProviderDefaults={revision:string;providers:Record<string,{model:string|null;reasoning:string|null}>};
@@ -47,7 +55,7 @@ function parseMemories(value: unknown, scope: MemoryScope): Memory[] {
 }
 
 function isResponseProgress(value:unknown,botId:string):value is ResponseProgress {
-  return isRecord(value)&&typeof value.id==='string'&&value.botId===botId&&typeof value.state==='string'&&['accepted','running','stopping','stopped','completed','failed','interrupted'].includes(value.state)&&typeof value.text==='string'&&(value.error===null||typeof value.error==='string');
+  return isRecord(value)&&typeof value.id==='string'&&value.botId===botId&&typeof value.state==='string'&&['accepted','running','stopping','stopped','completed','failed','interrupted'].includes(value.state)&&typeof value.text==='string'&&(value.error===null||typeof value.error==='string')&&(value.events===undefined||z.array(chatEventSchema).safeParse(value.events).success);
 }
 const prefix='staf-workspace-v1:';
 function normalizeDraft(draft:Draft):Draft {
@@ -57,11 +65,12 @@ function normalizeDraft(draft:Draft):Draft {
   return draft;
 }
 export class Controller {
-  private dataset:string|null=null; private writer=crypto.randomUUID(); private checking=false; private listeners=new Set<()=>void>(); private generation=0; private token=localStorage.getItem('staf-token')||''; private currentKey=''; private timer:number; private responseStream:{botId:string;controller:AbortController}|null=null;
-  state:Workspace={connection:{kind:'connecting'},setup:{kind:'closed'},bots:[],selected:null,messages:[],work:[],response:null,responseConnection:'connecting',inbox:[],credential:'unknown',openrouter:'unknown',authAttempt:null,authUrl:'',authUrlAttemptId:'',freshness:'',notice:'',notices:[],authStarting:false,authStatus:'',actionError:'',draft:{text:'',submission:null},draftReady:false,legacyRecords:[]};
+  private setupGeneration=0; private setupModelGeneration=0; private setupReasoningGeneration=0; private dataset:string|null=null; private datasetEpoch=0; private writer=crypto.randomUUID(); private checking=false; private listeners=new Set<()=>void>(); private generation=0; private token=localStorage.getItem('staf-token')||''; private currentKey=''; private timer:number; private responseStream:{botId:string;controller:AbortController}|null=null;
+  state:Workspace={datasetIdentity:null,connection:{kind:'connecting'},setup:{kind:'closed'},bots:[],selected:null,messages:[],work:[],response:null,responseConnection:'connecting',inbox:[],credential:'unknown',openrouter:'unknown',authAttempt:null,authUrl:'',authUrlAttemptId:'',freshness:'',notice:'',notices:[],authStarting:false,authStatus:'',actionError:'',draft:{text:'',submission:null},draftReady:false,legacyRecords:[]};
   constructor(){this.timer=window.setInterval(()=>{if(document.visibilityState==='visible')void this.refresh()},1000);window.addEventListener('online',()=>void this.refresh());document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')void this.refresh()});void this.removeObsoleteRecords();void this.refresh()}
   subscribe=(fn:()=>void)=>{this.listeners.add(fn);return()=>this.listeners.delete(fn)};
   snapshot=()=>this.state;
+  datasetGeneration=()=>this.datasetEpoch;
   notify(message:string,kind:ToastNotice['kind']='info',topic?:string){this.update({notices:[...this.state.notices.filter(n=>!topic||n.topic!==topic),{id:crypto.randomUUID(),message,kind,...(topic?{topic}:{})}]})}
   dismissNotice=(id:string)=>{this.update({notices:this.state.notices.filter(n=>n.id!==id)})};
   private update(change:Partial<Workspace>){
@@ -72,7 +81,8 @@ export class Controller {
     if(!response.ok||!isRecord(data)||typeof data.id!=='string'||!/^[a-f0-9]{64}$/.test(data.id))throw Error('Dataset identity unavailable');
     if(gen!==this.generation)return false;
     if(this.dataset!==data.id){
-      const changed=this.dataset!==null;this.dataset=data.id;this.draftLoad++;this.currentKey='';this.retainedCreation=null;this.watchResponse(null);
+      const changed=this.dataset!==null;this.dataset=data.id;this.datasetEpoch++;this.setupGeneration++;this.draftLoad++;this.currentKey='';this.retainedCreation=null;this.watchResponse(null);
+      this.update({datasetIdentity:data.id,legacyRecords:[]});
       if(changed)this.update({setup:{kind:'closed'},bots:[],selected:null,messages:[],work:[],response:null,draft:{text:'',submission:null},draftReady:false,notice:'The development dataset changed. Previous browser drafts and pending creations remain saved separately.'});
       void this.restoreCreation(data.id);
     }
@@ -95,7 +105,7 @@ export class Controller {
           if(!isRecord(event))throw Error('Invalid response stream event');
           const previous=this.state.response;
           let next:ResponseProgress|null;
-          if(event.type==='snapshot' && (event.response===null || isResponseProgress(event.response,botId)))next=event.response;
+          if(event.type==='snapshot' && (event.response===null || isResponseProgress(event.response,botId)))next=event.response?.state==='completed' && previous?.id===event.response.id ? {...event.response,text:previous.text} : event.response;
           else if(event.type==='delta' && typeof event.id==='string' && typeof event.text==='string' && previous?.id===event.id && previous.state==='running')next={...previous,text:previous.text+event.text};
           else throw Error('Invalid response stream event');
           this.update({response:next});
@@ -221,6 +231,19 @@ export class Controller {
       }
     }finally{this.legacyChecking=false}
   }
+  async discardLegacyRecord(record:{key:string;value:string}, dataset:string|null):Promise<boolean>{
+    if(!dataset || this.dataset!==dataset || !this.token || this.claims.has(record.key))return false;
+    const parts=record.key.startsWith(prefix)?record.key.slice(prefix.length).split(':'):[];
+    if(parts.length!==2)return false;
+    try{
+      return await navigator.locks.request('staf-draft:'+record.key,{ifAvailable:true},lock=>{
+        if(!lock || this.dataset!==dataset || this.claims.has(record.key) || localStorage.getItem(record.key)!==record.value)return false;
+        localStorage.removeItem(record.key);
+        this.update({legacyRecords:this.state.legacyRecords.filter(item=>item.key!==record.key || item.value!==record.value)});
+        return true;
+      });
+    }catch{return false;}
+  }
   private async restoreCreation(dataset:string){
     try{
       const keys=Array.from({length:localStorage.length},(_,i)=>localStorage.key(i)).filter((key):key is string=>!!key&&key.startsWith(prefix+'creation:'+dataset+':'));
@@ -229,7 +252,7 @@ export class Controller {
         const value=localStorage.getItem(key);if(!value)continue;
         const saved:unknown=JSON.parse(value);
         if(!isRecord(saved)||saved.kind!=='create'||typeof saved.operationId!=='string'||key!==prefix+'creation:'+dataset+':'+saved.operationId||typeof saved.name!=='string'||typeof saved.instructions!=='string'||typeof saved.provider!=='string'||typeof saved.model!=='string'||(saved.reasoning!==undefined&&(typeof saved.reasoning!=='string'||!['default','none','minimal','low','medium','high','xhigh','max'].includes(saved.reasoning))))continue;
-        const setup:Extract<Setup,{kind:'create'}>={kind:'create',operationId:saved.operationId,name:saved.name,instructions:saved.instructions,provider:saved.provider,model:saved.model,image:parseAgentImageInput(saved.image),...(saved.toolMode===undefined?{}:{toolMode:parseToolMode(saved.toolMode)}),...(saved.reasoning===undefined?{}:{reasoning:saved.reasoning}),status:'Recovered creation. Check status or retry the same operation.'};
+        const setup:Extract<Setup,{kind:'create'}>={kind:'create',operationId:saved.operationId,name:saved.name,instructions:saved.instructions,provider:saved.provider,model:saved.model,image:parseAgentImageInput(saved.image),...(saved.explicitChoices===true?{explicitChoices:true}:{}),...(saved.toolMode===undefined?{}:{toolMode:parseToolMode(saved.toolMode)}),...(saved.reasoning===undefined?{}:{reasoning:saved.reasoning}),status:'Recovered creation. Check status or retry the same operation.'};
         if(this.dataset!==dataset||this.state.setup.kind!=='closed'||this.retainedCreation)return;
         this.retainedCreation=setup;this.update({setup});return;
       }
@@ -246,7 +269,7 @@ export class Controller {
     const current=submission,uncertain=current.kind==='unknown'||current.kind==='uncertain-busy'||current.kind==='submitting-uncertain';
     if(!this.save({...draft,text:retry?draft.text:'',submission:{id:current.id,text:current.text,kind:uncertain?'submitting-uncertain':'submitting'}}))return;
     const bot=this.state.bots.find(item=>item.id===botId);
-    const setupError=bot?.provider==='codex'&&this.state.credential==='signed-out'?'Connect ChatGPT in Settings to send.':bot?.provider==='openrouter'&&this.state.openrouter!=='saved'?'Connect OpenRouter in Settings to send.':bot&&bot.provider!=='demo'&&!bot.model?.trim()?'Choose a model for this agent to send.':null;
+    const setupError=bot?.provider==='codex'&&this.state.credential==='signed-out'?'Connect ChatGPT in Settings to send.':bot?.provider==='openrouter'&&this.state.openrouter!=='saved'?'Connect OpenRouter in Settings to send.':bot?.provider==='demo'?'Choose a creation default in Settings to migrate this agent.':bot&&!bot.model?.trim()?'Choose a model for this agent to send.':null;
     if(setupError){this.save({...this.state.draft,submission:{id:current.id,text:current.text,kind:uncertain?'unknown':'rejected',error:setupError}});return}
     await this.submit(botId,current);
   }
@@ -279,7 +302,14 @@ export class Controller {
       const command=await this.api<{state:string;error:string|null}>('/api/commands/'+submission.id);
       if(this.state.selected!==botId||this.state.draft.submission?.id!==submission.id)return;
       const {id,text}=submission;
-      if(command.state==='completed'||command.state==='stopped'){this.save({...this.state.draft,submission:null});void this.refresh()}
+      if(command.state==='completed'||command.state==='stopped'){
+        await this.refresh();
+        if(this.state.selected!==botId||this.state.draft.submission?.id!==id)return;
+        const index=this.state.messages.findIndex(message=>message.id==='command-user-'+id);
+        const answer=this.state.messages[index+1];
+        const work=this.state.work.find(item=>item.id===id);
+        if(index>=0 && answer && ['assistant','assistant_stopped'].includes(answer.role) && work?.progress.state===command.state)this.save({...this.state.draft,submission:null});
+      }
       else if(command.state==='failed'||command.state==='interrupted')this.save({...this.state.draft,submission:{id,text,kind:command.state,error:command.error}});
       else this.save({...this.state.draft,submission:{id,text,kind:'pending'}});
     }catch(e){
@@ -288,13 +318,14 @@ export class Controller {
       if(submission.kind!=='uncertain-busy')this.save({...this.state.draft,submission:{id:submission.id,text:submission.text,kind:'unknown',error:String(e)}});
     }finally{this.checking=false}
   }
-  openSetup(){this.update({setup:this.retainedCreation??{kind:'create',name:'',instructions:'',provider:'',model:'',operationId:null,status:''}})}
-  async setupProvider(provider:string){const setup=this.state.setup;if(setup.kind!=='create'||setup.operationId)return;this.update({setup:{...setup,provider,model:'',reasoning:'default'}});try{const defaults=await this.providerDefaults();const pair=defaults.providers[provider];const current=this.state.setup;if(current.kind==='create'&&!current.operationId&&current.provider===provider&&!current.model)this.update({setup:{...current,model:pair?.model??'',reasoning:pair?.reasoning??'default'}})}catch{/* Creation remains possible while defaults are unavailable. */}}
-  setupField(field:'name'|'instructions'|'provider'|'model'|'reasoning',value:string){const setup=this.state.setup;if(setup.kind==='create'&&!setup.operationId)this.update({setup:{...setup,[field]:value}})}
+  openSetup(){const form=++this.setupGeneration,modelGeneration=this.setupModelGeneration,reasoningGeneration=this.setupReasoningGeneration,dataset=this.dataset,retained=this.retainedCreation;this.update({setup:retained??{kind:'create',name:'',instructions:'',provider:'',model:'',operationId:null,status:''}});if(!retained)void this.creationDefaults().then(defaults=>{const current=this.state.setup;if(this.dataset===dataset&&this.setupGeneration===form&&current.kind==='create'&&!current.operationId&&!current.provider)this.update({setup:{...current,provider:defaults.provider,...(this.setupModelGeneration===modelGeneration?{model:defaults.model??''}:{}),...(this.setupReasoningGeneration===reasoningGeneration?{reasoning:defaults.reasoning??'default'}:{})}})}).catch(error=>{const current=this.state.setup;if(this.dataset===dataset&&this.setupGeneration===form&&current.kind==='create'&&!current.operationId)this.update({setup:{...current,status:String(error)}})})}
+  async setupProvider(provider:string){const setup=this.state.setup;if(setup.kind!=='create'||setup.operationId)return;const form=++this.setupGeneration,dataset=this.dataset,modelGeneration=++this.setupModelGeneration,reasoningGeneration=++this.setupReasoningGeneration;this.update({setup:{...setup,provider,model:'',reasoning:'default'}});try{const defaults=await this.providerDefaults();const pair=defaults.providers[provider];const current=this.state.setup;if(this.dataset===dataset&&this.setupGeneration===form&&current.kind==='create'&&!current.operationId&&current.provider===provider)this.update({setup:{...current,...(this.setupModelGeneration===modelGeneration?{model:pair?.model??''}:{}),...(this.setupReasoningGeneration===reasoningGeneration?{reasoning:pair?.reasoning??'default'}:{})}})}catch{/* Creation remains possible while defaults are unavailable. */}}
+  setupField(field:'name'|'instructions'|'provider'|'model'|'reasoning',value:string){if(field==='model')this.setupModelGeneration++;if(field==='reasoning')this.setupReasoningGeneration++;const setup=this.state.setup;if(setup.kind==='create'&&!setup.operationId)this.update({setup:{...setup,[field]:value}})}
   setupToolMode(value:string){const setup=this.state.setup;if(setup.kind==='create'&&!setup.operationId)this.update({setup:{...setup,toolMode:value===''?undefined:parseToolMode(value)}})}
   setupImage(image:AgentImageInput){const setup=this.state.setup;if(setup.kind==='create'&&!setup.operationId)this.update({setup:{...setup,image}})}
-  closeSetup(){if(this.state.setup.kind==='create'&&this.state.setup.operationId)this.retainedCreation=this.state.setup;this.update({setup:{kind:'closed'}})}
-  async create(retry=false){const dataset=this.dataset;let s=this.state.setup;if(!dataset||s.kind!=='create')return;if(!s.name.trim()){this.update({setup:{...s,status:'Enter a name for your agent.'}});return;}if(!s.operationId)s={...s,operationId:crypto.randomUUID()};const key=prefix+'creation:'+dataset+':'+s.operationId;this.update({setup:s});try{if(!await this.claim(key))throw Error('Creation is in use');if(this.dataset!==dataset)return;localStorage.setItem(key,JSON.stringify(s));this.retainedCreation=s}catch{this.update({setup:{...s,status:'Browser storage unavailable. Creation is blocked.'}});return}this.update({setup:{...s,status:retry?'Retrying the same operation.':'Creating…'}});try{const provider=s.provider===undefined?'codex':s.provider;const bot=await this.api<Bot>('/api/bots',{operationId:s.operationId,name:s.name,instructions:s.instructions,...(provider?{provider}:{}),...(s.model.trim()?{model:s.model.trim()}:{}),...(s.reasoning?{reasoning:s.reasoning}:{}),...(s.toolMode===undefined?{}:{toolMode:s.toolMode}),image:s.image??{kind:'initials'}},undefined,s.image?.kind==='upload-data'?agentImageBodyType:undefined);if(this.dataset!==dataset)return;localStorage.removeItem(key);this.retainedCreation=null;this.update({setup:{kind:'closed'},selected:bot.id,notice:'Agent created. Provider readiness has not been verified.'});sessionStorage.setItem('staf-selected-agent',bot.id);await this.loadDraft(bot.id);await this.refresh()}catch(e){if(this.dataset!==dataset)return;this.update({setup:{...s,status:'Result may be uncertain. Your form is retained. Check status or retry the same operation. '+String(e)}})}}
+  closeSetup(){this.setupGeneration++;if(this.state.setup.kind==='create')this.retainedCreation=this.state.setup;this.update({setup:{kind:'closed'}})}
+  cancelSetup(){this.setupGeneration++;if(this.state.setup.kind==='create'&&this.state.setup.operationId)this.retainedCreation=this.state.setup;else this.retainedCreation=null;this.update({setup:{kind:'closed'}})}
+  async create(retry=false){const dataset=this.dataset;let s=this.state.setup;if(!dataset||s.kind!=='create')return;if(!s.name.trim()){this.update({setup:{...s,status:'Enter a name for your agent.'}});return;}if(!s.operationId&&!s.provider){this.update({setup:{...s,status:'Choose a provider for this agent or set creation defaults in Settings.'}});return;}if(!s.operationId)s={...s,operationId:crypto.randomUUID(),explicitChoices:true};const key=prefix+'creation:'+dataset+':'+s.operationId;this.update({setup:s});try{if(!await this.claim(key))throw Error('Creation is in use');if(this.dataset!==dataset)return;localStorage.setItem(key,JSON.stringify(s));this.retainedCreation=s}catch{this.update({setup:{...s,status:'Browser storage unavailable. Creation is blocked.'}});return}this.update({setup:{...s,status:retry?'Retrying the same operation.':'Creating…'}});try{const provider=s.provider;const bot=await this.api<Bot>('/api/bots',{operationId:s.operationId,name:s.name,instructions:s.instructions,...(provider?{provider}:{}),...(s.explicitChoices?{model:s.model.trim()||null,reasoning:s.reasoning&&s.reasoning!=='default'?s.reasoning:null}:{...(s.model.trim()?{model:s.model.trim()}:{}),...(s.reasoning&&s.reasoning!=='default'?{reasoning:s.reasoning}:{})}),...(s.toolMode===undefined?{}:{toolMode:s.toolMode}),image:s.image??{kind:'initials'}},undefined,s.image?.kind==='upload-data'?agentImageBodyType:undefined);if(this.dataset!==dataset)return;localStorage.removeItem(key);this.retainedCreation=null;this.update({setup:{kind:'closed'},selected:bot.id,notice:'Agent created. Provider readiness has not been verified.'});sessionStorage.setItem('staf-selected-agent',bot.id);await this.loadDraft(bot.id);await this.refresh()}catch(e){if(this.dataset!==dataset)return;this.update({setup:{...s,status:'Result may be uncertain. Your form is retained. Check status or retry the same operation. '+String(e)}})}}
   async checkCreate(){const dataset=this.dataset;const s=this.state.setup;if(!dataset||s.kind!=='create'||!s.operationId)return;try{const bot=await this.api<Bot>('/api/bot-creations/'+s.operationId);if(this.dataset!==dataset)return;localStorage.removeItem(prefix+'creation:'+dataset+':'+s.operationId);this.retainedCreation=null;this.update({setup:{kind:'closed'},selected:bot.id,notice:'Recovered the created agent.'});sessionStorage.setItem('staf-selected-agent',bot.id);await this.loadDraft(bot.id);await this.refresh()}catch(e){if(this.dataset!==dataset)return;this.update({setup:{...s,status:'Status unavailable. A missing record does not prove an in-flight request cannot finish. '+String(e)}})}}
   async saveOpenRouter(key:string){await this.api('/api/openrouter-connection',{key});await this.refresh()}
   async disconnectOpenRouter(){await this.api('/api/openrouter-connection/disconnect',{});await this.refresh()}
@@ -328,8 +359,11 @@ export class Controller {
   }
   async cancelAuth(){const attempt=this.state.authAttempt;if(!attempt)return;try{await this.api('/api/codex-auth/'+attempt.id+'/cancel',{});this.update({authUrl:'',authUrlAttemptId:'',authStatus:''});await this.refresh()}catch{const message='Could not cancel sign-in. Check connection and retry.';this.update({authStatus:message});this.notify(message,'error','auth')}}
   async signOutAuth(){try{await this.api('/api/codex-auth/logout',{});this.update({authUrl:'',authUrlAttemptId:'',authStatus:'',notices:this.state.notices.filter(n=>n.topic!=='auth')});await this.refresh();this.notify('ChatGPT sign-in removed from this instance.','success','auth')}catch(e){this.update({authStatus:'Could not sign out. Check connection and retry.'});this.notify('Could not sign out. Check connection and retry.','error','auth')}}
+  async core() { return parseCore(await this.api<unknown>('/api/core')); }
+  async saveCore(revision:string,content:string|null) { return parseCore(await this.api<unknown>('/api/core',{revision,content})); }
   async creationDefaults(){const value=await this.api<unknown>('/api/creation-defaults');if(!isRecord(value)||typeof value.revision!=='number'||typeof value.provider!=='string'||!isNullableString(value.model)||!isNullableString(value.reasoning))throw Error('Invalid creation defaults');return {revision:value.revision,provider:value.provider,model:value.model,reasoning:value.reasoning,toolMode:parseToolMode(value.toolMode)}}
   async saveCreationMode(defaults:Awaited<ReturnType<Controller['creationDefaults']>>,toolMode:ToolMode){return this.api('/api/creation-defaults',{...defaults,toolMode})}
+  async saveCreationDefaults(defaults:Awaited<ReturnType<Controller['creationDefaults']>>,provider:string,model:string,reasoning:string){return this.api('/api/creation-defaults',{...defaults,provider,model:model.trim()||null,reasoning:reasoning==='default'?null:reasoning})}
   async providerDefaults(){return parseProviderDefaults(await this.api<unknown>('/api/provider-defaults'))}
   async saveProviderDefault(revision:string,provider:string,model:string,reasoning:string){return parseProviderDefaults(await this.api<unknown>('/api/provider-defaults',{revision,provider,model:model.trim()||null,reasoning:reasoning==='default'?null:reasoning}))}
   async models(provider:string){return parseModelCatalog(await this.api<unknown>('/api/models',{provider}))}
@@ -363,7 +397,7 @@ export class Controller {
       throw error;
     }
   }
-  async saveBotProfile(profile:BotProfile,edit:{name:string;provider:string;model:string;instructions:string;toolMode:ToolMode;image?:AgentImageInput}){await this.api('/api/bots/'+profile.id+'/profile',{revision:profile.revision,name:edit.name,description:profile.description,instructions:edit.instructions,provider:edit.provider,model:edit.model.trim()||null,reasoning:profile.reasoning,toolMode:edit.toolMode,...(edit.image===undefined?{}:{image:edit.image})},undefined,edit.image?.kind==='upload-data'?agentImageBodyType:undefined);await this.refresh()}
+  async saveBotProfile(profile:BotProfile,edit:{name:string;provider:string;model:string;reasoning:string;instructions:string;toolMode:ToolMode;image?:AgentImageInput}){await this.api('/api/bots/'+profile.id+'/profile',{revision:profile.revision,name:edit.name,description:profile.description,instructions:edit.instructions,provider:edit.provider,model:edit.model.trim()||null,reasoning:edit.reasoning==='default'?null:edit.reasoning,toolMode:edit.toolMode,...(edit.image===undefined?{}:{image:edit.image})},undefined,edit.image?.kind==='upload-data'?agentImageBodyType:undefined);await this.refresh()}
   async setArchived(profile:BotProfile,archived:boolean){await this.api('/api/bots/'+profile.id+'/'+(archived?'archive':'restore'),{revision:profile.revision});await this.refresh()}
   async decide(item:Extract<InboxItem,{kind:'approval'}>,decision:'approve'|'deny'){const route={clock:'approvals',web:'web-approvals',search:'search-approvals',shell:'shell-approvals',disclosure:'disclosures'}[item.approvalKind];try{await this.api('/api/'+route+'/'+item.id+'/'+decision,{});this.update({notice:'Decision recorded.'});await this.refresh()}catch(e){this.update({actionError:'Decision failed or is uncertain. Refresh before trying again.'});this.notify('Decision failed or is uncertain. Refresh before trying again.','error');await this.refresh()}}
 }

@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import {syncBuiltinESMExports} from 'node:module';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {startInstance} from '../dist/instance-service.js';
+import {startInstance} from './fixtures/controlled-instance.mjs';
 import {PNG} from 'pngjs';
 import {randomFillSync,randomUUID} from 'node:crypto';
 import {execFile} from 'node:child_process';
@@ -46,7 +46,7 @@ test('first upload directory publication must succeed before accepting crop byte
 });
 
 test('legacy agents use initials and image edits preserve identity through clients and restart',()=>fixture(async({call,restart})=>{
-  const created=(await call('/api/bots',{name:'Ada',instructions:'Keep these instructions',provider:'demo'})).body;
+  const created=(await call('/api/bots',{name:'Ada',instructions:'Keep these instructions',provider:'live',model:'fixture-offline'})).body;
   assert.deepEqual(created.image,{kind:'initials'});
   const image={kind:'avatar',shape:'pentagon',color:'lilac'};
   const saved=await call(`/api/bots/${created.id}/profile`,{...created,image});
@@ -74,7 +74,7 @@ test('legacy agents use initials and image edits preserve identity through clien
 test('uploaded crops are bounded, authenticated, immutable and retained through recovery and lifecycle',()=>fixture(async(ctx)=>{
   const image=new PNG({width:256,height:256});randomFillSync(image.data);
   const png=PNG.sync.write(image).toString('base64'),input={kind:'upload-data',png};
-  const pending={operationId:'upload-create',name:'Photo',instructions:'Keep',provider:'demo',image:input};
+  const pending={operationId:'upload-create',name:'Photo',instructions:'Keep',provider:'live',model:'fixture-offline',image:input};
   assert.equal((await ctx.call('/api/bots',pending,'',agentImageBodyType)).status,401);
   assert.equal((await ctx.call('/api/bots',pending)).status,413,'ordinary JSON limit stays 64 KiB');
   const created=await ctx.call('/api/bots',pending,ctx.token,agentImageBodyType);
@@ -118,7 +118,7 @@ test('the paired CLI edits and preserves shared image descriptors',()=>fixture(a
   await writeFile(credential,JSON.stringify({token:ctx.token}),{mode:0o600});
   const cli=async(...args)=>JSON.parse((await run(process.execPath,['dist/cli.js','instance',...args])).stdout);
   const origin=`http://127.0.0.1:${ctx.port}`;
-  const agent=(await ctx.call('/api/bots',{name:'CLI image',provider:'demo'})).body;
+  const agent=(await ctx.call('/api/bots',{name:'CLI image',provider:'live',model:'fixture-offline'})).body;
   const profile=await cli('inspect',origin,credential,agent.id);
   await writeFile(profileFile,JSON.stringify({...profile,image:{kind:'avatar',shape:'capsule',color:'sage'}}));
   const edited=await cli('edit',origin,credential,agent.id,profileFile);
@@ -131,13 +131,13 @@ test('the paired CLI edits and preserves shared image descriptors',()=>fixture(a
 
 test('new upload references require stored bytes while unchanged missing images remain editable',()=>fixture(async(ctx)=>{
   const missing={kind:'upload',assetId:'a'.repeat(64)};
-  assert.equal((await ctx.call('/api/bots',{name:'Missing',provider:'demo',image:missing})).status,400);
+  assert.equal((await ctx.call('/api/bots',{name:'Missing',provider:'live',model:'fixture-offline',image:missing})).status,400);
   assert.equal((await ctx.call('/api/bots')).body.length,0);
   const crop=new PNG({width:256,height:256});crop.data.fill(90);
-  const created=(await ctx.call('/api/bots',{name:'Stored',provider:'demo',image:{kind:'upload-data',png:PNG.sync.write(crop).toString('base64')}},ctx.token,agentImageBodyType)).body;
+  const created=(await ctx.call('/api/bots',{name:'Stored',provider:'live',model:'fixture-offline',image:{kind:'upload-data',png:PNG.sync.write(crop).toString('base64')}},ctx.token,agentImageBodyType)).body;
   assert.equal((await ctx.call(`/api/bots/${created.id}/profile`,{...created,image:missing})).status,400);
   assert.deepEqual((await ctx.call(`/api/bots/${created.id}`)).body.image,created.image);
-  const request={name:'Reuse',provider:'demo',operationId:'reuse-upload',image:created.image};
+  const request={name:'Reuse',provider:'live',model:'fixture-offline',operationId:'reuse-upload',image:created.image};
   const reused=await ctx.call('/api/bots',request);assert.equal(reused.status,201);
   await rm(join(ctx.dir,'agents','.images',created.image.assetId+'.png'));
   assert.equal((await ctx.call('/api/bots',request)).body.id,reused.body.id,'accepted creation retry survives unavailable bytes');
@@ -145,11 +145,11 @@ test('new upload references require stored bytes while unchanged missing images 
   assert.equal(renamed.status,200);assert.deepEqual(renamed.body.image,created.image);
   const {image,...legacy}=renamed.body;
   assert.equal((await ctx.call(`/api/bots/${created.id}/profile`,{...legacy,instructions:'Still editable'})).status,200);
-  assert.equal((await ctx.call('/api/bots',{name:'New missing reference',provider:'demo',image})).status,400);
+  assert.equal((await ctx.call('/api/bots',{name:'New missing reference',provider:'live',model:'fixture-offline',image})).status,400);
 }));
 
 test('bad crops and stale image saves do not change the current image or weaken other body limits',()=>fixture(async(ctx)=>{
-  const agent=(await ctx.call('/api/bots',{name:'Safe',instructions:'',provider:'demo'})).body;
+  const agent=(await ctx.call('/api/bots',{name:'Safe',instructions:'',provider:'live',model:'fixture-offline'})).body;
   const image=new PNG({width:256,height:256});image.data.fill(128);const bytes=PNG.sync.write(image);
   const valid={kind:'upload-data',png:bytes.toString('base64')};
   assert.equal((await ctx.call(`/api/bots/${agent.id}/profile`,{...agent,image:valid})).status,415);
@@ -193,7 +193,7 @@ test('production avatars retain the approved palette, circular eyes and symmetri
 });
 
 test('image is part of retry-safe creation identity and invalid choices never replace a saved image',()=>fixture(async({call})=>{
-  const input={operationId:'image-create',name:'Scout',instructions:'',provider:'demo',image:{kind:'avatar',shape:'triangle',color:'lagoon'}};
+  const input={operationId:'image-create',name:'Scout',instructions:'',provider:'live',model:'fixture-offline',image:{kind:'avatar',shape:'triangle',color:'lagoon'}};
   const first=await call('/api/bots',input);assert.equal(first.status,201);assert.deepEqual(first.body.image,input.image);
   const again=await call('/api/bots',input);assert.equal(again.body.id,first.body.id);
   assert.equal((await call('/api/bots',{...input,image:{kind:'avatar',shape:'circle',color:'lagoon'}})).status,409);

@@ -19,7 +19,7 @@ interface TurnOptions {
   text: string;
   requestText?: string;
   emit?: (event: RuntimeEvent) => void;
-  responseProgress?: (event: {type:'start'} | {type:'delta';text:string}) => void;
+  responseProgress?: (event: {type:'start'} | {type:'delta'|'message';text:string}) => void;
   maxSteps?: number;
   clock?: () => string;
   authorizeClock?: () => Promise<void>;
@@ -57,12 +57,12 @@ export async function runTurn({ session, store, provider, text, emit = () => {},
   const observe = (report: UsageReport | undefined, outcome: UsageObservation['outcome']) => {
     usage.push({ observedAt: new Date().toISOString(), ...(report?.scope === 'request' || report?.scope === 'execution' ? {scope: report.scope} : {}), id: randomUUID(), attempt, turnStart: history.messages.length, provider: redact(provider.name),
       latencyMs: Math.max(0, performance.now() - (started ?? performance.now())), outcome,
-      status: report?.status === 'reported' || report?.status === 'not-applicable' ? report.status : provider.name === 'demo' ? 'not-applicable' : 'unavailable',
-      source: redact(report?.source || (provider.name === 'demo' ? 'Offline demo, no model' : 'No usage returned for this call')),
+      status: report?.status === 'reported' || report?.status === 'not-applicable' ? report.status : 'unavailable',
+      source: redact(report?.source || 'No usage returned for this call'),
       ...(report?.model && redact(report.model) === report.model ? {model: report.model} : {}), metrics: sanitizeMetrics(report?.metrics) });
     started = undefined;
   };
-  const report = (event: RuntimeEvent) => { events.push(event); emit(event); };
+  const report = (event: RuntimeEvent) => { events.push(event.type === 'tool_start' ? {type:event.type,id:event.id,name:event.name} : event); emit(event); };
   messages.push({ role: 'user', content: text });
   try {
     for (let step = 0; step < maxSteps; step++) {
@@ -132,6 +132,7 @@ export async function runTurn({ session, store, provider, text, emit = () => {},
       delete message.usage;
       if (calls.length && provider.capabilities?.toolCalls === false) throw new Error('This adapter does not support tool requests');
       messages.push(message);
+      if (calls.length && message.content) responseProgress?.({type:'message',text:message.content});
       if (preserveObservedAfterAbort && signal?.aborted && calls.length && typeof message.content === 'string' && message.content) report({type:'assistant_observed',text:message.content});
       if (!calls.length) {
         if (typeof message.content !== 'string') throw new Error('Expected assistant text');
@@ -152,12 +153,12 @@ export async function runTurn({ session, store, provider, text, emit = () => {},
         if(!task && name==='start_background_task')deferredBackground=true;
         if (task?.hasPending()) {
           const content='Tool not executed because owner input is pending.';
-          report({type:'tool_start',id:call.id,name});
+          report({type:'tool_start',id:call.id,name,arguments:call.function.arguments});
           messages.push({role:'tool',tool_call_id:call.id,content});
           report({type:'tool_result',id:call.id,name,success:false,content});
           continue;
         }
-        report({ type: 'tool_start', id: call.id, name });
+        report({ type: 'tool_start', id: call.id, name, arguments:call.function.arguments });
         if(actions?.closedReason()) {
           const content='Tool not executed: action admission is closed.';
           messages.push({role:'tool',tool_call_id:call.id,content});report({type:'tool_result',id:call.id,name,success:false,content});continue;
@@ -181,8 +182,9 @@ export async function runTurn({ session, store, provider, text, emit = () => {},
           }
         }
         if(actions && !availableTools.some(tool=>tool.function.name===name)) {
-          const content='Tool error: capability is not offered for this work';messages.push({role:'tool',tool_call_id:call.id,content});report({type:'tool_result',id:call.id,name,success:false,content});
-          if(name==='clock' && actions.context.mode!=='code') {actions.close('authority');throw Error(clockUnavailable?.() ?? 'Clock unavailable');}continue;
+          const content=name==='clock' && actions.context.mode!=='code' ? `Tool not executed: ${clockUnavailable?.() ?? 'Clock unavailable'}` : 'Tool error: capability is not offered for this work';messages.push({role:'tool',tool_call_id:call.id,content});report({type:'tool_result',id:call.id,name,success:false,content});
+          if(name==='clock' && actions.context.mode!=='code') actions.close('authority');
+          continue;
         }
         let content;
         let fatalAction: string | undefined;
@@ -201,7 +203,7 @@ export async function runTurn({ session, store, provider, text, emit = () => {},
             const intent=envelope===undefined ? {kind:'new' as const} : actionIntent.parse(envelope);
             let result:Awaited<ReturnType<WorkActions['invoke']>>;
             try {result=await actions.invoke({source:{kind:'provider',responseId:`${attempt}:${step}`,callId:call.id},name,input:actionInput,intent});} catch(error) {const closed=actions.closedReason();if(closed && !['search_web','read_web','run_scratch_shell'].includes(name))fatalAction='Action admission closed: '+closed;throw error;}
-            if(result.kind==='blocked' && actions.closedReason() && !['search_web','read_web','run_scratch_shell'].includes(name)) {fatalAction=name==='clock' && result.reason==='Action authorization failed' ? (clockUnavailable?.() ?? result.reason) : result.reason;throw Error(fatalAction);}
+            if(result.kind==='blocked' && result.reason!=='Action denied' && actions.closedReason() && !['search_web','read_web','run_scratch_shell'].includes(name)) {fatalAction=name==='clock' && result.reason==='Action authorization failed' ? (clockUnavailable?.() ?? result.reason) : result.reason;throw Error(fatalAction);}
             if(result.kind!=='completed') success=false;
             const safeResult=result.kind==='completed' ? redactValue(result.value,redact) : redactValue(result,redact);
             content=typeof safeResult==='string' ? safeResult : JSON.stringify(safeResult);

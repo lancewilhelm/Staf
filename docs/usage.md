@@ -11,6 +11,7 @@ Build and link the CLI once, then start it from your working directory:
 pnpm install --frozen-lockfile
 pnpm run build
 pnpm link --global
+staf settings set-defaults codex MODEL_ID
 staf
 ```
 
@@ -23,9 +24,7 @@ running. The next launch displays the saved conversation. A stopped instance
 starts again when you launch the terminal; unfinished requests are marked
 interrupted when the instance restarts.
 
-The initial provider is an offline demo that echoes messages. It is not a
-language model. Type `show settings`, `set provider to demo`, `set model to NAME`,
-or `set reasoning to LEVEL` to inspect or change the current bot profile. Use
+A fresh instance requires a real provider and model. Replace `codex` and `MODEL_ID` in the setup command with your choice. No connection or inference is required to save it. Type `show settings`, `set model to NAME`, or `set reasoning to LEVEL` to inspect or change the current bot profile. Use
 `/help` to see deterministic commands, including approval and status commands.
 Other messages go to the selected provider or the instance's existing memory and
 task handlers. Natural-language settings support these documented phrases, not
@@ -109,14 +108,11 @@ revoked, pair a client explicitly instead of silently restoring access.
 Open `/settings` in an interactive terminal to edit the current bot's provider,
 model, and reasoning. `/settings show` prints the current profile. In plain
 terminals, use `/set provider NAME`, `/set model MODEL_ID`, and `/set reasoning
-LEVEL`. Confirm a provider change with `/confirm-provider` after reviewing the history-transfer notice, or cancel with `/cancel-provider`. Use `/unset model` or `/unset reasoning` to restore the provider default. Changes are saved to the shared bot profile and apply to new work. Bot
-creation defaults are separate and do not change existing bots. Use `/defaults`
-to inspect them and `/set-default provider|model|reasoning VALUE` to edit them. `/models` reads
+LEVEL`. Confirm a provider change with `/confirm-provider` after reviewing the history-transfer notice, or cancel with `/cancel-provider`. Use `/unset model` or `/unset reasoning` to restore the provider default. Changes are saved to the shared bot profile and apply to new work. Creation defaults are separate. Run `staf settings set-defaults PROVIDER MODEL [REASONING]` to set the provider and model together, including on a fresh instance. Use `staf settings defaults` to inspect them. In an interactive terminal, use `/set-defaults PROVIDER MODEL [REASONING]` to save the pair. `/models` reads
 model metadata explicitly; a failed discovery does not prevent manual entry.
 
-The available providers are `demo`, `codex`, `openrouter`, `lmstudio`, and
-`live`. All except demo require an explicit model in the bot profile. Demo is an
-offline echo and does not use a language model. Switching providers can send the
+The available providers are `codex`, `openrouter`, `lmstudio`, and `live`.
+Each requires an explicit model in the agent profile. Switching providers can send the
 existing conversation to the newly selected provider on the next request.
 
 ### Use ChatGPT
@@ -223,10 +219,9 @@ The workspace keeps an agent list beside the selected main chat, visible while
 the chat scrolls. Select an agent to switch conversations; agents with the same
 name, including archived namesakes, show the last four characters of their stable
 IDs in the list and Updates. Suffixes can coincide; full IDs remain available
-through the API or CLI. **New agent**, under the **Agents** sidebar heading, opens creation, and **Settings** controls appearance and
-instance-wide provider connections. New agent opens a modal with keyboard focus
-contained inside; Escape or Cancel closes it and returns focus. Optional provider
-choices remain under its Provider, model and reasoning disclosure. Choose Light, Dark, or System appearance;
+through the API or CLI. **New agent**, at the bottom of the sidebar, opens creation, and **Settings** controls appearance and
+instance-wide provider connections. New agent uses the same settings form as an
+existing agent, with provider, model, and reasoning choices visible. Choose Light, Dark, or System appearance;
 Light is the default; System follows device appearance changes. The choice is saved
 in this browser, independently of other browsers; clearing browser storage resets it.
 
@@ -234,8 +229,8 @@ The sidebar starts expanded. Use its panel icon to collapse it to the Focus rail
 the expand button then appears in the workspace header. Agent selection, New
 agent, and Settings remain available in the rail. Settings offers Evergreen and
 Ink palettes and **Layout and typography** controls for DM Sans or system sans,
-text size, spacing, corners, and the five-dot logo. Defaults are Evergreen, DM
-Sans, 14px text, 20px spacing, 10px corners, and Orbit. These choices apply only
+text size, spacing, and corners. Defaults are Evergreen, DM
+Sans, 14px text, 20px spacing, and 10px corners. These choices apply only
 to this browser. Settings groups shared connections into provider cards;
 Creation defaults opens its editor through Edit defaults. The composer model button opens provider, model, and reasoning
 choices immediately above it as grouped menu rows with selection checkmarks.
@@ -258,26 +253,26 @@ new one. **Sign out** removes the instance's local credential after confirmation
 finish active work and sign-in first. Agent provider and model selections and
 unsent drafts are retained. Create an agent with a name and optional
 instructions, provider, and model, even before signing in or choosing a model. Select the
-agent avatar in the chat header to edit its full settings and Instructions. The
+agent name or avatar in the chat header to edit its full settings and Instructions. The
 optional **Instructions** field provides standing guidance in the agent's
-`soul.md`. Open **About Instructions** with a click, tap, or keyboard to read
-the explanation; hovering the control also shows it. Press
+`soul.md`. Use the information icons beside **Instructions** and **Tool mode** to read
+their explanations by hover, focus, click, or tap. Press
 Enter to send a message or Shift+Enter to insert a new line. The workspace keeps drafts when switching agents. If sign-in or a model is
 missing, the submitted text remains beside an explanation and Retry control.
 
-In agent settings, Demo is always available; ChatGPT and OpenRouter can be chosen
-when their shared connection is saved. A saved connection does not verify account
-or model access. A disconnected current provider remains visible, and **Open
-provider settings** lets you repair a connection and return to your unsaved
-agent edits. The browser does not offer LM Studio or HTTP compatible as new
-choices because their host configuration is not managed in global Settings;
-existing selections remain visible and can still be edited through the CLI or
-configuration files. A provider switch retains the model text for you to review
-and asks for confirmation because future requests can send the existing chat to
-the new provider. Saving settings does not send a model request. Other agents
-keep their own choices.
+In agent settings, choose a provider and review its model and reasoning before
+saving. Provider connections are shared by the instance, and a saved connection
+does not verify account or model access. **Open provider settings** lets you repair
+a connection and return to the unsaved form. Name, image, instructions, tool mode,
+provider, model, and reasoning are saved together. A provider change requires
+confirmation at Save because future requests can send the existing chat to the
+new provider. Canceling that confirmation keeps the form. Navigating away keeps
+the draft in the current tab; returning restores its original revision. **Cancel**
+discards unsaved form edits. If a save fails or its acknowledgment is uncertain,
+compare the latest settings and reconcile the retained draft before retrying.
+Saving settings does not send a model request. Other agents keep their own choices.
 In agent settings, select **Archive agent** to retain configuration and history
-while preventing new work. To restore it, expand **Archived agents** in the **Agents** sidebar and select
+while preventing new work. Confirm the action in Staf. To restore it, expand **Archived agents** in the sidebar and select
 **Restore agent** beside its name. An agent with active chat or background
 work cannot be archived until that work settles.
 
@@ -285,7 +280,15 @@ In the shared terminal, `/stop` requests cancellation of the current main-chat r
 
 Actual tool requests and success/failure outcomes appear below the corresponding user message. Expand an outcome to read bounded, redacted output. Pending chat approvals show the exact action and scope with **Approve once** and **Deny**. Decisions from other clients disappear on the next refresh. Observed outcomes remain visible after response failure or Stop. These are tool records, not hidden reasoning.
 
+After an ordinary tool error or an explicit denial, the provider can receive the
+matching result and produce a reply. A denied action closes admission for the
+rest of that work, so a follow-up cannot execute another action. Stop still
+ends the response. A provider failure or the four-step tool iteration limit can
+leave no completed reply; inspect the response status and tool outcomes. A
+provider decides its own wording, so a useful explanation is not guaranteed.
+
 While a response runs, the workspace receives provisional text and progress over a shared-instance event stream. If the connection drops, the workspace reconnects and shows the latest saved progress.
+Tool calls appear as compact rows before the next agent name and message. A response with several steps alternates tool rows, an agent message, more tool rows, and the next agent message. Intermediate messages remain visible after reload, failure, or Stop. Open a tool row to inspect its retained arguments and result. Approval requests and process controls remain available in the conversation. Older tool events without a call identity appear separately because their request and result cannot be paired reliably. Earlier responses without recorded message boundaries retain their existing tool group and final answer.
 The composer has one circular action: an up arrow labeled **Send** when ready, and a square labeled **Stop** during an active response. You can type a next draft while the response runs. Select **Stop** to request cancellation; the response shows **stopping** until the provider and pending operations settle. The circular action stays disabled and labeled **Stopping response** until settlement, then returns to Send. The draft remains editable throughout; Enter cannot submit it during generation or stopping, and nothing is queued. Send it explicitly after the response settles. Stopped partial output stays in the conversation labeled **stopped** and is not treated as a completed provider reply. A provider that does not promptly honor cancellation can keep the agent in stopping until it returns.
 Markdown headings, lists, links and code blocks render in assistant responses;
 use Copy on a code block. Raw HTML is not rendered. The conversation follows new
@@ -310,9 +313,11 @@ the message cannot be dismissed and any retry keeps the original ID.
 Obsolete pre-journal browser records are deleted without importing them. Current
 journal records, including records owned by other open tabs and recoverable closed-tab
 drafts, are retained. Older records without a dataset identity recover automatically
-when a stored command or creation operation verifies their origin. Otherwise, open
-**Earlier browser records** to inspect and copy the saved text and operation details;
-these records are not submitted or assigned to the current dataset automatically.
+when a stored command or creation operation verifies their origin. Otherwise, open **Settings > Earlier browser records** to inspect and copy saved
+text and operation details, or discard an individual record after confirmation.
+The section disappears when no earlier records remain. Staf does not submit or
+assign these records to the current dataset automatically. A changed record or a
+record owned by another open tab is not discarded.
 An unfinished agent
 creation is restored automatically after refresh or reopening a tab, with the same
 operation ID for Check creation or Retry same creation. A live tab keeps ownership
@@ -324,6 +329,61 @@ remain available.
 
 After updating Staf, reload any already-open workspace tabs so they all use the
 current draft coordination before editing in multiple tabs.
+### Shared core guidance
+
+Staf supplies instance-wide operating guidance separately from each agent's
+`soul.md`. The built-in core covers direct answers, proportionate detail,
+useful follow-through, uncertainty, and service-enforced permissions. It names
+no individual tool. Tool definitions describe the capabilities actually offered.
+Upgrades adopt this text only when there is no custom override. To inspect or
+adopt it deliberately, use **View latest built-in core** or **Reset core**.
+Open **Settings → Advanced Settings** to edit the complete effective
+core. **Save core** replaces the built-in text with your draft. Saving an empty
+draft deliberately removes the shared guidance. Open **View latest built-in core**
+to inspect the current shipped text. **Reset core** removes the override and
+adopts that text. An unsaved draft stays in the editor when you navigate away or
+reset; copy it before reloading or changing datasets.
+
+If a save conflicts, fails, or its outcome is uncertain, the editor retains your
+draft and blocks another save. Select **Compare latest core**, review the saved
+content, and reconcile your draft before retrying. The editor uses the same
+revision and authoritative file as the paired CLI. Inspect that file with:
+
+```sh
+node dist/cli.js instance core http://127.0.0.1:3210 "$HOME/.staf/dev-client/client.json"
+```
+
+The result includes the effective `content`, its `source`, `revision`, `path`,
+and the latest `defaultContent`. To replace it, save UTF-8 Markdown in a file and
+run `instance core-save URL CREDENTIAL_FILE REVISION FILE`. Use the revision
+from inspection. An empty file deliberately disables only the shared core. To
+remove the override and adopt the latest shipped default, run `instance
+core-reset URL CREDENTIAL_FILE REVISION`.
+
+The reported `path` is the authoritative override on the instance host. When
+`source` is `default`, that file is absent; creating it activates an override.
+Editing or deleting it directly affects newly accepted chat and task work.
+Staf validates the file before accepting work. Invalid or unreadable content
+blocks acceptance until repaired. An editor can overwrite an unobserved direct
+edit, so coordinate direct writers. Client saves reject stale revisions. If a
+save outcome is uncertain, inspect the current core before retrying.
+
+Staf retains previous revision directories, which may contain private guidance.
+If an editor writes an older open file after publication, Staf blocks new work
+and reports its directory. Close that editor, compare the old and current files,
+apply the desired changes, then remove the old directory's `.retired` marker.
+Each accepted request retains its captured core, including during provider
+continuations. A task retry retains its predecessor's captured profile. Prompt
+text cannot grant tools or bypass service permissions, approvals, or Stop.
+After relevant committed core, agent instruction, tool mode, provider, model, or
+reasoning changes, the workspace may report that provider prompt-cache reuse
+may decrease on the next message. It does not report this for name, image, or
+creation-default changes. The notice depends on the selected provider and the
+request inputs it uses. The direct ChatGPT adapter's local cache key includes
+the model, instructions, and sorted tools; reasoning can change the request
+without changing that key. A changed key or prefix does not establish a cache
+miss, a hit, or a cost change. Provider cache behavior has not been verified live.
+
 ### Agent configuration files
 
 Each agent has `agent.toml` for its name, description, provider, model and
@@ -363,8 +423,8 @@ files with `configDir`, apply the changes you want to the current files, and
 remove the old revision's `.retired` marker after review. The old files remain
 on disk.
 
-A later request after a provider change can send existing chat history to the new provider. Creation defaults set provider, model, and reasoning for future bots. The instance copies these settings at creation; changing defaults never changes existing bots. Revisions prevent stale clients from overwriting each other. In the CLI, use `instance defaults URL CREDENTIAL_FILE` and `instance defaults-set URL CREDENTIAL_FILE REVISION PROVIDER MODEL REASONING [TOOL_MODE]`; use `-` for an empty model or reasoning. Permission and approval settings remain separate. The description is owner-edited metadata visible to other bots; keep private instructions and memory out of it. New bots start with an empty description.
-The deterministic demo provider does not follow the instructions. Select ChatGPT, OpenRouter, LM Studio, or live and an explicit model in the bot profile. OpenRouter uses the managed instance key described above; the instance command does not load the project `.env` file. ChatGPT uses the Staf grant under the directory containing the instance database. From a paired browser, use ChatGPT sign-in and open the provided link on the instance host. The initiating paired client can check or cancel that attempt, including after refreshing the page. The CLI provides `instance chatgpt-auth-start URL CREDENTIAL_FILE`, `chatgpt-auth-current URL CREDENTIAL_FILE`, `chatgpt-auth-status URL CREDENTIAL_FILE ATTEMPT_ID`, `chatgpt-auth-cancel URL CREDENTIAL_FILE ATTEMPT_ID`, `chatgpt-auth-credential URL CREDENTIAL_FILE`, and `chatgpt-auth-logout URL CREDENTIAL_FILE`. The callback listens on the same loopback origin. Revoking the initiating client prevents credential commit. These paths have been tested with synthetic auth only; live sign-in has not been verified. Provider failures do not fall back to another provider. Live provider execution has not been verified in this preview.
+A later request after a provider change can send existing chat history to the new provider. Creation defaults set a real provider, model, and optional reasoning for future agents. The instance copies these settings at creation. In the creation editor, a cleared model and Automatic reasoning are saved as shown; the model can be chosen later. Saving a real default also moves remaining Demo agents, including archived agents, to that provider and model. Existing real-provider agents are unchanged. Migration does not authenticate or run inference. If a file conflict interrupts migration, repair the reported configuration and reload creation defaults to retry. Valid unrelated agents can still accept work. Revisions prevent stale clients from overwriting each other. In the paired CLI, use `instance defaults URL CREDENTIAL_FILE` and `instance defaults-set URL CREDENTIAL_FILE REVISION PROVIDER MODEL REASONING [TOOL_MODE]`; use `-` for automatic reasoning. Permission and approval settings remain separate. The description is owner-edited metadata visible to other bots; keep private instructions and memory out of it. New bots start with an empty description.
+Select ChatGPT, OpenRouter, LM Studio, or live and an explicit model in the bot profile. OpenRouter uses the managed instance key described above; the instance command does not load the project `.env` file. ChatGPT uses the Staf grant under the directory containing the instance database. From a paired browser, use ChatGPT sign-in and open the provided link on the instance host. The initiating paired client can check or cancel that attempt, including after refreshing the page. The CLI provides `instance chatgpt-auth-start URL CREDENTIAL_FILE`, `chatgpt-auth-current URL CREDENTIAL_FILE`, `chatgpt-auth-status URL CREDENTIAL_FILE ATTEMPT_ID`, `chatgpt-auth-cancel URL CREDENTIAL_FILE ATTEMPT_ID`, `chatgpt-auth-credential URL CREDENTIAL_FILE`, and `chatgpt-auth-logout URL CREDENTIAL_FILE`. The callback listens on the same loopback origin. Revoking the initiating client prevents credential commit. These paths have been tested with synthetic auth only; live sign-in has not been verified. Provider failures do not fall back to another provider. Live provider execution has not been verified in this preview.
 
 CLI examples (use a fresh host code for each client):
 
@@ -563,26 +623,30 @@ An uncertain start, stop or cleanup blocks further scratch commands and daemon c
 
 ## Provider choices
 
-Open the composer model control to choose provider, model and reasoning. Provider
-and reasoning selections and listed model choices save immediately; manual model text saves when leaving
-the field. **List models** reports how many models loaded and shows an **Available models**
-dropdown. If no models are returned, it says so; you can still enter a
-model ID manually or retry. Discovery errors remain beside the controls. Model
-listing reads metadata only and does not verify account access or run inference.
-Model IDs absent from the list remain valid manual entries. Provider default reasoning leaves the effort unset. A model
-with explicitly incompatible advertised reasoning resets the effort visibly.
-Missing metadata leaves the saved effort intact; generation can still reject it.
-Changing providers asks for confirmation before saving. Drafts stay in place.
-Agent settings uses the same picker; name and instructions retain their separate
-Save settings action and conflict recovery.
+Open the composer model control to choose provider, model and reasoning. The
+picker loads model metadata when opened or when the provider changes. Creation,
+agent settings, and provider defaults also load metadata automatically. Choose a
+listed model or enter a model ID. The selected listed model is marked. If
+metadata is unavailable, the entered ID remains editable and you can retry.
+Discovery reads metadata only. It does not verify authentication, account access,
+or inference.
 
-Global Settings → Provider defaults configures each provider's first-use pair.
-Returning to a provider restores that agent's remembered pair. Changing defaults
-does not update existing selections. Creation without an explicit provider keeps
-the copied creation defaults. An explicit provider instead uses its own defaults or an explicit choice; after
-discovery, an advertised default model can fill an unset model. It does not
-inherit another provider’s reasoning.
-Configuration does not verify model/account access.
+The composer saves provider, listed model, and reasoning choices immediately.
+Manual model text saves when you leave the field. The picker stays open until
+you click outside it or press Escape. A provider change asks for confirmation in
+the picker because the next request may send conversation history to that
+provider. The message draft remains editable. Agent settings and creation stage
+choices with the other fields until you save or create the agent.
+
+**Automatic** leaves reasoning to the provider. Known model metadata limits the
+explicit choices. Choosing a model that advertises incompatible reasoning resets
+the effort visibly; unknown metadata preserves it. A later request can still
+reject an explicit effort. Global Settings → Provider defaults configures each
+provider's first-use pair. Returning to a provider restores that agent's
+remembered pair. Changing first-use pairs does not update existing selections.
+Saving a real creation default also migrates existing Demo agents to that pair.
+An explicit provider uses its own defaults or an explicit choice. Discovery alone
+does not change a saved selection.
 
 Paired CLI clients can inspect and select the same state:
 
@@ -648,7 +712,7 @@ history and backups.
 
 For an offline manual check, build and start the controlled fixture in
 [development](development.md#review-chat-locally-without-a-provider), pair,
-create a Demo agent with Hybrid, and send `Scripted clock fixture`. Expect
+create the fixture agent with Hybrid, and send `Scripted clock fixture`. Expect
 “Scripted clock completed” and a **Code execution** detail containing the
 source, returned time and action ID. Select Direct or Code Mode for later work
 and use a tool-capable provider to exercise the respective offer. This fixture
