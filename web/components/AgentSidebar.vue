@@ -1,8 +1,9 @@
 <script setup lang="ts">
+import DisclosureSummary from './DisclosureSummary.vue';
 import AgentImage from './AgentImage.vue';
 import { useWorkspace } from '../workspace';
 import AgentLabel from './AgentLabel.vue';
-import UiIcon from './UiIcon.vue';
+import { Plus, Settings } from '@lucide/vue';
 import { providerLabel } from '../provider-label';
 import ArchivedAgent from './ArchivedAgent.vue';
 import BrandMark from './BrandMark.vue';
@@ -28,9 +29,9 @@ function agentName(agent: {name: string; id: string}) {
       </button>
     </nav>
     <details v-if="s.bots.some(agent => agent.archived)" class="archived-agents">
-      <summary>Archived agents</summary>
+      <DisclosureSummary>Archived agents</DisclosureSummary>
       <ArchivedAgent v-for="agent in s.bots.filter(b => b.archived)" :key="agent.id" :agent="agent" :saving="saving" @memory="emit('memory', agent.id)" />
     </details>
-    <div class="minor"><button :disabled="saving" @click="emit('create')" class="new-agent" aria-label="New agent" title="New agent"><UiIcon name="plus" /><span>New agent</span></button><button :disabled="saving" :class="{active: view === 'settings'}" @click="emit('settings')" aria-label="Settings" title="Settings"><UiIcon name="gear" /><span>Settings</span></button><div class="workspace-caption">Personal workspace</div></div>
+    <div class="minor"><button :disabled="saving" @click="emit('create')" class="new-agent" aria-label="New agent" title="New agent"><Plus :size="16" aria-hidden="true" focusable="false" /><span>New agent</span></button><button :disabled="saving" :class="{active: view === 'settings'}" @click="emit('settings')" aria-label="Settings" title="Settings"><Settings :size="16" aria-hidden="true" focusable="false" /><span>Settings</span></button><div class="workspace-caption">Personal workspace</div></div>
   </aside>
 </template>

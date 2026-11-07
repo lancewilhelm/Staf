@@ -4,7 +4,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import type { BotProfile } from '../controller';
 import { useWorkspace } from '../workspace';
 import ProviderPicker from './ProviderPicker.vue';
-import UiIcon from './UiIcon.vue';
+import { ArrowUp, ChevronDown, Square } from '@lucide/vue';
 const emit = defineEmits<{settings: [id: string]}>();
 const {app, state: s} = useWorkspace();
 const selected = computed(() => s.value.bots.find(agent => agent.id === s.value.selected));
@@ -75,14 +75,12 @@ function keydown(event: KeyboardEvent) {
       <ProviderPicker compact :active="picker" @ready="focusPicker" @catalog-ready="catalogReady" @profile="value => profile = value" :key="selected.id" :id="selected.id" />
     </div>
 
-      <button ref="trigger" class="model-button" aria-haspopup="menu" aria-controls="composer-picker" @keydown.down.prevent="openPicker('first')" @keydown.up.prevent="openPicker('last')" :aria-expanded="picker" aria-label="Choose provider, model and reasoning" @click="togglePicker"><span class="provider-name">{{ providerLabel(selected.provider) }}</span><span> / </span><span class="model-name">{{ selected.model || 'Choose model' }}</span><span> / </span><span>{{ profile?.id === selected.id ? profile.reasoning || 'Automatic' : '…' }}</span><UiIcon name="down" /></button>
+      <button ref="trigger" class="model-button" aria-haspopup="menu" aria-controls="composer-picker" @keydown.down.prevent="openPicker('first')" @keydown.up.prevent="openPicker('last')" :aria-expanded="picker" aria-label="Choose provider, model and reasoning" @click="togglePicker"><span class="provider-name">{{ providerLabel(selected.provider) }}</span><span> / </span><span class="model-name">{{ selected.model || 'Choose model' }}</span><span> / </span><span>{{ profile?.id === selected.id ? profile.reasoning || 'Automatic' : '…' }}</span><ChevronDown :size="16" aria-hidden="true" focusable="false" /></button>
       </div><button class="composer-control" :aria-label="responding ? stopping ? 'Stopping response' : 'Stop' : 'Send'"
         :title="responding ? stopping ? 'Stopping response' : 'Stop response' : 'Send (Enter)'"
         :disabled="responding ? stopping : !s.draftReady || !!s.draft.submission" @click="responding ? app.stopResponse() : app.send()">
-        <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24">
-          <rect v-if="responding" x="6" y="6" width="12" height="12" rx="2" fill="currentColor" />
-          <path v-else d="M12 19V5m-6 6 6-6 6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-        </svg>
+        <Square v-if="responding" :size="16" fill="currentColor" aria-hidden="true" focusable="false" />
+        <ArrowUp v-else :size="20" aria-hidden="true" focusable="false" />
         <span class="sr-only">{{ responding ? stopping ? 'Stopping…' : 'Stop' : 'Send' }}</span>
       </button>
     </div>

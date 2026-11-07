@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, watchEffect } from 'vue';
+import { X } from '@lucide/vue';
 import type { ToastNotice } from '../toast-notice';
 const props = defineProps<{notice: ToastNotice}>();
 const emit = defineEmits<{dismiss: [id: string]}>();
@@ -29,7 +30,7 @@ function blur(event: FocusEvent) {
   <div class="toast" :data-kind="notice.kind" :data-paused="hovered || focused"
     @mouseenter="hovered = true" @mouseleave="hovered = false" @focusin="focused = true" @focusout="blur">
     <p :role="notice.kind === 'error' ? 'alert' : 'status'">{{ notice.message }}</p>
-    <button class="quiet" aria-label="Dismiss notification" @click="emit('dismiss', notice.id)">×</button>
+    <button class="quiet toast-dismiss" aria-label="Dismiss notification" @click="emit('dismiss', notice.id)"><X :size="16" aria-hidden="true" focusable="false" /></button>
     <div v-if="notice.kind !== 'error'" class="toast-progress" role="progressbar" aria-label="Time remaining" :aria-valuemin="0" :aria-valuemax="100" :aria-valuenow="Math.round(progress)">
       <span :style="{width: progress + '%'}" />
     </div>
