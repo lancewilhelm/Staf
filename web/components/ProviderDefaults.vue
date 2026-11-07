@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import DisclosureSummary from './DisclosureSummary.vue';
 import { onMounted, onUnmounted, ref, shallowRef, watch } from 'vue';
 import type { Controller } from '../controller';
 import { useWorkspace } from '../workspace';
@@ -68,7 +69,7 @@ async function compare() {
 
 <template>
   <section aria-label="Provider defaults" class="setting-card">
-    <h2 class="section-title">Creation defaults</h2><p>Copied into new agents. Saving a real provider also moves existing Demo agents, including archived agents, to that provider and model. Their next request may send their conversation history to that provider.</p><details class="defaults-editor"><summary>Edit defaults</summary>
+    <h2 class="section-title">Creation defaults</h2><p>Copied into new agents. Saving a real provider also moves existing Demo agents, including archived agents, to that provider and model. Their next request may send their conversation history to that provider.</p><details class="defaults-editor"><DisclosureSummary>Edit defaults</DisclosureSummary>
     <ChoiceFields real-only :provider="creationProvider" :model="creationModel" :reasoning="creationReasoning" @change="changeCreation" />
     <div class="row"><button :disabled="!creation" @click="saveCreation">Save creation defaults</button><button class="quiet" @click="compareCreation">Compare creation defaults</button></div><p role="status">{{ creationStatus }}</p>
     <ToolModeSelect :model-value="toolMode" @update:model-value="changeMode" /><div class="row"><button :disabled="!creation" @click="saveMode">Save tool mode default</button><button class="quiet" @click="compareMode">Compare latest tool mode</button></div><p role="status">{{ modeStatus }}</p>

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import DisclosureSummary from './DisclosureSummary.vue';
 import { onMounted, ref, shallowRef } from 'vue';
 import type { Core } from '../controller';
 import { useWorkspace } from '../workspace';
@@ -57,7 +58,7 @@ async function save(reset: boolean) {
       <p v-if="current.source === 'override' && current.content === ''">The saved override is empty.</p>
       <label>Effective core<textarea v-model="draft" :disabled="busy" rows="12" /></label>
       <p class="meta">An empty saved override is valid and removes the shared core guidance.</p>
-      <details class="saved-settings"><summary>View latest built-in core</summary><pre>{{ current.defaultContent }}</pre></details>
+      <details class="saved-settings"><DisclosureSummary>View latest built-in core</DisclosureSummary><pre>{{ current.defaultContent }}</pre></details>
       <div class="row"><button :disabled="busy || needsComparison" @click="save(false)">Save core</button><button class="quiet" :disabled="busy || needsComparison" @click="save(true)">Reset core</button></div>
     </template>
     <p role="status">{{ busy ? 'Loading or saving…' : status }}</p>

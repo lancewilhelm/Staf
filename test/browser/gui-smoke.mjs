@@ -37,6 +37,8 @@ try{
  assert.equal(await evaluate("document.querySelector('nav[aria-label=Agents]') !== null && !document.querySelector('#agents-label') && document.querySelector('.minor .new-agent') !== null"),true,'agent navigation is named and creation is in the footer');
  await cdp('Emulation.setEmulatedMedia',{features:[{name:'prefers-color-scheme',value:'light'}]});
  assert.equal(await evaluate("document.querySelector('input[name=appearance][value=light]')?.checked"),true,'fresh browser defaults to Light');
+ assert.equal(await evaluate("[...document.querySelectorAll('.theme-preview')].length===3 && [...document.querySelectorAll('.theme-preview')].every(e=>e.querySelector('svg[aria-hidden=true][focusable=false]'))"),true,'all appearance choices use decorative Lucide icons');
+ assert.equal(await evaluate("[...document.querySelectorAll('.minor button,.panel-toggle,.header-action')].every(button=>button.querySelector('svg.lucide[stroke-width=\"2\"][aria-hidden=true][focusable=false]'))"),true,'navigation controls use Lucide icons with accessible button names');
  assert.equal(await evaluate("getComputedStyle(document.documentElement).colorScheme"),'light');
  await act("document.querySelector('input[name=appearance][value=dark]').click()","getComputedStyle(document.documentElement).colorScheme==='dark'",'choose dark appearance');
  await evaluate("localStorage.setItem('staf-draft','Obsolete draft');localStorage.setItem('staf-pending',JSON.stringify({id:'obsolete-command',text:'Obsolete command'}))");
@@ -194,7 +196,12 @@ try{
  await cdp('Input.dispatchMouseEvent',{type:'mouseMoved',...hoverPoint});assert.deepEqual(await buttonStyle(),beforeHover,'pointer hover keeps button visuals');
  await evaluate("[...document.querySelectorAll('.side button')].find(b=>b.getAttribute('aria-label')==='Settings').click()");
  await until(()=>evaluate("!!document.querySelector('.palette-card')"),'appearance options');
- await evaluate("document.querySelector('.appearance-details').open=true");
+ await evaluate("document.querySelector('.appearance-details summary').focus()");
+ await cdp('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',text:'\r',unmodifiedText:'\r',windowsVirtualKeyCode:13,nativeVirtualKeyCode:13});
+ await cdp('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13,nativeVirtualKeyCode:13});
+ await until(()=>evaluate("document.querySelector('.appearance-details').open"),'keyboard opens the native disclosure with its Lucide chevron');
+ assert.equal(await evaluate("getComputedStyle(document.querySelector('.appearance-details .disclosure-chevron')).transform==='matrix(0, 1, -1, 0, 0, 0)'"),true,'disclosure chevron follows the expanded state');
+ assert.equal(await evaluate("!!document.querySelector('.appearance-details select').labels.length && getComputedStyle(document.querySelector('.select-chevron')).pointerEvents==='none'"),true,'selects retain native labels and the Lucide arrow does not intercept clicks');
  assert.equal(await evaluate("!!document.querySelector('.appearance-details select') && [...document.querySelectorAll('.appearance-details select')].some(s=>s.parentElement.textContent.includes('Sidebar'))"),false,'no duplicate sidebar preference');
  assert.equal(await evaluate("!!document.querySelector('.logo-options')"),false,'logo selection removed');
  await evaluate("document.querySelectorAll('.palette-card')[1].click();const r=document.querySelector('[aria-label=\"Text size\"]');r.value='16';r.dispatchEvent(new Event('input',{bubbles:true}))");
@@ -547,6 +554,7 @@ try{
  await evaluate("[...document.querySelectorAll('.chat-work details summary')].find(e=>e.textContent.includes('Code execution · return')).click()");
  assert.equal(await evaluate("[...document.querySelectorAll('.chat-work details[open]')].some(e=>e.innerText.includes('capabilities.clock') && e.innerText.includes('Action IDs:'))"),true,'source and linked action are inspectable');
  console.log('PASS real QuickJS source and action inspection');
+ await until(()=>evaluate("document.querySelector('.composer-control')?.getAttribute('aria-label')==='Send' && !document.querySelector('.composer-control').disabled"),'previous response settles before the native process fixture');
  await act("testInput('[aria-label=Message]','Native process fixture');testClick('Send')","document.querySelector('.messages').innerText.includes('Native fixture started.')",'native process starts in chat');
  await until(()=>evaluate("[...document.querySelectorAll('.chat-work details summary')].some(e=>e.textContent.includes('Process · running'))"),'native process is visible');
  await evaluate("[...document.querySelectorAll('.chat-work details summary')].find(e=>e.textContent.includes('Process · running')).click()");
@@ -557,7 +565,7 @@ try{
  // Reuse this paired browser and its independent CLI client for the combined basic-tool journey.
  for(const mode of ['direct','hybrid','code']) {
   await act("document.querySelector('button[aria-label=\"Open agent settings\"]').click()","!![...document.querySelectorAll('.setup label')].find(e=>e.textContent.startsWith('Tool mode'))",'open tool mode settings');
-  await evaluate(`(()=>{const select=document.querySelector('.editor-label + select');select.value=${JSON.stringify(mode)};select.dispatchEvent(new Event('change',{bubbles:true}));testClick('Save settings')})()`);
+  await evaluate(`(()=>{const select=[...document.querySelectorAll('.setup label')].find(label=>label.textContent==='Tool mode').control;select.value=${JSON.stringify(mode)};select.dispatchEvent(new Event('change',{bubbles:true}));testClick('Save settings')})()`);
   await until(()=>evaluate("!!document.querySelector('[aria-label=Message]')"),'save '+mode+' mode');
   const saved=await evaluate(`(async()=>{return (await (await fetch('/api/bots/${bot.id}',{headers:{Authorization:'Bearer '+localStorage.getItem('staf-token')}})).json()).toolMode})()`);
   assert.equal(saved,mode);
@@ -601,7 +609,7 @@ try{
   console.log('PASS combined GUI/CLI files, memory and retained PTY in '+mode);
  }
  await act("document.querySelector('button[aria-label=\"Open agent settings\"]').click()","!![...document.querySelectorAll('.setup label')].find(e=>e.textContent.startsWith('Tool mode'))",'restore Hybrid fixture mode');
- await evaluate("(()=>{const select=document.querySelector('.editor-label + select');select.value='hybrid';select.dispatchEvent(new Event('change',{bubbles:true}));testClick('Save settings')})()");
+ await evaluate("(()=>{const select=[...document.querySelectorAll('.setup label')].find(label=>label.textContent==='Tool mode').control;select.value='hybrid';select.dispatchEvent(new Event('change',{bubbles:true}));testClick('Save settings')})()");
  await until(()=>evaluate("!!document.querySelector('[aria-label=Message]')"),'return from tool mode settings');
  await act("testInput('[aria-label=Message]','Start synthetic background work');testClick('Send')","document.querySelector('.messages').innerText.includes('Background tasks are deferred')",'unsolicited background creation rejected');
  assert.equal(await evaluate("[...document.querySelectorAll('.side button')].some(b=>b.textContent.includes('Updates'))"),false,'task update navigation absent');

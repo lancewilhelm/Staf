@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import DisclosureSummary from './DisclosureSummary.vue';
 import { computed, nextTick, onMounted, onScopeDispose, ref, shallowRef, watch } from 'vue';
 import type { Memory, MemoryScope } from '../../src/memory-types';
 import { useWorkspace } from '../workspace';
@@ -69,7 +70,7 @@ onMounted(() => { heading.value?.focus(); });
           <li v-for="entry in visible" :key="entry.id" class="memory-entry">
             <p class="memory-text">{{ entry.text }}</p>
             <p class="meta">Updated <time :datetime="entry.updatedAt" :title="entry.updatedAt">{{ new Date(entry.updatedAt).toLocaleString() }}</time></p>
-            <details><summary>Entry details</summary><dl>
+            <details><DisclosureSummary>Entry details</DisclosureSummary><dl>
               <dt>ID</dt><dd><code>{{ entry.id }}</code></dd>
               <dt>Version</dt><dd>{{ entry.version }}</dd>
               <dt>Created</dt><dd><time :datetime="entry.createdAt">{{ new Date(entry.createdAt).toLocaleString() }}</time></dd>

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import DisclosureSummary from './DisclosureSummary.vue';
 import { computed, ref } from 'vue';
 import { useWorkspace } from '../workspace';
 import type { ChatEvent, ChatWork, InboxItem } from '../controller';
@@ -34,19 +35,19 @@ const calls = computed(() => {
 <template>
   <div v-if="work" class="chat-work" aria-label="Agent work">
     <details v-for="call in calls" :key="call.key" class="tool-call">
-      <summary>{{ call.name }} · {{ !call.done ? (['accepted','running','stopping'].includes(work.progress.state) ? 'Requested' : 'No result') : call.success ? 'Succeeded' : 'Failed' }}</summary>
+      <DisclosureSummary>{{ call.name }} · {{ !call.done ? (['accepted','running','stopping'].includes(work.progress.state) ? 'Requested' : 'No result') : call.success ? 'Succeeded' : 'Failed' }}</DisclosureSummary>
       <template v-if="call.start !== null"><p>Arguments</p><pre>{{ call.start }}</pre></template>
       <template v-if="call.result !== null"><p>Result</p><pre>{{ call.result }}</pre></template>
     </details>
     <template v-if="controls">
     <details v-for="execution in work.codeExecutions" :key="execution.id">
-      <summary>Code execution · {{ execution.outcome }}</summary>
+      <DisclosureSummary>Code execution · {{ execution.outcome }}</DisclosureSummary>
       <p>Source</p><pre>{{ execution.source }}</pre>
       <p>Result</p><pre>{{ JSON.stringify(execution.result, null, 2) }}</pre>
       <p v-if="execution.actions.length">Action IDs: {{ execution.actions.join(', ') }}</p>
     </details>
     <details v-for="process in work.processes" :key="process.id" @toggle="showOutput(process.id)">
-      <summary>Process · {{ process.state }}<template v-if="process.exitCode !== null"> · exit {{ process.exitCode }}</template><template v-if="process.exitSignal"> · {{ process.exitSignal }}</template></summary>
+      <DisclosureSummary>Process · {{ process.state }}<template v-if="process.exitCode !== null"> · exit {{ process.exitCode }}</template><template v-if="process.exitSignal"> · {{ process.exitSignal }}</template></DisclosureSummary>
       <p>{{ process.id }}</p><pre>{{ outputs[process.id] }}</pre>
       <p v-if="process.retained">Retained {{ process.mode }} process</p>
       <template v-if="['starting','running'].includes(process.state) && !process.inputClosed">

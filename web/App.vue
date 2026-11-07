@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { X } from '@lucide/vue';
 import AgentImage from './components/AgentImage.vue';
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { provideWorkspace } from './workspace';
@@ -91,7 +92,7 @@ function openChat(id: string) { settingsAgentId.value = null; app.closeSetup(); 
           <div class="title"><template v-if="view === 'settings'">Settings</template><template v-else-if="view === 'create'">Create agent</template><template v-else-if="view === 'user-memory'">User memory</template><button v-else-if="selected && view === 'chat' && s.setup.kind === 'closed'" class="header-agent-name" :disabled="agentSaving" @click="openAgentSettings(selected.id)"><AgentLabel :agent="selected" /></button><AgentLabel v-else-if="headerAgent" :agent="headerAgent" /><template v-else>Welcome to Staf</template></div>
         </div>
         <div class="spacer" />
-        <button v-if="view !== 'chat'" class="header-action" :disabled="agentSaving" aria-label="Back to chat" @click="closeAgentSettings"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="m6 6 12 12M6 18 18 6"/></svg></button>
+        <button v-if="view !== 'chat'" class="header-action" :disabled="agentSaving" aria-label="Back to chat" @click="closeAgentSettings"><X :size="18" aria-hidden="true" focusable="false" /></button>
       </header>
       <Toasts />
       <div v-if="s.connection.kind === 'offline'" class="connection-recovery" role="alert">{{ s.connection.message }} {{ s.freshness }}</div>

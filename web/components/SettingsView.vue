@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { Monitor, Moon, Sun } from '@lucide/vue';
 import { useWorkspace } from '../workspace';
 import { type Appearance, saveAppearance } from '../appearance';
 import ProviderDefaults from './ProviderDefaults.vue';
@@ -75,7 +76,7 @@ async function disconnectRouter() {
     <section class="settings-section"><h2 class="section-title">User</h2><p class="section-help">User memory is available to all your agents.</p><button class="quiet user-memory-link" @click="emit('memory')">View user memory</button></section>
     <section class="settings-section"><h2 class="section-title">Theme</h2><p class="section-help">Choose how Staf looks in this browser.</p>
     <fieldset class="appearance"><legend>Appearance</legend>
-      <label v-for="value in appearances" :key="value"><span class="theme-preview" :class="value" aria-hidden="true"><i /><span><b /><em /></span></span><span class="theme-name"><input type="radio" name="appearance" :value="value" :checked="appearance === value" @change="chooseAppearance(value)" />{{ value[0].toUpperCase() + value.slice(1) }}</span></label>
+      <label v-for="value in appearances" :key="value"><span class="theme-preview" :class="value" aria-hidden="true"><Sun v-if="value === 'light'" :size="24" aria-hidden="true" focusable="false" /><Moon v-else-if="value === 'dark'" :size="24" aria-hidden="true" focusable="false" /><Monitor v-else :size="24" aria-hidden="true" focusable="false" /></span><span class="theme-name"><input type="radio" name="appearance" :value="value" :checked="appearance === value" @change="chooseAppearance(value)" />{{ value[0].toUpperCase() + value.slice(1) }}</span></label>
     </fieldset></section>
     <AppearanceOptions @reset="chooseAppearance('light')" />
     <section class="settings-section"><h2 class="section-title">Provider connections</h2><p class="section-help">Connections belong to this Staf instance and are available to all your agents.</p><div class="providers">

@@ -416,7 +416,29 @@ Import each icon by name, as `InfoHelp.vue` imports `Info`. Use `currentColor`,
 a stroke width of 2, and a size that fits its control. Keep an accessible name on
 the button and mark its decorative SVG `aria-hidden="true"`. Preserve keyboard
 focus and the existing hover, focus, click, and touch help interactions.
-The fixed Staf logo and agent avatars keep their own renderers.
+
+All interface icons use this package: navigation and sidebar controls, Send and
+Stop, picker and palette checkmarks, notification dismissal, information help,
+theme choices, and disclosure and select arrows. The custom `UiIcon` path
+registry is removed. Light, Dark, and System use `Sun`, `Moon`, and `Monitor`.
+The fixed Staf logo, agent avatars, uploaded images, and color swatches keep
+their own renderers.
+
+Use `DisclosureSummary` as the first child of a native `details` element. Its
+Lucide chevron follows the element's open state, including keyboard toggles.
+Wrap a native `select` in `SelectControl` to use its Lucide dropdown arrow.
+Keep labels, values, disabled state, and event handlers on the native select.
+The decorative arrow ignores pointer input. Neither helper adds a replacement
+menu or manages control state.
+
+To review the icons on the implementation branch, start the normal development
+workspace and reuse the paired browser. Check the sidebar in expanded and Focus
+views, the composer Send and Stop states, and selected picker entries. In
+Settings, switch Light, Dark, and System, and open Layout and typography with
+Enter or Space. Expect one rotating disclosure chevron, a labeled Font select,
+and visible keyboard focus. Check these controls at a narrow window width.
+The disposable GUI, provider-picker, memory, core-settings, and agent-image
+browser journeys cover the affected controls without live provider calls.
 
 ## Review agent images
 
