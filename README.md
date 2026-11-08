@@ -54,6 +54,8 @@ only to loopback. The optional native Linux HTTPS gateway provides paired home-n
 Explicit background tasks and their outcomes appear in the shared conversation, with a task Stop control; separate Activity management remains deferred. It is an offline-tested preview with important permission and recovery limitations; see [usage](docs/usage.md#background-task-preview).
 
 
+The optional bundled [Slack plugin](docs/usage.md#slack-plugin) connects one approved DM to a chosen agent through Socket Mode. It is inactive until configured and enabled, with separate agent access. Controlled integration tests do not establish live Slack behavior.
+
 The shared instance supports owner-imported [skills](docs/usage.md#skills-in-the-shared-instance) as an offline-tested preview. Eligible chat and task work can select them in Direct, Hybrid, or Code Mode.
 
 The shared instance supports [scoped memory](docs/usage.md#scoped-memory-in-the-shared-instance) in an offline-tested preview, with read-only agent and shared user memory pages in Settings.
