@@ -133,3 +133,16 @@ test('accepted tasks in each mode obey current availability without widening tas
   }
  }finally{await app.close();}
 });
+
+test('schema 40 Slack configuration and agent access survive the tool settings upgrade',async()=>{
+ const {Instance}=await import('../dist/instance.js');const {DatabaseSync}=await import('node:sqlite');
+ const dir=mkdtempSync(join(tmpdir(),'staf-plugin-upgrade-')),path=join(dir,'db');let instance=new Instance(path);
+ try{
+  const bot=instance.createBot({name:'Slack agent',provider:'live',model:'fixture-offline',instructions:''});
+  instance.plugins.connect({teamId:'T123',userId:'U123',channelId:'D123',botId:bot.id});instance.plugins.setAccess(bot.id,true);instance.plugins.setEnabled(true);
+  const before=instance.plugins.connection();instance.close();instance=undefined;
+  const db=new DatabaseSync(path);db.exec('DROP TABLE tool_defaults; PRAGMA user_version=40');db.close();
+  instance=new Instance(path);assert.ok(instance.migrationBackup);assert.deepEqual(instance.plugins.connection(),before);
+  assert.deepEqual(instance.toolDefaults(),{revision:1,clock:true,memory:true,web:true,files:true});
+ }finally{instance?.close();rmSync(dir,{recursive:true,force:true});}
+});

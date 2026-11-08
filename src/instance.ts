@@ -28,11 +28,12 @@ import { WorkActionService, workActionsSchema, type ActionIdentity } from './wor
 import type { ByteRedactor } from './config.js';
 import { NativeProcesses, nativeProcessSchema } from './native-processes.js';
 import { ApprovalGrants, approvalGrantSchema, type GrantBoundary } from './approval-grants.js';
+import { PluginStore, pluginSchema } from './plugins.js';
 
 const clockAction: Action = { capability:'clock', operation:'read', resource:'utc', effect:'read', limits:{}, risk:'safe' };
 const clockBoundary = { enabledCapabilities:['clock'], actions:[clockAction] };
 const modes: ApprovalMode[] = ['ask-every-time','ask-for-risky-actions','never-ask'];
-export const INSTANCE_SCHEMA_VERSION = 40;
+export const INSTANCE_SCHEMA_VERSION = 41;
 const MAINTENANCE_VERSION = 2147483647;
 
 export const starterSoul = "You are an assistant working for the owner. Be clear and candid. Distinguish observations from assumptions. Follow the owner's role instructions and work within the permissions and task scope granted to you.";
@@ -90,6 +91,7 @@ export class Instance {
   private actionService: WorkActionService | undefined;
   private readonly grantControllers = new Map<string,Set<AbortController>>();
   readonly migrationBackup: string | undefined;
+  readonly plugins: PluginStore;
   constructor(path: string, private readonly redactSkill: (text:string) => string = text => text, maintenanceToken?:string) {
     assertDatasetAvailable(path,maintenanceToken);
     this.temporaryConfigRoot = path === ':memory:' ? mkdtempSync(join(tmpdir(),'staf-config-')) : undefined;
@@ -206,7 +208,9 @@ export class Instance {
     if(version < 30 && !this.db.prepare("SELECT 1 FROM pragma_table_info('command_runtime_events') WHERE name='detail'").get())this.db.exec('ALTER TABLE command_runtime_events ADD COLUMN detail TEXT');
     if(version < 38 && !this.db.prepare("SELECT 1 FROM pragma_table_info('command_runtime_events') WHERE name='call_id'").get())this.db.exec('ALTER TABLE command_runtime_events ADD COLUMN call_id TEXT');
     this.db.exec('CREATE INDEX IF NOT EXISTS command_runtime_events_command ON command_runtime_events(command_id,seq)');
-    if(version < 40) this.db.exec("CREATE TABLE IF NOT EXISTS tool_defaults (id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL, clock INTEGER NOT NULL CHECK(clock IN (0,1)), memory INTEGER NOT NULL CHECK(memory IN (0,1)), web INTEGER NOT NULL CHECK(web IN (0,1)), files INTEGER NOT NULL CHECK(files IN (0,1))); INSERT OR IGNORE INTO tool_defaults VALUES (1,1,1,1,1,1)");
+    if(version < 40) this.db.exec(pluginSchema);
+    this.plugins = new PluginStore(this.db);
+    if(version < 41) this.db.exec("CREATE TABLE IF NOT EXISTS tool_defaults (id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL, clock INTEGER NOT NULL CHECK(clock IN (0,1)), memory INTEGER NOT NULL CHECK(memory IN (0,1)), web INTEGER NOT NULL CHECK(web IN (0,1)), files INTEGER NOT NULL CHECK(files IN (0,1))); INSERT OR IGNORE INTO tool_defaults VALUES (1,1,1,1,1,1)");
     if (!maintenanceToken) this.db.exec(`PRAGMA user_version=${INSTANCE_SCHEMA_VERSION}`);
     for (const row of this.db.prepare("SELECT id,bot_id FROM task_attempts WHERE state IN ('queued','running','stopping','waiting') ORDER BY rowid").all()) {
       if (typeof row.id !== 'string' || typeof row.bot_id !== 'string') throw Error('Invalid interrupted task');
@@ -255,7 +259,7 @@ export class Instance {
       (work,signal)=>this.workContext(work,signal),
       work=>{
         const record=work.kind==='command' ? this.command(work.id) : this.taskAttempt(work.id);
-        if (!record || typeof record.botId !== 'string' || record.state!==(work.kind==='command' ? 'pending' : 'running') || this.botIdentity(record.botId)?.archived !== false || (work.kind==='command' && this.responseStopping(work.id)) || (work.kind==='task' && this.scheduleOrigin(work.id)?.revoked === 1)) throw Error('Work is no longer active or authorized');
+        if (!record || typeof record.botId !== 'string' || record.state!==(work.kind==='command' ? 'pending' : 'running') || this.botIdentity(record.botId)?.archived !== false || (work.kind==='command' && this.responseStopping(work.id)) || (work.kind==='task' && this.scheduleOrigin(work.id)?.revoked === 1) || (work.kind==='command' && this.plugins.isPluginCommand(work.id) && !this.plugins.authority(work.id))) throw Error('Work is no longer active or authorized');
       },32,work=>work.kind==='task' && this.taskHasPending(work.id),this.redactSkill);
     return this.actionService;
   }
