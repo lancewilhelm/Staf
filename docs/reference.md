@@ -545,3 +545,16 @@ Paired owners can POST `/api/processes/ID/input` with `{ "data": "text\n" }`, `/
 `limits.inputBytes` is 16,384 per request, `pendingInputs` is eight per process, and `ptyInputBytes` is a cumulative 1,048,576 bytes per PTY lifetime. Input and resize requests are serialized per process. Stop closes interaction admission and interrupts queued input; it does not wait behind a blocked write. A receipt proves submission, not consumption. Pipe EOF closes input permanently; PTY EOF submits Ctrl-D. PTY output uses the `terminal` stream. Output bounds and redaction are shared with pipe mode.
 
 Schema 36 adds process retention, input counters/closure and PTY dimensions through the protected migration process, preserving combined native/search schema 35. Old records default to nonretained. Unknown handles cannot receive input, EOF, resize or signals after restart.
+
+
+## Bundled plugin management
+
+Paired clients use `GET /api/plugins` to inspect bundled definitions, Slack
+configuration without tokens, connection state, agent access, and recent event
+outcomes. `POST /api/plugins/slack/connect` accepts `appToken`, `botToken`,
+`teamId`, `userId`, `channelId`, and `botId`; it validates the bot token against
+the workspace. `POST /api/plugins/slack/access` takes `botId` and `enabled`.
+The `enable`, `disable`, `disconnect`, and `delete-config` endpoints take empty
+objects. Connections are instance-owned and keyed by service account identity;
+this slice exposes one Slack account. Tokens remain host-local and are never
+returned. See [Slack setup](usage.md#slack-plugin) for limits and recovery.
