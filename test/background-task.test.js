@@ -8,7 +8,7 @@ import { startInstance } from './fixtures/controlled-instance.mjs';
 test('background task and chat run independently, retain activity, and survive restart', async () => {
   const dir=mkdtempSync(join(tmpdir(),'staf-task-')), path=join(dir,'db');
   let release, entered; const gate=new Promise(r=>release=r), started=new Promise(r=>entered=r);
-  const factory=async profile=>({name:'fixture',capabilities:{toolCalls:true,incrementalText:false,transport:'demo'},async complete(messages){if(profile.chatId==='attempt-one'){entered();await gate;return {role:'assistant',content:'background result',usage:{scope:'request',status:'reported',source:'fixture',metrics:{input:7}}};}return {role:'assistant',content:'chat result'};}});
+  const factory=async profile=>({name:'fixture',capabilities:{toolCalls:true,incrementalText:false,transport:'demo'},async complete(messages){if(profile.chatId==='attempt-one'){entered();await gate;return {role:'assistant',content:'background result',tool_calls:[{id:'late-clock',type:'function',function:{name:'clock',arguments:'{}'}}],usage:{scope:'request',status:'reported',source:'fixture',metrics:{input:7}}};}return {role:'assistant',content:'chat result'};}});
   let app=startInstance(path,0,{providerFactory:factory}),port=await app.listen();
   const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return [r.status,await r.json()];};
   const wait=async(route,token,predicate)=>{for(let i=0;i<200;i++){const v=(await call(route,token))[1];if(predicate(v))return v;await new Promise(r=>setTimeout(r,5));}throw Error('timed out');};
@@ -23,7 +23,7 @@ test('background task and chat run independently, retain activity, and survive r
     assert.equal((await call('/api/tasks/attempt-one/stop',token,{}))[1].state,'stopping');
     release(); const completed=await wait('/api/tasks/attempt-one',token,t=>['completed','stopped'].includes(t.state));
     assert.equal(completed.state,'stopped');assert.equal(completed.outcome,'Task stopped');assert.equal(completed.usage[0].metrics.input,7);
-    assert.ok(completed.activity.some(e=>e.type==='stopping'));assert.ok(completed.activity.some(e=>e.type==='assistant_observed' && e.text==='background result'));
+    assert.ok(completed.activity.some(e=>e.type==='stopping'));assert.ok(completed.activity.some(e=>e.type==='assistant_observed' && e.text==='background result'));assert.ok(!completed.activity.some(e=>e.type==='tool_start'));
     const chat=(await call(`/api/bots/${bot.id}/chat-work`,token))[1];assert.equal(chat.tasks.length,1);assert.equal(chat.tasks[0].id,'attempt-one');assert.equal(chat.tasks[0].state,'stopped');assert.ok(chat.tasks[0].activity.some(e=>e.type==='assistant_observed' && e.text==='background result'));assert.ok(chat.tasks[0].anchorMessageId);
     assert.deepEqual((await call(`/api/bots/${bot.id}/chat-work`,token))[1].tasks,chat.tasks);
     assert.equal((await call('/api/tasks',token,req))[1].kind,'existing');

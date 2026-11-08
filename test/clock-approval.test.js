@@ -61,7 +61,13 @@ test('denial, stop and restart interrupt clock requests without retrying them', 
    assert.equal(state.state,disposition==='deny'?'failed':disposition==='stop'?'stopped':'interrupted');
    assert.equal((await call(`/api/approvals/${request.id}/approve`,{},token))[0],409);
    assert.equal(calls,disposition==='deny'?4:1);
-   if(disposition==='deny') assert.equal(state.activity.filter(event=>event.type==='tool_result' && event.success===false).length,4);
+   if(disposition==='deny') {
+    assert.equal(state.activity.filter(event=>event.type==='tool_result' && event.success===false).length,4);
+    const chat=(await call(`/api/bots/${bot.id}/chat-work`,undefined,token))[1];const shown=chat.tasks.find(task=>task.id==='attempt');
+    assert.equal(shown.state,'failed');assert.deepEqual(shown.activity.map(event=>event.seq),state.activity.map(event=>event.seq));
+    assert.equal(chat.messages.filter(message=>message.taskAttemptId==='attempt').length,1);
+    assert.deepEqual((await call(`/api/bots/${bot.id}/chat-work`,undefined,token))[1].tasks,chat.tasks);
+   }
   } finally {await app.close();rmSync(dir,{recursive:true,force:true});}
  }
 });

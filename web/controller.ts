@@ -14,6 +14,11 @@ function parseCore(value:unknown):Core {
   return {source:value.source,content:value.content,defaultContent:value.defaultContent,path:value.path,revision:value.revision};
 }
 export type Message={id:string;role:string;content:string;taskAttemptId?:string};
+export function nextChatMessage(messages:Message[],index:number):Message|undefined {
+  if(index<0)return undefined;
+  do {index++;} while(messages[index]?.role==='task');
+  return messages[index];
+}
 export type TaskActivity={seq:number;type:string;message?:string;text?:string;name?:string;content?:string;success?:boolean;late?:boolean};
 export type ConversationTask={id:string;taskId:string;botId:string;objective:string;state:string;outcome:string|null;anchorMessageId:string|null;activity:TaskActivity[]};
 const chatEventSchema=z.object({id:z.number().int(),type:z.enum(['tool_start','tool_result','assistant_message']),name:z.string(),success:z.number().nullable(),detail:z.string().nullable(),arguments:z.string().nullable(),callId:z.string().nullable()});
@@ -308,7 +313,7 @@ export class Controller {
         await this.refresh();
         if(this.state.selected!==botId||this.state.draft.submission?.id!==id)return;
         const index=this.state.messages.findIndex(message=>message.id==='command-user-'+id);
-        const answer=this.state.messages[index+1];
+        const answer=nextChatMessage(this.state.messages,index);
         const work=this.state.work.find(item=>item.id===id);
         if(index>=0 && answer && ['assistant','assistant_stopped'].includes(answer.role) && work?.progress.state===command.state)this.save({...this.state.draft,submission:null});
       }
