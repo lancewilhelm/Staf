@@ -3,14 +3,14 @@ import assert from 'node:assert/strict';
 import {gmailHistoryTransport} from '../dist/gmail-transport.js';
 import {GmailHistoryExpired} from '../dist/gmail-history.js';
 
-test('Gmail history requests use the inbox and message-added filters and parse real response shapes',async()=>{
+test('Gmail history requests retain message additions without filtering on current inbox state',async()=>{
   const requests=[];
   const request=async (url,options)=>{requests.push({url:new URL(url),options});return Response.json(requests.length===1?{emailAddress:'owner@example.test',historyId:'10'}:{historyId:'13',nextPageToken:'next',history:[{messages:[{id:'duplicate'}],messagesAdded:[{message:{id:'new'}}]}]});};
   const transport=gmailHistoryTransport({accessToken:async()=> 'synthetic-token',request});
   assert.equal((await transport.profile()).historyId,'10');
-  assert.deepEqual(await transport.history({startHistoryId:'10'}),{historyId:'13',nextPageToken:'next',inboxMessageIds:['new']});
+  assert.deepEqual(await transport.history({startHistoryId:'10'}),{historyId:'13',nextPageToken:'next',messageIds:['new']});
   const history=requests[1];assert.equal(history.url.origin,'https://gmail.googleapis.com');
-  assert.equal(history.url.searchParams.get('labelId'),'INBOX');assert.equal(history.url.searchParams.get('historyTypes'),'messageAdded');
+  assert.equal(history.url.searchParams.get('labelId'),null);assert.equal(history.url.searchParams.get('historyTypes'),'messageAdded');
   assert.equal(history.url.searchParams.get('startHistoryId'),'10');assert.equal(history.options.headers.Authorization,'Bearer synthetic-token');
 });
 

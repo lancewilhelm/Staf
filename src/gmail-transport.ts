@@ -30,10 +30,10 @@ export function gmailHistoryTransport({accessToken,request=fetch}:{accessToken:(
     async profile(){return profile.parse(await get(new URL('https://gmail.googleapis.com/gmail/v1/users/me/profile'),false));},
     async history({startHistoryId,pageToken}){
       const url=new URL('https://gmail.googleapis.com/gmail/v1/users/me/history');
-      url.searchParams.set('startHistoryId',startHistoryId);url.searchParams.set('labelId','INBOX');url.searchParams.set('historyTypes','messageAdded');url.searchParams.set('maxResults','500');
+      url.searchParams.set('startHistoryId',startHistoryId);url.searchParams.set('historyTypes','messageAdded');url.searchParams.set('maxResults','500');
       if(pageToken)url.searchParams.set('pageToken',pageToken);
       const page=historyPage.parse(await get(url,true));
-      return {historyId:page.historyId,...(page.nextPageToken?{nextPageToken:page.nextPageToken}:{}),inboxMessageIds:(page.history??[]).flatMap(item=>(item.messagesAdded??[]).map(added=>added.message.id))};
+      return {historyId:page.historyId,...(page.nextPageToken?{nextPageToken:page.nextPageToken}:{}),messageIds:(page.history??[]).flatMap(item=>(item.messagesAdded??[]).map(added=>added.message.id))};
     },
   };
 }

@@ -13,14 +13,17 @@ provide an authorized transport, and own scheduling and lifecycle controls;
 none of those are wired into the instance yet. A stored message ID is not proof
 that the message was inspected or processed.
 
-The experimental transport requests `messageAdded` history filtered by
-`INBOX`. Gmail's history response typically provides message IDs without label
-details, and history IDs can expire. The behavior of the filter for messages
-that arrive and leave the inbox before a delayed scan needs evidence before
-claiming complete arrival coverage. Expired history requires an explicit
+The experimental transport requests unfiltered `messageAdded` history and
+records all message IDs as candidates. Gmail's history response typically
+provides message IDs without label details; its release notes describe returned
+labels as current state. An archived message must therefore not be discarded by
+filtering on its current `INBOX` label. Candidates may include sent or draft
+messages; historical inbox membership is unknown and must not be represented as
+established. Expired history requires an explicit
 reconciliation design because a full sync cannot establish which messages
 arrived in the missing interval. See Google's [history reference](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.history/list)
-and [synchronization guide](https://developers.google.com/workspace/gmail/api/guides/sync).
+and [synchronization guide](https://developers.google.com/workspace/gmail/api/guides/sync),
+and its [release notes](https://developers.google.com/workspace/gmail/release-notes).
 
 The eventual owner-operated OAuth setup needs a Google Cloud project, Gmail API,
 OAuth consent configuration, and a suitable OAuth client. Search and reading

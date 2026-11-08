@@ -7,10 +7,10 @@ CREATE TABLE IF NOT EXISTS gmail_history (account_id TEXT PRIMARY KEY, cursor TE
 CREATE TABLE IF NOT EXISTS gmail_arrivals (account_id TEXT NOT NULL, message_id TEXT NOT NULL, PRIMARY KEY(account_id,message_id));`;
 
 const profileSchema=z.object({emailAddress:z.email(),historyId:z.string().regex(/^\d+$/)});
-const pageSchema=z.object({historyId:z.string().regex(/^\d+$/),nextPageToken:z.string().min(1).optional(),inboxMessageIds:z.array(z.string().min(1).max(200)).max(10000)});
+const pageSchema=z.object({historyId:z.string().regex(/^\d+$/),nextPageToken:z.string().min(1).optional(),messageIds:z.array(z.string().min(1).max(200)).max(10000)});
 export interface GmailHistoryTransport {
   profile():Promise<unknown>;
-  // Return only message-added events selected by the Gmail INBOX history filter.
+  // Gmail does not prove historical inbox membership in its message-added record.
   history(input:{startHistoryId:string;pageToken?:string}):Promise<unknown>;
 }
 export class GmailHistoryExpired extends Error {
@@ -18,7 +18,7 @@ export class GmailHistoryExpired extends Error {
 }
 
 export class GmailHistory {
-  constructor(private readonly db:DatabaseSync,private readonly transport:GmailHistoryTransport) {}
+  constructor(private readonly db:DatabaseSync,private readonly transport:GmailHistoryTransport,private readonly assertAuthority:()=>void=()=>{}) {}
 
   status(accountId:string) {
     const row=this.db.prepare('SELECT cursor,state,detail FROM gmail_history WHERE account_id=?').get(accountId);
@@ -31,7 +31,9 @@ export class GmailHistory {
   }
 
   async connect(accountId:string) {
+    this.assertAuthority();
     const profile=profileSchema.parse(await this.transport.profile());
+    this.assertAuthority();
     if(profile.emailAddress.toLowerCase()!==accountId.toLowerCase())throw Error('Gmail account does not match the selected account');
     this.db.prepare("INSERT OR IGNORE INTO gmail_history VALUES (?,?,'ready',NULL)").run(accountId,profile.historyId);
     return this.status(accountId);
@@ -43,15 +45,17 @@ export class GmailHistory {
     try {
       for(let page=0;;page++) {
         if(page>=100)throw Error('Gmail history scan exceeds the page limit');
+        this.assertAuthority();
         const result=pageSchema.parse(await this.transport.history({startHistoryId:cursor,...(pageToken?{pageToken}:{})}));
         latest=result.historyId;
-        for(const id of result.inboxMessageIds)messages.add(id);
+        for(const id of result.messageIds)messages.add(id);
         if(messages.size>10000)throw Error('Gmail history scan exceeds the arrival limit');
         if(!result.nextPageToken)break;
         if(tokens.has(result.nextPageToken))throw Error('Gmail history pagination repeated');
         tokens.add(result.nextPageToken);pageToken=result.nextPageToken;
       }
       if(BigInt(latest)<BigInt(cursor))throw Error('Gmail history cursor moved backwards');
+      this.assertAuthority();
       this.db.exec('BEGIN IMMEDIATE');
       try {
         const changed=this.db.prepare("UPDATE gmail_history SET cursor=?,state='ready',detail=NULL WHERE account_id=? AND cursor=?").run(latest,accountId,cursor);

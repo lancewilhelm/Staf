@@ -15,11 +15,11 @@ test('history baseline, arrivals and cursor survive restart without duplicates',
     let history=new GmailHistory(db,transport);
     await history.connect('owner@example.test');
     assert.deepEqual(history.arrivals('owner@example.test'),[]);
-    pages=[{token:undefined,value:{historyId:'15',nextPageToken:'next',inboxMessageIds:['new-a']}},{token:'next',value:{historyId:'15',inboxMessageIds:['new-a','new-b']}}];
+    pages=[{token:undefined,value:{historyId:'15',nextPageToken:'next',messageIds:['new-a']}},{token:'next',value:{historyId:'15',messageIds:['new-a','new-b']}}];
     await history.poll('owner@example.test');
     assert.deepEqual(history.arrivals('owner@example.test').map(x=>x.messageId),['new-a','new-b']);
     db.close(); db=new DatabaseSync(path);history=new GmailHistory(db,transport);
-    pages=[{token:undefined,value:{historyId:'16',inboxMessageIds:['new-a','new-c']}}];
+    pages=[{token:undefined,value:{historyId:'16',messageIds:['new-a','new-c']}}];
     await history.poll('owner@example.test');
     assert.deepEqual(history.arrivals('owner@example.test').map(x=>x.messageId),['new-a','new-b','new-c']);
     assert.equal(history.status('owner@example.test').cursor,'16');
@@ -42,7 +42,7 @@ test('an expired cursor stays in place and reports the unknown interval', async 
 test('failed pages and stale polls never advance the checkpoint or lose arrivals', async () => {
   const db=new DatabaseSync(':memory:');db.exec(gmailHistorySchema);
   let fail=true,release; const gate=new Promise(resolve=>{release=resolve});
-  const transport={profile:async()=>({emailAddress:'owner@example.test',historyId:'10'}),history:async ({pageToken})=>{if(!pageToken)return {historyId:'20',nextPageToken:'next',inboxMessageIds:['a']};if(fail)throw Error('offline');await gate;return {historyId:'20',inboxMessageIds:[]};}};
+  const transport={profile:async()=>({emailAddress:'owner@example.test',historyId:'10'}),history:async ({pageToken})=>{if(!pageToken)return {historyId:'20',nextPageToken:'next',messageIds:['a']};if(fail)throw Error('offline');await gate;return {historyId:'20',messageIds:[]};}};
   try {
     const history=new GmailHistory(db,transport);await history.connect('owner@example.test');
     await assert.rejects(history.poll('owner@example.test'),/offline/);
@@ -51,5 +51,17 @@ test('failed pages and stale polls never advance the checkpoint or lose arrivals
     fail=false;const first=history.poll('owner@example.test'),second=history.poll('owner@example.test');release();
     const results=await Promise.allSettled([first,second]);assert.equal(results.filter(x=>x.status==='fulfilled').length,1);
     assert.equal(history.status('owner@example.test').cursor,'20');assert.deepEqual(history.arrivals('owner@example.test').map(x=>x.messageId),['a']);
+  } finally {db.close();}
+});
+
+test('revoking authority during a scan prevents committing the fetched page', async () => {
+  const db=new DatabaseSync(':memory:');db.exec(gmailHistorySchema);
+  let allowed=true,release,started;const startedPromise=new Promise(resolve=>{started=resolve});const gate=new Promise(resolve=>{release=resolve});
+  const transport={profile:async()=>({emailAddress:'owner@example.test',historyId:'10'}),history:async()=>{started();await gate;return {historyId:'11',messageIds:['new']};}};
+  try {
+    const history=new GmailHistory(db,transport,()=>{if(!allowed)throw Error('revoked');});await history.connect('owner@example.test');
+    const poll=history.poll('owner@example.test');await startedPromise;allowed=false;release();
+    await assert.rejects(poll,/revoked/);
+    assert.equal(history.status('owner@example.test').cursor,'10');assert.deepEqual(history.arrivals('owner@example.test'),[]);
   } finally {db.close();}
 });
