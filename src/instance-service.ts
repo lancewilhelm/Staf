@@ -23,7 +23,10 @@ import { InstanceAuth } from './instance-auth.js';
 import { prepareDirectLogin, completeDirectLogin, loadDirectCredential, directAuth, authorizationUrl } from './codex-direct-auth.js';
 import { createServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID, createHash } from 'node:crypto';
+import {bundledPlugins, slackConfigSchema} from './plugins.js';
+import {slackTransport as defaultSlackTransport, type SlackTransport, type SlackEvent} from './slack.js';
+import {loadSlackTokens, saveSlackTokens, disconnectSlackTokens} from './slack-credential.js';
 import { assertDatasetAvailable, BotConflict, Instance } from './instance.js';
 import { AgentConfigConflict, AgentConfigInvalid, AgentConfigUncertain } from './agent-config.js';
 import {CoreInvalid} from './instance-core.js';
@@ -46,7 +49,7 @@ import { resolveSettings } from './settings.js';
 import { usageText } from './usage.js';
 import { loadOpenRouterKey, saveOpenRouterKey, disconnectOpenRouter } from './openrouter-credential.js';
 
-export function startInstance(path: string, port = 0, options: {dataDir?: string; publicOrigin?: string; maintenanceToken?:string; env?: Environment; enableCollaboration?: boolean; enableReusableApprovals?: boolean; localBootstrapToken?: string; authNow?:()=>number; authLifetimeMs?:number; webDependencies?:WebDependencies; searchTransport?:SearchTransport; shellExecutor?:typeof executeShellSandbox; modelRequest?:typeof fetch; authHooks?: {prepare:typeof prepareDirectLogin; complete:typeof completeDirectLogin; authorizationUrl?:typeof authorizationUrl}; providerFactory?: (profile: {provider:string; model:string | null; reasoning:string | null; instructions:string; chatId:string}, instructions:string) => Promise<Provider>} = {}) {
+export function startInstance(path: string, port = 0, options: {dataDir?: string; publicOrigin?: string; maintenanceToken?:string; env?: Environment; enableCollaboration?: boolean; enableReusableApprovals?: boolean; localBootstrapToken?: string; authNow?:()=>number; authLifetimeMs?:number; webDependencies?:WebDependencies; searchTransport?:SearchTransport; shellExecutor?:typeof executeShellSandbox; modelRequest?:typeof fetch; authHooks?: {prepare:typeof prepareDirectLogin; complete:typeof completeDirectLogin; authorizationUrl?:typeof authorizationUrl}; slackTransport?:SlackTransport; providerFactory?: (profile: {provider:string; model:string | null; reasoning:string | null; instructions:string; chatId:string}, instructions:string) => Promise<Provider>} = {}) {
   assertDatasetAvailable(path,options.maintenanceToken);
   const selectionCatalogs=new Map<string,ModelCatalog>();
   const catalogRequests=new Map<string,number>();
@@ -63,6 +66,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
   const dataDir = options.dataDir ?? resolve(dirname(path));
   const knownKeys = new Set<string>();
   try {const initialKey=loadOpenRouterKey(dataDir);if(initialKey) knownKeys.add(initialKey);}catch {/* A damaged store can be replaced or disconnected by a paired client. */}
+  try {const slack=loadSlackTokens(dataDir);if(slack){knownKeys.add(slack.appToken);knownKeys.add(slack.botToken);}}catch {}
   const redactEnv=redactor(env);
   const redactProgress=streamingRedactor(env,()=>[...knownKeys]);
   const redact = (text:string) => [...knownKeys].reduce((result,key)=>redactor({OPENROUTER_API_KEY:key})(result),redactEnv(text));
@@ -394,6 +398,113 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
     }
   }
   let scheduleTimer: ReturnType<typeof setInterval> | undefined;
+  function submitCommand(value:{id:string;botId:string;content:string}) {
+        if(loggingOut)throw Error('Sign-out in progress');
+        if (!/^[\w-]{1,100}$/.test(value.id) || value.content.length > 30000) throw Error('Invalid command');
+        if(containsUnsafeWebUrl(value.content))throw Error('URLs with credentials or query strings are not supported in shared chat');
+        const {id,botId} = value; const content=redact(value.content); const claim=instance.claim({id,botId,content:value.content},content);
+        if (claim.kind === 'accepted') {
+          publishResponse(botId);
+          const rawContent=value.content;
+          const stop=rawContent.trim().match(/^(?:please\s+)?(?:stop|cancel)\s+(?:the\s+)?task\s+([\w-]{1,100})[.!]?$/i);
+          const direction=rawContent.trim().match(/^(?:please\s+)?(?:direct|steer)\s+(?:the\s+)?task\s+([\w-]{1,100})\s*:\s*([\s\S]+)$/i);
+          const vague=/^(?:please\s+)?(?:stop|cancel|direct|steer)\s+(?:my\s+|the\s+)?(?:background\s+)?task\b/i.test(rawContent.trim());
+          if(stop || direction || vague) {
+            let reply='Please specify the full task attempt ID. Use “stop task ID” or “direct task ID: your direction”.';
+            const targetId=stop?.[1] ?? direction?.[1];
+            if(targetId) {const attempt=instance.taskAttempt(targetId);if(!attempt || attempt.botId!==botId) reply='No matching task for this agent. No changes were made.';
+              else if(!['queued','running'].includes(attempt.state)) reply=`Task ${targetId} is not active. No changes were made.`;
+              else if(stop) {instance.taskStop(targetId,'Stop requested in main chat');abortDelegatedChildren(targetId);taskControllers.get(targetId)?.abort();reply=`Stop requested for task ${targetId}.`;}
+              else if(direction?.[2]?.trim()) {try{const result=instance.taskInput({attemptId:targetId,commandId:id,kind:'direction',text:direction[2]},redact(direction[2]));reply=`Direction ${result.kind} for task ${targetId}; inspect the task through the API or CLI for when it is applied.`;}catch{reply=`Direction was not accepted for task ${targetId}. Inspect its current status through the task API or CLI.`;}}
+            }
+            instance.completeMemoryCommand(id,null,reply);publishResponse(botId);return claim;
+          }
+          const intent=memoryIntent(content,botId);
+          if (intent) { instance.completeMemoryCommand(id,intent.input,intent.reply,intent.operation,intent.proposal);publishResponse(botId); return claim; }
+          const controller = new AbortController(); active.add(controller); responseControllers.set(id,controller);
+          let observed='', progressFull=false;
+          const responseProgress=(event:{type:'start'}|{type:'delta'|'message';text:string})=>{
+            if(controller.signal.aborted)return;
+            if(event.type==='start'){observed='';progressFull=false;instance.updateResponse(id,'');publishResponse(botId);return;}
+            if(event.type==='message'){
+              const text=redact(event.text).replace(/https?:\/\/[^\s<>"']+/gi,url=>containsUnsafeWebUrl(url)?'[redacted URL]':url).slice(0,1000000);
+              instance.commandResponseMessage(id,text);observed='';publishResponse(botId);return;
+            }
+            if(progressFull)return;
+            if(observed.length+event.text.length>1000000){progressFull=true;return;}
+            observed+=event.text;
+            const safe=redactProgress(observed).replace(/https?:\/\/[^\s<>"']+/gi,url=>containsUnsafeWebUrl(url)?'[redacted URL]':url);
+            if(safe.length>1000000){progressFull=true;return;}
+            const prefix=safe.replace(/\S+$/,'');
+            instance.updateResponse(id,prefix);
+            publishResponse(botId);
+          };
+          void (async () => { try {
+            const {profile,session,notices} = instance.execution(id);
+            if (!isProviderId(profile.provider)) throw Error(retiredProviderMessage);
+            if (!profile.model?.trim()) throw Error('Set a model in the agent profile');
+            const instructions = `${profile.core}${profile.core ? "\n\n" : ""}Bot instructions:\n${profile.instructions}`;
+            const provider = options.providerFactory ? await options.providerFactory(profile,instructions) : (await selectProvider(profile.provider,{env:providerEnv(profile.provider),model:profile.model ?? undefined,reasoning:profile.reasoning ?? undefined,dataDir,sessionId:profile.chatId,instructions})).provider;
+            controller.signal.throwIfAborted();
+            const skillWork={kind:'command' as const,id};
+            const skills=skillTracker(skillAccess(botId,instance.skills.availableToBot(botId).slice(0,32).map(({id,revision,name,description,digest})=>({id,revision,name,description,digest})),event=>instance.commandSkillLoaded(id,event)),redact);
+            skillTrackers.set(skillWorkKey(skillWork),skills);
+            const actions=workActions.open(skillWork,controller.signal);
+            const callIds=new Map<string,string>();
+            try {await runTurn({session, provider, responseProgress, actions, clockUnavailable:()=>clockUnavailable(botId,'command',id),  skills, requestText:content, memory:query=>recall(botId,query), text:notices.length ? `Task updates since your last chat turn:\n${notices.join('\n')}\n\nUser message:\n${content}` : content, redact, signal:controller.signal, emit:event=>{if(event.type === 'tool_start' || event.type === 'tool_result'){const allowed=['clock','code_mode','read_web','search_web','run_scratch_shell','select_skill','start_background_task','memory_search','memory_read','memory_remember','memory_update','memory_forget','memory_proposal_status'];const name=actions.recognizes(event.name) || allowed.includes(event.name) ? event.name : 'tool';const callId=event.type==='tool_start' ? randomUUID() : callIds.get(event.id) ?? null;if(event.type==='tool_start' && callId)callIds.set(event.id,callId);else if(event.type==='tool_result')callIds.delete(event.id);let detail=event.type==='tool_result' ? event.content : event.arguments;if(event.type==='tool_start' && detail!==undefined){try{detail=JSON.stringify(JSON.parse(detail));}catch{detail='[Invalid arguments omitted]';}}const safe=detail===undefined ? null : redact(detail).replace(/https?:\/\/[^\s<>"']+/gi,url=>containsUnsafeWebUrl(url)?'[redacted URL]':url).slice(0,16000);instance.commandRuntimeEvent(id,event.type === 'tool_start' ? {type:event.type,name,callId} : {type:event.type,name,success:event.success,callId},safe);publishResponse(botId);}}, store:{save:async updated => instance.saveExecution(id,updated,updated.messages.length > session.messages.length)}});} finally {actions.dispose();skillTrackers.delete(skillWorkKey(skillWork));}
+          } catch (error) {
+            const message = error instanceof Error ? error.message : '';
+            const safe = message.startsWith('Clock ') || message === 'Action denied' || message === 'Action limit reached' || message === 'Tool iteration limit reached' || message.startsWith('Guest ') || message.startsWith('Source cannot be retained') || message.startsWith('Action admission closed') || message === 'Selected skill is no longer available' ? message : (message === 'Set a model in the agent profile' || message === retiredProviderMessage) ? message : /requires OPENROUTER_API_KEY/.test(message) ? 'Connect OpenRouter in Settings' : /HTTP 401/.test(message) || /credential|sign.in|login/i.test(message) ? 'Configure the selected provider credentials on the instance host' : /HTTP 402/.test(message) ? 'Provider credits are required' : /HTTP 429/.test(message) ? 'Provider rate limit reached; retry later' : /OpenRouter HTTP 40[034]/.test(message) ? 'Check the selected OpenRouter model, access and supported capabilities' : /OpenRouter (response|interrupted)|Invalid OpenRouter|Incomplete OpenRouter|Unsupported OpenRouter/.test(message) ? 'OpenRouter response was incomplete or unsupported; retry or choose another model' : /reasoning|effort/i.test(message) ? 'Check the model and reasoning settings in the agent profile' : /connection|timed out/i.test(message) ? 'Provider connection failed or timed out; check host network access' : 'Provider request failed. Check the instance host configuration.';
+            if (!closing && !instance.responseStopping(id)) { try { instance.fail(id,safe); } catch { /* A prior state transition won. */ } }
+          } finally { if(!closing){if(instance.responseStopping(id))instance.settleResponseStop(id);publishResponse(botId);}processes.finishWork({kind:'command',id});responseControllers.delete(id);active.delete(controller); } })();
+        }
+        return claim;
+  }
+  const slack = options.slackTransport ?? defaultSlackTransport;
+  let stopSlack:(()=>void)|undefined;
+  let slackGeneration=0;
+  let slackStatus='inactive';
+  function stopSlackConnection() {
+    slackGeneration++;stopSlack?.();stopSlack=undefined;slackStatus='inactive';
+    for(const [id,controller] of responseControllers)if(instance.plugins.isPluginCommand(id))controller.abort();
+  }
+  async function receiveSlack(event:SlackEvent) {
+    const c=instance.plugins.connection();
+    if(closing || !c || !c.enabled || !c.connected || !c.agentAccess || c.config.teamId!==event.teamId || c.config.userId!==event.userId || c.config.channelId!==event.channelId || !event.eventId || event.eventId.length>200 || !event.text.trim() || event.text.length>30000 || containsUnsafeWebUrl(event.text))return;
+    if(instance.bot(c.config.botId)?.archived!==false)return;
+    const id='slack-'+createHash('sha256').update(JSON.stringify([event.teamId,event.eventId])).digest('hex');
+    if(!instance.plugins.reserve(event.eventId,id,c.revision))return;
+    try {
+      const result=submitCommand({id,botId:c.config.botId,content:event.text});
+      if(result.kind!=='accepted'){instance.plugins.state(id,'failed',result.kind==='busy'?'Agent is busy':'Command already exists');return;}
+    } catch {instance.plugins.state(id,'failed','Message could not be accepted');return;}
+    void (async()=>{
+      while(!closing) {
+        const command=instance.command(id);
+        if(!command || command.state!=='pending')break;
+        await new Promise(resolve=>setTimeout(resolve,50));
+      }
+      if(closing)return;
+      const command=instance.command(id),progress=instance.responseProgress(id);
+      if(command?.state!=='completed' || typeof progress?.text!=='string' || !progress.text) {instance.plugins.state(id,'failed','Agent response did not complete');return;}
+      if(!instance.plugins.authority(id) || instance.bot(c.config.botId)?.archived!==false){instance.plugins.state(id,'interrupted','Plugin or agent access changed');return;}
+      const tokens=loadSlackTokens(dataDir);if(!tokens){instance.plugins.state(id,'failed','Slack connection unavailable');return;}
+      instance.plugins.state(id,'sending');
+      try {await slack.post(tokens,{channel:event.channelId,...(event.threadTs?{threadTs:event.threadTs}:{}),text:progress.text.slice(0,39000)});instance.plugins.state(id,'sent');}
+      catch {if(!closing)instance.plugins.state(id,'uncertain','Slack may have received the response; it will not be resent automatically');}
+    })().catch(()=>{if(!closing)instance.plugins.state(id,'failed','Slack response processing failed');});
+  }
+  async function startSlackConnection() {
+    stopSlackConnection();const c=instance.plugins.connection();if(!c?.enabled || !c.connected)return;
+    let tokens:ReturnType<typeof loadSlackTokens>;try{tokens=loadSlackTokens(dataDir);}catch{slackStatus='credentials unavailable';return;}
+    if(!tokens){slackStatus='credentials unavailable';return;}
+    const generation=slackGeneration;slackStatus='connecting';
+    try {const stop=await slack.start(tokens,event=>generation===slackGeneration ? receiveSlack(event) : Promise.resolve(),status=>{if(!closing && generation===slackGeneration)slackStatus=status;});if(closing || generation!==slackGeneration){stop();return;}stopSlack=stop;}
+    catch {if(generation===slackGeneration)slackStatus='connection failed';}
+  }
+  function pluginStatus() {
+    const c=instance.plugins.connection();return bundledPlugins.map(definition=>({...definition,connected:c?.connected??false,enabled:c?.enabled??false,config:c?.config??null,accountId:c?.accountId??null,agentAccess:c?.agentAccess??false,status:c?.enabled?slackStatus:'inactive',events:instance.plugins.events()}));
+  }
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     res.setHeader('Cache-Control', 'no-store'); res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Staf-Dataset', instance.datasetIdentity());
@@ -445,6 +556,26 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
         res.writeHead(200,{'Content-Type':'image/png','Content-Length':bytes.length});return res.end(bytes);
       }
       if(req.method==='POST' && (req.url==='/api/bots' || req.url==='/api/creation-defaults' || req.url==='/api/provider-defaults' || /^\/api\/bots\/[\w-]+\/selection$/.test(req.url??'') || /^\/api\/bots\/[\w-]+\/profile$/.test(req.url ?? '')) && JSON.stringify(redactValue(value,redact))!==JSON.stringify(value)) return json(400,{error:'Agent configuration cannot contain a credential'});
+      if(req.method==='GET' && req.url==='/api/plugins')return json(200,pluginStatus());
+      if(req.method==='POST' && req.url==='/api/plugins/slack/connect') {
+        const config=slackConfigSchema.parse({teamId:value.teamId,userId:value.userId,channelId:value.channelId,botId:value.botId});
+        if(typeof value.appToken!=='string' || !/^xapp-[A-Za-z0-9-]+$/.test(value.appToken) || typeof value.botToken!=='string' || !/^xoxb-[A-Za-z0-9-]+$/.test(value.botToken))throw Error('Enter valid Slack app and bot tokens');
+        if(instance.bot(config.botId)?.archived!==false)throw Error('Choose an active agent');
+        const generation=slackGeneration,existing=instance.plugins.connection();if(existing && existing.accountId!==config.teamId)throw Error('Delete the existing Slack configuration before changing workspace');
+        const tokens={appToken:value.appToken,botToken:value.botToken};
+        const identity=await slack.identify(tokens);if(identity.teamId!==config.teamId)throw Error('Bot token belongs to a different workspace');
+        if(generation!==slackGeneration || instance.plugins.connection()?.revision!==existing?.revision)throw Error('Slack settings changed during connection. Review and try again');
+        stopSlackConnection();saveSlackTokens({root:dataDir,...tokens});knownKeys.add(tokens.appToken);knownKeys.add(tokens.botToken);instance.plugins.connect(config);
+        return json(200,pluginStatus()[0]);
+      }
+      if(req.method==='POST' && req.url==='/api/plugins/slack/access') {
+        if(typeof value.botId!=='string' || typeof value.enabled!=='boolean')throw Error('Invalid agent access');
+        stopSlackConnection();instance.plugins.setAccess(value.botId,value.enabled);await startSlackConnection();return json(200,pluginStatus()[0]);
+      }
+      if(req.method==='POST' && req.url==='/api/plugins/slack/enable') {instance.plugins.setEnabled(true);await startSlackConnection();return json(200,pluginStatus()[0]);}
+      if(req.method==='POST' && req.url==='/api/plugins/slack/disable') {stopSlackConnection();instance.plugins.setEnabled(false);return json(200,pluginStatus()[0]);}
+      if(req.method==='POST' && req.url==='/api/plugins/slack/disconnect') {stopSlackConnection();instance.plugins.disconnect();disconnectSlackTokens(dataDir);return json(200,pluginStatus()[0]);}
+      if(req.method==='POST' && req.url==='/api/plugins/slack/delete-config') {stopSlackConnection();instance.plugins.disconnect();disconnectSlackTokens(dataDir);instance.plugins.deleteConfig();return json(200,pluginStatus()[0]);}
       if(req.url==='/api/core') {
         if(req.method==='GET') return json(200,instance.core());
         if(req.method==='POST') {
@@ -734,69 +865,12 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
       const commandMatch = req.url?.match(/^\/api\/commands\/([\w-]+)$/);
       if (req.method === 'GET' && commandMatch?.[1]) { const command=instance.command(commandMatch[1]); return command ? json(200,{...command,responseProgress:instance.responseProgress(commandMatch[1]),runtimeEvents:instance.commandRuntimeEvents(commandMatch[1]),skillActivity:instance.commandSkills(commandMatch[1]),webActions:instance.webActions({kind:'command',id:commandMatch[1]}),searchActions:instance.searchActions({kind:'command',id:commandMatch[1]}),shellActions:instance.shellActions({kind:'command',id:commandMatch[1]}),codeExecutions:workActions.inspect({kind:'command',id:commandMatch[1]}),workActions:workActions.inspectActions({kind:'command',id:commandMatch[1]})}) : json(404,{error:'Command not found'}); }
       if (req.method === 'POST' && req.url === '/api/commands') {
+        if(typeof value.id !== 'string' || typeof value.botId !== 'string' || typeof value.content !== 'string')return json(400,{error:'Invalid command'});
         if(loggingOut)return json(409,{error:'Sign-out in progress'});
-        if (typeof value.id !== 'string' || !/^[\w-]{1,100}$/.test(value.id) || typeof value.botId !== 'string' || typeof value.content !== 'string' || value.content.length > 30000) return json(400,{error:'Invalid command'});
-        if(containsUnsafeWebUrl(value.content))return json(400,{error:'URLs with credentials or query strings are not supported in shared chat'});
-        const {id,botId} = value; const content=redact(value.content); const claim=instance.claim({id,botId,content:value.content},content);
-        if (claim.kind === 'accepted') {
-          publishResponse(botId);
-          const rawContent=value.content;
-          const stop=rawContent.trim().match(/^(?:please\s+)?(?:stop|cancel)\s+(?:the\s+)?task\s+([\w-]{1,100})[.!]?$/i);
-          const direction=rawContent.trim().match(/^(?:please\s+)?(?:direct|steer)\s+(?:the\s+)?task\s+([\w-]{1,100})\s*:\s*([\s\S]+)$/i);
-          const vague=/^(?:please\s+)?(?:stop|cancel|direct|steer)\s+(?:my\s+|the\s+)?(?:background\s+)?task\b/i.test(rawContent.trim());
-          if(stop || direction || vague) {
-            let reply='Please specify the full task attempt ID. Use “stop task ID” or “direct task ID: your direction”.';
-            const targetId=stop?.[1] ?? direction?.[1];
-            if(targetId) {const attempt=instance.taskAttempt(targetId);if(!attempt || attempt.botId!==botId) reply='No matching task for this agent. No changes were made.';
-              else if(!['queued','running'].includes(attempt.state)) reply=`Task ${targetId} is not active. No changes were made.`;
-              else if(stop) {instance.taskStop(targetId,'Stop requested in main chat');abortDelegatedChildren(targetId);taskControllers.get(targetId)?.abort();reply=`Stop requested for task ${targetId}.`;}
-              else if(direction?.[2]?.trim()) {try{const result=instance.taskInput({attemptId:targetId,commandId:id,kind:'direction',text:direction[2]},redact(direction[2]));reply=`Direction ${result.kind} for task ${targetId}; inspect the task through the API or CLI for when it is applied.`;}catch{reply=`Direction was not accepted for task ${targetId}. Inspect its current status through the task API or CLI.`;}}
-            }
-            instance.completeMemoryCommand(id,null,reply);publishResponse(botId);return json(200,claim);
-          }
-          const intent=memoryIntent(content,botId);
-          if (intent) { instance.completeMemoryCommand(id,intent.input,intent.reply,intent.operation,intent.proposal);publishResponse(botId); return json(200,claim); }
-          const controller = new AbortController(); active.add(controller); responseControllers.set(id,controller);
-          let observed='', progressFull=false;
-          const responseProgress=(event:{type:'start'}|{type:'delta'|'message';text:string})=>{
-            if(controller.signal.aborted)return;
-            if(event.type==='start'){observed='';progressFull=false;instance.updateResponse(id,'');publishResponse(botId);return;}
-            if(event.type==='message'){
-              const text=redact(event.text).replace(/https?:\/\/[^\s<>"']+/gi,url=>containsUnsafeWebUrl(url)?'[redacted URL]':url).slice(0,1000000);
-              instance.commandResponseMessage(id,text);observed='';publishResponse(botId);return;
-            }
-            if(progressFull)return;
-            if(observed.length+event.text.length>1000000){progressFull=true;return;}
-            observed+=event.text;
-            const safe=redactProgress(observed).replace(/https?:\/\/[^\s<>"']+/gi,url=>containsUnsafeWebUrl(url)?'[redacted URL]':url);
-            if(safe.length>1000000){progressFull=true;return;}
-            const prefix=safe.replace(/\S+$/,'');
-            instance.updateResponse(id,prefix);
-            publishResponse(botId);
-          };
-          void (async () => { try {
-            const {profile,session,notices} = instance.execution(id);
-            if (!isProviderId(profile.provider)) throw Error(retiredProviderMessage);
-            if (!profile.model?.trim()) throw Error('Set a model in the agent profile');
-            const instructions = `${profile.core}${profile.core ? "\n\n" : ""}Bot instructions:\n${profile.instructions}`;
-            const provider = options.providerFactory ? await options.providerFactory(profile,instructions) : (await selectProvider(profile.provider,{env:providerEnv(profile.provider),model:profile.model ?? undefined,reasoning:profile.reasoning ?? undefined,dataDir,sessionId:profile.chatId,instructions})).provider;
-            controller.signal.throwIfAborted();
-            const skillWork={kind:'command' as const,id};
-            const skills=skillTracker(skillAccess(botId,instance.skills.availableToBot(botId).slice(0,32).map(({id,revision,name,description,digest})=>({id,revision,name,description,digest})),event=>instance.commandSkillLoaded(id,event)),redact);
-            skillTrackers.set(skillWorkKey(skillWork),skills);
-            const actions=workActions.open(skillWork,controller.signal);
-            const callIds=new Map<string,string>();
-            try {await runTurn({session, provider, responseProgress, actions, clockUnavailable:()=>clockUnavailable(botId,'command',id),  skills, requestText:content, memory:query=>recall(botId,query), text:notices.length ? `Task updates since your last chat turn:\n${notices.join('\n')}\n\nUser message:\n${content}` : content, redact, signal:controller.signal, emit:event=>{if(event.type === 'tool_start' || event.type === 'tool_result'){const allowed=['clock','code_mode','read_web','search_web','run_scratch_shell','select_skill','start_background_task','memory_search','memory_read','memory_remember','memory_update','memory_forget','memory_proposal_status'];const name=actions.recognizes(event.name) || allowed.includes(event.name) ? event.name : 'tool';const callId=event.type==='tool_start' ? randomUUID() : callIds.get(event.id) ?? null;if(event.type==='tool_start' && callId)callIds.set(event.id,callId);else if(event.type==='tool_result')callIds.delete(event.id);let detail=event.type==='tool_result' ? event.content : event.arguments;if(event.type==='tool_start' && detail!==undefined){try{detail=JSON.stringify(JSON.parse(detail));}catch{detail='[Invalid arguments omitted]';}}const safe=detail===undefined ? null : redact(detail).replace(/https?:\/\/[^\s<>"']+/gi,url=>containsUnsafeWebUrl(url)?'[redacted URL]':url).slice(0,16000);instance.commandRuntimeEvent(id,event.type === 'tool_start' ? {type:event.type,name,callId} : {type:event.type,name,success:event.success,callId},safe);publishResponse(botId);}}, store:{save:async updated => instance.saveExecution(id,updated,updated.messages.length > session.messages.length)}});} finally {actions.dispose();skillTrackers.delete(skillWorkKey(skillWork));}
-          } catch (error) {
-            const message = error instanceof Error ? error.message : '';
-            const safe = message.startsWith('Clock ') || message === 'Action denied' || message === 'Action limit reached' || message === 'Tool iteration limit reached' || message.startsWith('Guest ') || message.startsWith('Source cannot be retained') || message.startsWith('Action admission closed') || message === 'Selected skill is no longer available' ? message : (message === 'Set a model in the agent profile' || message === retiredProviderMessage) ? message : /requires OPENROUTER_API_KEY/.test(message) ? 'Connect OpenRouter in Settings' : /HTTP 401/.test(message) || /credential|sign.in|login/i.test(message) ? 'Configure the selected provider credentials on the instance host' : /HTTP 402/.test(message) ? 'Provider credits are required' : /HTTP 429/.test(message) ? 'Provider rate limit reached; retry later' : /OpenRouter HTTP 40[034]/.test(message) ? 'Check the selected OpenRouter model, access and supported capabilities' : /OpenRouter (response|interrupted)|Invalid OpenRouter|Incomplete OpenRouter|Unsupported OpenRouter/.test(message) ? 'OpenRouter response was incomplete or unsupported; retry or choose another model' : /reasoning|effort/i.test(message) ? 'Check the model and reasoning settings in the agent profile' : /connection|timed out/i.test(message) ? 'Provider connection failed or timed out; check host network access' : 'Provider request failed. Check the instance host configuration.';
-            if (!closing && !instance.responseStopping(id)) { try { instance.fail(id,safe); } catch { /* A prior state transition won. */ } }
-          } finally { if(!closing){if(instance.responseStopping(id))instance.settleResponseStop(id);publishResponse(botId);}processes.finishWork({kind:'command',id});responseControllers.delete(id);active.delete(controller); } })();
-        }
-        return json(200,claim);
+        return json(200,submitCommand({id:value.id,botId:value.botId,content:value.content}));
       }
       return json(404,{error:'Not found'});
     } catch (error) { if(error instanceof ActionFailed)return json(400,{error:error.safeResult});if(error instanceof CoreInvalid)return json(422,{error:error.message,code:'invalid_core_configuration'});if(error instanceof AgentConfigInvalid)return json(422,{error:error.message,code:'invalid_agent_configuration'});if(error instanceof AgentConfigUncertain)return json(503,{error:error.message,code:'configuration_save_uncertain'});return json((error instanceof BotConflict || error instanceof AgentConfigConflict || error instanceof MemoryConflict || error instanceof SkillConflict || error instanceof ScheduleConflict) ? 409 : 400,{error:error instanceof Error ? error.message : 'Request failed'}); }
   });
-  return { server, code, migrationBackup: instance.migrationBackup, finishUpgrade: (token:string)=>instance.finishUpgrade(token), issueCode: () => (code = randomBytes(18).toString('base64url')), close: () => new Promise<void>((resolve,reject)=>{closing=true; instanceAuth?.shutdown(); if(scheduleTimer) clearInterval(scheduleTimer); for(const subscriber of responseSubscribers)subscriber.response.end();for(const controller of active) controller.abort(); server.close(error=>{void processes.shutdown().then(()=>{instance.close(); if(error)reject(error);else resolve();},reject);});}), listen: () => new Promise<number>((resolve,reject)=>{server.once('error',reject);server.listen(port,'127.0.0.1',()=>{const a=server.address();if(a && typeof a !== 'string') { tickSchedules(); scheduleTimer=setInterval(tickSchedules,30000); resolve(a.port); }else reject(Error('Listen failed'));});}) };
+  return { server, code, migrationBackup: instance.migrationBackup, finishUpgrade: (token:string)=>instance.finishUpgrade(token), issueCode: () => (code = randomBytes(18).toString('base64url')), close: () => new Promise<void>((resolve,reject)=>{closing=true; stopSlackConnection(); instanceAuth?.shutdown(); if(scheduleTimer) clearInterval(scheduleTimer); for(const subscriber of responseSubscribers)subscriber.response.end();for(const controller of active) controller.abort(); server.close(error=>{void processes.shutdown().then(()=>{instance.close(); if(error)reject(error);else resolve();},reject);});}), listen: () => new Promise<number>((resolve,reject)=>{server.once('error',reject);server.listen(port,'127.0.0.1',()=>{const a=server.address();if(a && typeof a !== 'string') { tickSchedules(); scheduleTimer=setInterval(tickSchedules,30000); void startSlackConnection(); resolve(a.port); }else reject(Error('Listen failed'));});}) };
 }

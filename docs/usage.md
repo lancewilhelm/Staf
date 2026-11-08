@@ -756,6 +756,61 @@ Each input accepts at most 16 KiB of UTF-8 and each process admits at most eight
 
 The pinned node-pty 1.2.0-beta.17 dependency ships native bindings; source installation permits that dependency's build scripts through the checked-in pnpm configuration. When a matching prebuild is absent, installation needs Python, a C/C++ toolchain and node-gyp. The supervised service targets Linux and macOS; real PTY and packed-install verification here is on macOS arm64. Linux runtime and Windows are not verified, and the service requires Unix signals, sockets and `/bin/ps`.
 
+## Slack plugin
+
+Slack is bundled and inactive until the owner configures it. This preview binds
+one workspace, one approved Slack user and one direct-message channel to an
+existing Staf agent. It uses Socket Mode, so Slack does not need a public Staf
+URL. It does not accept channels, group DMs, other users, message edits or bot
+messages. The approved user can interact with that agent's main chat and the
+agent's existing capabilities and permissions; messages and responses are sent
+to its selected model provider. Choose these identities with that access in mind.
+
+To set up your own Slack app:
+
+1. Create an app in the desired workspace, enable Socket Mode, and create an
+   app-level token with `connections:write`. Under OAuth & Permissions add the
+   bot scopes `im:history` and `chat:write`; under Event Subscriptions subscribe
+   the bot to `message.im`. Install the app in the workspace. Enable the Messages
+   tab and allow users to send messages if Slack presents that setting.
+2. Open the app's direct message and find the workspace ID (`T...`), your user
+   ID (`U...`), and the DM channel ID (`D...`). Slack's profile and workspace
+   links expose user and workspace IDs; a copied link to a message in the app DM
+   includes the DM channel ID. IDs identify the approved conversation; names
+   are not sufficient. Slack's [Socket Mode guide](https://docs.slack.dev/apis/events-api/using-socket-mode/),
+   [`message.im` reference](https://docs.slack.dev/reference/events/message.im/),
+   and [`chat.postMessage` reference](https://docs.slack.dev/reference/methods/chat.postMessage/)
+   describe the transport, scopes and reply behavior.
+3. In **Settings → Plugins → Slack**, enter the app-level and bot user tokens,
+   the IDs and an existing active agent. **Connect** checks the bot token's
+   workspace with Slack. Then explicitly **Allow agent access** and **Enable**.
+   A connected status means the Socket Mode WebSocket opened, not that a DM
+   has been tested. An app token or Slack settings error may require correcting
+   the setup and enabling again.
+4. Send a harmless test DM from the approved user. The agent's response should
+   appear in that DM, or in the originating thread for a threaded message.
+   Inspect the corresponding main chat and **Recent message outcomes** in
+   Settings. A busy agent or failed model request is recorded, not queued.
+
+Disable stops the socket and cancels active Slack-originated work while retaining
+configuration, access, and history. Disconnect also removes the locally saved
+Slack tokens, while preserving the binding and history. Delete saved configuration
+removes the binding and agent access as well. These actions do not uninstall the
+Slack app or revoke tokens at Slack. Reconnect requires the tokens again. Tokens
+are stored as a host-local `auth/slack.json` file with restricted permissions;
+they are not returned to clients or included in the instance database. Protect
+host access and backups. Consult the backup instructions for which files are
+included; reconnect Slack after a restore unless the credential file was
+explicitly and securely restored.
+
+Slack event IDs and delivery outcomes persist in the instance database. Duplicate
+events are not run again. If the service stops during processing, the outcome is
+interrupted; a send whose result is unknown is uncertain and is never automatically
+replayed. Inspect the main chat and Slack before sending a new message. The reply
+is limited to 39,000 characters. Slack and model behavior have controlled offline
+coverage; real workspace setup and delivery have not been validated by the
+implementation tests.
+
 ## Home-network browser access
 
 The optional [native HTTPS gateway](native-linux-installation.md#enable-home-network-https-access) lets a paired browser reach the loopback instance over a trusted home network. Each browser origin needs pairing; CLI access and ChatGPT loopback sign-in use SSH forwarding. Native Linux, LAN and live sign-in remain unverified.

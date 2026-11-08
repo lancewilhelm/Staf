@@ -417,6 +417,22 @@ The built-in core describes general assistant behavior without naming tools.
 Capability definitions and service enforcement remain separate. Custom and empty
 core overrides keep their existing upgrade and reset behavior.
 
+
+## Bundled plugins and Slack
+
+Bundled plugin definitions describe identity, configuration, lifecycle, tools,
+events and account identity without a marketplace. The instance database stores
+connection configuration, per-agent access and a durable account/event ledger.
+Slack's Socket Mode transport admits only the configured workspace, user and DM.
+It submits a normal service-owned command with the captured agent identity; the
+existing work/action boundary still governs capabilities. Agent access and plugin
+state are checked again for actions and before reply dispatch. A dispatch is
+marked before the Slack API call so a crash or ambiguous response is not replayed.
+Tokens live separately in the host credential directory. A reconnecting socket
+can miss events during an outage; this slice has no Slack history backfill.
+These paths are exercised with controlled providers, not live Slack. Gmail is a
+future bundled integration and is not implemented by this interface.
+
 ## Native home-network transport
 
 The optional native HTTPS gateway binds a configured private IPv4 address and checks the external Host and Origin before forwarding to the fixed loopback service. TLS ends at the gateway; the service still owns pairing, client revocation, permissions and persistent state. The gateway adds no public owner API and is independent of the loopback CLI and callback. Controlled local tests cover this transport; Linux VM and LAN operation remain unverified. See [native installation](native-linux-installation.md).

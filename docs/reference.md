@@ -546,6 +546,19 @@ Paired owners can POST `/api/processes/ID/input` with `{ "data": "text\n" }`, `/
 
 Schema 36 adds process retention, input counters/closure and PTY dimensions through the protected migration process, preserving combined native/search schema 35. Old records default to nonretained. Unknown handles cannot receive input, EOF, resize or signals after restart.
 
+
+## Bundled plugin management
+
+Paired clients use `GET /api/plugins` to inspect bundled definitions, Slack
+configuration without tokens, connection state, agent access, and recent event
+outcomes. `POST /api/plugins/slack/connect` accepts `appToken`, `botToken`,
+`teamId`, `userId`, `channelId`, and `botId`; it validates the bot token against
+the workspace. `POST /api/plugins/slack/access` takes `botId` and `enabled`.
+The `enable`, `disable`, `disconnect`, and `delete-config` endpoints take empty
+objects. Connections are instance-owned and keyed by service account identity;
+this slice exposes one Slack account. Tokens remain host-local and are never
+returned. See [Slack setup](usage.md#slack-plugin) for limits and recovery.
+
 ## Native home-network gateway
 
 The optional native gateway uses `STAF_LAN_ADDRESS` (a specific private IPv4), `STAF_LAN_PORT` (1024–65535, default 3443), and absolute `STAF_LAN_KEY` and `STAF_LAN_CERT` paths in its systemd environment file. It serves HTTPS and forwards to the unchanged loopback service. See [installation and recovery](native-linux-installation.md#enable-home-network-https-access) for certificate trust, pairing and limits. The standard CLI remains loopback-only.
