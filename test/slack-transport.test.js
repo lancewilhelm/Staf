@@ -30,3 +30,13 @@ test('Socket Mode accepts only plain DMs and acknowledges envelopes; posting use
   stop();
  }finally{globalThis.fetch=originalFetch;globalThis.WebSocket=OriginalWebSocket;}
 });
+
+test('HTTP 429 exposes a safe retry delay while other transport failures remain ambiguous',async()=>{
+ const {SlackRateLimited}=await import('../dist/slack.js');const original=globalThis.fetch;const tokens={appToken:'xapp-synthetic',botToken:'xoxb-synthetic'};
+ try{
+  globalThis.fetch=async()=>new Response('',{status:429,headers:{'Retry-After':'2'}});
+  await assert.rejects(slackTransport.post(tokens,{channel:'D123',text:'test'}),error=>error instanceof SlackRateLimited && error.retryAfterMs===2000);
+  globalThis.fetch=async()=>{throw Error('connection lost')};
+  await assert.rejects(slackTransport.post(tokens,{channel:'D123',text:'test'}),error=>!(error instanceof SlackRateLimited));
+ }finally{globalThis.fetch=original;}
+});

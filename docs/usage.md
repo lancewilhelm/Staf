@@ -828,7 +828,9 @@ To start independent work, send `work: Investigate the topic` in the approved
 DM. The receipt contains an attempt ID. Use `status task ID`, `direct task ID:
 new direction`, or `stop task ID` in that DM; replace `ID` with the full ID from
 the receipt. For a task question use `answer task ID QUESTION_ID: answer`.
-Controls name the exact attempt, so a late stop cannot target a later task. The
+Controls name the exact attempt, so a late stop cannot target a later task.
+Action approvals still require a paired Staf client; Slack task controls do not
+approve actions. The
 agent can run one background task at a time; an additional request is declined.
 Normal DMs continue to use main chat. A task uses the agent's captured identity,
 context, permissions and scope; actions still use the service's approval rules.

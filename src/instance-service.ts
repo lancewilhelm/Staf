@@ -543,7 +543,11 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
       try {
         const task=instance.taskAttempt(attemptId);if(!task)throw Error('Task not found');
         const action=control[1].toLowerCase();
-        if(action==='status')reply=`Task ${attemptId} ${task.state}${task.outcome ? `: ${task.outcome}` : ''}${task.waitReason ? `; waiting for ${task.waitReason}` : ''}`;
+        if(action==='status') {
+          const recent=task.activity.filter(event=>event.type==='tool_start' || event.type==='tool_result').slice(-3).map(event=>`${event.name}: ${event.type==='tool_start'?'started':event.success?'completed':'failed'}`);
+          const questions=task.inbox.questions.filter(question=>question.state==='open').map(question=>`Question ${question.id}: ${question.text}`);
+          reply=`Task ${attemptId} ${task.state}${task.outcome ? `: ${task.outcome}` : ''}${task.waitReason ? `; waiting for ${task.waitReason}` : ''}${recent.length ? `\nRecent work: ${recent.join('; ')}` : ''}${questions.length ? `\n${questions.join('\n')}` : ''}`;
+        }
         else if(!['queued','running'].includes(task.state))reply=`Task ${attemptId} is not active. No changes were made.`;
         else if(action==='stop') {instance.taskStop(attemptId,'Stop requested in Slack');abortDelegatedChildren(attemptId);taskControllers.get(attemptId)?.abort();reply=`Stop requested for task ${attemptId}.`;}
         else if((action==='direct' || action==='answer') && control[4]?.trim() && (action!=='answer' || control[3])) {
@@ -644,7 +648,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
         if(instance.bot(config.botId)?.archived!==false)throw Error('Choose an active agent');
         const generation=slackGeneration,existing=instance.plugins.connection();if(existing && existing.accountId!==config.teamId)throw Error('Delete the existing Slack configuration before changing workspace');
         const tokens={appToken:value.appToken,botToken:value.botToken};
-        const identity=await slack.identify(tokens);if(identity.teamId!==config.teamId)throw Error('Bot token belongs to a different workspace');
+        const identity=await slack.identify(tokens);if(identity.teamId!==config.teamId)throw Error('Bot token belongs to a different workspace');if(identity.botUserId===config.userId)throw Error('The approved Slack user must not be the app bot');
         if(generation!==slackGeneration || instance.plugins.connection()?.revision!==existing?.revision)throw Error('Slack settings changed during connection. Review and try again');
         stopSlackConnection();saveSlackTokens({root:dataDir,...tokens});knownKeys.add(tokens.appToken);knownKeys.add(tokens.botToken);instance.plugins.connect(config);
         return json(200,pluginStatus()[0]);

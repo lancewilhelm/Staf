@@ -42,7 +42,8 @@ export const slackTransport:SlackTransport={
    current.addEventListener('error',()=>current.close());
   }
   function retry(){if(!stopped)timer=setTimeout(()=>{void connect().catch(retry);},3000);}
-  await connect();return ()=>{stopped=true;if(timer)clearTimeout(timer);socket?.close();};
+  try {await connect();} catch {if(!stopped){status?.('reconnecting');retry();}}
+  return ()=>{stopped=true;if(timer)clearTimeout(timer);socket?.close();};
  },
  async post(tokens,message){await api('chat.postMessage',tokens.botToken,{channel:message.channel,text:message.text,unfurl_links:false,unfurl_media:false,...(message.threadTs?{thread_ts:message.threadTs}:{})});},
 };
