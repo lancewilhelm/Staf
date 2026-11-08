@@ -599,7 +599,7 @@ Inspection shows occurrence status, linked task ID, skipped range and reason. An
 
 ### Public web reading
 
-Web reading is disabled by default. A paired owner must enable it for the instance and bot. Ordinary background tasks additionally require their own task permission. A scheduled task instead receives only its captured exact URL scope, which can be disabled explicitly for the task; helpers cannot use web reading. The task permission readback distinguishes the owner override, inherited scheduled scope and current effective access. Use `instance web-permission URL CREDENTIAL_FILE SCOPE` or `instance web-permission-set URL CREDENTIAL_FILE SCOPE true|false` to manage these switches. `SCOPE` is `instance`, `bot:BOT_ID`, or `task:ATTEMPT_ID`.
+Web reading permission is disabled by default. A paired owner must enable it for the instance and bot. Ordinary background tasks additionally require their own task permission. A scheduled task instead receives only its captured exact URL scope, which can be disabled explicitly for the task; helpers cannot use web reading. The task permission readback distinguishes the owner override, inherited scheduled scope and current effective access. Use `instance web-permission URL CREDENTIAL_FILE SCOPE` or `instance web-permission-set URL CREDENTIAL_FILE SCOPE true|false` to manage these switches. `SCOPE` is `instance`, `bot:BOT_ID`, or `task:ATTEMPT_ID`.
 
 A tool-capable bot may propose a public HTTP(S) page. A paired owner must approve each exact target, including each redirect, before DNS or HTTP. Use the browser approval list or `instance web-approvals URL CREDENTIAL_FILE`, `instance web-approve URL CREDENTIAL_FILE ACTION_ID`, and `instance web-deny URL CREDENTIAL_FILE ACTION_ID`. Web requests with credentials or query strings are rejected. A started request interrupted by restart is marked uncertain and is not automatically repeated. Revoking permission or stopping a task cancels in-flight reads.
 
@@ -607,7 +607,7 @@ Page text is untrusted data and cannot grant authority. The action journal recor
 
 ### Search through an owner-configured backend
 
-Search is separate from web reading and is disabled by default. Configure the exact local backend origin in the form `http://127.0.0.1:PORT` with the CLI, then explicitly enable instance and bot search. An ordinary background task also requires its own search permission. A scheduled task can use only its captured exact query and backend scope, subject to an explicit task disable; helpers are not supported. Task readback distinguishes the owner override, inherited schedule scope and current effective access. The selected loopback port can identify any local HTTP service; only configure a backend you trust. In Docker, `127.0.0.1` refers to the container itself.
+Search permissions are separate from web reading and are disabled by default. Configure the exact local backend origin in the form `http://127.0.0.1:PORT` in Settings or with the CLI, then explicitly enable instance and bot search. An ordinary background task also requires its own search permission. A scheduled task can use only its captured exact query and backend scope, subject to an explicit task disable; helpers are not supported. Task readback distinguishes the owner override, inherited schedule scope and current effective access. The selected loopback port can identify any local HTTP service; only configure a backend you trust. In Docker, `127.0.0.1` refers to the container itself.
 
 Each search requires owner approval of the exact query and backend before dispatch, unless an enabled matching reusable grant applies. In ordinary chat all three tool modes use the same search action, approval and result; the backend is never chosen by the model. The CLI supports `instance search-config URL CREDENTIAL_FILE`, `search-config-set URL CREDENTIAL_FILE REVISION ORIGIN` (use `-` to clear), `search-permission URL CREDENTIAL_FILE SCOPE`, `search-permission-set URL CREDENTIAL_FILE SCOPE true|false`, `search-approvals URL CREDENTIAL_FILE`, and `search-approve` or `search-deny` with an approval ID. Search has a limit of two concurrent dispatches within one instance process and ten dispatches per rolling minute per instance database; the rate history survives restart. Separate instance processes do not share a concurrency limit. Interrupted started actions become uncertain and are not automatically replayed.
 
@@ -664,6 +664,28 @@ agent and review the warning before adding `--confirm-provider-change`. Without
 the flag the provider stays unchanged. Use the revision from inspect; conflicts
 preserve the current configuration. The
 interactive terminal keeps its existing provider-change confirmation.
+
+## Manage tool availability
+
+In **Settings → Tools**, inspect and enable or disable clock, memory, web
+research, and files for the instance. All four are enabled on a fresh install
+and when an older instance is upgraded. Save changes explicitly. These controls
+apply to Direct, Hybrid, and Code Mode in chat and eligible tasks; they do not
+change agent permissions, task scope, approval modes, or the native terminal.
+Disabling memory also stops automatic recall for new provider requests. Your
+saved memories, tool history, configuration and permissions remain in place.
+Reenable a tool to make it available again, subject to the same permissions.
+Already dispatched external actions cannot be undone; disabling web research
+requests cancellation of active web reads and searches.
+
+The search backend can be inspected and configured in the same settings section.
+It must be a trusted SearXNG origin of the form `http://127.0.0.1:PORT`.
+Availability alone does not grant web or search permission: those permissions
+remain off on a fresh instance and are managed separately through the paired
+CLI. Search additionally requires a configured backend and exact-query approval;
+see [search setup](#search-through-an-owner-configured-backend) and
+[web reading](#public-web-reading). Existing permissions are never widened
+by enabling a tool.
 
 ## Save a tool mode
 

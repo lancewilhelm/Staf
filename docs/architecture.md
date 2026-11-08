@@ -201,6 +201,20 @@ The background-task preview stores tasks, linked attempts, captured profiles and
 
 Database version 8 adds the immutable skill catalog, per-bot availability, task catalog snapshots and command load evidence in the migration transaction after a protected backup. Configured credential values are redacted from new catalog records before storage and from existing records on read; catalog digests identify the original submitted bytes. Load evidence labels that value `sourceDigest` and records `loadedContentDigest` for the exact redacted UTF-8 body in the tool result. Older records do not contain the latter. Earlier database records and backups are not rewritten. The runtime offers at most 32 metadata records to tool-capable providers. A structured selection validates the captured ID and revision and current availability before returning untrusted text as a tool result. The task Activity and command status record successful loads. Availability is rechecked before later provider calls and actions. Clock authorization remains independent. Prior direct skill results and code results linked to actual skill child actions are replaced in the next turn's provider request; stored history, backups and already-sent provider data are not erased. Synthetic provider tests do not establish live model selection or resistance to prompt injection.
 
+### Instance tool availability
+
+Schema 40 stores revision-checked instance switches for clock, memory, web
+research and files. The shared action coordinator filters offers and rechecks
+availability at the same action boundaries used by direct and guest calls.
+Availability is independent of permissions, task scopes, configuration, and
+approvals. Web disable aborts active web/search controllers; it cannot reverse
+an already dispatched request. Memory disable also suppresses automatic recall,
+while owner inspection and retained records remain available. Native terminal
+capabilities are not governed by the file switch. Existing instances gain the
+enabled availability defaults without changing their existing permissions.
+Controlled-provider tests exercise these boundaries; they do not establish live
+provider or network behavior.
+
 ### Shared-instance memory
 
 The browser exposes read-only agent and shared user memory through the existing

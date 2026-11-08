@@ -427,6 +427,22 @@ recognize the new configuration field: remove `image` fields or restore a
 compatible backup before running one. Retain accepted assets if you intend to
 use those images again.
 
+## Instance tool availability
+
+Paired `GET /api/tool-defaults` returns `revision`, `clock`, `memory`, `web`,
+and `files`. `POST` accepts the same object with the current numeric revision
+and four booleans; a stale revision returns 409. Schema 40 adds the backed-up
+instance setting, initialized to enabled for both fresh and upgraded databases
+without changing existing permission or configuration records. These switches
+filter registered capability offers and are rechecked at action authorization,
+start and result release. `web` covers `read_web`, redirect hops and `search_web`;
+`files` covers registered `file_*` actions; `memory` covers registered
+`memory_*` actions and automatic recall. Owner memory inspection and native
+terminal capabilities remain separate. In-flight web/search requests are aborted
+on disable, but an already dispatched effect may have reached its destination.
+Clock permission, web/search permissions, task scope and approvals remain
+independent and authoritative. Search still needs a configured backend.
+
 ## Saved tool mode contract
 
 `src/tool-mode.ts` exports `ToolMode` (`direct`, `hybrid`, or `code`) and
