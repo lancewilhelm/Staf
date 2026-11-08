@@ -80,6 +80,8 @@ export class WorkActionService {
   private readonly queueDepth=new Map<string,number>();
   private readonly journal:ActionJournal;
   private workCheck:(work:WorkRef)=>void=()=>{};
+  private availability:(name:string)=>boolean=()=>true;
+  setAvailability(check:(name:string)=>boolean):void {this.availability=check;}
   setWorkCheck(check:(work:WorkRef)=>void):void {this.workCheck=check;}
   private readonly closures=new Map<string,{controller:AbortController;refs:number}>();
   private readonly completedHopParents=new Set<string>();
@@ -94,10 +96,10 @@ export class WorkActionService {
     if (!capability.name || capability.name==='code_mode' || this.capabilities.has(capability.name) || capability.definition.function.name!==capability.name) throw Error('Invalid or duplicate capability');
     const parse=(input:unknown)=>capability.parseInput(input);
     this.capabilities.set(capability.name,{
-      name:capability.name,internal:capability.internal===true,definition:structuredClone(capability.definition),eligible:capability.eligible,maxResultBytes:capability.maxResultBytes ?? 256*1024,
+      name:capability.name,internal:capability.internal===true,definition:structuredClone(capability.definition),eligible:work=>this.availability(capability.name) && capability.eligible(work),maxResultBytes:capability.maxResultBytes ?? 256*1024,
       parse:input=>jsonValue.parse(parse(input)),
       describe:(input,work)=>capability.describe(parse(input),work),
-      check:(input,work,action)=>{const parsed=parse(input);if(this.deferred(work.work))throw new ActionDeferred('Owner input is pending');try{capability.check(parsed,work,action);}catch(error){if(!(error instanceof ActionDeferred))this.close(work,'authority');throw error;}},
+      check:(input,work,action)=>{const parsed=parse(input);if(this.deferred(work.work))throw new ActionDeferred('Owner input is pending');try{if(!this.availability(capability.name))throw Error('Tool is disabled');capability.check(parsed,work,action);}catch(error){if(!(error instanceof ActionDeferred))this.close(work,'authority');throw error;}},
       authorize:(input,work,action)=>capability.authorize(parse(input),work,action),
       execute:async (input,work,action)=>jsonValue.parse(capability.parseResult(await capability.execute(parse(input),work,action))),
       visible:output=>capability.visibleResult(capability.parseResult(output)),
