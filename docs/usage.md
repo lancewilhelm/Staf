@@ -810,3 +810,7 @@ replayed. Inspect the main chat and Slack before sending a new message. The repl
 is limited to 39,000 characters. Slack and model behavior have controlled offline
 coverage; real workspace setup and delivery have not been validated by the
 implementation tests.
+
+## Home-network browser access
+
+The optional [native HTTPS gateway](native-linux-installation.md#enable-home-network-https-access) lets a paired browser reach the loopback instance over a trusted home network. Each browser origin needs pairing; CLI access and ChatGPT loopback sign-in use SSH forwarding. Native Linux, LAN and live sign-in remain unverified.

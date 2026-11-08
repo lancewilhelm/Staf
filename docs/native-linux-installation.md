@@ -1,13 +1,14 @@
 # Install and recover Staf on native Linux
 
 This path runs the shared instance as a non-root systemd user service. It binds to
-`127.0.0.1:3210`; use an SSH tunnel to reach it from another machine. The unit and
-wrapper are prepared for review. Installation, reboot, pairing, update, and restore
-have not been verified on a Linux VM. Issue [#24](https://github.com/lancewilhelm/Staf/issues/24)
+`127.0.0.1:3210`. An optional HTTPS gateway gives paired browsers access over a
+trusted home network; an SSH tunnel remains available for loopback access and the
+CLI. The units, gateway and wrapper are prepared for review. Installation, reboot,
+pairing, update, and restore have not been verified on a Linux VM. Issue [#24](https://github.com/lancewilhelm/Staf/issues/24)
 remains open until its actual Linux acceptance checks pass.
 
 The steps use `$HOME/.local/share/staf` and `$HOME/.config/staf`. They do not
-change Hermes or other services. The owner account needs a running systemd user
+change Hermes or other services. The owner account needs OpenSSL, a running systemd user
 manager, `/usr/bin/node` with Node.js 22.16 or later, Git, and Corepack with
 the project-pinned pnpm 12.16.1.
 Install prerequisites separately using the host's normal administration method.
@@ -57,6 +58,70 @@ must enable lingering for this account. Ask the host administrator to run
 This step may require administrator authorization. A real reboot check remains
 required.
 
+## Enable home-network HTTPS access
+
+The optional gateway listens on one private IPv4 address and forwards only to the
+local Staf service. It encrypts traffic but does not replace pairing or the
+instance's permissions. Use a stable private address on the Linux host (for
+example, a DHCP reservation). Restrict port 3443 to trusted home-network clients
+with the host/network firewall; do not forward it from the internet. Any paired
+client can control this instance and use permitted host tools. The gateway is not
+a general-purpose reverse proxy and does not support a DNS name or IPv6.
+
+1. On the host, set `STAF_LAN_ADDRESS` to its private IPv4 address. Generate an
+   owner-only self-signed certificate for that exact address. The command below
+   creates a new key: preserve an existing key and certificate rather than
+   overwriting them. The browser must trust the certificate on every client.
+
+   ```sh
+   STAF_LAN_ADDRESS=192.168.1.20  # replace with this host's private address
+   umask 077
+   test ! -e "$HOME/.config/staf/lan-key.pem" && test ! -e "$HOME/.config/staf/lan-cert.pem" &&
+   openssl req -x509 -newkey rsa:3072 -nodes -days 365 \
+     -keyout "$HOME/.config/staf/lan-key.pem" -out "$HOME/.config/staf/lan-cert.pem" \
+     -subj "/CN=$STAF_LAN_ADDRESS" -addext "subjectAltName=IP:$STAF_LAN_ADDRESS" \
+     -addext "basicConstraints=critical,CA:FALSE" -addext "extendedKeyUsage=serverAuth"
+   ```
+
+2. Create `$HOME/.config/staf/lan.env`, substituting your host's actual absolute
+   paths and the same address. Do not use shell expansion inside this systemd
+   environment file. The port defaults to 3443 and must be 1024–65535.
+
+   ```text
+   STAF_LAN_ADDRESS=192.168.1.20
+   STAF_LAN_PORT=3443
+   STAF_LAN_KEY=/home/USERNAME/.config/staf/lan-key.pem
+   STAF_LAN_CERT=/home/USERNAME/.config/staf/lan-cert.pem
+   ```
+
+   Run `chmod 600 "$HOME/.config/staf/lan.env" "$HOME/.config/staf/lan-key.pem"`.
+   Copy `deploy/native-linux/staf-lan.service` to `~/.config/systemd/user/`,
+   then run `systemctl --user daemon-reload` and
+   `systemctl --user enable --now staf-lan.service`. Lingering and the base
+   service setup above are required for automatic startup after reboot. Inspect
+   `systemctl --user status staf-lan.service` and
+   `journalctl --user -u staf-lan.service` for startup errors.
+
+3. Transfer **only** `lan-cert.pem` to each trusted client over authenticated
+   SSH and install it as a trusted certificate using that client's OS/browser
+   procedure. Verify the certificate fingerprint on the host with
+   `openssl x509 -in "$HOME/.config/staf/lan-cert.pem" -noout -sha256 -fingerprint`
+   and compare before trusting it. Never transfer the private key to clients.
+   Visit `https://YOUR_PRIVATE_IP:3443/` without bypassing a TLS warning. A new
+   browser origin needs its own pairing code, as described below. If the IP or
+   certificate changes, update the config and client trust deliberately.
+
+The gateway checks the exact Host and any browser Origin before forwarding. It
+keeps the application's API and database on loopback. An unpaired browser cannot
+access owner APIs; a paired browser retains access until revoked. TLS and pairing
+do not protect a compromised paired client or host. Stop or disable the optional
+gateway with `systemctl --user stop staf-lan.service` or
+`systemctl --user disable --now staf-lan.service`. The CLI still requires an SSH
+tunnel. ChatGPT sign-in uses a loopback callback: initiate it through the SSH
+loopback path on the machine receiving the callback, not through this HTTPS origin.
+The gateway has local controlled coverage; it has not been tested on a Linux VM,
+actual LAN, browsers' certificate stores, or live services.
+
 ## Connect and pair a client
 
 The code grants access to the whole instance. The wrapper captures it in
@@ -84,14 +149,15 @@ The file can contain a code that was already used. Rotate before pairing.
    cat "$XDG_RUNTIME_DIR/staf/pairing-code"
    ```
 
-4. On a separate trusted client, forward its local port through authenticated SSH.
-   Keep this terminal open.
+4. Use the HTTPS address above from a trusted paired-network client, or on a
+   separate trusted client forward its local port through authenticated SSH.
+   For the SSH option, keep this terminal open.
 
    ```sh
    ssh -N -L 3210:127.0.0.1:3210 USERNAME@HOST
    ```
 
-5. Open `http://127.0.0.1:3210/` on that client and enter the code. The code is
+5. Open the HTTPS address above, or `http://127.0.0.1:3210/` through SSH, and enter the code. The code is
    single-use. Rotate it again for another client. The browser stores its token
    in local storage. Other processes on the client may reach the forwarded port.
 
@@ -108,6 +174,8 @@ systemctl --user status staf.service
 journalctl --user -u staf.service --since today
 systemctl --user stop staf.service
 systemctl --user start staf.service
+# If the HTTPS gateway is enabled:
+systemctl --user start staf-lan.service
 ```
 
 Stopping the service interrupts running work. Review interrupted work before an
@@ -119,12 +187,13 @@ journal shows lifecycle status rather than application error details.
 Stop the service and every other process that writes this data before copying it.
 The service check below does not detect a separately started instance. The backup
 includes the whole data directory, including SQLite sidecar files, and the separate service configuration.
-It can contain private conversations, client credentials, and provider secrets.
+It can contain private conversations, client credentials, provider secrets, and the
+HTTPS private key. It includes the complete core revision tree and symlinks.
 Store it in an owner-only location outside the installation and protect copies on
 other media.
 
 ```sh
-systemctl --user stop staf.service
+systemctl --user stop staf-lan.service staf.service
 state=$(systemctl --user show staf.service --property=ActiveState --value)
 if [ "$state" = inactive ] || [ "$state" = failed ]; then
   umask 077
@@ -143,7 +212,7 @@ else
 fi
 ```
 
-The archive command runs only when the user manager reports `inactive` or `failed`.
+Stop the gateway too before backup or replacement. The archive command runs only when the user manager reports `inactive` or `failed`.
 Each run creates a new owner-only directory, so simultaneous backups do not
 overwrite one another. Verify the archive exists and is
 readable, then retain it independently of the host. Inspect the archive with
@@ -154,7 +223,7 @@ For an owner-initiated update, prepare a separate checkout at the reviewed
 revision and build it before stopping the service. After the stopped-data backup,
 move the old `app` directory to a unique retained name, move the prepared
 checkout to `app`. Review the new unit, copy it to the user unit directory if it
-changed, and run `systemctl --user daemon-reload`. Start the service. Preserve
+changed, and run `systemctl --user daemon-reload`. Start the service and, if enabled, the gateway. Preserve
 the data and configuration directories. If the service fails, stop it and restore the prior application and
 backup deliberately; never assume an older application can read a migrated
 store. A migration can create its own database backup, but it does not replace
@@ -168,7 +237,14 @@ that the destination data and config directories contain no records you need to
 keep. Move any existing directories to unique retained names before extracting;
 never overwrite the only copy of existing data. From the replacement account's
 home directory, extract the archive with `tar -xzf BACKUP_FILE -C "$HOME"`,
-restore owner-only permissions, and start the service. Inspect bots, chat,
-settings, task history, Activity, and client access. Reauthenticate providers if
-needed. Verify this procedure on a Linux VM and record the result before treating
+run `chmod -R go-rwx "$HOME/.local/share/staf/data" "$HOME/.config/staf"`,
+and start the service. Inspect agents, conversations, memory, schedules, settings, task history,
+Activity, and client access. This full archive retains paired client authority:
+review and revoke clients after restore, including any revoked since the backup. It also copies any connections and secrets stored
+in these directories, including the HTTPS key. External secret stores or paths are
+not included. Gmail and Slack connections may require reconnecting or renewing
+credentials; restore does not establish that either connection is valid. Check
+their actual status and reconnect if needed. Avoid running both copies against
+the same rotating credentials or schedules. Restore the gateway configuration
+only after adjusting its address and certificate for the replacement host. Verify this procedure on a Linux VM and record the result before treating
 the backup path as accepted.

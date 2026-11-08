@@ -432,3 +432,7 @@ Tokens live separately in the host credential directory. A reconnecting socket
 can miss events during an outage; this slice has no Slack history backfill.
 These paths are exercised with controlled providers, not live Slack. Gmail is a
 future bundled integration and is not implemented by this interface.
+
+## Native home-network transport
+
+The optional native HTTPS gateway binds a configured private IPv4 address and checks the external Host and Origin before forwarding to the fixed loopback service. TLS ends at the gateway; the service still owns pairing, client revocation, permissions and persistent state. The gateway adds no public owner API and is independent of the loopback CLI and callback. Controlled local tests cover this transport; Linux VM and LAN operation remain unverified. See [native installation](native-linux-installation.md).
