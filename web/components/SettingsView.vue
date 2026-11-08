@@ -4,6 +4,7 @@ import { useWorkspace } from '../workspace';
 import { type Appearance, saveAppearance } from '../appearance';
 import ProviderDefaults from './ProviderDefaults.vue';
 import CoreSettings from './CoreSettings.vue';
+import ToolSettings from './ToolSettings.vue';
 import PluginSettings from './PluginSettings.vue';
 import AppearanceOptions from './AppearanceOptions.vue';
 import ConfirmAction from './ConfirmAction.vue';
@@ -117,6 +118,7 @@ async function disconnectRouter() {
       </div>
       <ConfirmAction v-if="discardTarget" title="Discard this browser record?" message="This removes only the selected saved record from this browser. Copy anything you need first." action="Discard record" @cancel="discardTarget = null" @confirm="discardRecord" />
     </section>
+    <ToolSettings />
     <PluginSettings />
     <ProviderDefaults />
     <CoreSettings />
