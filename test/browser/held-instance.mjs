@@ -11,7 +11,7 @@ import {join,dirname} from 'node:path';
 
 const [path, port] = process.argv.slice(2);
 if (process.argv.includes('--legacy-fixture')) {const instance=new Instance(path);try {legacyDemo(instance,'Legacy','Keep soul');const archived=legacyDemo(instance,'Archived');instance.setArchived(archived.id,archived.revision,true);} finally {instance.close();}}
-let releaseInputTask, releaseStream, releaseRouter;
+let releaseInputTask, releaseStream, releaseRouter, releaseLateTask;
 let routerFailed=false;
 function makeProvider() {
 let backgroundCalls=0, inputCalls=0, inputTask=false, skillCalls=0, skillTask=false, collabCalls=0, collabTask=false, webCalls=0, searchCalls=0, shellCalls=0;
@@ -45,6 +45,7 @@ return {
       if(revise && results.length===4){const memory=result('memory_update');return calls([['file_search',{path:'basic-acceptance.txt',query:'after'}],['memory_forget',{scope:{kind:'agent'},id:memory.id,version:memory.version}]]);}
       return {role:'assistant',content:prompt+' completed.'};
     }
+    if (options?.currentUserInput==='Hold task for late output') {await new Promise(resolve=>{releaseLateTask=resolve});return {role:'assistant',content:'Observed after stopping.'};}
     if (options?.currentUserInput==='Interactive process fixture') {
       if(messages.at(-1)?.role==='tool')return {role:'assistant',content:'Interactive fixture started.'};
       const input={command:'printf "interactive ready\\n"; read answer; printf "answer:%s\\n" "$answer"; exec sleep 30',mode:'pty',retain:true};
@@ -211,4 +212,4 @@ let stopping=false;
 async function stopFixture(){if(stopping)return;stopping=true;await app.close();process.exit(0);}
 process.once('SIGTERM',stopFixture);process.once('SIGINT',stopFixture);
 console.log(`Listening on http://127.0.0.1:${port}\nPairing code: ${app.code}`);
-createInterface({input:process.stdin}).on('line', async line => { if(line==='ask-clock'){const origin='http://127.0.0.1:'+port;const paired=await (await fetch(origin+'/api/pair',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:app.issueCode()})})).json();await fetch(origin+'/api/approval-settings/instance',{method:'POST',headers:{Authorization:'Bearer '+paired.token,'Content-Type':'application/json'},body:JSON.stringify({mode:'ask-every-time',clockEnabled:true})});console.log('Clock approvals enabled');return;} if(line==='release') releaseInputTask?.(); else if(line==='stream-next')releaseStream?.();else if(line==='router-next')releaseRouter?.();else if(line==='drop-response-streams')for(const response of responseStreams)response.destroy();else console.log(`Pairing code: ${app.issueCode()}`); });
+createInterface({input:process.stdin}).on('line', async line => { if(line==='ask-clock'){const origin='http://127.0.0.1:'+port;const paired=await (await fetch(origin+'/api/pair',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:app.issueCode()})})).json();await fetch(origin+'/api/approval-settings/instance',{method:'POST',headers:{Authorization:'Bearer '+paired.token,'Content-Type':'application/json'},body:JSON.stringify({mode:'ask-every-time',clockEnabled:true})});console.log('Clock approvals enabled');return;} if(line==='release') releaseInputTask?.(); else if(line==='release-late-task') releaseLateTask?.(); else if(line==='stream-next')releaseStream?.();else if(line==='router-next')releaseRouter?.();else if(line==='drop-response-streams')for(const response of responseStreams)response.destroy();else console.log(`Pairing code: ${app.issueCode()}`); });

@@ -51,7 +51,7 @@ by default and require owner approval. Press Enter in the host
 terminal to issue a fresh one-time code for another client. This preview binds
 only to loopback; it does not support LAN access. See [usage](docs/usage.md#local-shared-instance-offline-preview) for CLI commands and limitations.
 
-The loopback instance retains the background-task engine; its separate Activity and task-update workspace is deferred. It is an offline-tested preview with important permission and recovery limitations; see [usage](docs/usage.md#background-task-preview).
+Explicit background tasks and their outcomes appear in the shared conversation, with a task Stop control; separate Activity management remains deferred. It is an offline-tested preview with important permission and recovery limitations; see [usage](docs/usage.md#background-task-preview).
 
 
 The shared instance supports owner-imported [skills](docs/usage.md#skills-in-the-shared-instance) as an offline-tested preview. Eligible chat and task work can select them in Direct, Hybrid, or Code Mode.

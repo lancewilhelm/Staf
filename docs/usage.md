@@ -297,7 +297,7 @@ Incremental output is available when the adapter supplies it; buffered adapters
 show progress and then the completed message. A failed or interrupted response
 remains labeled as incomplete.
 
-Pending main-chat approvals appear in the conversation. The workspace checks for updates while visible; it does not provide background notifications. Activity, task updates, and task questions are deferred from the MVP workspace.
+Pending chat and task approvals appear in the conversation. Explicit background tasks show their status, outcome and activity there; task questions are visible but answers still require the CLI or API. The workspace checks for updates while visible; it does not provide background notifications.
 
 Drafts and pending message IDs are stored in the browser's local journal.
 An agent's draft and pending submission recover automatically after reload or
@@ -457,7 +457,7 @@ If the result is uncertain, repeat the same command with `--operation-id ID`
 using that ID. Keep the other arguments unchanged. The browser retains its
 creation operation in local storage for status checks and retries after reload.
 
-The task form has a helper clock scope, also available with `instance task-start URL CREDENTIAL_FILE BOT_ID --delegate-clock OBJECTIVE`. It is off by default and recorded independently from the objective. Selecting it permits a helper to request clock reads, subject to current permissions and approval settings. Retries retain the original scope. Scheduled tasks currently receive no helper action scope.
+The CLI supports a helper clock scope with `instance task-start URL CREDENTIAL_FILE BOT_ID --delegate-clock OBJECTIVE`. It is off by default and recorded independently from the objective. Selecting it permits a helper to request clock reads, subject to current permissions and approval settings. Retries retain the original scope. Scheduled tasks currently receive no helper action scope.
 
 Discovery searches names and descriptions, excludes the requester and archived bots, and reports busy bots and ambiguous matches. Matching and limits are provisional. Discovery does not itself assign work. During a task, a bot can request one helper; the owner reviews each exact bot message before it is sent. Helpers do not inherit either bot’s chat history or retrieve private memory.
 
@@ -486,10 +486,8 @@ not a LAN deployment.
 
 ## Background task preview
 
-The background engine and task history remain available through explicit API/CLI operations. The MVP workspace hides Activity and task updates without stopping existing work. Main chat does not advertise or execute background-task creation. The CLI operations below can start and inspect tasks with a run
-limit of five minutes by default. Stop requests cancellation; the task remains
-stopping until its provider settles. A provider result already returned after
-the request can still complete the task. Retry a failed, stopped, or interrupted
+The background engine and task history remain available through explicit API/CLI operations. The conversation shows each task, its state, result, activity and pending approvals, and offers Stop while it is active. Chat remains usable during the task. Main chat does not advertise or execute background-task creation. The CLI operations below can start and inspect tasks with a run
+limit of five minutes by default. Stop requests cancellation and prevents new actions; the task remains stopping until its provider settles. Text and usage observed after Stop are retained as evidence, while the attempt remains stopped. An execution-limit stop retains its reason. Retry a failed, stopped, or interrupted
 attempt explicitly. Replace an active task with a changed objective explicitly.
 The replacement waits until the original settles and keeps a link to it.
 

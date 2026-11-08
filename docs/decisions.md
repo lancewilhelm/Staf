@@ -249,6 +249,10 @@ results returned to the parent agent. They are a future concept, distinct from
 the existing collaboration between persistent agents. This decision does not
 add sub-agents to the MVP or change runtime behavior.
 
+## Background task visibility in the shared conversation
+
+The first Gmail-to-Slack milestone ([issue #102](https://github.com/lancewilhelm/Staf/issues/102)) brings independently running work back into scope. Issue #103 places explicit tasks and their outcomes in the shared conversation, superseding the earlier deferral of task updates. Task creation from ordinary chat and a separate Activity management view remain deferred. Stopping work retains late provider output as observed evidence; it does not make the stopped attempt successful.
+
 ## First-delivery shared state and client contract
 
 Accepted on 2026-10-30. One Staf instance owns shared records in SQLite and
