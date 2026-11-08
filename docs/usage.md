@@ -790,8 +790,9 @@ To set up your own Slack app:
    Inspect the corresponding main chat and **Recent message outcomes** in
    Settings. A busy agent or failed model request is recorded, not queued.
 
-Disable stops the socket and cancels active Slack-originated work while retaining
-configuration, access, and history. Disconnect also removes the locally saved
+Disable stops the socket and cancels active Slack chat responses while retaining
+configuration, access, and history. Accepted Slack background tasks continue;
+their delivery waits until the same approved destination and agent are enabled again. Disconnect also removes the locally saved
 Slack tokens, while preserving the binding and history. Delete saved configuration
 removes the binding and agent access as well. These actions do not uninstall the
 Slack app or revoke tokens at Slack. Reconnect requires the tokens again. Tokens
@@ -801,13 +802,29 @@ host access and backups. Consult the backup instructions for which files are
 included; reconnect Slack after a restore unless the credential file was
 explicitly and securely restored.
 
-Slack event IDs and delivery outcomes persist in the instance database. Duplicate
-events are not run again. If the service stops during processing, the outcome is
-interrupted; a send whose result is unknown is uncertain and is never automatically
-replayed. Inspect the main chat and Slack before sending a new message. The reply
-is limited to 39,000 characters. Slack and model behavior have controlled offline
-coverage; real workspace setup and delivery have not been validated by the
-implementation tests.
+To start independent work, send `work: Investigate the topic` in the approved
+DM. The receipt contains an attempt ID. Use `status task ID`, `direct task ID:
+new direction`, or `stop task ID` in that DM; replace `ID` with the full ID from
+the receipt. For a task question use `answer task ID QUESTION_ID: answer`.
+Controls name the exact attempt, so a late stop cannot target a later task. The
+agent can run one background task at a time; an additional request is declined.
+Normal DMs continue to use main chat. A task uses the agent's captured identity,
+context, permissions and scope; actions still use the service's approval rules.
+
+Receipt, actual tool progress, questions and the terminal outcome are sent to
+the request's thread. A result does not require another DM. If Slack is disabled,
+disconnected or rate limited, pending delivery is retained for the same
+workspace, user, channel and agent; reconnect and enable that same binding to
+resume. A confirmed Slack acceptance is not proof that a person read the message.
+Inspect **Recent task deliveries** in plugin settings. A send with an unknown
+result is marked uncertain and never automatically replayed. Inspect Slack and the
+stored task before deciding what to do. A service restart interrupts unfinished
+tasks; it does not rerun model work or uncertain effects, and the interrupted
+outcome is delivered when possible. Duplicate events are not run again. Replies
+are limited to 39,000 characters. Socket Mode does not backfill events missed
+while disconnected. Slack and model behavior have controlled offline coverage;
+real workspace setup and delivery have not been validated by the implementation
+tests.
 
 ## Home-network browser access
 

@@ -428,6 +428,13 @@ It submits a normal service-owned command with the captured agent identity; the
 existing work/action boundary still governs capabilities. Agent access and plugin
 state are checked again for actions and before reply dispatch. A dispatch is
 marked before the Slack API call so a crash or ambiguous response is not replayed.
+An explicit `work:` DM is atomically bound to a service-owned task attempt and
+its original destination. A durable delivery ledger derives progress and terminal
+outcomes from the task record. It claims a dispatch before the external call,
+retries a known rate limit, and marks ambiguous in-flight dispatches uncertain.
+Current plugin access and the exact captured destination are checked before each
+send. Disable pauses delivery but does not cancel accepted background tasks.
+A restart interrupts unfinished tasks rather than replaying their effects.
 Tokens live separately in the host credential directory. A reconnecting socket
 can miss events during an outage; this slice has no Slack history backfill.
 These paths are exercised with controlled providers, not live Slack. Gmail is a

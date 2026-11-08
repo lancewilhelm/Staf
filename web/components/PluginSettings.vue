@@ -47,6 +47,7 @@ function connect(){void action('connect',{...form.value});}
    <button v-if="plugin.config" class="quiet" :disabled="busy" @click="confirm='delete-config'">Delete saved configuration</button>
    <button class="quiet" :disabled="busy" @click="refresh().catch(()=>{status='Could not refresh plugins.'})">Refresh status</button>
    <details v-if="plugin.events.length" class="saved-settings"><DisclosureSummary>Recent message outcomes</DisclosureSummary><ul><li v-for="event in plugin.events" :key="event.commandId">{{ event.state }}<span v-if="event.detail">: {{ event.detail }}</span> <span class="meta">({{ event.commandId }})</span></li></ul></details>
+   <details v-if="plugin.deliveries.length" class="saved-settings"><DisclosureSummary>Recent task deliveries</DisclosureSummary><p>Sent means Slack accepted the message, not that it was read. Uncertain sends are not retried automatically.</p><ul><li v-for="delivery in plugin.deliveries" :key="delivery.id">{{ delivery.state }} <span class="meta">({{ delivery.id }})</span></li></ul></details>
   </div>
   <p role="status">{{ busy ? 'Updating plugin…' : status }}</p>
   <ConfirmAction v-if="confirm" :title="confirm === 'disconnect' ? 'Disconnect Slack?' : 'Delete Slack configuration?'" :message="confirm === 'disconnect' ? 'This stops Slack and removes its saved tokens. The binding and history remain.' : 'This stops Slack, removes its tokens and saved binding. Message history remains.'" :action="confirm === 'disconnect' ? 'Disconnect' : 'Delete configuration'" @cancel="confirm=null" @confirm="action(confirm)" />

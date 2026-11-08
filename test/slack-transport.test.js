@@ -21,9 +21,10 @@ test('Socket Mode accepts only plain DMs and acknowledges envelopes; posting use
   socket.incoming({type:'events_api',envelope_id:'one',payload});
   socket.incoming({type:'events_api',envelope_id:'two',payload:{...payload,event:{...payload.event,channel_type:'channel'}}});
   socket.incoming({type:'events_api',envelope_id:'three',payload:{...payload,event:{...payload.event,subtype:'message_changed'}}});
+  socket.incoming({type:'events_api',envelope_id:'four',payload:{...payload,event:{...payload.event,bot_id:'B123'}}});
   await new Promise(resolve=>setImmediate(resolve));
   assert.deepEqual(events,[{eventId:'Ev1',teamId:'T123',userId:'U123',channelId:'D123',text:'hello',threadTs:'123.4'}]);
-  assert.deepEqual(socket.sent.map(x=>x.envelope_id).sort(),['one','three','two']);
+  assert.deepEqual(socket.sent.map(x=>x.envelope_id).sort(),['four','one','three','two']);
   await slackTransport.post(tokens,{channel:'D123',threadTs:'123.4',text:'reply'});
   assert.deepEqual(requests.at(-1),{url:'https://slack.com/api/chat.postMessage',authorization:'Bearer xoxb-synthetic',body:{channel:'D123',text:'reply',unfurl_links:false,unfurl_media:false,thread_ts:'123.4'}});
   stop();

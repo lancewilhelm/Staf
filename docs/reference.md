@@ -550,8 +550,9 @@ Schema 36 adds process retention, input counters/closure and PTY dimensions thro
 ## Bundled plugin management
 
 Paired clients use `GET /api/plugins` to inspect bundled definitions, Slack
-configuration without tokens, connection state, agent access, and recent event
-outcomes. `POST /api/plugins/slack/connect` accepts `appToken`, `botToken`,
+configuration without tokens, connection state, agent access, recent event
+outcomes, and recent task delivery states (`pending`, `sending`, `sent`, or
+`uncertain`). `sent` records Slack acceptance, not a human read. `POST /api/plugins/slack/connect` accepts `appToken`, `botToken`,
 `teamId`, `userId`, `channelId`, and `botId`; it validates the bot token against
 the workspace. `POST /api/plugins/slack/access` takes `botId` and `enabled`.
 The `enable`, `disable`, `disconnect`, and `delete-config` endpoints take empty

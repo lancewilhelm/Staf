@@ -25,7 +25,7 @@ import { createServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { randomBytes, randomUUID, createHash } from 'node:crypto';
 import {bundledPlugins, slackConfigSchema} from './plugins.js';
-import {slackTransport as defaultSlackTransport, type SlackTransport, type SlackEvent} from './slack.js';
+import {slackTransport as defaultSlackTransport, SlackRateLimited, type SlackTransport, type SlackEvent} from './slack.js';
 import {loadSlackTokens, saveSlackTokens, disconnectSlackTokens} from './slack-credential.js';
 import { assertDatasetAvailable, BotConflict, Instance } from './instance.js';
 import { AgentConfigConflict, AgentConfigInvalid, AgentConfigUncertain } from './agent-config.js';
@@ -464,6 +464,50 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
   let stopSlack:(()=>void)|undefined;
   let slackGeneration=0;
   let slackStatus='inactive';
+  let slackWorkTimer:ReturnType<typeof setInterval>|undefined;
+  let deliveringSlackWork=false;
+  function queueSlackWork(id:string,key:string,text:string) {
+    instance.plugins.queueWork(id,key,redact(text).slice(0,39000));
+  }
+  async function deliverSlackWork() {
+    if(closing || deliveringSlackWork)return;
+    deliveringSlackWork=true;
+    try {
+      for(const row of instance.plugins.work()) {
+        if(typeof row.attempt_id!=='string')continue;
+        const task=instance.taskAttempt(row.attempt_id);if(!task)continue;
+        for(const event of task.activity) {
+          if(typeof event.seq!=='number')continue;
+          let text:string|undefined;
+          if(event.type==='tool_start' && typeof event.name==='string')text=`Task ${task.id}: started ${event.name}.`;
+          if(event.type==='tool_result' && typeof event.name==='string')text=`Task ${task.id}: ${event.name} ${event.success ? 'completed' : 'failed'}.`;
+          if(event.type==='question' && typeof event.questionId==='string' && typeof event.text==='string')text=`Task ${task.id} needs input: ${event.text}\nReply with “answer task ${task.id} ${event.questionId}: your answer”.`;
+          if(text)queueSlackWork(task.id,`${task.id}:activity:${event.seq}`,text);
+        }
+        if(['completed','failed','stopped','interrupted'].includes(task.state)) queueSlackWork(task.id,`${task.id}:outcome`,`Task ${task.id} ${task.state}: ${task.outcome ?? 'No outcome available'}`);
+      }
+      const c=instance.plugins.connection();
+      if(!c?.enabled || !c.connected || !c.agentAccess || slackStatus==='reconnecting')return;
+      const rows=instance.plugins.pendingWork(Date.now());
+      for(const row of rows) {
+        if(closing)break;
+        const current=instance.plugins.connection();
+        if(!current?.enabled || !current.connected || !current.agentAccess || current.config.teamId!==row.team_id || current.config.userId!==row.user_id || current.config.channelId!==row.channel_id || current.config.botId!==row.bot_id || instance.bot(current.config.botId)?.archived!==false)continue;
+        const tokens=loadSlackTokens(dataDir);if(!tokens)continue;
+        if(typeof row.id!=='string' || typeof row.channel_id!=='string' || typeof row.text!=='string' || (row.kind!=='work' && row.kind!=='notice'))continue;
+        if(!instance.plugins.beginWorkDelivery(row.id,row.kind))continue;
+        try {
+          await slack.post(tokens,{channel:row.channel_id,...(typeof row.thread_ts==='string'?{threadTs:row.thread_ts}:{}),text:row.text});
+          if(!closing)instance.plugins.finishWorkDelivery(row.id,row.kind,'sent');
+        } catch(error) {
+          if(!closing) {
+            if(error instanceof SlackRateLimited)instance.plugins.finishWorkDelivery(row.id,row.kind,'pending',Date.now()+error.retryAfterMs);
+            else instance.plugins.finishWorkDelivery(row.id,row.kind,'uncertain');
+          }
+        }
+      }
+    } finally {deliveringSlackWork=false;}
+  }
   function stopSlackConnection() {
     slackGeneration++;stopSlack?.();stopSlack=undefined;slackStatus='inactive';
     for(const [id,controller] of responseControllers)if(instance.plugins.isPluginCommand(id))controller.abort();
@@ -473,6 +517,34 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
     if(closing || !c || !c.enabled || !c.connected || !c.agentAccess || c.config.teamId!==event.teamId || c.config.userId!==event.userId || c.config.channelId!==event.channelId || !event.eventId || event.eventId.length>200 || !event.text.trim() || event.text.length>30000 || containsUnsafeWebUrl(event.text))return;
     if(instance.bot(c.config.botId)?.archived!==false)return;
     const id='slack-'+createHash('sha256').update(JSON.stringify([event.teamId,event.eventId])).digest('hex');
+    const work=event.text.trim().match(/^work\s*:\s*([\s\S]+)$/i);
+    if(work?.[1]?.trim()) {
+      try {const destination=event.threadTs ?? event.messageTs;const result=instance.acceptSlackTask({id,eventId:event.eventId,revision:c.revision,config:c.config,...(destination?{threadTs:destination}:{}),objective:work[1].trim()},redact(work[1].trim()));if(result.kind==='accepted')executeTask(id);void deliverSlackWork().catch(()=>{});}catch{}
+      return;
+    }
+    const control=event.text.trim().match(/^(status|stop|direct|answer)\s+task\s+([\w-]{1,100})(?:\s+([\w-]{1,100}))?(?:\s*:\s*([\s\S]+))?$/i);
+    if(control?.[1] && control[2]) {
+      const attemptId=control[2],binding=instance.plugins.workBinding(attemptId);
+      if(!binding || binding.team_id!==event.teamId || binding.user_id!==event.userId || binding.channel_id!==event.channelId || binding.bot_id!==c.config.botId) {
+        if(instance.plugins.reserve(event.eventId,id,c.revision)) {const destination=event.threadTs ?? event.messageTs;instance.plugins.queueNotice({id:id+':unmatched',config:c.config,...(destination?{threadTs:destination}:{}),text:'No matching task in this Slack conversation. No changes were made.'});instance.plugins.state(id,'failed','No matching bound task');void deliverSlackWork().catch(()=>{});}
+        return;
+      }
+      if(!instance.plugins.reserve(event.eventId,id,c.revision))return;
+      let reply:string;
+      try {
+        const task=instance.taskAttempt(attemptId);if(!task)throw Error('Task not found');
+        const action=control[1].toLowerCase();
+        if(action==='status')reply=`Task ${attemptId} ${task.state}${task.outcome ? `: ${task.outcome}` : ''}${task.waitReason ? `; waiting for ${task.waitReason}` : ''}`;
+        else if(!['queued','running'].includes(task.state))reply=`Task ${attemptId} is not active. No changes were made.`;
+        else if(action==='stop') {instance.taskStop(attemptId,'Stop requested in Slack');abortDelegatedChildren(attemptId);taskControllers.get(attemptId)?.abort();reply=`Stop requested for task ${attemptId}.`;}
+        else if((action==='direct' || action==='answer') && control[4]?.trim() && (action!=='answer' || control[3])) {
+          const input={attemptId,commandId:id,text:control[4].trim()};
+          instance.taskInput(action==='answer' && control[3]?{...input,kind:'answer',questionId:control[3]}:{...input,kind:'direction'},redact(input.text));reply=`Input accepted for task ${attemptId}.`;
+        } else reply='Invalid task control. No changes were made.';
+        queueSlackWork(attemptId,`${id}:control`,reply);instance.plugins.state(id,'task','Control processed; delivery tracked separately');void deliverSlackWork().catch(()=>{});
+      } catch {instance.plugins.state(id,'failed','Task control could not be applied');}
+      return;
+    }
     if(!instance.plugins.reserve(event.eventId,id,c.revision))return;
     try {
       const result=submitCommand({id,botId:c.config.botId,content:event.text});
@@ -503,7 +575,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
     catch {if(generation===slackGeneration)slackStatus='connection failed';}
   }
   function pluginStatus() {
-    const c=instance.plugins.connection();return bundledPlugins.map(definition=>({...definition,connected:c?.connected??false,enabled:c?.enabled??false,config:c?.config??null,accountId:c?.accountId??null,agentAccess:c?.agentAccess??false,status:c?.enabled?slackStatus:'inactive',events:instance.plugins.events()}));
+    const c=instance.plugins.connection();return bundledPlugins.map(definition=>({...definition,connected:c?.connected??false,enabled:c?.enabled??false,config:c?.config??null,accountId:c?.accountId??null,agentAccess:c?.agentAccess??false,status:c?.enabled?slackStatus:'inactive',events:instance.plugins.events(),deliveries:instance.plugins.deliveries()}));
   }
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     res.setHeader('Cache-Control', 'no-store'); res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -872,5 +944,5 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
       return json(404,{error:'Not found'});
     } catch (error) { if(error instanceof ActionFailed)return json(400,{error:error.safeResult});if(error instanceof CoreInvalid)return json(422,{error:error.message,code:'invalid_core_configuration'});if(error instanceof AgentConfigInvalid)return json(422,{error:error.message,code:'invalid_agent_configuration'});if(error instanceof AgentConfigUncertain)return json(503,{error:error.message,code:'configuration_save_uncertain'});return json((error instanceof BotConflict || error instanceof AgentConfigConflict || error instanceof MemoryConflict || error instanceof SkillConflict || error instanceof ScheduleConflict) ? 409 : 400,{error:error instanceof Error ? error.message : 'Request failed'}); }
   });
-  return { server, code, migrationBackup: instance.migrationBackup, finishUpgrade: (token:string)=>instance.finishUpgrade(token), issueCode: () => (code = randomBytes(18).toString('base64url')), close: () => new Promise<void>((resolve,reject)=>{closing=true; stopSlackConnection(); instanceAuth?.shutdown(); if(scheduleTimer) clearInterval(scheduleTimer); for(const subscriber of responseSubscribers)subscriber.response.end();for(const controller of active) controller.abort(); server.close(error=>{void processes.shutdown().then(()=>{instance.close(); if(error)reject(error);else resolve();},reject);});}), listen: () => new Promise<number>((resolve,reject)=>{server.once('error',reject);server.listen(port,'127.0.0.1',()=>{const a=server.address();if(a && typeof a !== 'string') { tickSchedules(); scheduleTimer=setInterval(tickSchedules,30000); void startSlackConnection(); resolve(a.port); }else reject(Error('Listen failed'));});}) };
+  return { server, code, migrationBackup: instance.migrationBackup, finishUpgrade: (token:string)=>instance.finishUpgrade(token), issueCode: () => (code = randomBytes(18).toString('base64url')), close: () => new Promise<void>((resolve,reject)=>{closing=true; stopSlackConnection(); instanceAuth?.shutdown(); if(scheduleTimer) clearInterval(scheduleTimer); if(slackWorkTimer)clearInterval(slackWorkTimer); for(const subscriber of responseSubscribers)subscriber.response.end();for(const controller of active) controller.abort(); server.close(error=>{void processes.shutdown().then(()=>{instance.close(); if(error)reject(error);else resolve();},reject);});}), listen: () => new Promise<number>((resolve,reject)=>{server.once('error',reject);server.listen(port,'127.0.0.1',()=>{const a=server.address();if(a && typeof a !== 'string') { tickSchedules(); scheduleTimer=setInterval(tickSchedules,30000); void startSlackConnection(); slackWorkTimer=setInterval(()=>{void deliverSlackWork().catch(()=>{});},250); void deliverSlackWork().catch(()=>{}); resolve(a.port); }else reject(Error('Listen failed'));});}) };
 }
