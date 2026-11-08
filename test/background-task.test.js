@@ -8,7 +8,7 @@ import { startInstance } from './fixtures/controlled-instance.mjs';
 test('background task and chat run independently, retain activity, and survive restart', async () => {
   const dir=mkdtempSync(join(tmpdir(),'staf-task-')), path=join(dir,'db');
   let release, entered; const gate=new Promise(r=>release=r), started=new Promise(r=>entered=r);
-  const factory=async profile=>({name:'fixture',capabilities:{toolCalls:true,incrementalText:false,transport:'demo'},async complete(messages){if(profile.chatId==='attempt-one'){entered();await gate;return {role:'assistant',content:'background result',usage:{scope:'request',status:'reported',source:'fixture',metrics:{input:7}}};}return {role:'assistant',content:'chat result'};}});
+  const factory=async profile=>({name:'fixture',capabilities:{toolCalls:true,incrementalText:false,transport:'demo'},async complete(messages){if(profile.chatId==='attempt-one'){entered();await gate;return {role:'assistant',content:'background result',tool_calls:[{id:'late-clock',type:'function',function:{name:'clock',arguments:'{}'}}],usage:{scope:'request',status:'reported',source:'fixture',metrics:{input:7}}};}return {role:'assistant',content:'chat result'};}});
   let app=startInstance(path,0,{providerFactory:factory}),port=await app.listen();
   const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return [r.status,await r.json()];};
   const wait=async(route,token,predicate)=>{for(let i=0;i<200;i++){const v=(await call(route,token))[1];if(predicate(v))return v;await new Promise(r=>setTimeout(r,5));}throw Error('timed out');};
@@ -21,12 +21,14 @@ test('background task and chat run independently, retain activity, and survive r
     assert.equal((await wait('/api/commands/chat',token,c=>c.state!=='pending')).state,'completed');
     assert.equal((await call(`/api/bots/${bot.id}/archive`,token,{revision:bot.revision}))[0],409);
     assert.equal((await call('/api/tasks/attempt-one/stop',token,{}))[1].state,'stopping');
-    release(); const completed=await wait('/api/tasks/attempt-one',token,t=>t.state==='completed');
-    assert.equal(completed.outcome,'background result');assert.equal(completed.usage[0].metrics.input,7);
-    assert.ok(completed.activity.some(e=>e.type==='stopping'));assert.ok(completed.activity.some(e=>e.type==='assistant'));
+    release(); const completed=await wait('/api/tasks/attempt-one',token,t=>['completed','stopped'].includes(t.state));
+    assert.equal(completed.state,'stopped');assert.equal(completed.outcome,'Task stopped');assert.equal(completed.usage[0].metrics.input,7);
+    assert.ok(completed.activity.some(e=>e.type==='stopping'));assert.ok(completed.activity.some(e=>e.type==='assistant_observed' && e.text==='background result'));assert.ok(!completed.activity.some(e=>e.type==='tool_start'));
+    const chat=(await call(`/api/bots/${bot.id}/chat-work`,token))[1];assert.equal(chat.tasks.length,1);assert.equal(chat.tasks[0].id,'attempt-one');assert.equal(chat.tasks[0].state,'stopped');assert.ok(chat.tasks[0].activity.some(e=>e.type==='assistant_observed' && e.text==='background result'));assert.ok(chat.tasks[0].anchorMessageId);
+    assert.deepEqual((await call(`/api/bots/${bot.id}/chat-work`,token))[1].tasks,chat.tasks);
     assert.equal((await call('/api/tasks',token,req))[1].kind,'existing');
     await app.close(); app=startInstance(path,0,{providerFactory:factory});port=await app.listen();
-    assert.equal((await call('/api/tasks/attempt-one',token))[1].outcome,'background result');
+    assert.equal((await call('/api/tasks/attempt-one',token))[1].state,'stopped');assert.deepEqual((await call(`/api/bots/${bot.id}/chat-work`,token))[1].tasks,chat.tasks);
   } finally {release();await app.close();rmSync(dir,{recursive:true,force:true});}
 });
 
@@ -151,4 +153,14 @@ test('direction accepted during provider setup merges with objective before the 
   assert.equal(seen.length,1);assert.match(seen[0].content,/Inspect[\s\S]*focus here/);await app.close();closed=true;
   const {DatabaseSync}=await import('node:sqlite');const db=new DatabaseSync(path);const session=JSON.parse(db.prepare('SELECT session FROM task_attempts WHERE id=?').get('setup').session);db.close();const {validSession}=await import('../dist/validation.js');assert.ok(validSession(session,'setup'));
  }finally{release();if(!closed)await app.close();rmSync(dir,{recursive:true,force:true});}
+});
+
+test('execution limit remains the stopped outcome when a provider returns late', async () => {
+ const dir=mkdtempSync(join(tmpdir(),'staf-task-limit-')),path=join(dir,'db');let release,entered;const gate=new Promise(r=>release=r),started=new Promise(r=>entered=r);
+ const app=startInstance(path,0,{providerFactory:async()=>({name:'fixture',capabilities:{toolCalls:true},async complete(){entered();await gate;return {role:'assistant',content:'late timed output'};}})}),port=await app.listen();
+ const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return r.json();};
+ const wait=async(route,token,predicate)=>{for(let i=0;i<400;i++){const item=await call(route,token);if(predicate(item))return item;await new Promise(r=>setTimeout(r,5));}throw Error('timed out');};
+ try {const token=(await call('/api/pair','',{code:app.code})).token,bot=await call('/api/bots',token,{provider:'live',model:'fixture-offline',name:'A'});await call('/api/tasks',token,{id:'limit',botId:bot.id,objective:'Wait',limitMs:1000});await started;
+  await wait('/api/tasks/limit',token,t=>t.state==='stopping');release();const task=await wait('/api/tasks/limit',token,t=>t.state==='stopped');assert.equal(task.outcome,'Execution limit reached');assert.ok(task.activity.some(e=>e.type==='assistant_observed' && e.text==='late timed output'));
+ }finally{release();await app.close();rmSync(dir,{recursive:true,force:true});}
 });

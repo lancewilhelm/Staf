@@ -51,7 +51,7 @@ by default and require owner approval. Press Enter in the host
 terminal to issue a fresh one-time code for another client. This preview binds
 only to loopback. The optional native Linux HTTPS gateway provides paired home-network browser access; see [native Linux installation](docs/native-linux-installation.md). See [usage](docs/usage.md#local-shared-instance-offline-preview) for CLI commands and limitations.
 
-The loopback instance retains the background-task engine; its separate Activity and task-update workspace is deferred. It is an offline-tested preview with important permission and recovery limitations; see [usage](docs/usage.md#background-task-preview).
+Explicit background tasks and their outcomes appear in the shared conversation, with a task Stop control; separate Activity management remains deferred. It is an offline-tested preview with important permission and recovery limitations; see [usage](docs/usage.md#background-task-preview).
 
 
 The optional bundled [Slack plugin](docs/usage.md#slack-plugin) connects one approved DM to a chosen agent through Socket Mode. It is inactive until configured and enabled, with separate agent access. Controlled integration tests do not establish live Slack behavior.
