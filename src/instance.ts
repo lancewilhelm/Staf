@@ -211,6 +211,7 @@ export class Instance {
     if(version < 40) this.db.exec(pluginSchema);
     if(version < 41) this.db.exec(slackWorkSchema);
     this.plugins = new PluginStore(this.db);
+    if(version < 41) this.db.exec("CREATE TABLE IF NOT EXISTS tool_defaults (id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL, clock INTEGER NOT NULL CHECK(clock IN (0,1)), memory INTEGER NOT NULL CHECK(memory IN (0,1)), web INTEGER NOT NULL CHECK(web IN (0,1)), files INTEGER NOT NULL CHECK(files IN (0,1))); INSERT OR IGNORE INTO tool_defaults VALUES (1,1,1,1,1,1)");
     if (!maintenanceToken) this.db.exec(`PRAGMA user_version=${INSTANCE_SCHEMA_VERSION}`);
     for (const row of this.db.prepare("SELECT id,bot_id FROM task_attempts WHERE state IN ('queued','running','stopping','waiting') ORDER BY rowid").all()) {
       if (typeof row.id !== 'string' || typeof row.bot_id !== 'string') throw Error('Invalid interrupted task');
@@ -352,6 +353,16 @@ export class Instance {
     if(boundary.kind==='search' && !this.searchAllowed(work,boundary.origin,boundary.revision))throw new BotConflict('Search access revoked');
     if(boundary.kind==='shell' && !this.shellAllowed(work,boundary.revision))throw new BotConflict('Shell access revoked');
     return this.#approvalGrants.create(boundary,scope==='bot'?{kind:'bot',botId}:{kind:'all-bots'},lifetime==='task'?{kind:'task',taskId:work.id}:{kind:'remembered'});
+  }
+  toolDefaults() {
+    const row=this.db.prepare('SELECT revision,clock,memory,web,files FROM tool_defaults WHERE id=1').get();
+    if (!row) throw Error('Missing tool defaults');
+    return {revision:Number(row.revision),clock:row.clock===1,memory:row.memory===1,web:row.web===1,files:row.files===1};
+  }
+  setToolDefaults(input:{revision:number;clock:boolean;memory:boolean;web:boolean;files:boolean}) {
+    const result=this.db.prepare('UPDATE tool_defaults SET revision=revision+1,clock=?,memory=?,web=?,files=? WHERE id=1 AND revision=?').run(Number(input.clock),Number(input.memory),Number(input.web),Number(input.files),input.revision);
+    if(!result.changes)throw new BotConflict('Tool defaults changed. Refresh before editing.');
+    return this.toolDefaults();
   }
   approvalSettings(scope: string) {
     const row=this.db.prepare('SELECT mode,clock_enabled FROM approval_settings WHERE scope=?').get(scope);

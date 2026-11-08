@@ -288,12 +288,21 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
   }
 
   function clockUnavailable(botId:string,kind:'command'|'task',id:string):string {
+    if(!instance.toolDefaults().clock)return 'Clock disabled in tool settings';
     const decision=instance.clockDecision(botId,kind,id);
     return decision.outcome==='block' ? `Clock blocked by ${decision.reason}` : 'Clock authorization failed';
   }
 
   const processes=instance.processes(()=>byteStreamRedactor(env,()=>[...knownKeys]));
   const workActions=instance.workActions();
+  workActions.setAvailability(name=>{
+    const settings=instance.toolDefaults();
+    if(name==='clock')return settings.clock;
+    if(name.startsWith('memory_'))return settings.memory;
+    if(name==='read_web' || name==='read_web_hop' || name==='search_web')return settings.web;
+    if(name.startsWith('file_'))return settings.files;
+    return true;
+  });
   const nativeAllowed=(work:import('./work-actions.js').WorkContext)=>instance.nativeProcessAllowed(work.work);
   workActions.register(nativeCommandCapability(processes,nativeAllowed,redact));
   workActions.register(nativeOutputCapability(processes,nativeAllowed));
@@ -316,7 +325,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
     const state=await new Promise<string>(resolve=>{const finish=(value:string)=>{signal.removeEventListener('abort',abort);disclosureWaiters.delete(id);resolve(value);};const abort=()=>{try{instance.interruptDisclosure(id);}catch{}finish('interrupted');};disclosureWaiters.set(id,finish);signal.addEventListener('abort',abort,{once:true});if(signal.aborted)abort();});
     if(!signal.aborted) resume();signal.throwIfAborted();if(state!=='approved')throw new ActionDenied('Message disclosure denied');return id;
   }
-  const recall = (botId:string, query:string) => {const bounded=query.trim().slice(0,500); return bounded ? instance.memories.retrieve({botId,query:bounded,limit:5}).map(item=>redact(item.text)) : [];};
+  const recall = (botId:string, query:string) => {if(!instance.toolDefaults().memory)return [];const bounded=query.trim().slice(0,500); return bounded ? instance.memories.retrieve({botId,query:bounded,limit:5}).map(item=>redact(item.text)) : [];};
   function memoryIntent(content:string,botId:string): {input:{scope:MemoryScope;text:string}|null;reply:string;operation?:{kind:'list'|'edit'|'delete';scope:MemoryScope;id?:string;version?:number;text?:string};proposal?:{kind:'propose';text:string}|{kind:'confirm'|'cancel';id:string}} | undefined {
     const message=content.trim();
     const decision=message.match(/^(confirm|cancel) shared memory ([\w-]{1,100})$/i);
@@ -766,6 +775,15 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
       const shellApprovalMatch=req.url?.match(/^\/api\/shell-approvals\/([a-f0-9-]+)\/(approve|deny)$/);if(req.method==='POST'&&shellApprovalMatch?.[1]&&shellApprovalMatch[2]){const pending=shellApprovals.get(shellApprovalMatch[1]);if(!pending)return json(404,{error:'Shell approval is no longer pending'});rememberApproval(pending,shellApprovalMatch[2]);pending.record(shellApprovalMatch[2] === 'approve' ? 'approve' : 'deny');pending.resolve(shellApprovalMatch[2]);return json(200,{decision:shellApprovalMatch[2]});}
       if(req.method==='GET'&&req.url==='/api/shell-uncertain')return json(200,instance.shellUnresolved());
       const shellReviewMatch=req.url?.match(/^\/api\/shell-actions\/([a-f0-9-]+)\/review$/);if(req.method==='POST'&&shellReviewMatch?.[1]){if(value.acknowledgment!=='verified-daemon-identity-and-accepted-late-create-risk')return json(400,{error:'Explicit review acknowledgement required'});if(shellControllers.size)return json(409,{error:'Settle active shell work before review'});instance.reviewShell(shellReviewMatch[1]);return json(200,{reviewed:true});}
+      if(req.url==='/api/tool-defaults'){
+        if(req.method==='GET')return json(200,instance.toolDefaults());
+        if(req.method==='POST'){
+          if(!Number.isSafeInteger(value.revision) || typeof value.clock!=='boolean' || typeof value.memory!=='boolean' || typeof value.web!=='boolean' || typeof value.files!=='boolean')return json(400,{error:'Invalid tool defaults'});
+          const result=instance.setToolDefaults({revision:Number(value.revision),clock:value.clock,memory:value.memory,web:value.web,files:value.files});
+          if(!result.web){for(const controller of webControllers.keys())controller.abort();for(const controller of searchControllers.keys())controller.abort();}
+          return json(200,result);
+        }
+      }
       if(req.url==='/api/search-config'){if(req.method==='GET')return json(200,instance.searchConfig());if(req.method==='POST'){if(typeof value.revision!=='number' || !(value.origin===null || typeof value.origin==='string'))return json(400,{error:'Invalid search configuration'});const result=instance.setSearchConfig({revision:value.revision,origin:value.origin});for(const controller of searchControllers.keys())controller.abort();return json(200,result);}}
       const searchScopeMatch=req.url?.match(/^\/api\/search-permissions\/(instance|bot:[\w-]+|task:[\w-]+)$/);
       if(searchScopeMatch?.[1]){if(req.method==='GET')return json(200,instance.searchPermission(searchScopeMatch[1]));if(req.method==='POST'){if(typeof value.enabled!=='boolean')return json(400,{error:'Invalid search permission'});const result=instance.setSearchPermission(searchScopeMatch[1],value.enabled);if(!value.enabled)for(const [controller,active] of searchControllers)if(searchScopeMatch[1]==='instance' || searchScopeMatch[1]==='bot:'+active.botId || (active.work.kind==='task' && searchScopeMatch[1]==='task:'+active.work.id))controller.abort();return json(200,result);}}

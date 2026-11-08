@@ -35,6 +35,14 @@ try{
 
  await until(()=>evaluate("document.querySelector('[aria-label=\"Shared core guidance\"] textarea')"),'shared core editor loads');
  const api=async(path,body)=>evaluate(`(async()=>{const r=await fetch('/api/'+${JSON.stringify(path)},{method:${JSON.stringify(body?'POST':'GET')},headers:{Authorization:'Bearer '+localStorage.getItem('staf-token'),'Content-Type':'application/json'},${body?'body:JSON.stringify('+JSON.stringify(body)+'),':''}});return r.json()})()`);
+ await until(()=>evaluate("document.querySelector('[aria-label=\"Tools\"] input[type=checkbox]')"),'tool settings load');
+ assert.deepEqual(await evaluate("[...document.querySelectorAll('[aria-label=\"Tools\"] input[type=checkbox]')].map(x=>x.checked)"),[true,true,true,true]);
+ await act("document.querySelector('[aria-label=\"Tools\"] input[type=checkbox]').click();testClick('Save tool availability')","document.querySelector('[aria-label=\"Tools\"] [role=status]').textContent.includes('saved')",'disable clock in settings');
+ assert.equal((await api('tool-defaults')).clock,false);
+ await act("document.querySelector('[aria-label=\"Tools\"] input[type=checkbox]').click();testClick('Save tool availability')","document.querySelector('[aria-label=\"Tools\"] [role=status]').textContent.includes('saved')",'reenable clock in settings');
+ await until(async()=>(await api('tool-defaults')).clock===true,'clock reenabled');
+ await act("testInput('[aria-label=\"Tools\"] input[type=url]','http://127.0.0.1:9999');testClick('Save search backend')","document.querySelector('[aria-label=\"Tools\"]').innerText.includes('Search backend saved')",'configure local search backend');
+ assert.equal((await api('search-config')).origin,'http://127.0.0.1:9999');
  const agent=await api('bots',{name:'Cache fixture',provider:'codex',model:'fixture-model'});
  await until(()=>evaluate("document.querySelector('.side nav')?.textContent.includes('Cache fixture')"),'fixture agent loaded');
  const initial=await api('core');
