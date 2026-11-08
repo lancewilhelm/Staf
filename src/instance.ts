@@ -1132,6 +1132,10 @@ export class Instance {
     this.taskEvent(helperAttemptId,{type:'collaboration_result',assignmentId,messageId:key('message'),parentAttemptId:parentId,late:!active});
   }
   private finishTask(id:string,state:'completed'|'failed'|'stopped',outcome:string,disclosureId?:string) {
+    if(state === 'stopped') {
+      const stop=this.db.prepare("SELECT json_extract(event,'$.message') AS reason FROM task_activity WHERE attempt_id=? AND json_extract(event,'$.type')='stopping' ORDER BY seq LIMIT 1").get(id);
+      if(stop?.reason === 'Execution limit reached') outcome='Execution limit reached';
+    }
     this.cancelDelegations(id);
     this.deliverHelperOutcome(id,state,outcome,disclosureId);
     this.cancelTaskInputs(id);
@@ -1148,7 +1152,7 @@ export class Instance {
   taskComplete(id:string,session:Session,disclosureId?:string) {
     const answer=session.messages.at(-1);if(!answer || answer.role !== 'assistant' || typeof answer.content !== 'string') throw Error('Missing task outcome');
     this.db.exec('BEGIN IMMEDIATE');
-    try {const attempt=this.taskAttempt(id); if(!attempt) throw Error('Task not found'); if(this.isHelperAttempt(id) && attempt.state === 'stopping') {this.taskSave(id,session);this.taskEvent(id,{type:'assistant_observed',text:answer.content,late:true});const next=this.finishTask(id,'stopped','Task stopped');this.db.exec('COMMIT');return {completed:true as const,next};} if(new TaskInbox(this.db).hasPending({botId:attempt.botId,attemptId:id})) {this.db.exec('ROLLBACK');return {completed:false as const};} this.taskSave(id,session);this.taskEvent(id,{type:'assistant',text:answer.content});const next=this.finishTask(id,'completed',answer.content,disclosureId);this.db.exec('COMMIT');return {completed:true as const,next};}
+    try {const attempt=this.taskAttempt(id); if(!attempt) throw Error('Task not found'); if(attempt.state === 'stopping') {this.taskSave(id,session);this.taskEvent(id,{type:'assistant_observed',text:answer.content,late:true});const next=this.finishTask(id,'stopped','Task stopped');this.db.exec('COMMIT');return {completed:true as const,next};} if(new TaskInbox(this.db).hasPending({botId:attempt.botId,attemptId:id})) {this.db.exec('ROLLBACK');return {completed:false as const};} this.taskSave(id,session);this.taskEvent(id,{type:'assistant',text:answer.content});const next=this.finishTask(id,'completed',answer.content,disclosureId);this.db.exec('COMMIT');return {completed:true as const,next};}
     catch(error){this.db.exec('ROLLBACK');if(disclosureId)this.interruptDisclosure(disclosureId);throw error;}
   }
   taskFinish(id:string,state:'failed'|'stopped',outcome:string,disclosureId?:string) {
@@ -1209,7 +1213,22 @@ export class Instance {
       const id=String(row.id);
       return {id,toolMode:parseToolModeFromProfile(row.capturedProfile),progress:this.responseProgress(id),events:byCommand.get(id) ?? [],codeExecutions:this.workActions().inspect({kind:'command',id}),processes:this.processes().forWork({kind:'command',id})};
     });
-    return {requests,messages:this.db.prepare('SELECT id,role,content FROM messages WHERE bot_id=? AND id NOT IN (SELECT message_id FROM task_notices) ORDER BY seq').all(botId)};
+    // The acceptance notice is an existing conversation record. Match its exact
+    // service-authored text for older databases too; never replace its identity.
+    const anchors=this.db.prepare(`SELECT a.id AS attemptId,m.id AS messageId FROM task_attempts a JOIN tasks t ON t.id=a.task_id
+      JOIN task_notices n ON n.bot_id=a.bot_id JOIN messages m ON m.id=n.message_id
+      WHERE a.bot_id=? AND m.content IN ('Task ' || a.id || ' accepted: ' || t.objective, 'Replacement task ' || a.id || ' accepted: ' || t.objective)
+      ORDER BY m.seq`).all(botId);
+    const anchorByMessage=new Map(anchors.map(row=>[String(row.messageId),String(row.attemptId)]));
+    const anchorByAttempt=new Map(anchors.map(row=>[String(row.attemptId),String(row.messageId)]));
+    const messages=this.db.prepare('SELECT m.id,m.role,m.content,n.message_id AS noticeId FROM messages m LEFT JOIN task_notices n ON n.message_id=m.id WHERE m.bot_id=? ORDER BY m.seq').all(botId).flatMap(({noticeId,...message})=>{
+      const id=String(message.id),attemptId=anchorByMessage.get(id);
+      if(attemptId)return [{id,role:'task',content:'',taskAttemptId:attemptId}];
+      if(noticeId)return [];
+      return [message];
+    });
+    const tasks=this.db.prepare('SELECT id FROM task_attempts WHERE bot_id=? ORDER BY rowid').all(botId).map(row=>({...this.taskAttempt(String(row.id))!,anchorMessageId:anchorByAttempt.get(String(row.id)) ?? null}));
+    return {requests,messages,tasks};
   }
   chatSession(botId:string):Session {
     const bot=this.botIdentity(botId);if(!bot || typeof bot.chatId !== 'string')throw Error('Agent not found');

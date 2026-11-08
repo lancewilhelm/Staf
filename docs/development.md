@@ -248,6 +248,14 @@ and create an agent from **New agent** with provider `lmstudio` and model
 `fixture-model`. This fixture supplies a synthetic provider and stores review
 data separately under `.staf/chat-review`; it does not contact LM Studio.
 
+For an offline background-task check, pair a CLI client with this fixture and
+use `instance task-start` for the fixture agent with the objective `Hold task
+for late output`. The task appears in the agent's conversation. Select **Stop
+task**, then enter `release-late-task` in the fixture terminal. The task should
+settle as stopped and show the observed late text. Refresh the browser to check
+that the same task and observation remain. This is a synthetic provider; the
+fixture does not exercise a live model.
+
 **Connect ChatGPT** opens a loopback page labeled **Simulated ChatGPT sign-in**.
 Choose **Complete simulated sign-in** to exercise the connected state. This does
 not sign in to OpenAI, store real credentials, or enable live model responses.
