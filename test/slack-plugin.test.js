@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync,rmSync} from 'node:fs';
+import {mkdtempSync,rmSync,statSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {startInstance} from '../dist/instance-service.js';
@@ -19,10 +19,12 @@ test('Slack DM is approved, durable and delivered once, while plugin controls re
   const bot=(await call('/api/bots',token,{name:'Slack agent',provider:'live',model:'fixture'}))[1];
   assert.equal((await call('/api/plugins/slack/connect',token,{appToken:'xapp-synthetic',botToken:'xoxb-synthetic',teamId:'T123',userId:'U123',channelId:'D123',botId:bot.id}))[0],200);
   assert.equal(connections,0);
+  assert.equal(statSync(join(dir,'auth','slack.json')).mode & 0o777,0o600);
+  assert.doesNotMatch(JSON.stringify((await call('/api/plugins',token))[1]),/xapp-synthetic|xoxb-synthetic/);
   await call('/api/plugins/slack/access',token,{botId:bot.id,enabled:true});
   await call('/api/plugins/slack/enable',token,{});assert.equal(connections,1);
   const event={eventId:'Ev1',teamId:'T123',userId:'U123',channelId:'D123',text:'hello',threadTs:'123.1'};
-  await receive({...event,userId:'U999'});assert.equal(posts.length,0);
+  await receive({...event,userId:'U999'});await receive({...event,teamId:'T999'});await receive({...event,channelId:'D999'});assert.equal(posts.length,0);
   await receive(event);await receive(event);
   await until(()=>posts.length===1);assert.deepEqual(posts[0],{channel:'D123',threadTs:'123.1',text:'Fixture reply'});
   await call('/api/plugins/slack/disable',token,{});assert.equal(receive,undefined);
@@ -53,5 +55,38 @@ test('revoking agent access cancels pending work and an uncertain send is never 
   const uncertain={...event,eventId:'EvUncertain',text:'second'};await receive(uncertain);
   await until(async()=>{const events=(await call('/api/plugins',token))[1][0].events;return events.find(e=>e.eventId==='EvUncertain' && e.state==='uncertain');});assert.equal(posts,1);
   await app.close();app=startInstance(path,0,{env:{},slackTransport,providerFactory});port=await app.listen();await until(()=>receive);await receive(uncertain);await new Promise(resolve=>setTimeout(resolve,50));assert.equal(posts,1);
+ }finally{release();await app.close();rmSync(dir,{recursive:true,force:true});}
+});
+
+test('restart fences a reply whose Slack dispatch was still in flight',async()=>{
+ const dir=mkdtempSync(join(tmpdir(),'staf-slack-flight-')),path=join(dir,'db');let receive,posts=0,release;
+ const pending=new Promise(resolve=>{release=resolve});
+ const slackTransport={identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async(_tokens,handler)=>{receive=handler;return ()=>{receive=undefined}},post:async()=>{posts++;await pending;}};
+ const providerFactory=async()=>({name:'fixture',capabilities:{toolCalls:false,incrementalText:false},complete:async()=>({role:'assistant',content:'reply'})});
+ let app=startInstance(path,0,{env:{},slackTransport,providerFactory}),port=await app.listen();
+ const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body===undefined?'GET':'POST',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body===undefined?{}:{'Content-Type':'application/json'})},...(body===undefined?{}:{body:JSON.stringify(body)})});return [r.status,await r.json()]};
+ try {
+  const token=(await call('/api/pair','',{code:app.code}))[1].token,bot=(await call('/api/bots',token,{name:'Test agent',provider:'live',model:'fixture'}))[1];
+  await call('/api/plugins/slack/connect',token,{appToken:'xapp-synthetic',botToken:'xoxb-synthetic',teamId:'T123',userId:'U123',channelId:'D123',botId:bot.id});await call('/api/plugins/slack/access',token,{botId:bot.id,enabled:true});await call('/api/plugins/slack/enable',token,{});
+  const event={eventId:'EvInFlight',teamId:'T123',userId:'U123',channelId:'D123',text:'hello'};await receive(event);await until(()=>posts===1);
+  await app.close();app=startInstance(path,0,{env:{},slackTransport,providerFactory});port=await app.listen();await until(()=>receive);
+  const result=(await call('/api/plugins',token))[1][0].events.find(event=>event.eventId==='EvInFlight');assert.equal(result.state,'uncertain');
+  await receive(event);await new Promise(resolve=>setTimeout(resolve,50));assert.equal(posts,1);
+ }finally{release();await app.close();rmSync(dir,{recursive:true,force:true});}
+});
+
+test('an in-flight reconnect cannot undo a later owner disconnect',async()=>{
+ const dir=mkdtempSync(join(tmpdir(),'staf-slack-connect-race-'));let release,started,hold=false;
+ const waiting=new Promise(resolve=>{started=resolve}),gate=new Promise(resolve=>{release=resolve});
+ const slackTransport={identify:async()=>{if(hold){started();await gate;}return {teamId:'T123',botUserId:'B123'}},start:async()=>()=>{},post:async()=>{}};
+ const app=startInstance(join(dir,'db'),0,{env:{},slackTransport}),port=await app.listen();
+ const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body===undefined?'GET':'POST',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body===undefined?{}:{'Content-Type':'application/json'})},...(body===undefined?{}:{body:JSON.stringify(body)})});return [r.status,await r.json()]};
+ try{
+  const token=(await call('/api/pair','',{code:app.code}))[1].token,bot=(await call('/api/bots',token,{name:'Test agent',provider:'live',model:'fixture'}))[1];
+  const config={appToken:'xapp-synthetic',botToken:'xoxb-synthetic',teamId:'T123',userId:'U123',channelId:'D123',botId:bot.id};
+  await call('/api/plugins/slack/connect',token,config);hold=true;
+  const connecting=call('/api/plugins/slack/connect',token,config);await waiting;
+  await call('/api/plugins/slack/disconnect',token,{});release();assert.equal((await connecting)[0],400);
+  assert.equal((await call('/api/plugins',token))[1][0].connected,false);
  }finally{release();await app.close();rmSync(dir,{recursive:true,force:true});}
 });

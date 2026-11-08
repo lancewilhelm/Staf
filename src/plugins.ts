@@ -20,9 +20,9 @@ export const bundledPlugins: readonly PluginDefinition[] = [{
 export const slackConfigSchema=z.strictObject({teamId:z.string().regex(/^T[A-Z0-9]+$/),userId:z.string().regex(/^U[A-Z0-9]+$/),channelId:z.string().regex(/^D[A-Z0-9]+$/),botId:z.string().regex(/^[\w-]+$/)});
 export type SlackConfig=z.infer<typeof slackConfigSchema>;
 export const pluginSchema=`
-CREATE TABLE plugin_connections (plugin_id TEXT NOT NULL, account_id TEXT NOT NULL, config TEXT NOT NULL, connected INTEGER NOT NULL, enabled INTEGER NOT NULL, revision INTEGER NOT NULL, PRIMARY KEY(plugin_id,account_id));
-CREATE TABLE plugin_agent_access (plugin_id TEXT NOT NULL, account_id TEXT NOT NULL, bot_id TEXT NOT NULL REFERENCES bots(id), enabled INTEGER NOT NULL, PRIMARY KEY(plugin_id,account_id,bot_id));
-CREATE TABLE plugin_events (plugin_id TEXT NOT NULL, account_id TEXT NOT NULL, event_id TEXT NOT NULL, command_id TEXT NOT NULL UNIQUE, revision INTEGER NOT NULL, state TEXT NOT NULL, detail TEXT, PRIMARY KEY(plugin_id,account_id,event_id));`;
+CREATE TABLE IF NOT EXISTS plugin_connections (plugin_id TEXT NOT NULL, account_id TEXT NOT NULL, config TEXT NOT NULL, connected INTEGER NOT NULL, enabled INTEGER NOT NULL, revision INTEGER NOT NULL, PRIMARY KEY(plugin_id,account_id));
+CREATE TABLE IF NOT EXISTS plugin_agent_access (plugin_id TEXT NOT NULL, account_id TEXT NOT NULL, bot_id TEXT NOT NULL REFERENCES bots(id), enabled INTEGER NOT NULL, PRIMARY KEY(plugin_id,account_id,bot_id));
+CREATE TABLE IF NOT EXISTS plugin_events (plugin_id TEXT NOT NULL, account_id TEXT NOT NULL, event_id TEXT NOT NULL, command_id TEXT NOT NULL UNIQUE, revision INTEGER NOT NULL, state TEXT NOT NULL, detail TEXT, PRIMARY KEY(plugin_id,account_id,event_id));`;
 
 export class PluginStore {
  constructor(private readonly db:DatabaseSync) {

@@ -496,7 +496,8 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
   }
   async function startSlackConnection() {
     stopSlackConnection();const c=instance.plugins.connection();if(!c?.enabled || !c.connected)return;
-    const tokens=loadSlackTokens(dataDir);if(!tokens){slackStatus='credentials unavailable';return;}
+    let tokens:ReturnType<typeof loadSlackTokens>;try{tokens=loadSlackTokens(dataDir);}catch{slackStatus='credentials unavailable';return;}
+    if(!tokens){slackStatus='credentials unavailable';return;}
     const generation=slackGeneration;slackStatus='connecting';
     try {const stop=await slack.start(tokens,event=>generation===slackGeneration ? receiveSlack(event) : Promise.resolve(),status=>{if(!closing && generation===slackGeneration)slackStatus=status;});if(closing || generation!==slackGeneration){stop();return;}stopSlack=stop;}
     catch {if(generation===slackGeneration)slackStatus='connection failed';}
@@ -560,10 +561,10 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
         const config=slackConfigSchema.parse({teamId:value.teamId,userId:value.userId,channelId:value.channelId,botId:value.botId});
         if(typeof value.appToken!=='string' || !/^xapp-[A-Za-z0-9-]+$/.test(value.appToken) || typeof value.botToken!=='string' || !/^xoxb-[A-Za-z0-9-]+$/.test(value.botToken))throw Error('Enter valid Slack app and bot tokens');
         if(instance.bot(config.botId)?.archived!==false)throw Error('Choose an active agent');
-        const existing=instance.plugins.connection();if(existing && existing.accountId!==config.teamId)throw Error('Delete the existing Slack configuration before changing workspace');
+        const generation=slackGeneration,existing=instance.plugins.connection();if(existing && existing.accountId!==config.teamId)throw Error('Delete the existing Slack configuration before changing workspace');
         const tokens={appToken:value.appToken,botToken:value.botToken};
         const identity=await slack.identify(tokens);if(identity.teamId!==config.teamId)throw Error('Bot token belongs to a different workspace');
-        if(instance.plugins.connection()?.revision!==existing?.revision)throw Error('Slack settings changed during connection. Review and try again');
+        if(generation!==slackGeneration || instance.plugins.connection()?.revision!==existing?.revision)throw Error('Slack settings changed during connection. Review and try again');
         stopSlackConnection();saveSlackTokens({root:dataDir,...tokens});knownKeys.add(tokens.appToken);knownKeys.add(tokens.botToken);instance.plugins.connect(config);
         return json(200,pluginStatus()[0]);
       }
