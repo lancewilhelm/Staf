@@ -416,3 +416,7 @@ summary excludes message boundaries.
 The built-in core describes general assistant behavior without naming tools.
 Capability definitions and service enforcement remain separate. Custom and empty
 core overrides keep their existing upgrade and reset behavior.
+
+## Native home-network transport
+
+The optional native HTTPS gateway binds a configured private IPv4 address and checks the external Host and Origin before forwarding to the fixed loopback service. TLS ends at the gateway; the service still owns pairing, client revocation, permissions and persistent state. The gateway adds no public owner API and is independent of the loopback CLI and callback. Controlled local tests cover this transport; Linux VM and LAN operation remain unverified. See [native installation](native-linux-installation.md).

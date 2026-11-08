@@ -31,6 +31,7 @@
   },
   "files": [
     "dist/*.js",
+    "deploy/native-linux/**",
     "src/*.ts",
     "test/*.test.js",
     "test/fixtures/demo-terminal.mjs",

@@ -753,3 +753,7 @@ Paired clients use the process `/input`, `/eof` and `/resize` endpoints. CLI com
 Each input accepts at most 16 KiB of UTF-8 and each process admits at most eight pending interaction requests. PTYs accept a cumulative 1 MiB per process, including Ctrl-D bytes; this bounds node-pty's unacknowledged write queue. The budget does not reset when an application produces output. Exhaustion leaves output and Stop usable. Pipe input uses write backpressure and has no cumulative input budget. Output keeps the existing 128 KiB buffer and explicit expiry gaps.
 
 The pinned node-pty 1.2.0-beta.17 dependency ships native bindings; source installation permits that dependency's build scripts through the checked-in pnpm configuration. When a matching prebuild is absent, installation needs Python, a C/C++ toolchain and node-gyp. The supervised service targets Linux and macOS; real PTY and packed-install verification here is on macOS arm64. Linux runtime and Windows are not verified, and the service requires Unix signals, sockets and `/bin/ps`.
+
+## Home-network browser access
+
+The optional [native HTTPS gateway](native-linux-installation.md#enable-home-network-https-access) lets a paired browser reach the loopback instance over a trusted home network. Each browser origin needs pairing; CLI access and ChatGPT loopback sign-in use SSH forwarding. Native Linux, LAN and live sign-in remain unverified.
