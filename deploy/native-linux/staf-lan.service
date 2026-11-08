@@ -1,0 +1,21 @@
+[Unit]
+Description=Staf home-network HTTPS gateway
+StartLimitIntervalSec=0
+Requires=staf.service
+After=staf.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/.local/share/staf/app
+EnvironmentFile=%h/.config/staf/lan.env
+ExecStart=/usr/bin/node %h/.local/share/staf/app/deploy/native-linux/lan-gateway.mjs
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+
+[Install]
+WantedBy=default.target
