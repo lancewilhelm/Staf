@@ -52,6 +52,7 @@ onMounted(() => { heading.value?.focus(); });
     <p class="memory-audience badge">{{ scope.kind === 'user' ? 'Available to all your agents' : `Available only to ${agent?.name ?? 'this agent'}` }}</p>
     <p v-if="agent?.archived" class="meta">This agent is archived. Its memory is retained for inspection.</p>
     <p class="page-intro">Inspect saved memory. Retrieval is selective: relevant entries may be sent to the selected provider.</p>
+    <p class="meta">Staf does not classify sensitive memories or require approval for agent-memory saves and updates. Review what the agent saves. Deleting a memory does not erase conversation or action history, backups, in-flight work, or information already sent to a provider.</p>
     <div class="row memory-actions">
       <button class="quiet" @click="emit('back')">{{ backLabel }}</button>
       <button v-if="scope.kind === 'bot'" class="quiet shared-memory-link" @click="emit('shared')">View shared user memory</button>
