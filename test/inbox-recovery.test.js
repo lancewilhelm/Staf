@@ -8,6 +8,7 @@ function setup() {
  ALTER TABLE inbox_monitor_settings ADD COLUMN digest_minutes INTEGER NOT NULL DEFAULT 60;
  ALTER TABLE inbox_monitor_settings ADD COLUMN next_digest_at INTEGER NOT NULL DEFAULT 0;
  ALTER TABLE inbox_monitor_settings ADD COLUMN memory_context INTEGER NOT NULL DEFAULT 0;
+ ALTER TABLE inbox_monitor_items ADD COLUMN recheck_private INTEGER NOT NULL DEFAULT 0;
  ALTER TABLE inbox_monitor_items ADD COLUMN delivery_ts TEXT;
  ALTER TABLE inbox_monitor_items ADD COLUMN uncertain_from TEXT;
  ALTER TABLE inbox_monitor_items ADD COLUMN urgency TEXT;
@@ -57,5 +58,48 @@ test('rate limited deliveries remain pending until their persisted retry time',(
   store.deferDelivery('item','a','sending','ready',1000);store.deferDelivery('digest','d','sending','pending',2000);
   assert.equal(store.deliveries(999).length,0);assert.equal(store.deliveries(1000).length,1);
   assert.equal(store.digestBatches(1999).length,0);assert.equal(store.digestBatches(2000).length,1);
+ }finally{db.close();}
+});
+test('stale digest members can each be explicitly reassessed without changing uncertain batches',()=>{
+ const {db,store}=setup();try {
+  for(const id of ['a','b','u']){db.prepare('INSERT INTO gmail_arrivals VALUES (?,?)').run('owner',id);db.prepare('INSERT INTO inbox_monitor_items(account_id,message_id,settings_revision,attempt_id,state,summary) VALUES (?,?,?,?,?,?)').run('owner',id,1,id,id==='u'?'uncertain':id==='a'?'stale':'digest_batched','old '+id);}
+  db.prepare("INSERT INTO inbox_digest_batches VALUES ('stale-batch',1,'stale','old digest',NULL,0)").run();for(const id of ['a','b'])db.prepare('INSERT INTO inbox_digest_items VALUES (?,?)').run('stale-batch',id);
+  db.prepare("INSERT INTO inbox_digest_batches VALUES ('uncertain-batch',1,'uncertain','unknown',NULL,0)").run();db.prepare("INSERT INTO inbox_digest_items VALUES ('uncertain-batch','u')").run();
+  store.reviewCandidate('owner','a',1);assert.equal(store.item('b').state,'stale');assert.equal(store.next(),'a');store.add('owner','a',1,'a-new');assert.equal(store.item('a-new').forced_private,1);
+  store.reviewCandidate('owner','b',1);assert.equal(store.next(),'b');store.add('owner','b',1,'b-new');assert.equal(store.item('b-new').forced_private,1);assert.throws(()=>store.reviewCandidate('owner','u',1));
+  assert.equal(store.item('u').state,'uncertain');assert.equal(db.prepare("SELECT text FROM inbox_digest_batches WHERE id='stale-batch'").get().text,'old digest');
+ }finally{db.close();}
+});
+test('sensitive sender protection survives same-item urgency and not-sensitive edits until clear',()=>{
+ const {db,store}=setup();try {
+  for(const id of ['old','new'])db.prepare('INSERT INTO inbox_monitor_items(account_id,message_id,settings_revision,attempt_id,state,sender_key) VALUES (?,?,?,?,?,?)').run('owner',id,1,id,id==='old'?'delivered':'evaluating','sender');
+  store.correct('s','old','sensitive');store.correct('u','old','urgent');store.correct('n','old','not-sensitive');assert.equal(store.hasSensitiveFeedback('new'),true);
+  store.correct('c','old','clear');assert.equal(store.hasSensitiveFeedback('new'),false);
+ }finally{db.close();}
+});
+test('a compatible preference change preserves a delivered correction binding',()=>{
+ const {db,store,prefs}=setup();try {db.prepare("INSERT INTO inbox_monitor_items(account_id,message_id,settings_revision,attempt_id,state) VALUES ('owner','a',1,'a','delivered')").run();store.configure({...prefs,attention:'different'});assert.equal(store.item('a').settings_revision,2);}finally{db.close();}
+});
+test('privacy edits keep an in-flight delivery bound and force clarification on rejection',()=>{
+ const {db,store,prefs}=setup();try {db.prepare("INSERT INTO inbox_monitor_items(account_id,message_id,settings_revision,attempt_id,state) VALUES ('owner','a',1,'a','sending')").run();store.configure({...prefs,sensitiveTerms:['private']});store.deferDelivery('item','a','sending','ready',1000);assert.equal(store.item('a').settings_revision,2);assert.equal(store.item('a').state,'clarify');assert.equal(store.deliveries(999).length,0);assert.equal(store.deliveries(1000).length,1);}finally{db.close();}
+});
+test('revoked delivery preserves its retry deadline through owner reassessment',()=>{
+ const {db,store}=setup();try {
+  db.prepare("INSERT INTO gmail_arrivals VALUES ('owner','a')").run();db.prepare("INSERT INTO inbox_monitor_items(account_id,message_id,settings_revision,attempt_id,state) VALUES ('owner','a',1,'old','sending')").run();
+  store.deferDelivery('item','old','sending','ready',7200000,false);assert.equal(store.item('old').state,'stale');store.retryEvaluation('old',1);store.add('owner','a',1,'new');store.setResult('new','ready','summary');assert.equal(store.deliveries(7199999).length,0);assert.equal(store.deliveries(7200000).length,1);
+ }finally{db.close();}
+});
+test('revoked digest retains deadlines for all stale members when reassessed',()=>{
+ const {db,store}=setup();try {
+  for(const id of ['a','b']){db.prepare('INSERT INTO gmail_arrivals VALUES (?,?)').run('owner',id);db.prepare("INSERT INTO inbox_monitor_items(account_id,message_id,settings_revision,attempt_id,state) VALUES ('owner',?,1,?,'digest_batched')").run(id,id);}
+  db.prepare("INSERT INTO inbox_digest_batches VALUES ('batch',1,'sending','digest',NULL,0)").run();for(const id of ['a','b'])db.prepare('INSERT INTO inbox_digest_items VALUES (?,?)').run('batch',id);
+  store.deferDelivery('digest','batch','sending','pending',7200000,false);for(const id of ['a','b']){assert.equal(store.item(id).state,'stale');store.retryEvaluation(id,1);store.add('owner',id,1,id+'-new');store.setResult(id+'-new','ready','summary');}assert.equal(store.deliveries(7199999).length,0);assert.equal(store.deliveries(7200000).length,2);
+ }finally{db.close();}
+});
+test('a pending rate-limited digest retains its deadline when a sender is corrected',()=>{
+ const {db,store}=setup();try {
+  db.prepare("INSERT INTO inbox_monitor_items(account_id,message_id,settings_revision,attempt_id,state,sender_key) VALUES ('owner','old',1,'old','delivered','sender'),('owner','a',1,'a','digest_batched','sender'),('owner','b',1,'b','digest_batched','other')").run();
+  db.prepare("INSERT INTO inbox_digest_batches VALUES ('batch',1,'sending','digest',NULL,0)").run();db.prepare("INSERT INTO inbox_digest_items VALUES ('batch','a'),('batch','b')").run();store.deferDelivery('digest','batch','sending','pending',7200000);store.correct('sensitive','old','sensitive');assert.equal(JSON.parse(db.prepare("SELECT snapshot FROM inbox_digest_archive WHERE batch_id='batch'").get().snapshot).text,'digest');assert.equal(db.prepare("SELECT count(*) AS n FROM inbox_digest_history WHERE batch_id='batch'").get().n,2);
+  assert.equal(store.item('a').state,'clarify');assert.equal(store.item('b').state,'digest_pending');assert.equal(store.deliveries(7199999).length,0);db.exec('UPDATE inbox_monitor_settings SET next_digest_at=0');store.claimDigest('new',1,3600001,7199999);assert.equal(store.digestBatches(7199999).length,0);db.exec('UPDATE inbox_monitor_settings SET next_digest_at=0');store.claimDigest('new',1,3600001,7200000);assert.equal(store.digestBatches(7200000).length,1);assert.equal(store.deliveries(7200000).length,1);
  }finally{db.close();}
 });

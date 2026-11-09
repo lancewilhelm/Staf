@@ -5,7 +5,8 @@ export type SlackEvent={eventId:string;teamId:string;userId:string;channelId:str
 export type SlackInteraction={eventId:string;teamId:string;userId:string;channelId:string;messageTs:string;actionId:string;value:string};
 export type SlackButton={text:string;actionId:string;value:string};
 export class SlackRateLimited extends Error {
- constructor(readonly retryAfterMs:number) {super('Slack rate limited the request');}
+ constructor(readonly retryAfterMs:number|null) {super('Slack rate limited the request');}
+ retryAt(now:number) {if(this.retryAfterMs===null || !Number.isSafeInteger(this.retryAfterMs) || this.retryAfterMs<0 || !Number.isSafeInteger(now) || !Number.isSafeInteger(now+this.retryAfterMs))return null;return now+this.retryAfterMs;}
 }
 export interface SlackTransport {
  identify(tokens:SlackTokens):Promise<{teamId:string;botUserId:string}>;
@@ -15,7 +16,7 @@ export interface SlackTransport {
 const apiResult=z.object({ok:z.boolean(),team_id:z.string().optional(),user_id:z.string().optional(),url:z.string().optional(),ts:z.string().optional()});
 async function api(method:string,token:string,body:object) {
  const response=await fetch('https://slack.com/api/'+method,{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(body),signal:AbortSignal.timeout(15000)});
- if(response.status===429) {const seconds=Number(response.headers.get('retry-after'));throw new SlackRateLimited(Number.isFinite(seconds) && seconds>0 ? Math.min(seconds*1000,3600000) : 30000);}
+ if(response.status===429) {const raw=response.headers.get('retry-after'),seconds=raw && /^\d+(?:\.\d+)?$/.test(raw.trim())?Number(raw):NaN,ms=Math.ceil(seconds*1000);throw new SlackRateLimited(Number.isSafeInteger(ms) && ms>=0?ms:null);}
  if(!response.ok)throw Error('Slack request failed');
  const result=apiResult.parse(await response.json());if(!result.ok)throw Error('Slack rejected the request');return result;
 }

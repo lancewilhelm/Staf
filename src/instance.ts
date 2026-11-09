@@ -35,7 +35,7 @@ import {InboxMonitorStore,inboxMonitorSchema} from './inbox-monitor.js';
 const clockAction: Action = { capability:'clock', operation:'read', resource:'utc', effect:'read', limits:{}, risk:'safe' };
 const clockBoundary = { enabledCapabilities:['clock'], actions:[clockAction] };
 const modes: ApprovalMode[] = ['ask-every-time','ask-for-risky-actions','never-ask'];
-export const INSTANCE_SCHEMA_VERSION = 51;
+export const INSTANCE_SCHEMA_VERSION = 52;
 const MAINTENANCE_VERSION = 2147483647;
 
 export const starterSoul = "You are an assistant working for the owner. Be clear and candid. Distinguish observations from assumptions. Follow the owner's role instructions and work within the permissions and task scope granted to you.";
@@ -235,6 +235,18 @@ export class Instance {
       UPDATE inbox_digest_batches SET state='stale' WHERE state='pending'
         AND EXISTS (SELECT 1 FROM inbox_digest_items d JOIN inbox_monitor_items i ON i.attempt_id=d.attempt_id WHERE d.batch_id=inbox_digest_batches.id AND i.state='stale');
     `);
+    if(version < 52) {
+      if(!this.db.prepare("SELECT 1 FROM pragma_table_info('inbox_monitor_items') WHERE name='recheck_private'").get())this.db.exec('ALTER TABLE inbox_monitor_items ADD COLUMN recheck_private INTEGER NOT NULL DEFAULT 0');
+      this.db.exec(`CREATE TABLE IF NOT EXISTS inbox_sensitive_corrections (account_id TEXT NOT NULL,message_id TEXT NOT NULL,PRIMARY KEY(account_id,message_id));
+        CREATE TABLE IF NOT EXISTS inbox_correction_events (event_id TEXT PRIMARY KEY,account_id TEXT NOT NULL,message_id TEXT NOT NULL,correction TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS inbox_legacy_corrections (account_id TEXT NOT NULL,message_id TEXT NOT NULL,correction TEXT NOT NULL,PRIMARY KEY(account_id,message_id));
+        CREATE TABLE IF NOT EXISTS inbox_assessment_history (attempt_id TEXT PRIMARY KEY,account_id TEXT NOT NULL,message_id TEXT NOT NULL,snapshot TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS inbox_digest_history (batch_id TEXT NOT NULL,attempt_id TEXT NOT NULL,PRIMARY KEY(batch_id,attempt_id));
+        CREATE TABLE IF NOT EXISTS inbox_digest_archive (batch_id TEXT PRIMARY KEY,snapshot TEXT NOT NULL);
+        INSERT OR IGNORE INTO inbox_sensitive_corrections SELECT account_id,message_id FROM inbox_monitor_items WHERE correction='sensitive';
+        INSERT OR IGNORE INTO inbox_legacy_corrections SELECT account_id,message_id,correction FROM inbox_monitor_items WHERE correction IS NOT NULL;
+        UPDATE inbox_monitor_items SET state='stale' WHERE state='digest_batched' AND attempt_id IN (SELECT d.attempt_id FROM inbox_digest_items d JOIN inbox_digest_batches b ON b.id=d.batch_id WHERE b.state='stale');`);
+    }
     this.db.prepare("UPDATE gmail_monitor_runs SET outcome='interrupted',finished_at=? WHERE outcome='running'").run(Date.now());
     if(version < 49) this.db.exec(`CREATE TABLE IF NOT EXISTS gmail_reply_proposals (action_id TEXT PRIMARY KEY REFERENCES action_journal(id), fingerprint TEXT NOT NULL, work_kind TEXT NOT NULL, work_id TEXT NOT NULL, bot_id TEXT NOT NULL, account_id TEXT NOT NULL, gmail_revision INTEGER NOT NULL, slack_revision INTEGER NOT NULL, team_id TEXT NOT NULL, user_id TEXT NOT NULL, channel_id TEXT NOT NULL, message_id TEXT NOT NULL, effect TEXT NOT NULL, digest TEXT NOT NULL, effect_digest TEXT NOT NULL, state TEXT NOT NULL, prompt_ts TEXT, detail TEXT);
       CREATE INDEX IF NOT EXISTS gmail_reply_account_message ON gmail_reply_proposals(account_id,message_id);`);
