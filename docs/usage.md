@@ -784,18 +784,22 @@ Gmail is optional and starts disconnected. One account can be connected through
 **Settings → Plugins → Gmail**. The service records new message candidates and
 lets a paired owner inspect them. An agent can search and read mail in chat only
 after both agent access and a separate, explicit model disclosure decision.
-Connecting Gmail alone does not authorize sending email to a model. Sending mail,
-changing mailbox state, automatic sensitivity classification and Slack updates
-are not implemented.
+Connecting Gmail alone does not authorize sending email to a model. An optional
+Google permissions allow an agent to propose a reply or inbox change for approval
+in Slack. Automatic sensitivity classification is not implemented.
 
 To prepare an owner-operated connection:
 
 1. In your own Google Cloud project, enable the Gmail API and configure the
    OAuth consent screen. Create an OAuth client of type **Desktop app** and
    obtain its client ID and client secret. If the app is in external Testing
-   mode, add the Google account as a test user. The connection requests only
+   mode, add the Google account as a test user. The connection requests
    `https://www.googleapis.com/auth/gmail.readonly`, a restricted scope used
-   for read/search and history. Google's [scope documentation](https://developers.google.com/workspace/gmail/api/auth/scopes)
+   for read/search and history. Reply sending additionally requests
+   `https://www.googleapis.com/auth/gmail.send`. Inbox changes additionally request
+   `https://www.googleapis.com/auth/gmail.modify`, which Google also permits for
+   sending; Staf separately requires its send setting and approval for replies.
+   Google's [scope documentation](https://developers.google.com/workspace/gmail/api/auth/scopes)
    and [restricted-scope verification guidance](https://developers.google.com/identity/protocols/oauth2/production-readiness/restricted-scope-verification)
    explain applicable verification and exceptions. Do not assume that a
    particular personal or organizational configuration qualifies.
@@ -804,7 +808,12 @@ To prepare an owner-operated connection:
    loopback address locally; the OAuth callback needs that loopback address.
    The HTTPS LAN gateway is not an OAuth callback address. Use the paired
    browser and open **Settings → Plugins → Gmail**.
-3. Enter the intended Gmail address, desktop client ID and client secret. Select
+3. Enter the intended Gmail address, desktop client ID and client secret. To
+   allow approved replies, select **Allow Gmail to send replies after explicit
+   approval in Slack**. To allow approved label, archive, and mark-read changes,
+   select **Allow Gmail inbox changes after explicit approval in Slack**.
+   Reconnect and select the permissions you want if the existing connection
+   lacks them. Select
    **Begin Google authorization**, then **Open Google authorization**. Sign in
    to the intended account and grant the requested access. Google redirects to
    the local Staf callback. Return to Settings and refresh Gmail status. Staf
@@ -861,9 +870,40 @@ Gmail access and both model permissions when the task starts. Changes to
 the connection or any permission stop subsequent Gmail work.
 
 After a Gmail result in a turn, other tools are unavailable for the rest of that
-turn, including guest calls already queued behind the Gmail action. Slack receives
-a generic notification directing the owner to Staf, not the Gmail-derived
-answer. The owner's visible chat and task activity can contain the email and
+turn except Gmail search, read, and approved action proposals. This also applies to guest
+calls already queued behind the Gmail action. Ordinary Slack updates remain
+generic. To propose a reply, the agent must read the original message in that
+work and have an enabled Slack connection for the same agent. Staf first asks
+the approved Slack user a generic question before showing the proposal. If the
+user chooses **Show proposal**, Slack displays the account, recipient, subject,
+and complete plain-text body with **Approve send**, **Request changes**, and
+**Deny** buttons. To request changes, select **Request changes**, then reply in
+the indicated thread. The old buttons stop working. The agent receives your
+direction and must make a new proposal with a new disclosure and approval.
+Only an approval of that proposal can send it. A reply has one recipient and no
+attachments. The subject must be nonempty, at most 400 characters, and match the
+original message, as required by [Gmail threading](https://developers.google.com/workspace/gmail/api/guides/threads).
+The body limit is up to 2,600 characters; the complete proposal must fit within
+3,000 characters. An agent may need another instruction if it cannot revise
+the proposal. Edits are requests to the agent, not direct edits of the email.
+
+For an inbox change, the agent must first read the target message in the same
+work. It can propose adding an existing user label by its exact name, archiving
+the message, or marking it read. Staf resolves the label name to its Gmail ID
+and checks it again before dispatch. Slack shows the account, message, and exact
+change after the generic disclosure question. Approval applies only that change.
+The Gmail account can change between the final check and Google's operation.
+
+Slack receives a generic send result. A timeout, lost connection, or interrupted
+send or change can leave the outcome unknown. Staf does not replay an uncertain
+action and blocks further actions on that message until the owner reviews it.
+In **Settings → Plugins → Gmail**, review **Gmail outcomes needing review**.
+Check Sent mail or the message's labels in Gmail, then record your finding. If
+you are unsure, leave it unresolved. Recording a finding does not retry anything;
+a new action still needs a new approval. The paired command or task API also
+includes `gmailReplies` with the recorded effect and state. Pending
+approvals are interrupted on restart and old buttons cannot send. The owner's
+visible chat, task activity, and proposal records can contain the email and
 should be protected like the mailbox.
 Gmail tool results and generated replies from that turn are omitted from later
 model replay and captured task context; the owner's original request remains.
@@ -885,9 +925,10 @@ External apps in Google Testing mode with this scope generally receive refresh
 tokens that expire after seven days; Google can also revoke tokens for other
 reasons. See Google's [OAuth token expiration guidance](https://developers.google.com/identity/protocols/oauth2#expiration).
 
-OAuth, monitoring and read/search are covered by synthetic HTTP, controlled model
-and browser fixtures. Real Google sign-in, token refresh, mail, history delivery,
-and model behavior have not been tested. No live account is needed for tests.
+OAuth, monitoring, read/search, and reply sending are covered by synthetic HTTP
+and controlled model fixtures. Real Google sign-in, token refresh, mail, history
+delivery, Slack interactions, and model behavior have not been tested. No live
+account is needed for tests.
 
 ## Slack plugin
 
@@ -904,7 +945,8 @@ To set up your own Slack app:
 1. Create an app in the desired workspace, enable Socket Mode, and create an
    app-level token with `connections:write`. Under OAuth & Permissions add the
    bot scopes `im:history` and `chat:write`; under Event Subscriptions subscribe
-   the bot to `message.im`. Install the app in the workspace. Enable the Messages
+   the bot to `message.im`. Enable **Interactivity** for the approval buttons.
+   Install the app in the workspace. Enable the Messages
    tab and allow users to send messages if Slack presents that setting.
 2. Open the app's direct message and find the workspace ID (`T...`), your user
    ID (`U...`), and the DM channel ID (`D...`). Slack's profile and workspace

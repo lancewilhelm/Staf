@@ -6,12 +6,15 @@ import DisclosureSummary from './DisclosureSummary.vue';
 
 const {app,state}=useWorkspace();
 const gmail=ref<Awaited<ReturnType<typeof app.gmailPlugin>>|null>(null),busy=ref(false),message=ref(''),authorizationUrl=ref('');
-const form=ref({email:'',clientId:'',clientSecret:''});
+const form=ref({email:'',clientId:'',clientSecret:'',sendEnabled:false,modifyEnabled:false});
 const confirm=ref<'disconnect'|'delete-config'|'rebaseline'|null>(null),grant=ref<{botId:string;provider:string;model:string}|null>(null);
 const workGrant=ref<{botId:string;provider:string;model:string}|null>(null);
+const uncertain=ref<Awaited<ReturnType<typeof app.gmailUncertain>>>([]);
+const resolution=ref<{item:(typeof uncertain.value)[number];outcome:'sent'|'not-sent'|'applied'|'not-applied'}|null>(null);
 const inspected=ref<Awaited<ReturnType<typeof app.gmailRead>>|null>(null);let timer:ReturnType<typeof setInterval>|undefined;
 const older=ref<Array<{messageId:string;inbox:'unknown'}>>([]),olderBefore=ref<number|null>(null),loadedOlder=ref(false);
-async function refresh(fillForm=false){const previous=gmail.value?.accountId,next=await app.gmailPlugin();if(previous!==next.accountId){older.value=[];olderBefore.value=null;loadedOlder.value=false;inspected.value=null;}gmail.value=next;if(fillForm && next.config){form.value.email=next.config.email;form.value.clientId=next.config.clientId;}if(next.authorizationStatus==='Connected')authorizationUrl.value='';}
+async function refresh(fillForm=false){const previous=gmail.value?.accountId,[next,unknown]=await Promise.all([app.gmailPlugin(),app.gmailUncertain()]);if(previous!==next.accountId){older.value=[];olderBefore.value=null;loadedOlder.value=false;inspected.value=null;}gmail.value=next;uncertain.value=unknown;if(fillForm && next.config){form.value.email=next.config.email;form.value.clientId=next.config.clientId;}if(next.authorizationStatus==='Connected')authorizationUrl.value='';}
+async function reconcile(){const selected=resolution.value;if(!selected || busy.value)return;busy.value=true;message.value='';try{await app.gmailReconcile({actionId:selected.item.actionId,fingerprint:selected.item.fingerprint,kind:selected.item.effect.kind==='modify'?'modify':'reply',outcome:selected.outcome});message.value='Your finding was recorded. No Gmail action was sent.';await refresh();}catch(error){message.value='Could not record the finding. '+String(error);await refresh().catch(()=>{});}finally{busy.value=false;resolution.value=null;}}
 function onFocus(){void refresh().catch(()=>{message.value='Could not refresh Gmail status.';});}
 onMounted(()=>{window.addEventListener('focus',onFocus);void refresh(true).catch(()=>{message.value='Could not load Gmail status.';});timer=setInterval(()=>{if(!busy.value)void refresh().catch(()=>{});},10000);});
 onUnmounted(()=>{window.removeEventListener('focus',onFocus);if(timer)clearInterval(timer);});
@@ -29,15 +32,33 @@ async function loadOlder(){const before=loadedOlder.value?olderBefore.value:gmai
   <div class="provider-title"><h3>Gmail</h3><span class="badge">{{ gmail?.enabled ? 'Enabled' : gmail?.connected ? 'Disabled' : 'Not connected' }}</span></div>
   <p>Monitor new Gmail message candidates and search or read mail with an authorized agent.</p>
   <p v-if="gmail?.accountId">Account {{ gmail.accountId }}</p>
+  <p v-if="gmail?.connected">Approved reply sending: {{ gmail.sendEnabled ? 'Authorized with Google' : 'Not authorized' }}</p>
+  <p v-if="gmail?.connected">Approved inbox changes: {{ gmail.modifyEnabled ? 'Authorized with Google' : 'Not authorized' }}</p>
   <p v-if="gmail">Connection status: {{ gmail.status }}</p>
   <p v-if="gmail && gmail.authorizationStatus!=='Connected' && gmail.authorizationStatus!=='Not connected'">Authorization: {{ gmail.authorizationStatus }}</p>
   <p>Email sent to a model provider remains your choice. Agent access alone does not allow Gmail content to be sent to a model.</p>
+  <section v-if="uncertain.length" aria-label="Gmail outcomes needing review">
+   <h4>Gmail outcomes needing review</h4>
+   <p>Staf cannot determine whether these actions finished. Check Gmail before recording your finding. Recording a finding never sends or changes mail. Showing up to 100.</p>
+   <article v-for="item in uncertain" :key="item.actionId">
+    <p><strong>Account:</strong> {{ item.accountId }} · <strong>Outcome:</strong> Unknown</p>
+    <template v-if="item.intact">
+     <template v-if="item.effect.kind==='modify'"><p><strong>Message:</strong> {{ item.effect.subject || '(No subject)' }} · {{ item.effect.from }} · {{ item.effect.messageId }}</p><p><strong>Proposed change:</strong> {{ item.effect.action==='label' ? 'Add label '+item.effect.labelName : item.effect.action==='archive' ? 'Archive' : 'Mark read' }}</p></template>
+     <template v-else><p><strong>To:</strong> {{ item.effect.to }}<br /><strong>Subject:</strong> {{ item.effect.subject }}</p><pre style="white-space:pre-wrap">{{ item.effect.body }}</pre></template>
+     <p>{{ item.detail }}</p>
+     <div class="row"><button :disabled="busy" @click="resolution={item,outcome:item.effect.kind==='modify'?'applied':'sent'}">{{ item.effect.kind==='modify'?'I found it applied':'I found it sent' }}</button><button class="quiet" :disabled="busy" @click="resolution={item,outcome:item.effect.kind==='modify'?'not-applied':'not-sent'}">{{ item.effect.kind==='modify'?'I found it not applied':'I found it not sent' }}</button></div>
+    </template>
+    <p v-else>The recorded proposal changed and cannot be reconciled here. Inspect the database and Gmail before taking further action.</p>
+   </article>
+  </section>
   <details class="saved-settings"><DisclosureSummary>{{ gmail?.config ? 'Reconnect Gmail' : 'Set up Gmail' }}</DisclosureSummary>
-   <p>Create a Google desktop OAuth client and enable the Gmail API first. The requested Gmail read-only scope is restricted. See the Gmail setup documentation for requirements and limitations.</p>
+   <p>Create a Google desktop OAuth client and enable the Gmail API first. The Gmail read-only scope is restricted. Google's modify permission also permits sending; Staf still requires the separate send option and approval for replies. See the Gmail setup documentation for requirements and limitations.</p>
    <form @submit.prevent="action('start',{...form})">
     <label>Gmail account email<input v-model.trim="form.email" type="email" autocomplete="off" required /></label>
     <label>Google OAuth client ID<input v-model.trim="form.clientId" autocomplete="off" required /></label>
     <label>Google OAuth client secret<input v-model="form.clientSecret" type="password" autocomplete="off" required /></label>
+    <label><input v-model="form.sendEnabled" type="checkbox" /> Allow Gmail to send replies after explicit approval in Slack</label>
+    <label><input v-model="form.modifyEnabled" type="checkbox" /> Allow Gmail inbox changes after explicit approval in Slack</label>
     <button :disabled="busy">Begin Google authorization</button>
    </form>
    <p v-if="authorizationUrl"><a :href="authorizationUrl" target="_blank" rel="noreferrer">Open Google authorization</a>. Return here after granting access, then refresh status.</p>
@@ -79,6 +100,7 @@ async function loadOlder(){const before=loadedOlder.value?olderBefore.value:gmai
   <p role="status">{{ busy?'Updating Gmail…':message }}</p>
   <ConfirmAction v-if="confirm" :title="confirm==='disconnect'?'Disconnect Gmail?':confirm==='rebaseline'?'Start monitoring from now?':'Delete Gmail configuration?'" :message="confirm==='disconnect'?'This disables Gmail and removes its credentials. Account, agent access, and model permissions remain and can apply again after reconnecting.':confirm==='rebaseline'?'Arrivals in the missing interval cannot be recovered or identified. Staf will record this gap and start from the current Gmail history ID.':'This removes the stored credentials, account configuration, agent access, and model permissions.'" :action="confirm==='disconnect'?'Disconnect':confirm==='rebaseline'?'Start from now':'Delete configuration'" @cancel="confirm=null" @confirm="confirm==='rebaseline'?action('rebaseline',{confirm:true}):action(confirm)" />
   <ConfirmAction v-if="grant" title="Allow Gmail data to this model?" :message="`Gmail search results and message content can be sent to ${grant.provider} / ${grant.model} during this agent's chat. The owner-visible answer may contain email. This grant applies only to that provider and model. Gmail results and generated replies are omitted from later model requests; your request remains.`" action="Allow Gmail data" @cancel="grant=null" @confirm="action('model-access',{...grant,enabled:true})" />
-  <ConfirmAction v-if="workGrant" title="Allow Gmail in tasks and Slack work?" :message="`Gmail results and message content can be sent to ${workGrant.provider} / ${workGrant.model} in scoped background tasks and Slack-originated chat or tasks. Slack receives a generic notification; email details remain visible in Staf. This permission applies only to this agent and model.`" action="Allow task and Slack access" @cancel="workGrant=null" @confirm="action('work-model-access',{...workGrant,enabled:true})" />
+  <ConfirmAction v-if="workGrant" title="Allow Gmail in tasks and Slack work?" :message="`Gmail results and message content can be sent to ${workGrant.provider} / ${workGrant.model} in scoped background tasks and Slack-originated chat or tasks. Slack receives generic updates unless you separately choose to reveal a Gmail action proposal. This permission applies only to this agent and model.`" action="Allow task and Slack access" @cancel="workGrant=null" @confirm="action('work-model-access',{...workGrant,enabled:true})" />
+  <ConfirmAction v-if="resolution" title="Record your Gmail finding?" :message="`You are recording that the action ${resolution.outcome.replace('-', ' ')} after checking Gmail. This does not perform or retry the action. If you are unsure, cancel and leave it unresolved.`" action="Record finding" @cancel="resolution=null" @confirm="reconcile()" />
  </div>
 </template>

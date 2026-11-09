@@ -581,8 +581,10 @@ returned. Slack-originated model turns can use the service-owned `start_slack_ta
 and `manage_slack_task` capabilities; thread and owner message identity are
 captured by the service, not supplied as tool arguments. See [Slack setup](usage.md#slack-plugin) for limits and recovery.
 
-Gmail uses `POST /api/plugins/gmail/start` with `email`, `clientId`, and
-`clientSecret`; it returns an authorization URL, not a credential. Google
+Gmail uses `POST /api/plugins/gmail/start` with `email`, `clientId`,
+`clientSecret`, and optional booleans `sendEnabled` and `modifyEnabled`; it
+returns an authorization URL, not a credential. Both options default to false
+and request their respective Google scopes when true. Google
 returns to the loopback `/gmail/oauth/callback` with the one-time state and code.
 The paired owner can call `check`, `enable`, `disable`, `disconnect`, `poll`, or
 `delete-config` with an empty object, and `access` with `botId` and `enabled`.
@@ -594,7 +596,8 @@ model. Setting or revoking the model grant clears the task and Slack grant.
 `read` takes a `messageId` for owner inspection. `rebaseline` requires
 `{"confirm":true}` and retains a record of the unknown interval.
 The Gmail entry in `GET /api/plugins` includes the account, connection state,
-agent access IDs, model access, task and Slack model access, monitoring state, recent candidate IDs and gaps;
+agent access IDs, model access, task and Slack model access, `sendEnabled`,
+`modifyEnabled`, monitoring state, recent candidate IDs and gaps;
 it never returns the client secret or refresh token. Older candidates are paged
 through `GET /api/plugins/gmail/arrivals?before=CURSOR` using `nextBefore`.
 There is one Gmail account in this implementation. The shared database keys
@@ -606,13 +609,29 @@ characters. The captured account, revision and exact query scope the attempt;
 only message IDs returned by that attempt's searches can be read. The scope is
 not inherited by retries, scheduled tasks, or helpers. `work gmail: QUERY` in an
 authorized Slack DM creates a task with that exact scope. Gmail-derived Slack
-responses are replaced with a generic instruction to inspect Staf.
+responses are generic, except for a proposal the approved user has chosen
+to reveal. `gmail_reply` requires the original message to be read in the same
+work, the Google send scope, an enabled Slack connection for the agent, a
+disclosure decision, and an exact approval. Slack revision requests invalidate
+the original proposal and return the owner's direction to the model. A new
+proposal requires a new approval. `gmail_modify` uses the same boundary for
+`label`, `archive`, and `mark_read`, with the separate Google modify scope.
+The command and task read endpoints include `gmailReplies` with the recorded
+effect and outcome. `GET /api/plugins/gmail/uncertain` lists up to 100 uncertain
+actions for paired clients. To reconcile an
+uncertain send after checking Gmail, a paired owner can call
+`POST /api/plugins/gmail/reconcile` with `actionId`, the recorded `fingerprint`,
+and `outcome` of `sent` or `not-sent`. Reconciliation records the owner's
+finding; it never sends mail. For an inbox change, use
+`POST /api/plugins/gmail/reconcile-change` with the same identity fields and
+an `outcome` of `applied` or `not-applied`.
 Schema 44 adds Gmail history, disclosure and private-turn records while also
 ensuring sensitive-memory schema is present. Both independent schema 43
 predecessors upgrade without replacing their existing records. See
 [Gmail setup](usage.md#gmail-plugin) for OAuth requirements and limitations.
 Schema 45 adds task Gmail scopes, scoped message IDs, private-task markers, and
 the separately approved task and Slack model permission.
+Schema 46 adds exact Gmail reply proposals, Slack decisions, and send outcomes.
 
 ## Native home-network gateway
 

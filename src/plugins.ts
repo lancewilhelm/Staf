@@ -19,7 +19,7 @@ export const bundledPlugins: readonly PluginDefinition[] = [{
 },{
   id:'gmail',name:'Gmail',description:'Search Gmail and inspect new message candidates.',
   configuration:[{name:'email',secret:false,description:'Google account email'},{name:'clientId',secret:false,description:'Google desktop OAuth client ID'},{name:'clientSecret',secret:true,description:'Google desktop OAuth client secret'}],
-  lifecycle:['connect','enable','disable','disconnect','delete-config'],tools:['gmail_search','gmail_read'],events:['message_candidate'],accountIdentity:'Gmail address',
+  lifecycle:['connect','enable','disable','disconnect','delete-config'],tools:['gmail_search','gmail_read','gmail_reply','gmail_modify'],events:['message_candidate'],accountIdentity:'Gmail address',
 }];
 export const slackConfigSchema=z.strictObject({teamId:z.string().regex(/^T[A-Z0-9]+$/),userId:z.string().regex(/^U[A-Z0-9]+$/),channelId:z.string().regex(/^D[A-Z0-9]+$/),botId:z.string().regex(/^[\w-]+$/)});
 export type SlackConfig=z.infer<typeof slackConfigSchema>;

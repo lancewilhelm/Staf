@@ -47,13 +47,14 @@ export type Capability<I,O> = {
 };
 export class ActionDenied extends Error {}
 export class ActionDeferred extends Error {}
+export class ActionRevision extends Error {constructor(readonly direction:string){super('Owner requested a revision');}}
 /** Reject input before journaling, or establish a definite failed effect outcome. */
 export class ActionFailed extends Error {
   constructor(readonly safeResult:string) {super('Action failed');}
 }
 export function closesAdmission(reason:string):boolean {return ['Action limit reached','Action denied','Action authorization failed','Action could not start','Work stopped'].includes(reason);}
 export type RecoveryManifest = {actions:ActionRecord[];resolutions:string[];truncated:boolean;instructions:string};
-export type InvocationResult = {kind:'completed';actionId:string;value:Json} | {kind:'status';action:ActionRecord} | {kind:'repeat-required';actions:ActionRecord[];truncated:boolean;challenge:string} | {kind:'blocked';reason:string};
+export type InvocationResult = {kind:'completed';actionId:string;value:Json} | {kind:'status';action:ActionRecord} | {kind:'repeat-required';actions:ActionRecord[];truncated:boolean;challenge:string} | {kind:'blocked';reason:string} | {kind:'revision-requested';direction:string};
 
 function stable(value:Json):string {
   if (Array.isArray(value)) return `[${value.map(stable).join(',')}]`;
@@ -131,7 +132,7 @@ export class WorkActionService {
   }
   offers(context:WorkContext,route:'direct'|'guest'):ToolDefinition[] {
     if ((route==='direct' && context.mode==='code') || (route==='guest' && context.mode==='direct')) return [];
-    return [...this.capabilities.values()].filter(cap=>!cap.internal && !(route==='guest' && cap.directOnly) && (!this.privateWork(context) || ['gmail_search','gmail_read'].includes(cap.name)) && cap.eligible(context)).map(cap=>structuredClone(cap.definition));
+    return [...this.capabilities.values()].filter(cap=>!cap.internal && !(route==='guest' && cap.directOnly) && (!this.privateWork(context) || ['gmail_search','gmail_read','gmail_reply','gmail_modify'].includes(cap.name)) && cap.eligible(context)).map(cap=>structuredClone(cap.definition));
   }
   recognizes(name:string):boolean {const cap=this.capabilities.get(name);return !!cap && !cap.internal;}
   private digest(value:string):string {return createHmac('sha256',this.key).update(value).digest('hex');}
@@ -229,7 +230,7 @@ export class WorkActionService {
   }
   private async dispatch(context:WorkContext,request:{source:InvocationSource|InternalInvocationSource;name:string;input:unknown;intent:ActionIntent}):Promise<InvocationResult> {
     this.admit(context);
-    if(this.privateWork(context) && !['gmail_search','gmail_read'].includes(request.name)) return {kind:'blocked',reason:'Capability unavailable after private Gmail data was read'};
+    if(this.privateWork(context) && !['gmail_search','gmail_read','gmail_reply','gmail_modify'].includes(request.name)) return {kind:'blocked',reason:'Capability unavailable after private Gmail data was read'};
     this.assertPrivateDisclosure(context);
     const route=request.source.kind==='provider'?'direct':request.source.kind==='guest'?'guest':'internal';
     const cap=this.capabilities.get(request.name);
@@ -324,7 +325,7 @@ export class WorkActionService {
     if(prepared.kind!=='created')throw Error('New action already exists');
     const action=Object.freeze({id:actionId,fingerprint});let claim:void|AuthorityClaim=undefined;
     try {cap.check(input,context);claim=await cap.authorize(input,context,action);this.admit(context);cap.check(input,context,action);}
-    catch(error){claim?.release();this.journal.cancel(actionId);if(error instanceof ActionDeferred)return {kind:'blocked',reason:error.message};const reason=context.signal.aborted?'Work stopped':error instanceof ActionDenied?'Action denied':'Action authorization failed';this.close(context,'authority');return {kind:'blocked',reason};}
+    catch(error){claim?.release();this.journal.cancel(actionId);if(error instanceof ActionRevision)return {kind:'revision-requested',direction:error.direction};if(error instanceof ActionDeferred)return {kind:'blocked',reason:error.message};const reason=context.signal.aborted?'Work stopped':error instanceof ActionDenied?'Action denied':'Action authorization failed';this.close(context,'authority');return {kind:'blocked',reason};}
     try {
     this.db.exec('BEGIN IMMEDIATE');
     try {this.admit(context);cap.check(input,context,action);claim?.start();this.journal.startInInstanceTransaction(prepared.permit,this.db,{id:actionId,fingerprint,work:context.work});this.db.exec('COMMIT');this.journal.finalizeInstanceStart(prepared.permit);}

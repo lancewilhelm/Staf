@@ -14,7 +14,7 @@ export async function runCode(input:{actions:WorkActions;responseId:string;callI
   try {id=actions.startExecution(input.responseId,input.callId,source);} catch(error) {if(error instanceof ActionDeferred)return JSON.stringify({outcome:'deferred',notice:error.message});throw error;}
   const receipts=new Map<string,Json>(), emitted:Json[]=[];
   const persist=()=>actions.updateExecution(id,JSON.stringify({emitted}));
-  let outputBytes=0, cachedBytes=0, fatal:string|undefined;
+  let outputBytes=0, cachedBytes=0, fatal:string|undefined,ownerRevision:string|undefined;
   const pending=new Set<Promise<unknown>>();
   const safe=(value:Json):Json=>{if(typeof value==='string')return redact(value);if(Array.isArray(value))return value.map(safe);if(value && typeof value==='object')return Object.fromEntries(Object.entries(value).map(([key,item])=>[redact(key),safe(item)]));return value;};
   const keep=(value:Json):Json=>{const result=safe(value);outputBytes+=Buffer.byteLength(JSON.stringify(result));if(outputBytes>limits.outputBytes){fatal='Guest output limit reached';actions.close(fatal);throw Error(fatal);}return result;};
@@ -33,6 +33,7 @@ export async function runCode(input:{actions:WorkActions;responseId:string;callI
       catch(error) {input.emit?.({type:'tool_result',id:eventId,name:message.name,success:false,content:'Capability call failed'});throw error;}
       input.emit?.({type:'tool_result',id:eventId,name:message.name,success:result.kind==='completed',content:result.kind==='completed' && message.name==='select_skill' && typeof result.value==='string' ? JSON.stringify(skillEvidence(result.value) ?? {}) : result.kind==='completed'?'Capability completed':JSON.stringify(result)});
       if(result.kind==='blocked') {if(actions.closedReason()) fatal ??= result.reason;return {ok:false as const,error:result.reason};}
+      if(result.kind==='revision-requested') {ownerRevision=result.direction;return {ok:false as const,error:JSON.stringify(result)};}
       if(result.kind!=='completed') return {ok:false as const,error:JSON.stringify(result)};
       const receipt=randomUUID(),value=safe(result.value);
       cachedBytes+=Buffer.byteLength(JSON.stringify(value));if(cachedBytes>limits.cacheBytes){fatal='Guest cache limit reached';actions.close(fatal);throw Error(fatal);}receipts.set(receipt,value);
@@ -62,7 +63,7 @@ export async function runCode(input:{actions:WorkActions;responseId:string;callI
   if(fatal) throw Error(fatal);
   if(end.outcome!=='return') {
     const manifest=actions.beginRecovery();
-    return JSON.stringify({executionId:id,outcome:end.outcome,recovery:manifest,mode:actions.context.mode,notice:actions.context.mode==='code'?'Code Mode remains selected; correct the program or explain the failure.':'Correct the program or continue with offered direct tools.'});
+    return JSON.stringify({executionId:id,outcome:end.outcome,recovery:manifest,mode:actions.context.mode,...(ownerRevision?{ownerRevision}:{}),notice:actions.context.mode==='code'?'Code Mode remains selected; correct the program or explain the failure.':'Correct the program or continue with offered direct tools.'});
   }
-  return JSON.stringify({executionId:id,outcome:end.outcome,...result});
+  return JSON.stringify({executionId:id,outcome:end.outcome,...result,...(ownerRevision?{ownerRevision}:{})});
 }
