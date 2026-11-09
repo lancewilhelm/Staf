@@ -33,7 +33,7 @@ import { PluginStore, pluginSchema, slackWorkSchema, type SlackConfig } from './
 const clockAction: Action = { capability:'clock', operation:'read', resource:'utc', effect:'read', limits:{}, risk:'safe' };
 const clockBoundary = { enabledCapabilities:['clock'], actions:[clockAction] };
 const modes: ApprovalMode[] = ['ask-every-time','ask-for-risky-actions','never-ask'];
-export const INSTANCE_SCHEMA_VERSION = 42;
+export const INSTANCE_SCHEMA_VERSION = 43;
 const MAINTENANCE_VERSION = 2147483647;
 
 export const starterSoul = "You are an assistant working for the owner. Be clear and candid. Distinguish observations from assumptions. Follow the owner's role instructions and work within the permissions and task scope granted to you.";
@@ -209,9 +209,12 @@ export class Instance {
     if(version < 38 && !this.db.prepare("SELECT 1 FROM pragma_table_info('command_runtime_events') WHERE name='call_id'").get())this.db.exec('ALTER TABLE command_runtime_events ADD COLUMN call_id TEXT');
     this.db.exec('CREATE INDEX IF NOT EXISTS command_runtime_events_command ON command_runtime_events(command_id,seq)');
     if(version < 40) this.db.exec(pluginSchema);
-    if(version < 42) this.db.exec(slackWorkSchema);
+    this.db.exec(slackWorkSchema);
     this.plugins = new PluginStore(this.db);
-    if(version < 42) this.db.exec("CREATE TABLE IF NOT EXISTS tool_defaults (id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL, clock INTEGER NOT NULL CHECK(clock IN (0,1)), memory INTEGER NOT NULL CHECK(memory IN (0,1)), web INTEGER NOT NULL CHECK(web IN (0,1)), files INTEGER NOT NULL CHECK(files IN (0,1))); INSERT OR IGNORE INTO tool_defaults VALUES (1,1,1,1,1,1)");
+    this.db.exec("CREATE TABLE IF NOT EXISTS tool_defaults (id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL, clock INTEGER NOT NULL CHECK(clock IN (0,1)), memory INTEGER NOT NULL CHECK(memory IN (0,1)), web INTEGER NOT NULL CHECK(web IN (0,1)), files INTEGER NOT NULL CHECK(files IN (0,1))); INSERT OR IGNORE INTO tool_defaults VALUES (1,1,1,1,1,1)");
+    if(version < 43) this.db.exec(`CREATE TABLE IF NOT EXISTS memory_sensitivity (id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL, mode TEXT NOT NULL CHECK(mode IN ('model','review-all')), terms TEXT NOT NULL);
+      INSERT OR IGNORE INTO memory_sensitivity VALUES (1,1,'model','["medical","health","diagnosis","medication","therapy","sexual","financial","password"]');
+      CREATE TABLE IF NOT EXISTS sensitive_memory_proposals (id TEXT PRIMARY KEY, bot_id TEXT NOT NULL REFERENCES bots(id), work_kind TEXT NOT NULL CHECK(work_kind IN ('command','task')), work_id TEXT NOT NULL, scope TEXT NOT NULL CHECK(scope IN ('bot','user')), operation TEXT NOT NULL CHECK(operation IN ('create','update')), target_id TEXT, target_version INTEGER, text TEXT, fingerprint TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('pending','confirmed','denied')), CHECK((state='pending' AND text IS NOT NULL) OR (state<>'pending' AND text IS NULL)));`);
     if (!maintenanceToken) this.db.exec(`PRAGMA user_version=${INSTANCE_SCHEMA_VERSION}`);
     for (const row of this.db.prepare("SELECT id,bot_id FROM task_attempts WHERE state IN ('queued','running','stopping','waiting') ORDER BY rowid").all()) {
       if (typeof row.id !== 'string' || typeof row.bot_id !== 'string') throw Error('Invalid interrupted task');
@@ -260,7 +263,7 @@ export class Instance {
       (work,signal)=>this.workContext(work,signal),
       work=>{
         const record=work.kind==='command' ? this.command(work.id) : this.taskAttempt(work.id);
-        if (!record || typeof record.botId !== 'string' || record.state!==(work.kind==='command' ? 'pending' : 'running') || this.botIdentity(record.botId)?.archived !== false || (work.kind==='command' && this.responseStopping(work.id)) || (work.kind==='task' && this.scheduleOrigin(work.id)?.revoked === 1) || (work.kind==='command' && this.plugins.isPluginCommand(work.id) && !this.plugins.authority(work.id))) throw Error('Work is no longer active or authorized');
+        if (!record || typeof record.botId !== 'string' || record.state!==(work.kind==='command' ? 'pending' : 'running') || this.botIdentity(record.botId)?.archived !== false || (work.kind==='command' && this.responseStopping(work.id)) || (work.kind==='task' && this.scheduleOrigin(work.id)?.revoked === 1) || (this.plugins.isPluginCommand(work.id) && !(work.kind==='command' ? this.plugins.authority(work.id) : this.plugins.currentAuthority(work.id)))) throw Error('Work is no longer active or authorized');
       },32,work=>work.kind==='task' && this.taskHasPending(work.id),this.redactSkill);
     return this.actionService;
   }
@@ -301,6 +304,60 @@ export class Instance {
   }
   get skills() { return new SkillCatalog(this.db, this.redactSkill); }
   get memories() { return new MemoryStore(this.db); }
+  memorySensitivity() {
+    const row=this.db.prepare('SELECT revision,mode,terms FROM memory_sensitivity WHERE id=1').get();
+    if(!row || (row.mode!=='model' && row.mode!=='review-all') || typeof row.terms!=='string')throw Error('Invalid sensitivity rules');
+    const terms:unknown=JSON.parse(row.terms);
+    if(!Array.isArray(terms) || !terms.every(term=>typeof term==='string'))throw Error('Invalid sensitivity rules');
+    return {revision:Number(row.revision),mode:row.mode,terms};
+  }
+  setMemorySensitivity(input:{revision:number;mode:'model'|'review-all';terms:string[]}) {
+    if(!Number.isSafeInteger(input.revision) || input.revision<1 || input.terms.length>100 || input.terms.some(term=>typeof term!=='string' || !term.trim() || term.length>100))throw Error('Invalid sensitivity rules');
+    const terms=[...new Set(input.terms.map(term=>term.trim().toLowerCase()))];
+    if(!this.db.prepare('UPDATE memory_sensitivity SET revision=revision+1,mode=?,terms=? WHERE id=1 AND revision=?').run(input.mode,JSON.stringify(terms),input.revision).changes)throw new BotConflict('Sensitivity rules changed. Refresh before editing.');
+    return this.memorySensitivity();
+  }
+  memoryNeedsApproval(text:string,classification:'ordinary'|'sensitive'|'uncertain'|undefined) {
+    const rules=this.memorySensitivity();
+    return rules.mode==='review-all' || classification!=='ordinary' || rules.terms.some(term=>text.toLowerCase().includes(term));
+  }
+  private sensitiveMemoryFingerprint(input:{id:string;botId:string;work:WorkRef;scope:'bot'|'user';operation:'create'|'update';targetId:string|null;targetVersion:number|null;text:string}) {
+    return createHmac('sha256',this.fingerprintKey).update(JSON.stringify([input.id,input.botId,input.work.kind,input.work.id,input.scope,input.operation,input.targetId,input.targetVersion,input.text])).digest('hex');
+  }
+  proposeSensitiveMemory(input:{id:string;botId:string;work:WorkRef;scope:'bot'|'user';operation:'create'|'update';targetId?:string;targetVersion?:number;text:string}) {
+    const fingerprint=this.sensitiveMemoryFingerprint({...input,targetId:input.targetId ?? null,targetVersion:input.targetVersion ?? null});
+    this.db.prepare("INSERT INTO sensitive_memory_proposals VALUES (?,?,?,?,?,?,?,?,?,?,'pending')").run(input.id,input.botId,input.work.kind,input.work.id,input.scope,input.operation,input.targetId ?? null,input.targetVersion ?? null,input.text,fingerprint);
+    return {id:input.id,fingerprint};
+  }
+  sensitiveMemoryProposals(botId:string) {
+    return this.db.prepare("SELECT id,scope,operation,target_id AS targetId,target_version AS targetVersion,text,fingerprint FROM sensitive_memory_proposals WHERE bot_id=? AND state='pending' ORDER BY rowid").all(botId);
+  }
+  hasSensitiveMemoryProposal(id:string) {return !!this.db.prepare('SELECT 1 FROM sensitive_memory_proposals WHERE id=?').get(id);}
+  sensitiveMemoryProposalStatus(botId:string,id:string) {
+    const row=this.db.prepare('SELECT state,scope,operation FROM sensitive_memory_proposals WHERE id=? AND bot_id=?').get(id,botId);
+    if(!row || (row.state!=='pending' && row.state!=='confirmed' && row.state!=='denied'))return null;
+    return {id,kind:'sensitive' as const,state:row.state,...(row.scope==='user' && row.operation==='create' && row.state==='confirmed'?{sharedState:this.sharedMemoryProposal(botId,id)?.state ?? 'unavailable'}:{})};
+  }
+  decideSensitiveMemory(id:string,fingerprint:string,decision:'confirm'|'deny') {
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const row=this.db.prepare('SELECT * FROM sensitive_memory_proposals WHERE id=?').get(id);
+      if(!row || row.state!=='pending' || row.fingerprint!==fingerprint || typeof row.text!=='string' || typeof row.bot_id!=='string')throw new BotConflict('Proposal is stale or no longer pending.');
+      if((row.work_kind!=='command' && row.work_kind!=='task') || typeof row.work_id!=='string' || (row.scope!=='bot' && row.scope!=='user') || (row.operation!=='create' && row.operation!=='update') || !(row.target_id===null || typeof row.target_id==='string') || !(row.target_version===null || typeof row.target_version==='number'))throw Error('Invalid memory proposal');
+      if(this.sensitiveMemoryFingerprint({id,botId:row.bot_id,work:{kind:row.work_kind,id:row.work_id},scope:row.scope,operation:row.operation,targetId:row.target_id,targetVersion:row.target_version,text:row.text})!==fingerprint)throw new BotConflict('Proposal changed. Refresh before deciding.');
+      if(decision==='confirm') {
+        if(!this.toolDefaults().memory || this.botIdentity(row.bot_id)?.archived!==false)throw new BotConflict('Memory access is no longer available.');
+        if(this.plugins.isPluginCommand(row.work_id) && !this.plugins.currentAuthority(row.work_id))throw new BotConflict('Plugin access is no longer available.');
+        const scope:MemoryScope=row.scope==='user'?{kind:'user'}:{kind:'bot',botId:row.bot_id};
+        if(row.operation==='create' && row.scope==='user') this.proposeSharedMemory(row.bot_id,row.text,id);
+        else if(row.operation==='create')this.memories.create({scope,text:row.text});
+        else if(row.operation==='update' && typeof row.target_id==='string' && typeof row.target_version==='number')this.memories.update({id:row.target_id,scope,version:row.target_version,text:row.text});
+        else throw Error('Invalid memory proposal');
+      }
+      this.db.prepare('UPDATE sensitive_memory_proposals SET state=?,text=NULL WHERE id=? AND state=\'pending\'').run(decision==='confirm'?'confirmed':'denied',id);
+      this.db.exec('COMMIT');return {decision,sharedConfirmationRequired:decision==='confirm' && row.scope==='user' && row.operation==='create'};
+    } catch(error){this.db.exec('ROLLBACK');throw error;}
+  }
   proposeSharedMemory(botId:string,text:string,id:string=randomUUID()) {
     const clean=text.trim();
     if (!clean || clean.length>4000) throw Error('Invalid memory text');
@@ -311,6 +368,12 @@ export class Instance {
     const row=this.db.prepare('SELECT id,state FROM memory_proposals WHERE id=? AND bot_id=?').get(id,botId);
     if (!row || (row.state!=='pending' && row.state!=='confirmed' && row.state!=='cancelled')) return null;
     return {id:String(row.id),state:row.state};
+  }
+  private sensitiveSharedMemoryAllowed(botId:string,id:string,text:string) {
+    const row=this.db.prepare('SELECT * FROM sensitive_memory_proposals WHERE id=? AND bot_id=?').get(id,botId);
+    if(!row)return true;
+    if(row.state!=='confirmed' || row.scope!=='user' || row.operation!=='create' || (row.work_kind!=='command' && row.work_kind!=='task') || typeof row.work_id!=='string' || typeof row.fingerprint!=='string' || row.target_id!==null || row.target_version!==null) return false;
+    return this.toolDefaults().memory && this.botIdentity(botId)?.archived===false && (!this.plugins.isPluginCommand(row.work_id) || this.plugins.currentAuthority(row.work_id)) && this.sensitiveMemoryFingerprint({id,botId,work:{kind:row.work_kind,id:row.work_id},scope:'user',operation:'create',targetId:null,targetVersion:null,text})===row.fingerprint;
   }
 
   get #approvalGrants() { return new ApprovalGrants(this.db); }
@@ -360,9 +423,13 @@ export class Instance {
     return {revision:Number(row.revision),clock:row.clock===1,memory:row.memory===1,web:row.web===1,files:row.files===1};
   }
   setToolDefaults(input:{revision:number;clock:boolean;memory:boolean;web:boolean;files:boolean}) {
-    const result=this.db.prepare('UPDATE tool_defaults SET revision=revision+1,clock=?,memory=?,web=?,files=? WHERE id=1 AND revision=?').run(Number(input.clock),Number(input.memory),Number(input.web),Number(input.files),input.revision);
-    if(!result.changes)throw new BotConflict('Tool defaults changed. Refresh before editing.');
-    return this.toolDefaults();
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const result=this.db.prepare('UPDATE tool_defaults SET revision=revision+1,clock=?,memory=?,web=?,files=? WHERE id=1 AND revision=?').run(Number(input.clock),Number(input.memory),Number(input.web),Number(input.files),input.revision);
+      if(!result.changes)throw new BotConflict('Tool defaults changed. Refresh before editing.');
+      if(!input.memory)this.db.exec("UPDATE sensitive_memory_proposals SET state='denied',text=NULL WHERE state='pending'; UPDATE memory_proposals SET state='cancelled',text=NULL WHERE state='pending' AND id IN (SELECT id FROM sensitive_memory_proposals WHERE state='confirmed')");
+      const saved=this.toolDefaults();this.db.exec('COMMIT');return saved;
+    }catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   approvalSettings(scope: string) {
     const row=this.db.prepare('SELECT mode,clock_enabled FROM approval_settings WHERE scope=?').get(scope);
@@ -828,6 +895,10 @@ export class Instance {
         this.configs.publishFiles(id,files.settings,files.instructions,bot.archived,revision);
         published=true;
         this.db.prepare('UPDATE bot_profiles SET archived=? WHERE bot_id=?').run(archived ? 1 : 0, id);
+        if(archived) {
+          this.db.prepare("UPDATE sensitive_memory_proposals SET state='denied',text=NULL WHERE bot_id=? AND state='pending'").run(id);
+          this.db.prepare("UPDATE memory_proposals SET state='cancelled',text=NULL WHERE bot_id=? AND state='pending' AND id IN (SELECT id FROM sensitive_memory_proposals WHERE state='confirmed')").run(id);
+        }
       }
       const result = this.bot(id);
       try { this.db.exec('COMMIT'); } catch { throw new AgentConfigUncertain('Archive state may have changed. Inspect the agent before retrying.'); }
@@ -1334,6 +1405,7 @@ export class Instance {
         else if (row.state === 'cancelled') reply='That shared memory proposal was cancelled. No changes were made.';
         else if (row.state !== 'pending' || typeof row.text !== 'string') throw Error('Invalid memory proposal');
         else if (proposal.kind === 'cancel') {this.db.prepare("UPDATE memory_proposals SET state='cancelled',text=NULL WHERE id=? AND state='pending'").run(proposal.id); reply='Shared memory proposal cancelled. No memory was saved.';}
+        else if(!this.sensitiveSharedMemoryAllowed(command.botId,proposal.id,row.text)) reply='Memory access or the approved proposal changed. No memory was saved.';
         else {this.memories.create({scope:{kind:'user'},text:row.text}); this.db.prepare("UPDATE memory_proposals SET state='confirmed',text=NULL WHERE id=? AND state='pending'").run(proposal.id);reply='Confirmed and saved to shared user memory. All agents can retrieve it.';}
       }
       if (operation) {

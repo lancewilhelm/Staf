@@ -794,6 +794,15 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
         if (req.method === 'POST' && action === 'availability' && typeof value.botId === 'string' && typeof value.available === 'boolean') { if (!instance.bot(value.botId) || !instance.skills.inspect({id})) return json(404,{error:'Agent or skill not found'}); instance.skills.setBotAvailability({id,botId:value.botId,available:value.available}); return json(200,{available:value.available}); }
         return json(400,{error:'Invalid skill request'});
       }
+      if(req.url==='/api/memory-sensitivity') {
+        if(req.method==='GET')return json(200,instance.memorySensitivity());
+        if(req.method==='POST' && typeof value.revision==='number' && (value.mode==='model' || value.mode==='review-all') && Array.isArray(value.terms) && value.terms.every(term=>typeof term==='string'))return json(200,instance.setMemorySensitivity({revision:value.revision,mode:value.mode,terms:value.terms}));
+        return json(400,{error:'Invalid sensitivity rules'});
+      }
+      const sensitiveList=req.url?.match(/^\/api\/memory-proposals\/([\w-]+)$/);
+      if(req.method==='GET' && sensitiveList?.[1]) {if(!instance.bot(sensitiveList[1]))return json(404,{error:'Agent not found'});res.setHeader('Cache-Control','no-store');return json(200,instance.sensitiveMemoryProposals(sensitiveList[1]));}
+      const sensitiveDecision=req.url?.match(/^\/api\/memory-proposals\/([\w-]+)\/(confirm|deny)$/);
+      if(req.method==='POST' && sensitiveDecision?.[1] && (sensitiveDecision[2]==='confirm'||sensitiveDecision[2]==='deny') && typeof value.fingerprint==='string')return json(200,instance.decideSensitiveMemory(sensitiveDecision[1],value.fingerprint,sensitiveDecision[2]));
       const memoryMatch = req.url?.match(/^\/api\/memories\/(user|bot\/[\w-]+)(?:\/([\w-]+)\/(edit|delete))?$/);
       if (memoryMatch?.[1]) {
         const scope: MemoryScope = memoryMatch[1] === 'user' ? {kind:'user'} : {kind:'bot',botId:memoryMatch[1].slice(4)};
