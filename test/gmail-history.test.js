@@ -65,3 +65,9 @@ test('revoking authority during a scan prevents committing the fetched page', as
     assert.equal(history.status('owner@example.test').cursor,'10');assert.deepEqual(history.arrivals('owner@example.test'),[]);
   } finally {db.close();}
 });
+
+test('all persisted candidates remain reachable through bounded pages',async()=>{
+  const db=new DatabaseSync(':memory:');db.exec(gmailHistorySchema);
+  const transport={profile:async()=>({emailAddress:'owner@example.test',historyId:'10'}),history:async()=>({historyId:'11',messageIds:Array.from({length:105},(_,i)=>'message-'+i)})};
+  try {const history=new GmailHistory(db,transport);await history.connect('owner@example.test');await history.poll('owner@example.test');const first=history.snapshot('owner@example.test');assert.equal(first.arrivals.length,100);const second=history.page('owner@example.test',first.nextBefore);assert.equal(second.arrivals.length,5);assert.equal(second.nextBefore,null);assert.equal(new Set([...first.arrivals,...second.arrivals].map(item=>item.messageId)).size,105);}finally{db.close();}
+});

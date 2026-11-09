@@ -29,11 +29,12 @@ import type { ByteRedactor } from './config.js';
 import { NativeProcesses, nativeProcessSchema } from './native-processes.js';
 import { ApprovalGrants, approvalGrantSchema, type GrantBoundary } from './approval-grants.js';
 import { PluginStore, pluginSchema, slackWorkSchema, type SlackConfig } from './plugins.js';
+import {GmailHistory,gmailHistorySchema,type GmailHistoryTransport} from './gmail-history.js';
 
 const clockAction: Action = { capability:'clock', operation:'read', resource:'utc', effect:'read', limits:{}, risk:'safe' };
 const clockBoundary = { enabledCapabilities:['clock'], actions:[clockAction] };
 const modes: ApprovalMode[] = ['ask-every-time','ask-for-risky-actions','never-ask'];
-export const INSTANCE_SCHEMA_VERSION = 42;
+export const INSTANCE_SCHEMA_VERSION = 43;
 const MAINTENANCE_VERSION = 2147483647;
 
 export const starterSoul = "You are an assistant working for the owner. Be clear and candid. Distinguish observations from assumptions. Follow the owner's role instructions and work within the permissions and task scope granted to you.";
@@ -210,6 +211,7 @@ export class Instance {
     this.db.exec('CREATE INDEX IF NOT EXISTS command_runtime_events_command ON command_runtime_events(command_id,seq)');
     if(version < 40) this.db.exec(pluginSchema);
     if(version < 42) this.db.exec(slackWorkSchema);
+    if(version < 43) this.db.exec(gmailHistorySchema);
     this.plugins = new PluginStore(this.db);
     if(version < 42) this.db.exec("CREATE TABLE IF NOT EXISTS tool_defaults (id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL, clock INTEGER NOT NULL CHECK(clock IN (0,1)), memory INTEGER NOT NULL CHECK(memory IN (0,1)), web INTEGER NOT NULL CHECK(web IN (0,1)), files INTEGER NOT NULL CHECK(files IN (0,1))); INSERT OR IGNORE INTO tool_defaults VALUES (1,1,1,1,1,1)");
     if (!maintenanceToken) this.db.exec(`PRAGMA user_version=${INSTANCE_SCHEMA_VERSION}`);
@@ -243,6 +245,17 @@ export class Instance {
     mkdirSync(directory,{recursive:true,mode:0o700});
     this.db.prepare('INSERT OR IGNORE INTO work_bindings VALUES (?,?,?,?)').run(work.kind,work.id,botId,directory);
   }
+  gmailHistory(transport?:GmailHistoryTransport,assertAuthority:()=>void=()=>{}) {return new GmailHistory(this.db,transport,assertAuthority);}
+  gmailWorkIdentity(work:WorkRef) {
+    if(work.kind!=='command' || this.plugins.isPluginCommand(work.id))return null;
+    const row=this.db.prepare("SELECT c.bot_id,p.profile FROM commands c JOIN command_profiles p ON p.command_id=c.id WHERE c.id=? AND c.state='pending'").get(work.id);
+    if(typeof row?.bot_id!=='string'||typeof row.profile!=='string')return null;
+    const profile=parseCapturedProfile(JSON.parse(row.profile)),bot=this.bot(row.bot_id);
+    if(!profile.model || !bot || bot.archived || bot.provider!==profile.provider || bot.model!==profile.model)return null;
+    return {botId:row.bot_id,provider:profile.provider,model:profile.model};
+  }
+  gmailPrivateCommand(id:string) {return !!this.db.prepare('SELECT 1 FROM gmail_private_commands WHERE command_id=?').get(id);}
+  markGmailPrivate(id:string) {this.db.prepare('INSERT OR IGNORE INTO gmail_private_commands VALUES (?)').run(id);}
   workContext(work:WorkRef, signal:AbortSignal) {
     const binding=this.db.prepare('SELECT bot_id,working_directory FROM work_bindings WHERE kind=? AND work_id=?').get(work.kind,work.id);
     if (typeof binding?.bot_id !== 'string' || typeof binding.working_directory !== 'string' || !isAbsolute(binding.working_directory)) throw Error('Accepted work binding unavailable');
@@ -1187,7 +1200,7 @@ export class Instance {
     try {const next=this.finishTask(id,state,outcome,disclosureId);this.db.exec('COMMIT');return next;}
     catch(error){this.db.exec('ROLLBACK');if(disclosureId)this.interruptDisclosure(disclosureId);throw error;}
   }
-  private taskContext(botId:string) { return this.db.prepare('SELECT m.id,m.role,m.content,EXISTS(SELECT 1 FROM task_notices n WHERE n.message_id=m.id) AS isNotice FROM messages m WHERE m.bot_id=? ORDER BY m.seq').all(botId); }
+  private taskContext(botId:string) { return this.db.prepare('SELECT m.id,m.role,m.content,EXISTS(SELECT 1 FROM task_notices n WHERE n.message_id=m.id) AS isNotice FROM messages m WHERE m.bot_id=? AND NOT EXISTS(SELECT 1 FROM gmail_private_messages p WHERE p.message_id=m.id) ORDER BY m.seq').all(botId); }
   messages(botId: string) { return this.db.prepare('SELECT id, role, content FROM messages WHERE bot_id=? ORDER BY seq').all(botId); }
   hasBot(botId:string) {return !!this.botIdentity(botId);}
   command(id: string) { const row=this.db.prepare('SELECT c.id,c.bot_id AS botId,c.content,c.state,c.error,p.profile AS capturedProfile FROM commands c LEFT JOIN command_profiles p ON p.command_id=c.id WHERE c.id=?').get(id);if(!row)return undefined;const {capturedProfile,...command}=row;return {id:command.id,botId:command.botId,content:command.content,state:command.state,error:command.error,toolMode:parseToolModeFromProfile(capturedProfile)}; }
@@ -1211,7 +1224,8 @@ export class Instance {
     try {
       const command=this.command(id),progress=this.responseProgress(id);
       if(command?.state==='pending' && this.responseStopping(id) && typeof command.botId==='string') {
-        this.db.prepare("INSERT INTO messages VALUES (?, ?, 'assistant_stopped', ?, (SELECT COALESCE(MAX(seq),0)+1 FROM messages WHERE bot_id=?))").run(randomUUID(),command.botId,String(progress?.text ?? ''),command.botId);
+        const messageId=randomUUID();this.db.prepare("INSERT INTO messages VALUES (?, ?, 'assistant_stopped', ?, (SELECT COALESCE(MAX(seq),0)+1 FROM messages WHERE bot_id=?))").run(messageId,command.botId,String(progress?.text ?? ''),command.botId);
+        if(this.gmailPrivateCommand(id))this.db.prepare('INSERT INTO gmail_private_messages VALUES (?)').run(messageId);
         this.db.prepare("UPDATE commands SET state='stopped',error=NULL WHERE id=? AND state='pending'").run(id);
       }
       this.db.exec('COMMIT');
@@ -1307,7 +1321,7 @@ export class Instance {
       session = parsed;
     } else {
       const messages: Message[] = [];
-      for (const m of this.db.prepare('SELECT id,role,content FROM messages WHERE bot_id=? AND id NOT IN (SELECT message_id FROM task_notices) ORDER BY seq').all(command.botId).slice(0, -1)) {
+      for (const m of this.db.prepare('SELECT id,role,content FROM messages WHERE bot_id=? AND id NOT IN (SELECT message_id FROM task_notices) AND id NOT IN (SELECT message_id FROM gmail_private_messages) ORDER BY seq').all(command.botId).slice(0, -1)) {
         if (m.role === 'user' && typeof m.content === 'string') { if (messages.at(-1)?.role === 'user') messages.pop(); messages.push({role:'user',content:m.content}); }
         else if (m.role === 'assistant' && typeof m.content === 'string' && messages.at(-1)?.role === 'user') messages.push({role:'assistant',content:m.content});
       }
@@ -1363,11 +1377,20 @@ export class Instance {
     try {
       const command = this.command(id);
       if (!command || command.state !== 'pending' || this.responseStopping(id) || typeof command.botId !== 'string') throw Error('Command is not pending');
-      this.db.prepare('INSERT INTO sessions VALUES (?,?) ON CONFLICT(bot_id) DO UPDATE SET session=excluded.session').run(command.botId,JSON.stringify(session));
+      const privateCommand=this.gmailPrivateCommand(id);
+      let stored=session;
+      if(success && privateCommand) {
+        const turns=session.turns??[],turn=turns.at(-1);if(!turn || !Number.isSafeInteger(turn.start))throw Error('Gmail turn boundary unavailable');
+        const user=session.messages[turn.start];if(!user || user.role!=='user')throw Error('Gmail user message unavailable');
+        const messages=[...session.messages.slice(0,turn.start),user,{role:'assistant' as const,content:'A private Gmail result was shown to the owner and is not replayed.'}];
+        stored={...session,messages,turns:[...turns.slice(0,-1),{...turn,end:messages.length}]};
+      }
+      this.db.prepare('INSERT INTO sessions VALUES (?,?) ON CONFLICT(bot_id) DO UPDATE SET session=excluded.session').run(command.botId,JSON.stringify(stored));
       if (success) {
         const answer=session.messages.at(-1);
         if (!answer || answer.role !== 'assistant' || typeof answer.content !== 'string') throw Error('Missing assistant answer');
-        this.db.prepare("INSERT INTO messages VALUES (?, ?, 'assistant', ?, (SELECT COALESCE(MAX(seq),0)+1 FROM messages WHERE bot_id=?))").run(randomUUID(),command.botId,answer.content,command.botId);
+        const messageId=randomUUID();this.db.prepare("INSERT INTO messages VALUES (?, ?, 'assistant', ?, (SELECT COALESCE(MAX(seq),0)+1 FROM messages WHERE bot_id=?))").run(messageId,command.botId,answer.content,command.botId);
+        if(privateCommand)this.db.prepare('INSERT INTO gmail_private_messages VALUES (?)').run(messageId);
         this.updateResponse(id,answer.content);
         this.db.prepare("UPDATE commands SET state='completed' WHERE id=?").run(id);
         this.db.prepare('UPDATE task_notices SET delivered=1 WHERE message_id IN (SELECT message_id FROM command_notices WHERE command_id=?)').run(id);

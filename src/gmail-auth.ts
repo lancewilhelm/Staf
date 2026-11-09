@@ -17,7 +17,7 @@ async function responseJson(response:Response):Promise<unknown> {
 export class GmailAuth {
  private attempt:Attempt|undefined;
  private result='Not connected';
- constructor(private readonly request:typeof fetch,private readonly authorized:(token:string)=>boolean,private readonly revision:()=>number|null,private readonly commit:(credential:GmailCredential)=>void) {}
+ constructor(private readonly request:typeof fetch,private readonly authorized:(token:string)=>boolean,private readonly revision:()=>number|null,private readonly commit:(credential:GmailCredential,historyId:string)=>void) {}
  status(){return this.attempt ? (this.attempt.phase==='waiting'?'Waiting for Google authorization':'Checking Gmail account') : this.result;}
  cancel(){const a=this.attempt;if(a){if(a.timer)clearTimeout(a.timer);a.controller.abort();this.attempt=undefined;this.result='Authorization cancelled';}}
  reset(){this.cancel();this.result='Not connected';}
@@ -45,17 +45,20 @@ export class GmailAuth {
    this.assertAttempt(a);const profile=await this.profile(tokens.access_token,a.controller.signal);
    if(profile.emailAddress.toLowerCase()!==a.input.email)throw Error('Google account did not match');
    this.assertAttempt(a);
-   this.commit({email:a.input.email,clientId:a.input.clientId,clientSecret:a.input.clientSecret,refreshToken:tokens.refresh_token});if(a.timer)clearTimeout(a.timer);this.attempt=undefined;this.result='Connected';return true;
+   this.commit({email:a.input.email,clientId:a.input.clientId,clientSecret:a.input.clientSecret,refreshToken:tokens.refresh_token},profile.historyId);if(a.timer)clearTimeout(a.timer);this.attempt=undefined;this.result='Connected';return true;
   } catch {if(this.attempt===a){if(a.timer)clearTimeout(a.timer);this.attempt=undefined;this.result='Connection failed. Check the account, consent and Google client settings.';}return false;}
  }
  async profile(accessToken:string,signal?:AbortSignal) {
   const response=await this.request('https://gmail.googleapis.com/gmail/v1/users/me/profile',{headers:{Authorization:'Bearer '+accessToken},redirect:'error',signal:signal?AbortSignal.any([signal,AbortSignal.timeout(15000)]):AbortSignal.timeout(15000)});
   if(!response.ok)throw Error('Gmail account check failed');return profileSchema.parse(await responseJson(response));
  }
- async check(credential:GmailCredential,signal?:AbortSignal) {
+ async refresh(credential:GmailCredential,signal?:AbortSignal) {
   const body=new URLSearchParams({client_id:credential.clientId,client_secret:credential.clientSecret,refresh_token:credential.refreshToken,grant_type:'refresh_token'});
   const response=await this.request('https://oauth2.googleapis.com/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body.toString(),redirect:'error',signal:signal?AbortSignal.any([signal,AbortSignal.timeout(15000)]):AbortSignal.timeout(15000)});
   if(!response.ok)throw Error('Gmail authorization unavailable');const tokens=tokenResponse.parse(await responseJson(response));if(tokens.token_type.toLowerCase()!=='bearer')throw Error('Gmail authorization unavailable');
-  signal?.throwIfAborted();const profile=await this.profile(tokens.access_token,signal);if(profile.emailAddress.toLowerCase()!==credential.email)throw Error('Gmail account changed');
+  signal?.throwIfAborted();return tokens.access_token;
+ }
+ async check(credential:GmailCredential,signal?:AbortSignal) {
+  const token=await this.refresh(credential,signal);signal?.throwIfAborted();const profile=await this.profile(token,signal);if(profile.emailAddress.toLowerCase()!==credential.email)throw Error('Gmail account changed');return profile;
  }
 }

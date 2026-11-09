@@ -464,10 +464,18 @@ client starts an in-memory desktop OAuth attempt with PKCE and a loopback
 callback; the service exchanges the code, verifies the Gmail profile identity,
 and saves the client secret and refresh token in a separate host credential file.
 The service fences an in-flight exchange against cancellation, expiry, client
-revocation and connection revision changes. Connection and access controls do
-not yet offer any Gmail action or background event. The model-provider disclosure
-boundary remains unresolved. Synthetic Google HTTP and browser fixtures cover
-the management journey; real Google behavior remains unverified.
+revocation and connection revision changes. The connection-time history ID and
+candidate message IDs are stored in SQLite; complete pages and the next cursor
+commit atomically. A 404 retains an uncertain gap until the owner explicitly
+rebaselines. Gmail's current labels do not establish historical inbox membership,
+so all message-added records are exposed as candidates with unknown membership.
+The monitor does not send mail to a model. Separate per-agent permission binds
+chat read/search to an explicitly approved provider and model, with current
+connection revision and access rechecked at dispatch and result release. Gmail
+turns are excluded from subsequent model replay and captured task context; other
+tools are fenced for the rest of that turn. The owner's general sensitive-email
+and model-provider policy remains unresolved. Synthetic Google HTTP, model and
+browser fixtures cover these paths; real Google behavior remains unverified.
 
 ## Native home-network transport
 

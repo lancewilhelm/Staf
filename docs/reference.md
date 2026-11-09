@@ -581,13 +581,21 @@ captured by the service, not supplied as tool arguments. See [Slack setup](usage
 Gmail uses `POST /api/plugins/gmail/start` with `email`, `clientId`, and
 `clientSecret`; it returns an authorization URL, not a credential. Google
 returns to the loopback `/gmail/oauth/callback` with the one-time state and code.
-The paired owner can call `check`, `enable`, `disable`, `disconnect`, or
+The paired owner can call `check`, `enable`, `disable`, `disconnect`, `poll`, or
 `delete-config` with an empty object, and `access` with `botId` and `enabled`.
+`model-access` takes `botId`, `provider`, `model`, and `enabled`; enabling it
+requires an exact match to the current agent profile and existing agent access.
+`read` takes a `messageId` for owner inspection. `rebaseline` requires
+`{"confirm":true}` and retains a record of the unknown interval.
 The Gmail entry in `GET /api/plugins` includes the account, connection state,
-agent access IDs, and status; it never returns the client secret or refresh token.
+agent access IDs, model access, monitoring state, recent candidate IDs and gaps;
+it never returns the client secret or refresh token. Older candidates are paged
+through `GET /api/plugins/gmail/arrivals?before=CURSOR` using `nextBefore`.
 There is one Gmail account in this implementation. The shared database keys
 connections and access by plugin and account. The local credential file is
-separate from SQLite. Gmail actions, search, and monitoring are not available.
+separate from SQLite. `gmail_search` and `gmail_read` are journaled read actions
+for explicitly permitted Direct or Hybrid main chat; they are not available to
+guest code, tasks, or Slack-originated work.
 See [Gmail setup](usage.md#gmail-plugin) for OAuth requirements and limitations.
 
 ## Native home-network gateway

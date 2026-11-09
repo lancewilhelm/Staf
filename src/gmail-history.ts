@@ -4,7 +4,11 @@ import {z} from 'zod';
 // The cursor and all arrivals from a complete history scan are committed together.
 export const gmailHistorySchema = `
 CREATE TABLE IF NOT EXISTS gmail_history (account_id TEXT PRIMARY KEY, cursor TEXT NOT NULL, state TEXT NOT NULL, detail TEXT);
-CREATE TABLE IF NOT EXISTS gmail_arrivals (account_id TEXT NOT NULL, message_id TEXT NOT NULL, PRIMARY KEY(account_id,message_id));`;
+CREATE TABLE IF NOT EXISTS gmail_arrivals (account_id TEXT NOT NULL, message_id TEXT NOT NULL, PRIMARY KEY(account_id,message_id));
+CREATE TABLE IF NOT EXISTS gmail_history_gaps (account_id TEXT NOT NULL, previous_cursor TEXT, new_cursor TEXT NOT NULL, reason TEXT NOT NULL, recorded_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS gmail_model_access (account_id TEXT NOT NULL, bot_id TEXT NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL, PRIMARY KEY(account_id,bot_id));
+CREATE TABLE IF NOT EXISTS gmail_private_commands (command_id TEXT PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS gmail_private_messages (message_id TEXT PRIMARY KEY);`;
 
 const profileSchema=z.object({emailAddress:z.email(),historyId:z.string().regex(/^\d+$/)});
 const pageSchema=z.object({historyId:z.string().regex(/^\d+$/),nextPageToken:z.string().min(1).optional(),messageIds:z.array(z.string().min(1).max(200)).max(10000)});
@@ -18,7 +22,7 @@ export class GmailHistoryExpired extends Error {
 }
 
 export class GmailHistory {
-  constructor(private readonly db:DatabaseSync,private readonly transport:GmailHistoryTransport,private readonly assertAuthority:()=>void=()=>{}) {}
+  constructor(private readonly db:DatabaseSync,private readonly transport?:GmailHistoryTransport,private readonly assertAuthority:()=>void=()=>{}) {}
 
   status(accountId:string) {
     const row=this.db.prepare('SELECT cursor,state,detail FROM gmail_history WHERE account_id=?').get(accountId);
@@ -27,10 +31,35 @@ export class GmailHistory {
   }
 
   arrivals(accountId:string) {
-    return this.db.prepare('SELECT message_id AS messageId FROM gmail_arrivals WHERE account_id=? ORDER BY rowid').all(accountId).map(row=>({messageId:String(row.messageId)}));
+    return this.db.prepare('SELECT message_id AS messageId FROM gmail_arrivals WHERE account_id=? ORDER BY rowid DESC LIMIT 100').all(accountId).reverse().map(row=>({messageId:String(row.messageId),inbox:'unknown' as const}));
+  }
+
+  page(accountId:string,before?:number) {
+    if(before!==undefined && (!Number.isSafeInteger(before)||before<1))throw Error('Invalid Gmail arrival cursor');
+    const rows=this.db.prepare('SELECT rowid AS seq,message_id AS messageId FROM gmail_arrivals WHERE account_id=? AND (? IS NULL OR rowid<?) ORDER BY rowid DESC LIMIT 101').all(accountId,before??null,before??null);
+    const selected=rows.slice(0,100);
+    return {arrivals:selected.map(row=>({messageId:String(row.messageId),inbox:'unknown' as const})),nextBefore:rows.length>100?Number(selected.at(-1)?.seq):null};
+  }
+
+  snapshot(accountId:string) {
+    const exists=this.db.prepare('SELECT 1 FROM gmail_history WHERE account_id=?').get(accountId);
+    const gaps=this.db.prepare('SELECT previous_cursor AS previousCursor,new_cursor AS newCursor,reason,recorded_at AS recordedAt FROM gmail_history_gaps WHERE account_id=? ORDER BY rowid DESC LIMIT 20').all(accountId);
+    return {monitor:exists?this.status(accountId):null,...this.page(accountId),gaps};
+  }
+
+  rebaseline(accountId:string,cursor:string) {
+    if(!/^\d+$/.test(cursor))throw Error('Invalid Gmail history ID');this.assertAuthority();
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const old=this.db.prepare('SELECT cursor FROM gmail_history WHERE account_id=?').get(accountId);
+      this.db.prepare('INSERT INTO gmail_history_gaps VALUES (?,?,?,?,?)').run(accountId,typeof old?.cursor==='string'?old.cursor:null,cursor,old?'History expired or monitoring restarted':'Monitoring began after the account was connected',Date.now());
+      this.db.prepare("INSERT INTO gmail_history VALUES (?,?,'ready',NULL) ON CONFLICT(account_id) DO UPDATE SET cursor=excluded.cursor,state='ready',detail=NULL").run(accountId,cursor);
+      this.db.exec('COMMIT');
+    }catch(error){this.db.exec('ROLLBACK');throw error;}
   }
 
   async connect(accountId:string) {
+    if(!this.transport)throw Error('Gmail transport unavailable');
     this.assertAuthority();
     const profile=profileSchema.parse(await this.transport.profile());
     this.assertAuthority();
@@ -40,6 +69,7 @@ export class GmailHistory {
   }
 
   async poll(accountId:string) {
+    if(!this.transport)throw Error('Gmail transport unavailable');
     const {cursor}=this.status(accountId),messages=new Set<string>(),tokens=new Set<string>();
     let pageToken:string|undefined,latest=cursor;
     try {
@@ -65,6 +95,7 @@ export class GmailHistory {
         this.db.exec('COMMIT');
       } catch(error){this.db.exec('ROLLBACK');throw error;}
     } catch(error) {
+      this.assertAuthority();
       const expired=error instanceof GmailHistoryExpired;
       this.db.prepare('UPDATE gmail_history SET state=?,detail=? WHERE account_id=? AND cursor=?').run(expired?'uncertain':'failed',expired?'History expired; arrivals during the gap are unknown':'History scan failed; retry is safe',accountId,cursor);
       throw error;

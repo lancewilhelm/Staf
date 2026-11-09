@@ -30,6 +30,7 @@ interface TurnOptions {
   redact?: (text: string) => string;
   memory?: (ownerInput:string) => string[];
   skills?: SkillAccess | SkillTracker;
+  beforeProvider?:()=>void;
   task?: { drain: (session:Session) => string[]; hasPending: () => boolean; finish: (session:Session) => boolean | Promise<boolean>; clarify: (question:string) => Promise<string>; delegate?: (request:{callId:string;helperId:string;objective:string;context:string}) => Promise<string>; discover?: (query:string) => string; answerBot?: (request:{callId:string;assignmentId:string;questionId:string;answer:string}) => Promise<string> };
 }
 
@@ -39,7 +40,7 @@ export const tools: ToolDefinition[] = [{ type: 'function', function: {
 } }];
 
 // Transport-independent loop: providers see messages; clients receive persisted events.
-export async function runTurn({ session, store, provider, text, emit = () => {}, responseProgress, maxSteps = 4, clock = () => new Date().toISOString(), authorizeClock, actions, clockUnavailable, redact = text => text, signal, preserveObservedAfterAbort = false, task, memory, requestText, skills }: TurnOptions): Promise<void> {
+export async function runTurn({ session, store, provider, text, emit = () => {}, responseProgress, maxSteps = 4, clock = () => new Date().toISOString(), authorizeClock, actions, clockUnavailable, redact = text => text, signal, preserveObservedAfterAbort = false, task, memory, requestText, skills, beforeProvider }: TurnOptions): Promise<void> {
   text = redact(text);
   if (!text.trim()) throw new Error('Message cannot be empty');
   const history = redactValue(session, redact);
@@ -50,6 +51,7 @@ export async function runTurn({ session, store, provider, text, emit = () => {},
   const usage: UsageObservation[] = [];
   const attempt = randomUUID();
   let started: number | undefined;
+  let gmailPrivate=false;
   let checkpoint = history as Session;
   const tracker=skills && ('ensure' in skills ? skills : skillTracker(skills,redact));
   const ensureSkills = () => {try{tracker?.ensure();}catch(error){actions?.close('selected skill unavailable');throw error;}};
@@ -68,6 +70,7 @@ export async function runTurn({ session, store, provider, text, emit = () => {},
     for (let step = 0; step < maxSteps; step++) {
       signal?.throwIfAborted();
       ensureSkills();
+      beforeProvider?.();
       const current:Session={...history,...(task ? {provider:redact(provider.name)} : {}),messages:structuredClone(messages),usage:[...(history.usage || []),...usage],events:[...history.events,...events]};
       const directions=task?.drain(current) ?? [];
       messages=appendTaskInputs(messages,directions);
@@ -85,6 +88,7 @@ export async function runTurn({ session, store, provider, text, emit = () => {},
         availableTools.push({type:'function',function:{name:'code_mode',description:`Run JavaScript using eligible capabilities. Catalog (name, description and input schema): ${JSON.stringify(catalog)}. Call capabilities.<name>(input, intent), use staf.emit(value), and return a JSON value. Intent is optional: {kind:new}, {kind:resume,actionId}, or {kind:repeat,challenge}. Child calls return {receipt, actionId, value}.`,parameters:{type:'object',properties:{source:{type:'string'}},required:['source'],additionalProperties:false}}});
       }
       if(actions) {const index=availableTools.findIndex(tool=>tool.function.name==='select_skill');if(index>=0)availableTools.push(...availableTools.splice(index,1));}
+      if(gmailPrivate)for(let index=availableTools.length-1;index>=0;index--)if(!['gmail_search','gmail_read'].includes(availableTools[index]!.function.name))availableTools.splice(index,1);
       if (individualTools && !actions && task?.answerBot && provider.capabilities?.toolCalls !== false) availableTools.push({type:'function',function:{name:'answer_bot',description:'Answer an actual helper question using its assignment and question IDs.',parameters:{type:'object',properties:{assignmentId:{type:'string'},questionId:{type:'string'},answer:{type:'string'}},required:['assignmentId','questionId','answer'],additionalProperties:false}}});
       if (individualTools && !actions && task?.discover && provider.capabilities?.toolCalls !== false) availableTools.push({type:'function',function:{name:'discover_bots',description:'Find potential helpers by their public names and descriptions.',parameters:{type:'object',properties:{query:{type:'string'}},required:['query'],additionalProperties:false}}});
       if (individualTools && !actions && task?.delegate && provider.capabilities?.toolCalls !== false) availableTools.push({type:'function',function:{name:'request_bot_help',description:'Request help from a bot by its exact ID. Include only the objective and context needed for this assignment.',parameters:{type:'object',properties:{helperId:{type:'string'},objective:{type:'string'},context:{type:'string'}},required:['helperId','objective','context'],additionalProperties:false}}});
@@ -150,6 +154,7 @@ export async function runTurn({ session, store, provider, text, emit = () => {},
         signal?.throwIfAborted();
         ensureSkills();
         const name = call.function.name;
+        if(gmailPrivate && name!=='gmail_search' && name!=='gmail_read') {const content='Tool not executed after private Gmail data was read in this turn.';report({type:'tool_start',id:call.id,name,arguments:call.function.arguments});messages.push({role:'tool',tool_call_id:call.id,content});report({type:'tool_result',id:call.id,name,success:false,content});continue;}
         if(!task && name==='start_background_task')deferredBackground=true;
         if (task?.hasPending()) {
           const content='Tool not executed because owner input is pending.';
@@ -205,6 +210,7 @@ export async function runTurn({ session, store, provider, text, emit = () => {},
             try {result=await actions.invoke({source:{kind:'provider',responseId:`${attempt}:${step}`,callId:call.id},name,input:actionInput,intent});} catch(error) {const closed=actions.closedReason();if(closed && !['search_web','read_web','run_scratch_shell'].includes(name))fatalAction='Action admission closed: '+closed;throw error;}
             if(result.kind==='blocked' && result.reason!=='Action denied' && actions.closedReason() && !['search_web','read_web','run_scratch_shell'].includes(name)) {fatalAction=name==='clock' && result.reason==='Action authorization failed' ? (clockUnavailable?.() ?? result.reason) : result.reason;throw Error(fatalAction);}
             if(result.kind!=='completed') success=false;
+            if(result.kind==='completed' && (name==='gmail_search' || name==='gmail_read'))gmailPrivate=true;
             const safeResult=result.kind==='completed' ? redactValue(result.value,redact) : redactValue(result,redact);
             content=typeof safeResult==='string' ? safeResult : JSON.stringify(safeResult);
             if(name==='select_skill' && result.kind==='completed') skillEvidence=extractSkillEvidence(content);

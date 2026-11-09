@@ -779,11 +779,12 @@ The pinned node-pty 1.2.0-beta.17 dependency ships native bindings; source insta
 ## Gmail plugin
 
 Gmail is optional and starts disconnected. One account can be connected through
-**Settings → Plugins → Gmail**. This slice only manages the connection and
-per-agent access settings. It does not search or read messages, monitor the
-inbox, send mail, or make Gmail tools available to agents. The owner's boundary
-for sending private email to a model provider remains unresolved; connecting
-does not authorize that disclosure.
+**Settings → Plugins → Gmail**. The service records new message candidates and
+lets a paired owner inspect them. An agent can search and read mail in chat only
+after both agent access and a separate, explicit model disclosure decision.
+Connecting Gmail alone does not authorize sending email to a model. Sending mail,
+changing mailbox state, automatic sensitivity classification and Slack updates
+are not implemented.
 
 To prepare an owner-operated connection:
 
@@ -791,8 +792,8 @@ To prepare an owner-operated connection:
    OAuth consent screen. Create an OAuth client of type **Desktop app** and
    obtain its client ID and client secret. If the app is in external Testing
    mode, add the Google account as a test user. The connection requests only
-   `https://www.googleapis.com/auth/gmail.readonly`, a restricted scope intended
-   for the later read/search feature. Google's [scope documentation](https://developers.google.com/workspace/gmail/api/auth/scopes)
+   `https://www.googleapis.com/auth/gmail.readonly`, a restricted scope used
+   for read/search and history. Google's [scope documentation](https://developers.google.com/workspace/gmail/api/auth/scopes)
    and [restricted-scope verification guidance](https://developers.google.com/identity/protocols/oauth2/production-readiness/restricted-scope-verification)
    explain applicable verification and exceptions. Do not assume that a
    particular personal or organizational configuration qualifies.
@@ -807,11 +808,47 @@ To prepare an owner-operated connection:
    the local Staf callback. Return to Settings and refresh Gmail status. Staf
    checks that the Google profile email matches the address entered; the
    connection starts disabled and agent access starts off.
-4. Select the agents that may use this connection in future and choose
-   **Enable**. Enabling and **Check Gmail connection** refresh the Google token
-   and check the profile. A successful check confirms that exchange and identity
-   check only; it does not verify mail search or monitoring. After a restart,
-   status is **Not checked** until the next check.
+4. Choose **Enable** to start monitoring. To let an agent read mail, allow its
+   access and separately confirm **Allow Gmail to** the displayed provider and
+   model. That decision allows message text and search results to be sent to
+   that provider during this agent's chat. It does not apply to another provider
+   or model. Revoke it independently in Settings. Enabling and **Check Gmail
+   connection** refresh the token and check the profile. After a restart,
+   connection status is **Not checked** until the next check or successful poll.
+
+Staf captures the Gmail history ID when the account is first connected, without
+reporting existing mail. While enabled, it polls approximately every 30 seconds
+and atomically stores new message IDs and the history cursor. The same message ID
+is recorded once across retries and restarts. Settings shows candidates and lets
+the paired owner inspect them without a model call. Candidates include all Gmail
+`messageAdded` events, not just inbox mail: Google history does not establish
+historical inbox membership from the current labels, so Staf labels that fact
+unknown. Sent or draft mail may appear. It does not automatically classify or
+forward any candidate. Google's [history reference](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.history/list)
+and [release notes](https://developers.google.com/workspace/gmail/release-notes)
+describe the available records and current labels.
+
+If Gmail reports that the saved history ID expired, Settings reports an unknown
+interval and stops automatic polling. **Start monitoring from now** records the
+gap and establishes a new baseline only after confirmation; it cannot reconstruct
+missing arrivals. Accounts connected by an older Staf version have no baseline:
+they require that same explicit step and record the earlier interval as unknown.
+Disable pauses polling without deleting the cursor or candidates. Gmail's history
+can expire during a long outage or while disabled.
+
+In Direct or Hybrid main chat, an agent with both permissions can call
+`gmail_search` and `gmail_read`. Search returns at most 20 IDs and signals when
+more exist; narrow the query to find others. Read returns bounded plain text,
+headers and a snippet; HTML and attachments are not included. Gmail content is
+untrusted data, not instructions. Read fails rather than truncating a Gmail API
+response over 2 MiB, and displayed plain text is limited to 16,000 characters.
+Gmail actions are unavailable in Code Mode,
+background tasks and Slack-originated chat. After a Gmail result in a turn,
+other tools are unavailable for the rest of that turn. The owner's visible chat
+and activity can contain the email and should be protected like the mailbox.
+The private Gmail turn is omitted from later model replay and from captured task
+context; an agent must search again to use it in a later turn. This cannot recall
+content already sent to the explicitly allowed provider.
 
 Disable retains credentials and access settings. Disconnect disables the plugin
 and removes its local credentials, but retains account configuration and agent
@@ -825,9 +862,9 @@ External apps in Google Testing mode with this scope generally receive refresh
 tokens that expire after seven days; Google can also revoke tokens for other
 reasons. See Google's [OAuth token expiration guidance](https://developers.google.com/identity/protocols/oauth2#expiration).
 
-The OAuth and plugin-management journey is covered by synthetic HTTP and browser
-fixtures. Real Google sign-in, token refresh, and account behavior have not been
-tested. No live account is needed to run the tests.
+OAuth, monitoring and read/search are covered by synthetic HTTP, controlled model
+and browser fixtures. Real Google sign-in, token refresh, mail, history delivery,
+and model behavior have not been tested. No live account is needed for tests.
 
 ## Slack plugin
 

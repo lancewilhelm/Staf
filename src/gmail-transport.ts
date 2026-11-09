@@ -17,11 +17,11 @@ async function boundedJson(response:Response):Promise<unknown> {
 }
 
 /** The caller owns OAuth, credential storage, and authorization at each request. */
-export function gmailHistoryTransport({accessToken,request=fetch}:{accessToken:()=>Promise<string>;request?:typeof fetch}):GmailHistoryTransport {
+export function gmailHistoryTransport({accessToken,request=fetch,signal,assertAuthority=()=>{}}:{accessToken:()=>Promise<string>;request?:typeof fetch;signal?:AbortSignal;assertAuthority?:()=>void}):GmailHistoryTransport {
   async function get(url:URL,history:boolean):Promise<unknown> {
-    const token=await accessToken();
+    assertAuthority();const token=await accessToken();assertAuthority();signal?.throwIfAborted();
     if(!token || /\s/.test(token))throw Error('Gmail credentials unavailable');
-    const response=await request(url,{headers:{Authorization:`Bearer ${token}`},signal:AbortSignal.timeout(15000),redirect:'error'});
+    const response=await request(url,{headers:{Authorization:`Bearer ${token}`},signal:signal?AbortSignal.any([signal,AbortSignal.timeout(15000)]):AbortSignal.timeout(15000),redirect:'error'});
     if(history && response.status===404)throw new GmailHistoryExpired();
     if(!response.ok)throw Error(`Gmail request failed (HTTP ${response.status})`);
     return boundedJson(response);

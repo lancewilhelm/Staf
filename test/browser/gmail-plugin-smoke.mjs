@@ -35,6 +35,17 @@ try {
  await until(()=>evaluate("document.querySelector('[aria-label=\"Gmail plugin\"] input[type=checkbox]').checked && [...document.querySelectorAll('[aria-label=\"Gmail plugin\"] button')].some(b=>b.textContent.trim()==='Enable'&&!b.disabled)"),'agent access');
  await evaluate("[...document.querySelectorAll('[aria-label=\"Gmail plugin\"] button')].find(b=>b.textContent.trim()==='Enable').click()");
  await until(()=>evaluate("document.querySelector('[aria-label=\"Gmail plugin\"] .badge').textContent.trim()==='Enabled' && [...document.querySelectorAll('[aria-label=\"Gmail plugin\"] button')].some(b=>b.textContent.trim()==='Disable'&&!b.disabled)"),'enabled');
+ await evaluate("[...document.querySelectorAll('[aria-label=\"Gmail plugin\"] button')].find(b=>b.textContent.trim()==='Check for new candidates').click()");
+ await until(()=>evaluate("document.querySelector('[aria-label=\"Gmail arrivals\"]').innerText.includes('candidate-1')"),'candidate visible');
+ assert.equal(await evaluate("document.querySelector('[aria-label=\"Gmail arrivals\"]').innerText.includes('inbox membership unknown')"),true);
+ await until(()=>evaluate("[...document.querySelectorAll('[aria-label=\"Gmail arrivals\"] button')].some(b=>b.textContent.trim()==='Inspect'&&!b.disabled)"),'inspection available');
+ await evaluate("[...document.querySelectorAll('[aria-label=\"Gmail arrivals\"] button')].find(b=>b.textContent.trim()==='Inspect').click()");
+ await until(()=>evaluate("document.querySelector('[aria-label=\"Gmail arrivals\"]').innerText.includes('Browser private fixture')"),'owner inspection');
+ await until(()=>evaluate("[...document.querySelectorAll('[aria-label=\"Gmail plugin\"] button')].some(b=>b.textContent.trim()==='Allow Gmail to live / fixture'&&!b.disabled)"),'model choice available');
+ await evaluate("[...document.querySelectorAll('[aria-label=\"Gmail plugin\"] button')].find(b=>b.textContent.trim()==='Allow Gmail to live / fixture').click()");
+ await until(()=>evaluate("document.body.innerText.includes('Allow Gmail data to this model?')"),'model disclosure');
+ await evaluate("[...document.querySelectorAll('dialog button')].find(b=>b.textContent.trim()==='Allow Gmail data').click()");
+ await until(()=>evaluate("[...document.querySelectorAll('[aria-label=\"Gmail plugin\"] button')].some(b=>b.textContent.trim()==='Revoke Gmail model access'&&!b.disabled)"),'model access saved');
  await evaluate("[...document.querySelectorAll('[aria-label=\"Gmail plugin\"] button')].find(b=>b.textContent.trim()==='Disable').click()");
  await until(()=>evaluate("document.querySelector('[aria-label=\"Gmail plugin\"] .badge').textContent.trim()==='Disabled' && [...document.querySelectorAll('[aria-label=\"Gmail plugin\"] button')].some(b=>b.textContent.trim()==='Disconnect Gmail'&&!b.disabled)"),'disabled');
  await evaluate("[...document.querySelectorAll('[aria-label=\"Gmail plugin\"] button')].find(b=>b.textContent.trim()==='Disconnect Gmail').click()");
