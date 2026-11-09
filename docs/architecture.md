@@ -491,9 +491,7 @@ a non-sensitive summary or a fixed generic private question. A Slack thread ID
 binds an affirmative owner response to that candidate; uncertain sends are never
 automatically repeated. Authority is checked again at evaluation and delivery.
 A durable failure state deduplicates generic alerts while individual history
-scans remain recorded. Monitoring deliberately skips automatic memory recall;
-its model classification can be wrong, and Gmail history does not prove inbox
-membership. Synthetic Google, Slack and model fixtures cover these paths; live
+scans remain recorded. An explicit memory-provider opt-in allows retrieval of active memories from the bound agent and user scopes; pending proposals and other agents’ private memory are excluded. Live memory availability and selected versions are checked around provider calls, and any recalled memory forces private clarification before Slack disclosure. Non-sensitive less-urgent summaries are atomically batched for interval-based delivery; an uncertain batch remains inspectable and requires an explicit exact-text owner decision. Bound corrections are retained per item and keyed sender, without storing the sender in the feedback index. Model classification can be wrong, and Gmail history does not prove inbox membership. Synthetic Google, Slack and model fixtures cover these paths; live
 behavior remains unverified.
 
 ## Native home-network transport

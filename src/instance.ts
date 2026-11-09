@@ -35,7 +35,7 @@ import {InboxMonitorStore,inboxMonitorSchema} from './inbox-monitor.js';
 const clockAction: Action = { capability:'clock', operation:'read', resource:'utc', effect:'read', limits:{}, risk:'safe' };
 const clockBoundary = { enabledCapabilities:['clock'], actions:[clockAction] };
 const modes: ApprovalMode[] = ['ask-every-time','ask-for-risky-actions','never-ask'];
-export const INSTANCE_SCHEMA_VERSION = 47;
+export const INSTANCE_SCHEMA_VERSION = 48;
 const MAINTENANCE_VERSION = 2147483647;
 
 export const starterSoul = "You are an assistant working for the owner. Be clear and candid. Distinguish observations from assumptions. Follow the owner's role instructions and work within the permissions and task scope granted to you.";
@@ -220,6 +220,12 @@ export class Instance {
       CREATE TABLE IF NOT EXISTS gmail_work_model_access (account_id TEXT NOT NULL, bot_id TEXT NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL, PRIMARY KEY(account_id,bot_id));`);
     if(version < 46) this.db.exec(gmailMonitorRunsSchema);
     if(version < 47) this.db.exec(inboxMonitorSchema);
+    if(version < 48) {
+      for(const [name,definition] of Object.entries({digest_minutes:'INTEGER NOT NULL DEFAULT 60',next_digest_at:'INTEGER NOT NULL DEFAULT 0',memory_context:'INTEGER NOT NULL DEFAULT 0'}))if(!this.db.prepare("SELECT 1 FROM pragma_table_info('inbox_monitor_settings') WHERE name=?").get(name))this.db.exec(`ALTER TABLE inbox_monitor_settings ADD COLUMN ${name} ${definition}`);
+      for(const [name,definition] of Object.entries({delivery_ts:'TEXT',uncertain_from:'TEXT',urgency:'TEXT',correction:'TEXT',sender_key:'TEXT'}))if(!this.db.prepare("SELECT 1 FROM pragma_table_info('inbox_monitor_items') WHERE name=?").get(name))this.db.exec(`ALTER TABLE inbox_monitor_items ADD COLUMN ${name} ${definition}`);
+      this.db.exec(`CREATE TABLE IF NOT EXISTS inbox_digest_batches (id TEXT PRIMARY KEY, settings_revision INTEGER NOT NULL, state TEXT NOT NULL, text TEXT NOT NULL, thread_ts TEXT, created_at INTEGER NOT NULL);
+        CREATE TABLE IF NOT EXISTS inbox_digest_items (batch_id TEXT NOT NULL REFERENCES inbox_digest_batches(id),attempt_id TEXT NOT NULL UNIQUE REFERENCES inbox_monitor_items(attempt_id),PRIMARY KEY(batch_id,attempt_id));`);
+    }
     this.db.prepare("UPDATE gmail_monitor_runs SET outcome='interrupted',finished_at=? WHERE outcome='running'").run(Date.now());
     this.plugins = new PluginStore(this.db);
     this.inboxMonitor = new InboxMonitorStore(this.db);
@@ -260,6 +266,7 @@ export class Instance {
     this.db.prepare('INSERT OR IGNORE INTO work_bindings VALUES (?,?,?,?)').run(work.kind,work.id,botId,directory);
   }
   gmailHistory(transport?:GmailHistoryTransport,assertAuthority:()=>void=()=>{}) {return new GmailHistory(this.db,transport,assertAuthority);}
+  inboxSenderKey(accountId:string,botId:string,sender:string) {return createHmac('sha256',this.fingerprintKey).update(JSON.stringify([accountId,botId,sender.trim().toLocaleLowerCase()])).digest('hex');}
   gmailWorkIdentity(work:WorkRef) {
     const row=work.kind==='command' ? this.db.prepare("SELECT c.bot_id,p.profile FROM commands c JOIN command_profiles p ON p.command_id=c.id WHERE c.id=? AND c.state='pending'").get(work.id) : this.db.prepare("SELECT bot_id,profile FROM task_attempts WHERE id=? AND state='running'").get(work.id);
     if(typeof row?.bot_id!=='string'||typeof row.profile!=='string')return null;
