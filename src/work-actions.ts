@@ -131,7 +131,7 @@ export class WorkActionService {
   }
   offers(context:WorkContext,route:'direct'|'guest'):ToolDefinition[] {
     if ((route==='direct' && context.mode==='code') || (route==='guest' && context.mode==='direct')) return [];
-    return [...this.capabilities.values()].filter(cap=>!cap.internal && !(route==='guest' && cap.directOnly) && (!this.privateWork(context) || ['gmail_search','gmail_read'].includes(cap.name)) && cap.eligible(context)).map(cap=>structuredClone(cap.definition));
+    return [...this.capabilities.values()].filter(cap=>!cap.internal && !(route==='guest' && cap.directOnly) && (!this.privateWork(context) || ['gmail_search','gmail_read','gmail_reply'].includes(cap.name)) && cap.eligible(context)).map(cap=>structuredClone(cap.definition));
   }
   recognizes(name:string):boolean {const cap=this.capabilities.get(name);return !!cap && !cap.internal;}
   private digest(value:string):string {return createHmac('sha256',this.key).update(value).digest('hex');}
@@ -229,7 +229,7 @@ export class WorkActionService {
   }
   private async dispatch(context:WorkContext,request:{source:InvocationSource|InternalInvocationSource;name:string;input:unknown;intent:ActionIntent}):Promise<InvocationResult> {
     this.admit(context);
-    if(this.privateWork(context) && !['gmail_search','gmail_read'].includes(request.name)) return {kind:'blocked',reason:'Capability unavailable after private Gmail data was read'};
+    if(this.privateWork(context) && !['gmail_search','gmail_read','gmail_reply'].includes(request.name)) return {kind:'blocked',reason:'Capability unavailable after private Gmail data was read'};
     this.assertPrivateDisclosure(context);
     const route=request.source.kind==='provider'?'direct':request.source.kind==='guest'?'guest':'internal';
     const cap=this.capabilities.get(request.name);

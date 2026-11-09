@@ -6,7 +6,7 @@ import DisclosureSummary from './DisclosureSummary.vue';
 
 const {app,state}=useWorkspace();
 const gmail=ref<Awaited<ReturnType<typeof app.gmailPlugin>>|null>(null),busy=ref(false),message=ref(''),authorizationUrl=ref('');
-const form=ref({email:'',clientId:'',clientSecret:''});
+const form=ref({email:'',clientId:'',clientSecret:'',sendEnabled:false});
 const confirm=ref<'disconnect'|'delete-config'|'rebaseline'|null>(null),grant=ref<{botId:string;provider:string;model:string}|null>(null);
 const workGrant=ref<{botId:string;provider:string;model:string}|null>(null);
 const inspected=ref<Awaited<ReturnType<typeof app.gmailRead>>|null>(null);let timer:ReturnType<typeof setInterval>|undefined;
@@ -29,15 +29,17 @@ async function loadOlder(){const before=loadedOlder.value?olderBefore.value:gmai
   <div class="provider-title"><h3>Gmail</h3><span class="badge">{{ gmail?.enabled ? 'Enabled' : gmail?.connected ? 'Disabled' : 'Not connected' }}</span></div>
   <p>Monitor new Gmail message candidates and search or read mail with an authorized agent.</p>
   <p v-if="gmail?.accountId">Account {{ gmail.accountId }}</p>
+  <p v-if="gmail?.connected">Approved reply sending: {{ gmail.sendEnabled ? 'Authorized with Google' : 'Not authorized' }}</p>
   <p v-if="gmail">Connection status: {{ gmail.status }}</p>
   <p v-if="gmail && gmail.authorizationStatus!=='Connected' && gmail.authorizationStatus!=='Not connected'">Authorization: {{ gmail.authorizationStatus }}</p>
   <p>Email sent to a model provider remains your choice. Agent access alone does not allow Gmail content to be sent to a model.</p>
   <details class="saved-settings"><DisclosureSummary>{{ gmail?.config ? 'Reconnect Gmail' : 'Set up Gmail' }}</DisclosureSummary>
-   <p>Create a Google desktop OAuth client and enable the Gmail API first. The requested Gmail read-only scope is restricted. See the Gmail setup documentation for requirements and limitations.</p>
+   <p>Create a Google desktop OAuth client and enable the Gmail API first. The Gmail read-only scope is restricted. See the Gmail setup documentation for requirements and limitations.</p>
    <form @submit.prevent="action('start',{...form})">
     <label>Gmail account email<input v-model.trim="form.email" type="email" autocomplete="off" required /></label>
     <label>Google OAuth client ID<input v-model.trim="form.clientId" autocomplete="off" required /></label>
     <label>Google OAuth client secret<input v-model="form.clientSecret" type="password" autocomplete="off" required /></label>
+    <label><input v-model="form.sendEnabled" type="checkbox" /> Allow Gmail to send replies after explicit approval in Slack</label>
     <button :disabled="busy">Begin Google authorization</button>
    </form>
    <p v-if="authorizationUrl"><a :href="authorizationUrl" target="_blank" rel="noreferrer">Open Google authorization</a>. Return here after granting access, then refresh status.</p>
@@ -79,6 +81,6 @@ async function loadOlder(){const before=loadedOlder.value?olderBefore.value:gmai
   <p role="status">{{ busy?'Updating Gmail…':message }}</p>
   <ConfirmAction v-if="confirm" :title="confirm==='disconnect'?'Disconnect Gmail?':confirm==='rebaseline'?'Start monitoring from now?':'Delete Gmail configuration?'" :message="confirm==='disconnect'?'This disables Gmail and removes its credentials. Account, agent access, and model permissions remain and can apply again after reconnecting.':confirm==='rebaseline'?'Arrivals in the missing interval cannot be recovered or identified. Staf will record this gap and start from the current Gmail history ID.':'This removes the stored credentials, account configuration, agent access, and model permissions.'" :action="confirm==='disconnect'?'Disconnect':confirm==='rebaseline'?'Start from now':'Delete configuration'" @cancel="confirm=null" @confirm="confirm==='rebaseline'?action('rebaseline',{confirm:true}):action(confirm)" />
   <ConfirmAction v-if="grant" title="Allow Gmail data to this model?" :message="`Gmail search results and message content can be sent to ${grant.provider} / ${grant.model} during this agent's chat. The owner-visible answer may contain email. This grant applies only to that provider and model. Gmail results and generated replies are omitted from later model requests; your request remains.`" action="Allow Gmail data" @cancel="grant=null" @confirm="action('model-access',{...grant,enabled:true})" />
-  <ConfirmAction v-if="workGrant" title="Allow Gmail in tasks and Slack work?" :message="`Gmail results and message content can be sent to ${workGrant.provider} / ${workGrant.model} in scoped background tasks and Slack-originated chat or tasks. Slack receives a generic notification; email details remain visible in Staf. This permission applies only to this agent and model.`" action="Allow task and Slack access" @cancel="workGrant=null" @confirm="action('work-model-access',{...workGrant,enabled:true})" />
+  <ConfirmAction v-if="workGrant" title="Allow Gmail in tasks and Slack work?" :message="`Gmail results and message content can be sent to ${workGrant.provider} / ${workGrant.model} in scoped background tasks and Slack-originated chat or tasks. Slack receives generic updates unless you separately choose to reveal a reply proposal. This permission applies only to this agent and model.`" action="Allow task and Slack access" @cancel="workGrant=null" @confirm="action('work-model-access',{...workGrant,enabled:true})" />
  </div>
 </template>

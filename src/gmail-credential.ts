@@ -5,7 +5,7 @@ import {z} from 'zod';
 import {hasCode} from './validation.js';
 
 const token=z.string().min(1).max(4096).regex(/^[\x21-\x7e]+$/);
-const schema=z.strictObject({email:z.email().max(320),clientId:token,clientSecret:token,refreshToken:token});
+const schema=z.strictObject({email:z.email().max(320),clientId:token,clientSecret:token,refreshToken:token,sendEnabled:z.boolean().optional()});
 export type GmailCredential=z.infer<typeof schema>;
 function pathFor(root:string,create:boolean) {
  const base=resolve(root),dir=join(base,'auth');

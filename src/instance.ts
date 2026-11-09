@@ -34,7 +34,7 @@ import {GmailHistory,gmailHistorySchema,type GmailHistoryTransport} from './gmai
 const clockAction: Action = { capability:'clock', operation:'read', resource:'utc', effect:'read', limits:{}, risk:'safe' };
 const clockBoundary = { enabledCapabilities:['clock'], actions:[clockAction] };
 const modes: ApprovalMode[] = ['ask-every-time','ask-for-risky-actions','never-ask'];
-export const INSTANCE_SCHEMA_VERSION = 45;
+export const INSTANCE_SCHEMA_VERSION = 46;
 const MAINTENANCE_VERSION = 2147483647;
 
 export const starterSoul = "You are an assistant working for the owner. Be clear and candid. Distinguish observations from assumptions. Follow the owner's role instructions and work within the permissions and task scope granted to you.";
@@ -216,6 +216,9 @@ export class Instance {
       CREATE TABLE IF NOT EXISTS gmail_task_messages (attempt_id TEXT NOT NULL, message_id TEXT NOT NULL, PRIMARY KEY(attempt_id,message_id));
       CREATE TABLE IF NOT EXISTS gmail_private_tasks (attempt_id TEXT PRIMARY KEY);
       CREATE TABLE IF NOT EXISTS gmail_work_model_access (account_id TEXT NOT NULL, bot_id TEXT NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL, PRIMARY KEY(account_id,bot_id));`);
+    if(version < 46) this.db.exec(`CREATE TABLE IF NOT EXISTS gmail_reply_proposals (action_id TEXT PRIMARY KEY REFERENCES action_journal(id), fingerprint TEXT NOT NULL, work_kind TEXT NOT NULL, work_id TEXT NOT NULL, bot_id TEXT NOT NULL, account_id TEXT NOT NULL, gmail_revision INTEGER NOT NULL, slack_revision INTEGER NOT NULL, team_id TEXT NOT NULL, user_id TEXT NOT NULL, channel_id TEXT NOT NULL, message_id TEXT NOT NULL, effect TEXT NOT NULL, digest TEXT NOT NULL, effect_digest TEXT NOT NULL, state TEXT NOT NULL, prompt_ts TEXT, detail TEXT);
+      CREATE INDEX IF NOT EXISTS gmail_reply_account_message ON gmail_reply_proposals(account_id,message_id);`);
+    this.db.exec("INSERT OR IGNORE INTO slack_notices SELECT action_id||':send-outcome',team_id,user_id,channel_id,NULL,bot_id,'The Gmail send outcome is unknown after restart. Check Sent mail before trying again.', 'pending',0 FROM gmail_reply_proposals WHERE state='dispatching'; UPDATE gmail_reply_proposals SET state='interrupted',detail='Instance restarted before dispatch' WHERE state IN ('disclosure','review','approved'); UPDATE gmail_reply_proposals SET state='uncertain',detail='Instance restarted during send; check Gmail before taking further action' WHERE state='dispatching'");
     this.plugins = new PluginStore(this.db);
     this.db.exec("CREATE TABLE IF NOT EXISTS tool_defaults (id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL, clock INTEGER NOT NULL CHECK(clock IN (0,1)), memory INTEGER NOT NULL CHECK(memory IN (0,1)), web INTEGER NOT NULL CHECK(web IN (0,1)), files INTEGER NOT NULL CHECK(files IN (0,1))); INSERT OR IGNORE INTO tool_defaults VALUES (1,1,1,1,1,1)");
     if(version < 44) this.db.exec(`CREATE TABLE IF NOT EXISTS memory_sensitivity (id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL, mode TEXT NOT NULL CHECK(mode IN ('model','review-all')), terms TEXT NOT NULL);
@@ -267,6 +270,33 @@ export class Instance {
   gmailTaskScope(id:string) {return this.db.prepare('SELECT account_id AS accountId,revision,query FROM gmail_task_scopes WHERE attempt_id=?').get(id);}
   gmailTaskMessageAllowed(id:string,messageId:string) {return !!this.db.prepare('SELECT 1 FROM gmail_task_messages WHERE attempt_id=? AND message_id=?').get(id,messageId);}
   rememberGmailTaskMessages(id:string,ids:string[]) {for(const messageId of ids)this.db.prepare('INSERT OR IGNORE INTO gmail_task_messages VALUES (?,?)').run(id,messageId);}
+  createGmailReply(input:{actionId:string;fingerprint:string;work:WorkRef;botId:string;accountId:string;gmailRevision:number;slackRevision:number;teamId:string;userId:string;channelId:string;messageId:string;effect:string}) {
+    const digest=createHmac('sha256',this.fingerprintKey).update(JSON.stringify([input.work,input.botId,input.accountId,input.gmailRevision,input.slackRevision,input.teamId,input.userId,input.channelId,input.messageId,input.effect,input.actionId,input.fingerprint])).digest('hex');
+    const same=createHmac('sha256',this.fingerprintKey).update(JSON.stringify([input.accountId,input.messageId,input.effect])).digest('hex');
+    if(this.db.prepare("SELECT 1 FROM gmail_reply_proposals WHERE account_id=? AND message_id=? AND (state IN ('dispatching','uncertain') OR (state IN ('succeeded','reconciled_sent') AND effect_digest=?))").get(input.accountId,input.messageId,same))throw Error('Previous Gmail send requires review or already succeeded');
+    this.db.prepare("INSERT INTO gmail_reply_proposals VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'disclosure',NULL,NULL)").run(input.actionId,input.fingerprint,input.work.kind,input.work.id,input.botId,input.accountId,input.gmailRevision,input.slackRevision,input.teamId,input.userId,input.channelId,input.messageId,input.effect,digest,same);
+  }
+  gmailReply(id:string) {return this.db.prepare('SELECT * FROM gmail_reply_proposals WHERE action_id=?').get(id);}
+  gmailReplyIntact(id:string) {
+    const r=this.gmailReply(id);if(!r || typeof r.effect!=='string')return false;
+    const digest=createHmac('sha256',this.fingerprintKey).update(JSON.stringify([{kind:r.work_kind,id:r.work_id},r.bot_id,r.account_id,r.gmail_revision,r.slack_revision,r.team_id,r.user_id,r.channel_id,r.message_id,r.effect,r.action_id,r.fingerprint])).digest('hex');const same=createHmac('sha256',this.fingerprintKey).update(JSON.stringify([r.account_id,r.message_id,r.effect])).digest('hex');return digest===r.digest && same===r.effect_digest;
+  }
+  gmailReplyPrompt(id:string,state:'disclosure'|'review',ts:string) {return this.db.prepare('UPDATE gmail_reply_proposals SET prompt_ts=? WHERE action_id=? AND state=? AND prompt_ts IS NULL').run(ts,id,state).changes===1;}
+  gmailReplyDecision(id:string,state:'disclosure'|'review',next:'review'|'approved'|'denied',ts:string) {return this.db.prepare('UPDATE gmail_reply_proposals SET state=?,prompt_ts=NULL WHERE action_id=? AND state=? AND prompt_ts=?').run(next,id,state,ts).changes===1;}
+  gmailReplyStart(id:string) {
+    const r=this.gmailReply(id);if(!r || typeof r.account_id!=='string' || typeof r.message_id!=='string' || typeof r.effect!=='string' || !this.gmailReplyIntact(id))throw Error('Gmail reply approval changed');
+    const same=createHmac('sha256',this.fingerprintKey).update(JSON.stringify([r.account_id,r.message_id,r.effect])).digest('hex');
+    if(this.db.prepare("SELECT 1 FROM gmail_reply_proposals WHERE action_id<>? AND account_id=? AND message_id=? AND (state IN ('dispatching','uncertain') OR (state IN ('succeeded','reconciled_sent') AND effect_digest=?))").get(id,r.account_id,r.message_id,same))throw Error('Previous Gmail send requires review or already succeeded');
+    if(this.db.prepare("UPDATE gmail_reply_proposals SET state='dispatching' WHERE action_id=? AND state='approved'").run(id).changes!==1)throw Error('Gmail reply approval changed');
+  }
+  gmailReplyFinish(id:string,state:'succeeded'|'failed'|'uncertain'|'interrupted',detail:string) {this.db.prepare("UPDATE gmail_reply_proposals SET state=?,detail=? WHERE action_id=? AND state IN ('disclosure','review','approved','dispatching')").run(state,detail,id);}
+  gmailReplyCancel(id:string) {this.db.prepare("UPDATE gmail_reply_proposals SET state='interrupted',detail='Approval or dispatch was interrupted' WHERE action_id=? AND state IN ('disclosure','review','approved')").run(id);}
+  gmailReplies(work:WorkRef) {return this.db.prepare('SELECT action_id AS actionId,fingerprint,account_id AS accountId,effect,state,detail FROM gmail_reply_proposals WHERE work_kind=? AND work_id=? ORDER BY rowid').all(work.kind,work.id).map(row=>({...row,effect:typeof row.effect==='string'?JSON.parse(row.effect):null}));}
+  reconcileGmailReply(id:string,fingerprint:string,outcome:'sent'|'not-sent') {
+    const r=this.gmailReply(id);if(!r || r.state!=='uncertain' || r.fingerprint!==fingerprint || !this.gmailReplyIntact(id))throw new BotConflict('Gmail reply is not the uncertain proposal reviewed');
+    const detail=outcome==='sent'?'Owner reported that Gmail sent the reply':'Owner reported that Gmail did not send the reply';
+    if(this.db.prepare("UPDATE gmail_reply_proposals SET state=?,detail=? WHERE action_id=? AND state='uncertain' AND fingerprint=?").run(outcome==='sent'?'reconciled_sent':'reconciled_not_sent',detail,id,fingerprint).changes!==1)throw new BotConflict('Gmail reply changed');
+  }
   workContext(work:WorkRef, signal:AbortSignal) {
     const binding=this.db.prepare('SELECT bot_id,working_directory FROM work_bindings WHERE kind=? AND work_id=?').get(work.kind,work.id);
     if (typeof binding?.bot_id !== 'string' || typeof binding.working_directory !== 'string' || !isAbsolute(binding.working_directory)) throw Error('Accepted work binding unavailable');

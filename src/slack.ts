@@ -10,9 +10,9 @@ export class SlackRateLimited extends Error {
 export interface SlackTransport {
  identify(tokens:SlackTokens):Promise<{teamId:string;botUserId:string}>;
  start(tokens:SlackTokens,receive:(event:SlackEvent)=>Promise<void>,status?:(status:'connected'|'reconnecting')=>void,interact?:(interaction:SlackInteraction)=>Promise<void>):Promise<()=>void>;
- post(tokens:SlackTokens,message:{channel:string;threadTs?:string;text:string;buttons?:SlackButton[]}):Promise<void>;
+ post(tokens:SlackTokens,message:{channel:string;threadTs?:string;text:string;buttons?:SlackButton[]}):Promise<void|{messageTs:string}>;
 }
-const apiResult=z.object({ok:z.boolean(),team_id:z.string().optional(),user_id:z.string().optional(),url:z.string().optional()});
+const apiResult=z.object({ok:z.boolean(),team_id:z.string().optional(),user_id:z.string().optional(),url:z.string().optional(),ts:z.string().optional()});
 async function api(method:string,token:string,body:object) {
  const response=await fetch('https://slack.com/api/'+method,{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(body),signal:AbortSignal.timeout(15000)});
  if(response.status===429) {const seconds=Number(response.headers.get('retry-after'));throw new SlackRateLimited(Number.isFinite(seconds) && seconds>0 ? Math.min(seconds*1000,3600000) : 30000);}
@@ -57,6 +57,7 @@ export const slackTransport:SlackTransport={
  async post(tokens,message){
   const buttons=z.array(z.strictObject({text:z.string().min(1).max(75),actionId:z.string().min(1).max(255),value:z.string().min(1).max(2000)})).min(1).max(5).optional().parse(message.buttons);
   if(buttons)z.string().min(1).max(3000).parse(message.text);
-  await api('chat.postMessage',tokens.botToken,{channel:message.channel,text:message.text,unfurl_links:false,unfurl_media:false,...(message.threadTs?{thread_ts:message.threadTs}:{}),...(buttons?{blocks:[{type:'section',text:{type:'plain_text',text:message.text}},{type:'actions',elements:buttons.map(button=>({type:'button',text:{type:'plain_text',text:button.text},action_id:button.actionId,value:button.value}))}]}:{})});
+  const result=await api('chat.postMessage',tokens.botToken,{channel:message.channel,text:message.text,unfurl_links:false,unfurl_media:false,...(message.threadTs?{thread_ts:message.threadTs}:{}),...(buttons?{mrkdwn:false,blocks:[{type:'section',text:{type:'plain_text',text:message.text}},{type:'actions',elements:buttons.map(button=>({type:'button',text:{type:'plain_text',text:button.text},action_id:button.actionId,value:button.value}))}]}:{})});
+  if(result.ts)return {messageTs:result.ts};
  },
 };

@@ -3,8 +3,9 @@ import {z} from 'zod';
 import type {GmailCredential} from './gmail-credential.js';
 
 export const gmailScope='https://www.googleapis.com/auth/gmail.readonly';
+export const gmailSendScope='https://www.googleapis.com/auth/gmail.send';
 const secret=z.string().min(1).max(4096).regex(/^[\x21-\x7e]+$/);
-export const gmailStartSchema=z.strictObject({email:z.email().max(320).transform(value=>value.toLowerCase()),clientId:secret,clientSecret:secret});
+export const gmailStartSchema=z.strictObject({email:z.email().max(320).transform(value=>value.toLowerCase()),clientId:secret,clientSecret:secret,sendEnabled:z.boolean().optional()});
 const tokenResponse=z.object({access_token:secret,refresh_token:secret.optional(),scope:z.string().optional(),token_type:z.string()});
 const profileSchema=z.object({emailAddress:z.email().max(320),historyId:z.string().regex(/^\d+$/)});
 type Attempt={state:string;verifier:string;initiator:string;input:z.infer<typeof gmailStartSchema>;revision:number|null;expires:number;phase:'waiting'|'exchanging';controller:AbortController;timer?:ReturnType<typeof setTimeout>};
@@ -28,7 +29,7 @@ export class GmailAuth {
   const a:Attempt={state:randomBytes(32).toString('base64url'),verifier:randomBytes(48).toString('base64url'),initiator,input:parsed,revision:this.revision(),expires:Date.now()+600000,phase:'waiting',controller:new AbortController()};this.attempt=a;
   a.timer=setTimeout(()=>{if(this.attempt===a){this.cancel();this.result='Authorization expired';}},600000);a.timer.unref();
   const url=new URL('https://accounts.google.com/o/oauth2/v2/auth');
-  for(const [key,value] of Object.entries({client_id:parsed.clientId,redirect_uri:origin+'/gmail/oauth/callback',response_type:'code',scope:gmailScope,access_type:'offline',prompt:'consent',state:a.state,code_challenge:createHash('sha256').update(a.verifier).digest('base64url'),code_challenge_method:'S256',login_hint:parsed.email}))url.searchParams.set(key,value);
+  for(const [key,value] of Object.entries({client_id:parsed.clientId,redirect_uri:origin+'/gmail/oauth/callback',response_type:'code',scope:parsed.sendEnabled?`${gmailScope} ${gmailSendScope}`:gmailScope,access_type:'offline',prompt:'consent',state:a.state,code_challenge:createHash('sha256').update(a.verifier).digest('base64url'),code_challenge_method:'S256',login_hint:parsed.email}))url.searchParams.set(key,value);
   this.result='Waiting for Google authorization';return {url:url.toString()};
  }
  async accept(method:string,target:string,origin:string):Promise<boolean> {
@@ -41,11 +42,11 @@ export class GmailAuth {
    const body=new URLSearchParams({code:codes[0],client_id:a.input.clientId,client_secret:a.input.clientSecret,redirect_uri:origin+'/gmail/oauth/callback',grant_type:'authorization_code',code_verifier:a.verifier});
    const response=await this.request('https://oauth2.googleapis.com/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body.toString(),redirect:'error',signal:AbortSignal.any([a.controller.signal,AbortSignal.timeout(15000)])});
    if(!response.ok)throw Error('Token exchange failed');const tokens=tokenResponse.parse(await responseJson(response));
-   if(!tokens.refresh_token || tokens.token_type.toLowerCase()!=='bearer' || !tokens.scope?.split(/\s+/).includes(gmailScope))throw Error('Gmail permission or refresh token missing');
+   if(!tokens.refresh_token || tokens.token_type.toLowerCase()!=='bearer' || !tokens.scope?.split(/\s+/).includes(gmailScope) || (a.input.sendEnabled && !tokens.scope.split(/\s+/).includes(gmailSendScope)))throw Error('Gmail permission or refresh token missing');
    this.assertAttempt(a);const profile=await this.profile(tokens.access_token,a.controller.signal);
    if(profile.emailAddress.toLowerCase()!==a.input.email)throw Error('Google account did not match');
    this.assertAttempt(a);
-   this.commit({email:a.input.email,clientId:a.input.clientId,clientSecret:a.input.clientSecret,refreshToken:tokens.refresh_token},profile.historyId);if(a.timer)clearTimeout(a.timer);this.attempt=undefined;this.result='Connected';return true;
+   this.commit({email:a.input.email,clientId:a.input.clientId,clientSecret:a.input.clientSecret,refreshToken:tokens.refresh_token,...(a.input.sendEnabled?{sendEnabled:true}:{})},profile.historyId);if(a.timer)clearTimeout(a.timer);this.attempt=undefined;this.result='Connected';return true;
   } catch {if(this.attempt===a){if(a.timer)clearTimeout(a.timer);this.attempt=undefined;this.result='Connection failed. Check the account, consent and Google client settings.';}return false;}
  }
  async profile(accessToken:string,signal?:AbortSignal) {
@@ -55,7 +56,7 @@ export class GmailAuth {
  async refresh(credential:GmailCredential,signal?:AbortSignal) {
   const body=new URLSearchParams({client_id:credential.clientId,client_secret:credential.clientSecret,refresh_token:credential.refreshToken,grant_type:'refresh_token'});
   const response=await this.request('https://oauth2.googleapis.com/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body.toString(),redirect:'error',signal:signal?AbortSignal.any([signal,AbortSignal.timeout(15000)]):AbortSignal.timeout(15000)});
-  if(!response.ok)throw Error('Gmail authorization unavailable');const tokens=tokenResponse.parse(await responseJson(response));if(tokens.token_type.toLowerCase()!=='bearer')throw Error('Gmail authorization unavailable');
+  if(!response.ok)throw Error('Gmail authorization unavailable');const tokens=tokenResponse.parse(await responseJson(response));if(tokens.token_type.toLowerCase()!=='bearer' || (credential.sendEnabled && tokens.scope && !tokens.scope.split(/\s+/).includes(gmailSendScope)))throw Error('Gmail authorization unavailable');
   signal?.throwIfAborted();return tokens.access_token;
  }
  async check(credential:GmailCredential,signal?:AbortSignal) {
