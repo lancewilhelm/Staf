@@ -188,6 +188,11 @@ For a workspace change, run the served GUI smoke journey after building:
 node test/browser/gui-smoke.mjs
 ```
 
+For Gmail plugin management, run `node --test test/gmail-plugin.test.js` and
+`node test/browser/gmail-plugin-smoke.mjs` after building. These use synthetic
+Google HTTP responses and a disposable instance; they do not authenticate a
+Google account or exercise mail search or monitoring.
+
 For shared core settings changes, also run the disposable paired browser and CLI
 journey after building:
 

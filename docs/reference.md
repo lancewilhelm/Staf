@@ -575,6 +575,18 @@ objects. Connections are instance-owned and keyed by service account identity;
 this slice exposes one Slack account. Tokens remain host-local and are never
 returned. See [Slack setup](usage.md#slack-plugin) for limits and recovery.
 
+Gmail uses `POST /api/plugins/gmail/start` with `email`, `clientId`, and
+`clientSecret`; it returns an authorization URL, not a credential. Google
+returns to the loopback `/gmail/oauth/callback` with the one-time state and code.
+The paired owner can call `check`, `enable`, `disable`, `disconnect`, or
+`delete-config` with an empty object, and `access` with `botId` and `enabled`.
+The Gmail entry in `GET /api/plugins` includes the account, connection state,
+agent access IDs, and status; it never returns the client secret or refresh token.
+There is one Gmail account in this implementation. The shared database keys
+connections and access by plugin and account. The local credential file is
+separate from SQLite. Gmail actions, search, and monitoring are not available.
+See [Gmail setup](usage.md#gmail-plugin) for OAuth requirements and limitations.
+
 ## Native home-network gateway
 
 The optional native gateway uses `STAF_LAN_ADDRESS` (a specific private IPv4), `STAF_LAN_PORT` (1024–65535, default 3443), and absolute `STAF_LAN_KEY` and `STAF_LAN_CERT` paths in its systemd environment file. It serves HTTPS and forwards to the unchanged loopback service. See [installation and recovery](native-linux-installation.md#enable-home-network-https-access) for certificate trust, pairing and limits. The standard CLI remains loopback-only.

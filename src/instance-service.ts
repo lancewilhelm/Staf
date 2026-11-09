@@ -27,6 +27,8 @@ import { randomBytes, randomUUID, createHash } from 'node:crypto';
 import {bundledPlugins, slackConfigSchema} from './plugins.js';
 import {slackTransport as defaultSlackTransport, type SlackTransport, type SlackEvent} from './slack.js';
 import {loadSlackTokens, saveSlackTokens, disconnectSlackTokens} from './slack-credential.js';
+import {GmailAuth,gmailStartSchema} from './gmail-auth.js';
+import {loadGmailCredential,saveGmailCredential,disconnectGmailCredential} from './gmail-credential.js';
 import { assertDatasetAvailable, BotConflict, Instance } from './instance.js';
 import { AgentConfigConflict, AgentConfigInvalid, AgentConfigUncertain } from './agent-config.js';
 import {CoreInvalid} from './instance-core.js';
@@ -49,7 +51,7 @@ import { resolveSettings } from './settings.js';
 import { usageText } from './usage.js';
 import { loadOpenRouterKey, saveOpenRouterKey, disconnectOpenRouter } from './openrouter-credential.js';
 
-export function startInstance(path: string, port = 0, options: {dataDir?: string; publicOrigin?: string; maintenanceToken?:string; env?: Environment; enableCollaboration?: boolean; enableReusableApprovals?: boolean; localBootstrapToken?: string; authNow?:()=>number; authLifetimeMs?:number; webDependencies?:WebDependencies; searchTransport?:SearchTransport; shellExecutor?:typeof executeShellSandbox; modelRequest?:typeof fetch; authHooks?: {prepare:typeof prepareDirectLogin; complete:typeof completeDirectLogin; authorizationUrl?:typeof authorizationUrl}; slackTransport?:SlackTransport; providerFactory?: (profile: {provider:string; model:string | null; reasoning:string | null; instructions:string; chatId:string}, instructions:string) => Promise<Provider>} = {}) {
+export function startInstance(path: string, port = 0, options: {dataDir?: string; publicOrigin?: string; maintenanceToken?:string; env?: Environment; enableCollaboration?: boolean; enableReusableApprovals?: boolean; localBootstrapToken?: string; authNow?:()=>number; authLifetimeMs?:number; webDependencies?:WebDependencies; searchTransport?:SearchTransport; shellExecutor?:typeof executeShellSandbox; modelRequest?:typeof fetch; authHooks?: {prepare:typeof prepareDirectLogin; complete:typeof completeDirectLogin; authorizationUrl?:typeof authorizationUrl}; slackTransport?:SlackTransport; gmailRequest?:typeof fetch; providerFactory?: (profile: {provider:string; model:string | null; reasoning:string | null; instructions:string; chatId:string}, instructions:string) => Promise<Provider>} = {}) {
   assertDatasetAvailable(path,options.maintenanceToken);
   const selectionCatalogs=new Map<string,ModelCatalog>();
   const catalogRequests=new Map<string,number>();
@@ -67,11 +69,31 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
   const knownKeys = new Set<string>();
   try {const initialKey=loadOpenRouterKey(dataDir);if(initialKey) knownKeys.add(initialKey);}catch {/* A damaged store can be replaced or disconnected by a paired client. */}
   try {const slack=loadSlackTokens(dataDir);if(slack){knownKeys.add(slack.appToken);knownKeys.add(slack.botToken);}}catch {}
+  try {const gmail=loadGmailCredential(dataDir);if(gmail){knownKeys.add(gmail.clientSecret);knownKeys.add(gmail.refreshToken);}}catch {}
   const redactEnv=redactor(env);
   const redactProgress=streamingRedactor(env,()=>[...knownKeys]);
   const redact = (text:string) => [...knownKeys].reduce((result,key)=>redactor({OPENROUTER_API_KEY:key})(result),redactEnv(text));
   const providerEnv = (provider:string) => ({...env,STAF_MODEL:undefined,...(provider==='openrouter'?{OPENROUTER_API_KEY:loadOpenRouterKey(dataDir)}:{})});
   const instance = new Instance(path,redact,options.maintenanceToken);
+  let gmailHealth='Not checked';
+  const gmailChecks=new Set<AbortController>();
+  const stopGmailChecks=()=>{for(const controller of gmailChecks)controller.abort();};
+  const gmailAuth=new GmailAuth(options.gmailRequest ?? fetch,token=>instance.authorized(token),()=>instance.plugins.gmailConnection()?.revision??null,credential=>{
+    const old=loadGmailCredential(dataDir),existing=instance.plugins.gmailConnection();
+    if(existing && existing.accountId!==credential.email)throw Error('Delete the existing Gmail configuration before changing accounts');
+    knownKeys.add(credential.clientSecret);knownKeys.add(credential.refreshToken);
+    saveGmailCredential(dataDir,credential);
+    try {instance.plugins.gmailConnect({email:credential.email,clientId:credential.clientId});}
+    catch(error){if(old)saveGmailCredential(dataDir,old);else disconnectGmailCredential(dataDir);throw error;}
+    gmailHealth='Connected';
+  });
+  async function checkGmailConnection() {
+    const c=instance.plugins.gmailConnection(),credential=loadGmailCredential(dataDir);if(!c?.connected||!credential||credential.email!==c.accountId||credential.clientId!==c.config.clientId)throw Error('Gmail credentials unavailable; reconnect Gmail');
+    const controller=new AbortController();gmailChecks.add(controller);
+    try {await gmailAuth.check(credential,controller.signal);controller.signal.throwIfAborted();if(instance.plugins.gmailConnection()?.revision!==c.revision)throw Error('Gmail settings changed');gmailHealth='Connected';}
+    catch {if(!controller.signal.aborted && instance.plugins.gmailConnection()?.revision===c.revision)gmailHealth='Connection check failed';throw Error('Gmail connection check failed; reconnect or check Google settings');}
+    finally {gmailChecks.delete(controller);}
+  }
   if (options.localBootstrapToken) instance.bootstrapLocal(options.localBootstrapToken);
   const active = new Set<AbortController>();
   const responseControllers = new Map<string,AbortController>();
@@ -512,7 +534,11 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
     catch {if(generation===slackGeneration)slackStatus='connection failed';}
   }
   function pluginStatus() {
-    const c=instance.plugins.connection();return bundledPlugins.map(definition=>({...definition,connected:c?.connected??false,enabled:c?.enabled??false,config:c?.config??null,accountId:c?.accountId??null,agentAccess:c?.agentAccess??false,status:c?.enabled?slackStatus:'inactive',events:instance.plugins.events()}));
+    const c=instance.plugins.connection(),gmail=instance.plugins.gmailConnection();
+    let gmailCredentials=false;try{const credential=loadGmailCredential(dataDir);gmailCredentials=!!credential && credential.email===gmail?.accountId && credential.clientId===gmail?.config.clientId;}catch{}
+    return bundledPlugins.map(definition=>definition.id==='gmail'
+      ? {...definition,connected:gmail?.connected??false,enabled:gmail?.enabled??false,config:gmail?.config??null,accountId:gmail?.accountId??null,agentAccessIds:gmail?.agentAccessIds??[],status:gmail?.connected?(gmailCredentials?gmailHealth:'Credentials unavailable'):gmailAuth.status(),authorizationStatus:gmailAuth.status(),events:[]}
+      : {...definition,connected:c?.connected??false,enabled:c?.enabled??false,config:c?.config??null,accountId:c?.accountId??null,agentAccess:c?.agentAccess??false,status:c?.enabled?slackStatus:'inactive',events:instance.plugins.events()});
   }
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     res.setHeader('Cache-Control', 'no-store'); res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -525,6 +551,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
       if (req.method === 'GET' && req.url === '/api/dataset') return json(200,{id:instance.datasetIdentity()});
       if (req.headers['x-staf-dataset'] && req.headers['x-staf-dataset'] !== instance.datasetIdentity()) return json(409,{error:'Dataset changed. Refresh before retrying.'});
       if ((req.url ?? '').startsWith('/auth/callback')) {const result=await authFor(origin).accept(req.method ?? '',req.url ?? '');res.setHeader('Referrer-Policy','no-referrer');res.writeHead(result === 'accepted' ? 200 : 400,{'Content-Type':'text/plain; charset=utf-8'});return res.end(result === 'accepted' ? 'Sign-in completed. Return to Staf.' : 'Sign-in could not be completed. Return to Staf.');}
+      if ((req.url ?? '').startsWith('/gmail/oauth/callback')) {const result=await gmailAuth.accept(req.method ?? '',req.url ?? '',origin);res.setHeader('Referrer-Policy','no-referrer');res.writeHead(result?200:400,{'Content-Type':'text/plain; charset=utf-8','Content-Security-Policy':"default-src 'none'; frame-ancestors 'none'"});return res.end(result?'Gmail connected. Return to Staf and refresh plugin status.':'Gmail authorization did not complete. Return to Staf.');}
       const csp="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'";
       if (req.method === 'GET' && (req.url === '/' || /^\/assets\/[\w.-]+\.(js|css)$/.test(req.url ?? ''))) {
         const webDir=fileURLToPath(new URL('./web/',import.meta.url));
@@ -566,6 +593,20 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
       }
       if(req.method==='POST' && (req.url==='/api/bots' || req.url==='/api/creation-defaults' || req.url==='/api/provider-defaults' || /^\/api\/bots\/[\w-]+\/selection$/.test(req.url??'') || /^\/api\/bots\/[\w-]+\/profile$/.test(req.url ?? '')) && JSON.stringify(redactValue(value,redact))!==JSON.stringify(value)) return json(400,{error:'Agent configuration cannot contain a credential'});
       if(req.method==='GET' && req.url==='/api/plugins')return json(200,pluginStatus());
+      if(req.method==='POST' && req.url==='/api/plugins/gmail/start') {
+        const input=gmailStartSchema.parse(value),existing=instance.plugins.gmailConnection();
+        if(existing && existing.accountId!==input.email)throw Error('Delete the existing Gmail configuration before changing accounts');
+        knownKeys.add(input.clientSecret);stopGmailChecks();return json(200,gmailAuth.start(token,origin,input));
+      }
+      if(req.method==='POST' && req.url==='/api/plugins/gmail/check') {await checkGmailConnection();return json(200,pluginStatus()[1]);}
+      if(req.method==='POST' && req.url==='/api/plugins/gmail/access') {
+        if(typeof value.botId!=='string'||typeof value.enabled!=='boolean')throw Error('Invalid agent access');
+        gmailAuth.cancel();stopGmailChecks();instance.plugins.gmailSetAccess(value.botId,value.enabled);return json(200,pluginStatus()[1]);
+      }
+      if(req.method==='POST' && req.url==='/api/plugins/gmail/enable') {gmailAuth.cancel();await checkGmailConnection();instance.plugins.gmailSetEnabled(true);return json(200,pluginStatus()[1]);}
+      if(req.method==='POST' && req.url==='/api/plugins/gmail/disable') {gmailAuth.cancel();stopGmailChecks();instance.plugins.gmailSetEnabled(false);return json(200,pluginStatus()[1]);}
+      if(req.method==='POST' && req.url==='/api/plugins/gmail/disconnect') {gmailAuth.reset();stopGmailChecks();instance.plugins.gmailDisconnect();disconnectGmailCredential(dataDir);gmailHealth='Not checked';return json(200,pluginStatus()[1]);}
+      if(req.method==='POST' && req.url==='/api/plugins/gmail/delete-config') {gmailAuth.reset();stopGmailChecks();instance.plugins.gmailDisconnect();disconnectGmailCredential(dataDir);instance.plugins.gmailDeleteConfig();gmailHealth='Not checked';return json(200,pluginStatus()[1]);}
       if(req.method==='POST' && req.url==='/api/plugins/slack/connect') {
         const config=slackConfigSchema.parse({teamId:value.teamId,userId:value.userId,channelId:value.channelId,botId:value.botId});
         if(typeof value.appToken!=='string' || !/^xapp-[A-Za-z0-9-]+$/.test(value.appToken) || typeof value.botToken!=='string' || !/^xoxb-[A-Za-z0-9-]+$/.test(value.botToken))throw Error('Enter valid Slack app and bot tokens');
@@ -890,5 +931,5 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
       return json(404,{error:'Not found'});
     } catch (error) { if(error instanceof ActionFailed)return json(400,{error:error.safeResult});if(error instanceof CoreInvalid)return json(422,{error:error.message,code:'invalid_core_configuration'});if(error instanceof AgentConfigInvalid)return json(422,{error:error.message,code:'invalid_agent_configuration'});if(error instanceof AgentConfigUncertain)return json(503,{error:error.message,code:'configuration_save_uncertain'});return json((error instanceof BotConflict || error instanceof AgentConfigConflict || error instanceof MemoryConflict || error instanceof SkillConflict || error instanceof ScheduleConflict) ? 409 : 400,{error:error instanceof Error ? error.message : 'Request failed'}); }
   });
-  return { server, code, migrationBackup: instance.migrationBackup, finishUpgrade: (token:string)=>instance.finishUpgrade(token), issueCode: () => (code = randomBytes(18).toString('base64url')), close: () => new Promise<void>((resolve,reject)=>{closing=true; stopSlackConnection(); instanceAuth?.shutdown(); if(scheduleTimer) clearInterval(scheduleTimer); for(const subscriber of responseSubscribers)subscriber.response.end();for(const controller of active) controller.abort(); server.close(error=>{void processes.shutdown().then(()=>{instance.close(); if(error)reject(error);else resolve();},reject);});}), listen: () => new Promise<number>((resolve,reject)=>{server.once('error',reject);server.listen(port,'127.0.0.1',()=>{const a=server.address();if(a && typeof a !== 'string') { tickSchedules(); scheduleTimer=setInterval(tickSchedules,30000); void startSlackConnection(); resolve(a.port); }else reject(Error('Listen failed'));});}) };
+  return { server, code, migrationBackup: instance.migrationBackup, finishUpgrade: (token:string)=>instance.finishUpgrade(token), issueCode: () => (code = randomBytes(18).toString('base64url')), close: () => new Promise<void>((resolve,reject)=>{closing=true; stopSlackConnection(); gmailAuth.cancel(); stopGmailChecks(); instanceAuth?.shutdown(); if(scheduleTimer) clearInterval(scheduleTimer); for(const subscriber of responseSubscribers)subscriber.response.end();for(const controller of active) controller.abort(); server.close(error=>{void processes.shutdown().then(()=>{instance.close(); if(error)reject(error);else resolve();},reject);});}), listen: () => new Promise<number>((resolve,reject)=>{server.once('error',reject);server.listen(port,'127.0.0.1',()=>{const a=server.address();if(a && typeof a !== 'string') { tickSchedules(); scheduleTimer=setInterval(tickSchedules,30000); void startSlackConnection(); resolve(a.port); }else reject(Error('Listen failed'));});}) };
 }

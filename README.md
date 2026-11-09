@@ -55,6 +55,8 @@ Explicit background tasks and their outcomes appear in the shared conversation, 
 
 The optional bundled [Slack plugin](docs/usage.md#slack-plugin) connects one approved DM to a chosen agent through Socket Mode. It is inactive until configured and enabled, with separate agent access. Controlled integration tests do not establish live Slack behavior.
 
+The optional [Gmail connection](docs/usage.md#gmail-plugin) supports owner-operated Google authorization, connection controls, and per-agent access settings. Gmail search and monitoring are not implemented yet; connecting does not send mail content to a model. Google authorization has controlled tests but has not been tested with a real account.
+
 The shared instance supports owner-imported [skills](docs/usage.md#skills-in-the-shared-instance) as an offline-tested preview. Eligible chat and task work can select them in Direct, Hybrid, or Code Mode.
 
 The shared instance supports [scoped memory](docs/usage.md#scoped-memory-in-the-shared-instance) in an offline-tested preview, with read-only agent and shared user memory pages in Settings.

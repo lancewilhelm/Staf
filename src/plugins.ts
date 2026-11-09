@@ -16,9 +16,15 @@ export const bundledPlugins: readonly PluginDefinition[] = [{
   id:'slack', name:'Slack', description:'Chat with an agent in an approved Slack direct message.',
   configuration:[{name:'appToken',secret:true,description:'Socket Mode app token'}, {name:'botToken',secret:true,description:'Bot user token'}, {name:'teamId',secret:false,description:'Workspace ID'}, {name:'userId',secret:false,description:'Approved user ID'}, {name:'channelId',secret:false,description:'Direct message channel ID'}, {name:'botId',secret:false,description:'Staf agent ID'}],
   lifecycle:['connect','enable','disable','disconnect','delete-config'],tools:[],events:['direct_message'],accountIdentity:'Slack workspace ID',
+},{
+  id:'gmail',name:'Gmail',description:'Connect an account for future Gmail capabilities.',
+  configuration:[{name:'email',secret:false,description:'Google account email'},{name:'clientId',secret:false,description:'Google desktop OAuth client ID'},{name:'clientSecret',secret:true,description:'Google desktop OAuth client secret'}],
+  lifecycle:['connect','enable','disable','disconnect','delete-config'],tools:[],events:[],accountIdentity:'Gmail address',
 }];
 export const slackConfigSchema=z.strictObject({teamId:z.string().regex(/^T[A-Z0-9]+$/),userId:z.string().regex(/^U[A-Z0-9]+$/),channelId:z.string().regex(/^D[A-Z0-9]+$/),botId:z.string().regex(/^[\w-]+$/)});
 export type SlackConfig=z.infer<typeof slackConfigSchema>;
+export const gmailConfigSchema=z.strictObject({email:z.email().max(320),clientId:z.string().min(1).max(500)});
+export type GmailConfig=z.infer<typeof gmailConfigSchema>;
 export const pluginSchema=`
 CREATE TABLE IF NOT EXISTS plugin_connections (plugin_id TEXT NOT NULL, account_id TEXT NOT NULL, config TEXT NOT NULL, connected INTEGER NOT NULL, enabled INTEGER NOT NULL, revision INTEGER NOT NULL, PRIMARY KEY(plugin_id,account_id));
 CREATE TABLE IF NOT EXISTS plugin_agent_access (plugin_id TEXT NOT NULL, account_id TEXT NOT NULL, bot_id TEXT NOT NULL REFERENCES bots(id), enabled INTEGER NOT NULL, PRIMARY KEY(plugin_id,account_id,bot_id));
@@ -49,4 +55,20 @@ export class PluginStore {
  isPluginCommand(commandId:string) {return !!this.db.prepare('SELECT 1 FROM plugin_events WHERE command_id=?').get(commandId);}
  state(commandId:string,state:'sending'|'sent'|'failed'|'uncertain'|'interrupted',detail:string|null=null) {this.db.prepare('UPDATE plugin_events SET state=?,detail=? WHERE command_id=?').run(state,detail,commandId);}
  events() {return this.db.prepare("SELECT event_id AS eventId,command_id AS commandId,state,detail FROM plugin_events WHERE plugin_id='slack' ORDER BY rowid DESC LIMIT 30").all();}
+ gmailConnection() {
+  const row=this.db.prepare("SELECT account_id,config,connected,enabled,revision FROM plugin_connections WHERE plugin_id='gmail' LIMIT 1").get();
+  if(!row)return null;
+  const config=gmailConfigSchema.parse(JSON.parse(String(row.config)));
+  const agentAccessIds=this.db.prepare("SELECT bot_id FROM plugin_agent_access WHERE plugin_id='gmail' AND account_id=? AND enabled=1 ORDER BY bot_id").all(String(row.account_id)).map(item=>String(item.bot_id));
+  return {accountId:String(row.account_id),config,connected:row.connected===1,enabled:row.enabled===1,revision:Number(row.revision),agentAccessIds};
+ }
+ gmailConnect(config:GmailConfig) {
+  const existing=this.gmailConnection();if(existing && existing.accountId!==config.email)throw Error('Delete the existing Gmail configuration before changing accounts');
+  this.db.prepare("INSERT INTO plugin_connections VALUES ('gmail',?,?,1,0,1) ON CONFLICT(plugin_id,account_id) DO UPDATE SET config=excluded.config,connected=1,enabled=0,revision=plugin_connections.revision+1").run(config.email,JSON.stringify(config));
+  return this.gmailConnection();
+ }
+ gmailSetEnabled(enabled:boolean) {const c=this.gmailConnection();if(!c || (enabled && !c.connected))throw Error('Connect Gmail first');this.db.prepare("UPDATE plugin_connections SET enabled=?,revision=revision+1 WHERE plugin_id='gmail' AND account_id=?").run(enabled?1:0,c.accountId);return this.gmailConnection();}
+ gmailSetAccess(botId:string,enabled:boolean) {const c=this.gmailConnection();if(!c)throw Error('Configure Gmail first');if(!this.db.prepare('SELECT 1 FROM bots WHERE id=?').get(botId))throw Error('Agent not found');this.db.prepare("INSERT INTO plugin_agent_access VALUES ('gmail',?,?,?) ON CONFLICT(plugin_id,account_id,bot_id) DO UPDATE SET enabled=excluded.enabled").run(c.accountId,botId,enabled?1:0);this.db.prepare("UPDATE plugin_connections SET revision=revision+1 WHERE plugin_id='gmail' AND account_id=?").run(c.accountId);return this.gmailConnection();}
+ gmailDisconnect() {const c=this.gmailConnection();if(c)this.db.prepare("UPDATE plugin_connections SET connected=0,enabled=0,revision=revision+1 WHERE plugin_id='gmail' AND account_id=?").run(c.accountId);return this.gmailConnection();}
+ gmailDeleteConfig() {const c=this.gmailConnection();if(c){this.db.prepare("DELETE FROM plugin_agent_access WHERE plugin_id='gmail' AND account_id=?").run(c.accountId);this.db.prepare("DELETE FROM plugin_connections WHERE plugin_id='gmail' AND account_id=?").run(c.accountId);}return null;}
 }

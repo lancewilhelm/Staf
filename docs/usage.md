@@ -776,6 +776,59 @@ Each input accepts at most 16 KiB of UTF-8 and each process admits at most eight
 
 The pinned node-pty 1.2.0-beta.17 dependency ships native bindings; source installation permits that dependency's build scripts through the checked-in pnpm configuration. When a matching prebuild is absent, installation needs Python, a C/C++ toolchain and node-gyp. The supervised service targets Linux and macOS; real PTY and packed-install verification here is on macOS arm64. Linux runtime and Windows are not verified, and the service requires Unix signals, sockets and `/bin/ps`.
 
+## Gmail plugin
+
+Gmail is optional and starts disconnected. One account can be connected through
+**Settings → Plugins → Gmail**. This slice only manages the connection and
+per-agent access settings. It does not search or read messages, monitor the
+inbox, send mail, or make Gmail tools available to agents. The owner's boundary
+for sending private email to a model provider remains unresolved; connecting
+does not authorize that disclosure.
+
+To prepare an owner-operated connection:
+
+1. In your own Google Cloud project, enable the Gmail API and configure the
+   OAuth consent screen. Create an OAuth client of type **Desktop app** and
+   obtain its client ID and client secret. If the app is in external Testing
+   mode, add the Google account as a test user. The connection requests only
+   `https://www.googleapis.com/auth/gmail.readonly`, a restricted scope intended
+   for the later read/search feature. Google's [scope documentation](https://developers.google.com/workspace/gmail/api/auth/scopes)
+   and [restricted-scope verification guidance](https://developers.google.com/identity/protocols/oauth2/production-readiness/restricted-scope-verification)
+   explain applicable verification and exceptions. Do not assume that a
+   particular personal or organizational configuration qualifies.
+2. Open Staf using `http://127.0.0.1:3210/` or its selected loopback port.
+   For a remote host, use an SSH tunnel forwarding the same port and open the
+   loopback address locally; the OAuth callback needs that loopback address.
+   The HTTPS LAN gateway is not an OAuth callback address. Use the paired
+   browser and open **Settings → Plugins → Gmail**.
+3. Enter the intended Gmail address, desktop client ID and client secret. Select
+   **Begin Google authorization**, then **Open Google authorization**. Sign in
+   to the intended account and grant the requested access. Google redirects to
+   the local Staf callback. Return to Settings and refresh Gmail status. Staf
+   checks that the Google profile email matches the address entered; the
+   connection starts disabled and agent access starts off.
+4. Select the agents that may use this connection in future and choose
+   **Enable**. Enabling and **Check Gmail connection** refresh the Google token
+   and check the profile. A successful check confirms that exchange and identity
+   check only; it does not verify mail search or monitoring. After a restart,
+   status is **Not checked** until the next check.
+
+Disable retains credentials and access settings. Disconnect disables the plugin
+and removes its local credentials, but retains account configuration and agent
+access. Delete Gmail configuration also removes those settings. Neither action
+revokes the grant at Google; revoke it in Google account settings if desired.
+Reconnect requires the client secret and Google consent again. The client secret
+and refresh token are stored in host-local `auth/gmail.json` with restrictive
+permissions, outside SQLite and outside normal dataset backups. Protect the
+host and securely backed-up credentials; otherwise reconnect after restore.
+External apps in Google Testing mode with this scope generally receive refresh
+tokens that expire after seven days; Google can also revoke tokens for other
+reasons. See Google's [OAuth token expiration guidance](https://developers.google.com/identity/protocols/oauth2#expiration).
+
+The OAuth and plugin-management journey is covered by synthetic HTTP and browser
+fixtures. Real Google sign-in, token refresh, and account behavior have not been
+tested. No live account is needed to run the tests.
+
 ## Slack plugin
 
 Slack is bundled and inactive until the owner configures it. This preview binds

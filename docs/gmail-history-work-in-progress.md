@@ -1,8 +1,8 @@
 # Gmail history work in progress
 
-This document describes an internal, unintegrated implementation, not an
-available plugin. Staf cannot connect Gmail, search mail, or monitor an inbox
-with this code yet. Do not use it with a real account.
+This document describes the internal, unintegrated history implementation.
+Staf can manage a Gmail connection, but cannot search mail or monitor an inbox
+yet. See [Gmail setup](usage.md#gmail-plugin) for the connection's limits.
 
 The history component records an account's initial history ID without emitting
 existing messages. It collects all pages of a subsequent scan before atomically
@@ -25,18 +25,8 @@ arrived in the missing interval. See Google's [history reference](https://develo
 and [synchronization guide](https://developers.google.com/workspace/gmail/api/guides/sync),
 and its [release notes](https://developers.google.com/workspace/gmail/release-notes).
 
-The eventual owner-operated OAuth setup needs a Google Cloud project, Gmail API,
-OAuth consent configuration, and a suitable OAuth client. Search and reading
-require a scope such as `https://www.googleapis.com/auth/gmail.readonly`, which
-Google classifies as restricted. Verification requirements and exceptions
-depend on the actual app and use; do not assume an exception or public
-verification. See Google's [scope list](https://developers.google.com/workspace/gmail/api/auth/scopes)
-and [restricted-scope verification guidance](https://developers.google.com/identity/protocols/oauth2/production-readiness/restricted-scope-verification).
-This is not yet a usable authorization procedure.
-
 Before any real mail is processed, the owner's boundary for sending private
 email to a model provider remains to be resolved. A classifier cannot judge
-sensitivity without accessing data. Connection management, credential storage,
-agent authorization, service action integration, visible inspection, durable
-processing identity, and an owner-led setup and recovery path remain to be built.
+sensitivity without accessing data. Service action integration, visible
+inspection, durable processing identity, and monitoring remain to be built.
 The current tests use synthetic data and do not establish Google behavior.

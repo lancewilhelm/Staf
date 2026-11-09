@@ -444,8 +444,17 @@ state are checked again for actions and before reply dispatch. A dispatch is
 marked before the Slack API call so a crash or ambiguous response is not replayed.
 Tokens live separately in the host credential directory. A reconnecting socket
 can miss events during an outage; this slice has no Slack history backfill.
-These paths are exercised with controlled providers, not live Slack. Gmail is a
-future bundled integration and is not implemented by this interface.
+These paths are exercised with controlled providers, not live Slack.
+
+Gmail uses the same account-keyed connection and agent-access tables. A paired
+client starts an in-memory desktop OAuth attempt with PKCE and a loopback
+callback; the service exchanges the code, verifies the Gmail profile identity,
+and saves the client secret and refresh token in a separate host credential file.
+The service fences an in-flight exchange against cancellation, expiry, client
+revocation and connection revision changes. Connection and access controls do
+not yet offer any Gmail action or background event. The model-provider disclosure
+boundary remains unresolved. Synthetic Google HTTP and browser fixtures cover
+the management journey; real Google behavior remains unverified.
 
 ## Native home-network transport
 
