@@ -46,17 +46,20 @@ Connect an instance-wide OpenRouter key in global Settings or through the paired
 Tool mode controls clock, scoped memory, configured search, web reading, scratch shell, skill selection, host file actions, and native host commands in chat and eligible tasks: Direct offers individual capabilities, Hybrid offers them and code, and Code Mode offers code with those capabilities. Native commands run with the service account’s host access; known credentials are filtered before process output storage, and pipe and PTY backends support input, EOF, resize, retained processes and cross-client Stop. Recovery keeps uncertain effects fenced until supported service evidence is reconciled through the paired owner API/CLI; it never automatically repeats them. Unselected read receipts expire with work. See [tool mode usage](docs/usage.md#save-a-tool-mode). Other management features remain available through the service and CLI while
 their GUI is developed. Shared-instance ChatGPT sign-in has synthetic coverage
 but is not live verified. Background-task creation from main chat is deferred. Explicit task API and CLI operations remain available.
-Public web reading, owner-configured local search and scratch-only shell are off
-by default and require owner approval. Press Enter in the host
+Clock, memory, web research and file tools are enabled for availability in **Settings → Tools**. Web reading and search permissions remain off by default; search also needs a configured local backend. Scratch-only shell remains off by default. Web, search and scratch actions require owner approval. See [tool availability](docs/usage.md#manage-tool-availability). Press Enter in the host
 terminal to issue a fresh one-time code for another client. This preview binds
-only to loopback; it does not support LAN access. See [usage](docs/usage.md#local-shared-instance-offline-preview) for CLI commands and limitations.
+only to loopback. The optional native Linux HTTPS gateway provides paired home-network browser access; see [native Linux installation](docs/native-linux-installation.md). See [usage](docs/usage.md#local-shared-instance-offline-preview) for CLI commands and limitations.
 
-The loopback instance retains the background-task engine; its separate Activity and task-update workspace is deferred. It is an offline-tested preview with important permission and recovery limitations; see [usage](docs/usage.md#background-task-preview).
+Explicit background tasks and their outcomes appear in the shared conversation, with a task Stop control; separate Activity management remains deferred. It is an offline-tested preview with important permission and recovery limitations; see [usage](docs/usage.md#background-task-preview).
 
+
+The optional bundled [Slack plugin](docs/usage.md#slack-plugin) connects one approved DM to a chosen agent through Socket Mode. It is inactive until configured and enabled, with separate agent access. An approved DM can request and follow service-owned background work in its thread. Controlled integration tests do not establish live Slack behavior.
+
+The optional [Gmail plugin](docs/usage.md#gmail-plugin) supports owner-operated Google authorization, durable candidates, and agent read/search after separate model permission. An opt-in inbox assistant sends scoped updates and digests to an approved Slack DM. With optional Google scopes, an agent can propose replies or inbox changes for approval in Slack. Historical inbox membership and expired-history gaps are explicit. Google, Slack, and model behavior has controlled tests but has not been tested with real accounts.
 
 The shared instance supports owner-imported [skills](docs/usage.md#skills-in-the-shared-instance) as an offline-tested preview. Eligible chat and task work can select them in Direct, Hybrid, or Code Mode.
 
-The shared instance supports [scoped memory](docs/usage.md#scoped-memory-in-the-shared-instance) in an offline-tested preview, with read-only agent and shared user memory pages in Settings.
+The shared instance supports [scoped memory](docs/usage.md#scoped-memory-in-the-shared-instance) in an offline-tested preview, with agent and shared user memory pages, configurable sensitivity rules, and owner review of proposed sensitive changes.
 
 Agents can keep their initials, choose a geometric avatar with a separate color,
 or use a cropped uploaded image. Use **Change image** in New agent or agent

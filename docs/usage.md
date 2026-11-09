@@ -297,7 +297,7 @@ Incremental output is available when the adapter supplies it; buffered adapters
 show progress and then the completed message. A failed or interrupted response
 remains labeled as incomplete.
 
-Pending main-chat approvals appear in the conversation. The workspace checks for updates while visible; it does not provide background notifications. Activity, task updates, and task questions are deferred from the MVP workspace.
+Pending chat and task approvals appear in the conversation. Explicit background tasks show their status, outcome and activity there; task questions are visible but answers still require the CLI or API. The workspace checks for updates while visible; it does not provide background notifications.
 
 Drafts and pending message IDs are stored in the browser's local journal.
 An agent's draft and pending submission recover automatically after reload or
@@ -457,7 +457,7 @@ If the result is uncertain, repeat the same command with `--operation-id ID`
 using that ID. Keep the other arguments unchanged. The browser retains its
 creation operation in local storage for status checks and retries after reload.
 
-The task form has a helper clock scope, also available with `instance task-start URL CREDENTIAL_FILE BOT_ID --delegate-clock OBJECTIVE`. It is off by default and recorded independently from the objective. Selecting it permits a helper to request clock reads, subject to current permissions and approval settings. Retries retain the original scope. Scheduled tasks currently receive no helper action scope.
+The CLI supports a helper clock scope with `instance task-start URL CREDENTIAL_FILE BOT_ID --delegate-clock OBJECTIVE`. It is off by default and recorded independently from the objective. Selecting it permits a helper to request clock reads, subject to current permissions and approval settings. Retries retain the original scope. Scheduled tasks currently receive no helper action scope.
 
 Discovery searches names and descriptions, excludes the requester and archived bots, and reports busy bots and ambiguous matches. Matching and limits are provisional. Discovery does not itself assign work. During a task, a bot can request one helper; the owner reviews each exact bot message before it is sent. Helpers do not inherit either bot’s chat history or retrieve private memory.
 
@@ -486,10 +486,8 @@ not a LAN deployment.
 
 ## Background task preview
 
-The background engine and task history remain available through explicit API/CLI operations. The MVP workspace hides Activity and task updates without stopping existing work. Main chat does not advertise or execute background-task creation. The CLI operations below can start and inspect tasks with a run
-limit of five minutes by default. Stop requests cancellation; the task remains
-stopping until its provider settles. A provider result already returned after
-the request can still complete the task. Retry a failed, stopped, or interrupted
+The background engine and task history remain available through explicit API/CLI operations. The conversation shows each task, its state, result, activity and pending approvals, and offers Stop while it is active. Chat remains usable during the task. Main chat does not advertise or execute background-task creation. The CLI operations below can start and inspect tasks with a run
+limit of five minutes by default. Stop requests cancellation and prevents new actions; the task remains stopping until its provider settles. Text and usage observed after Stop are retained as evidence, while the attempt remains stopped. An execution-limit stop retains its reason. Retry a failed, stopped, or interrupted
 attempt explicitly. Replace an active task with a changed objective explicitly.
 The replacement waits until the original settles and keeps a link to it.
 
@@ -532,11 +530,13 @@ separate from the up to five matches selected for a provider request.
 
 Each agent has separate memory. User memory is shared across agents. In main chat, explicit phrases such as “Remember that I like tea” save to the addressed agent. “Remember for all agents: I like tea” proposes shared user memory. The response shows the exact text and warns that all agents can retrieve it. Send `Confirm shared memory PROPOSAL_ID` to save that exact proposal, or `Cancel shared memory PROPOSAL_ID` to cancel it without saving memory. Cancellation removes the text from the active proposal, but the original message and proposal response remain in chat history and may be included in later model requests or task context. Cancellation does not erase backups or data already sent to a provider. The proposal is bound to the addressed agent and survives restart. Repeating confirmation cannot duplicate it. The acknowledgment names the scope. Ambiguous scope or missing content prompts a clarification without saving. Other supported save forms include “Please keep in mind that …”, “Save this for later: …”, and the prefixes “for this agent” or “in shared memory”. For inspection say “List memories in shared memory” or “List memories in this agent memory”. For a specific entry say “Correct memory MEMORY_ID version VERSION in this agent memory to NEW TEXT” or “Forget memory MEMORY_ID version VERSION in shared memory”. Edits and deletions require the exact ID, last observed version, and scope. Scoped save phrases require a colon after the scope; partial agent scopes and recognizable conflicting restrictions require clarification. Phrase recognition is deterministic and cannot reliably infer every implied restriction; review the scope before using shared memory. “Forget that …” asks for an ID and scope rather than guessing which entry to delete. Descriptive requests such as “What do you remember about tea?”, “Forget the memory about tea” and “Correct my memory about tea to coffee” show up to ten matching candidates with IDs and versions; they do not change memory. Unspecified scope means this agent. Add “in shared memory” to preview shared entries. Ambiguous, excluded or other-agent scopes require clarification. A preview does not select an entry or authorize mutation; use the exact ID, current version, scope and replacement text in a separate command. Other natural-language phrasing is not reliably recognized. Tool-capable models can use the memory actions described below. The earlier “bot” wording remains accepted in these chat phrases. CLI scope values such as `bot:BOT_ID` are unchanged.
 
-In ordinary chat, a tool-capable model can explicitly search or read retained memory, remember, update, and forget using the existing store. It chooses agent or user scope; agent scope is always the executing agent. Reads include IDs and versions. Updates and deletions require the current version, and stale or wrong-scope IDs fail. A shared remember action only proposes the text; the owner must send `Confirm shared memory PROPOSAL_ID` in the same agent chat to save it, or `Cancel shared memory PROPOSAL_ID` to discard it. The action record shows the exact proposed text and ID for review. The model can inspect a proposal status but cannot confirm it. Existing shared updates and deletion do not require a new confirmation. Model behavior depends on its tool use; review changes in the owner interfaces. Eligible tasks use the same memory actions; helpers remain excluded from private memory.
+In chat and eligible tasks, a tool-capable model can search, read, remember, update, and forget within the existing agent and shared scopes. Set **Settings → Tools → Memory sensitivity** to allow model-classified ordinary changes or to review every model save and update. The default allows a model-classified ordinary change unless its text contains a configured sensitive term. Terms match case-insensitively anywhere in the text; add or remove terms in settings. A sensitive, uncertain or omitted classification requires review; an unrecognized value is rejected. A model can misclassify, and term matching misses synonyms and implicit details: choose **Review every model memory change** when this risk is unacceptable. The policy applies to model memory tools, not explicit owner memory commands or paired API and CLI changes. Native terminal and file access remain governed by their existing permissions and can write outside memory tools; these rules are not a filesystem sandbox.
 
-The workspace memory views are read-only. Use chat commands or the CLI to add, edit, or delete entries. The CLI uses explicit scopes. Use `memory-list URL CREDENTIAL_FILE user`, `memory-add URL CREDENTIAL_FILE bot:BOT_ID TEXT`, `memory-edit URL CREDENTIAL_FILE bot:BOT_ID MEMORY_ID VERSION TEXT`, and `memory-delete URL CREDENTIAL_FILE bot:BOT_ID MEMORY_ID VERSION`. Use `user` instead of `bot:BOT_ID` for shared user memory. Refresh after a conflict before editing or deleting. All paired clients act for the same owner.
+Open **Agent settings → View agent memory → Memory proposals** to inspect the exact text, scope and target version, then confirm or deny. A confirmed agent proposal saves or updates that agent's memory; a stale update fails and can be denied. A sensitive shared creation requires this review and then the existing separate `Confirm shared memory PROPOSAL_ID` in that agent's chat. The final confirmation checks the approved text and current authority again. Shared updates still use their existing authority, with sensitive review added. Pending proposals survive restart. Disabling memory or archiving the agent denies its pending sensitive proposals and cancels their pending shared confirmations; re-enabling does not restore them. A plugin-originated proposal cannot be confirmed after its captured plugin access changes. A denial or confirmation cannot be replayed. Settings changes do not retroactively reclassify already saved memories or pending proposals. Helpers and scheduled tasks remain ineligible for these memory actions. Deletion still uses the existing version checks.
 
-Up to five keyword-matched entries from shared user memory and the addressed bot are included as untrusted data in each provider request. The matching is simple and may miss relevant memories. Injected entries are not added to saved conversation messages. Deleting an entry removes it from active memory and future retrieval; it does not erase prior transcripts, backups, or provider requests already sent or in flight. A memory saved or listed in chat remains in that transcript and can be sent again as ordinary conversation history after deletion. Memory is stored in the instance database and shares its access protections. A migration backup is created before upgrading an existing database. Offline integration tests cover this preview; live providers have not been verified for memory.
+Saved memory lists are read-only; proposal decisions are available on each agent memory page. Use chat commands or the CLI to add, edit, or delete entries. The CLI uses explicit scopes. Use `memory-list URL CREDENTIAL_FILE user`, `memory-add URL CREDENTIAL_FILE bot:BOT_ID TEXT`, `memory-edit URL CREDENTIAL_FILE bot:BOT_ID MEMORY_ID VERSION TEXT`, and `memory-delete URL CREDENTIAL_FILE bot:BOT_ID MEMORY_ID VERSION`. Use `user` instead of `bot:BOT_ID` for shared user memory. Refresh after a conflict before editing or deleting. All paired clients act for the same owner.
+
+Up to five keyword-matched entries from shared user memory and the addressed bot are included as untrusted data in each provider request. The matching is simple and may miss relevant memories. Injected entries are not added to saved conversation messages. Deleting an entry removes it from active memory and future retrieval; it does not erase prior transcripts, action records, backups, or provider requests already sent or in flight. New work-action invocations store a keyed fingerprint instead of memory-save or update input; older action records are not rewritten. Pending sensitive proposals separately store their exact text in the instance database for owner review; their text is cleared on decision, but database files and backups can retain prior bytes. Provider messages, chat and task history, tool event details and Code Mode source can contain proposed text independently of the action journal. A memory saved or listed in chat remains in that transcript and can be sent again as ordinary conversation history after deletion. Memory is stored in the instance database and shares its access protections. A migration backup is created before upgrading an existing database. Offline integration tests cover this preview; a scripted response to an interruption preference demonstrates the retrieval path, not empathy or reliable live model behavior. Live providers have not been verified for memory.
 
 ### Skills in the shared instance
 
@@ -599,7 +599,7 @@ Inspection shows occurrence status, linked task ID, skipped range and reason. An
 
 ### Public web reading
 
-Web reading is disabled by default. A paired owner must enable it for the instance and bot. Ordinary background tasks additionally require their own task permission. A scheduled task instead receives only its captured exact URL scope, which can be disabled explicitly for the task; helpers cannot use web reading. The task permission readback distinguishes the owner override, inherited scheduled scope and current effective access. Use `instance web-permission URL CREDENTIAL_FILE SCOPE` or `instance web-permission-set URL CREDENTIAL_FILE SCOPE true|false` to manage these switches. `SCOPE` is `instance`, `bot:BOT_ID`, or `task:ATTEMPT_ID`.
+Web reading permission is disabled by default. A paired owner must enable it for the instance and bot. Ordinary background tasks additionally require their own task permission. A scheduled task instead receives only its captured exact URL scope, which can be disabled explicitly for the task; helpers cannot use web reading. The task permission readback distinguishes the owner override, inherited scheduled scope and current effective access. Use `instance web-permission URL CREDENTIAL_FILE SCOPE` or `instance web-permission-set URL CREDENTIAL_FILE SCOPE true|false` to manage these switches. `SCOPE` is `instance`, `bot:BOT_ID`, or `task:ATTEMPT_ID`.
 
 A tool-capable bot may propose a public HTTP(S) page. A paired owner must approve each exact target, including each redirect, before DNS or HTTP. Use the browser approval list or `instance web-approvals URL CREDENTIAL_FILE`, `instance web-approve URL CREDENTIAL_FILE ACTION_ID`, and `instance web-deny URL CREDENTIAL_FILE ACTION_ID`. Web requests with credentials or query strings are rejected. A started request interrupted by restart is marked uncertain and is not automatically repeated. Revoking permission or stopping a task cancels in-flight reads.
 
@@ -607,7 +607,7 @@ Page text is untrusted data and cannot grant authority. The action journal recor
 
 ### Search through an owner-configured backend
 
-Search is separate from web reading and is disabled by default. Configure the exact local backend origin in the form `http://127.0.0.1:PORT` with the CLI, then explicitly enable instance and bot search. An ordinary background task also requires its own search permission. A scheduled task can use only its captured exact query and backend scope, subject to an explicit task disable; helpers are not supported. Task readback distinguishes the owner override, inherited schedule scope and current effective access. The selected loopback port can identify any local HTTP service; only configure a backend you trust. In Docker, `127.0.0.1` refers to the container itself.
+Search permissions are separate from web reading and are disabled by default. Configure the exact local backend origin in the form `http://127.0.0.1:PORT` in Settings or with the CLI, then explicitly enable instance and bot search. An ordinary background task also requires its own search permission. A scheduled task can use only its captured exact query and backend scope, subject to an explicit task disable; helpers are not supported. Task readback distinguishes the owner override, inherited schedule scope and current effective access. The selected loopback port can identify any local HTTP service; only configure a backend you trust. In Docker, `127.0.0.1` refers to the container itself.
 
 Each search requires owner approval of the exact query and backend before dispatch, unless an enabled matching reusable grant applies. In ordinary chat all three tool modes use the same search action, approval and result; the backend is never chosen by the model. The CLI supports `instance search-config URL CREDENTIAL_FILE`, `search-config-set URL CREDENTIAL_FILE REVISION ORIGIN` (use `-` to clear), `search-permission URL CREDENTIAL_FILE SCOPE`, `search-permission-set URL CREDENTIAL_FILE SCOPE true|false`, `search-approvals URL CREDENTIAL_FILE`, and `search-approve` or `search-deny` with an approval ID. Search has a limit of two concurrent dispatches within one instance process and ten dispatches per rolling minute per instance database; the rate history survives restart. Separate instance processes do not share a concurrency limit. Interrupted started actions become uncertain and are not automatically replayed.
 
@@ -664,6 +664,28 @@ agent and review the warning before adding `--confirm-provider-change`. Without
 the flag the provider stays unchanged. Use the revision from inspect; conflicts
 preserve the current configuration. The
 interactive terminal keeps its existing provider-change confirmation.
+
+## Manage tool availability
+
+In **Settings → Tools**, inspect and enable or disable clock, memory, web
+research, and files for the instance. All four are enabled on a fresh install
+and when an older instance is upgraded. Save changes explicitly. These controls
+apply to Direct, Hybrid, and Code Mode in chat and eligible tasks; they do not
+change agent permissions, task scope, approval modes, or the native terminal.
+Disabling memory also stops automatic recall for new provider requests. Your
+saved memories, tool history, configuration and permissions remain in place.
+Reenable a tool to make it available again, subject to the same permissions.
+Already dispatched external actions cannot be undone; disabling web research
+requests cancellation of active web reads and searches.
+
+The search backend can be inspected and configured in the same settings section.
+It must be a trusted SearXNG origin of the form `http://127.0.0.1:PORT`.
+Availability alone does not grant web or search permission: those permissions
+remain off on a fresh instance and are managed separately through the paired
+CLI. Search additionally requires a configured backend and exact-query approval;
+see [search setup](#search-through-an-owner-configured-backend) and
+[web reading](#public-web-reading). Existing permissions are never widened
+by enabling a tool.
 
 ## Save a tool mode
 
@@ -755,3 +777,288 @@ Paired clients use the process `/input`, `/eof` and `/resize` endpoints. CLI com
 Each input accepts at most 16 KiB of UTF-8 and each process admits at most eight pending interaction requests. PTYs accept a cumulative 1 MiB per process, including Ctrl-D bytes; this bounds node-pty's unacknowledged write queue. The budget does not reset when an application produces output. Exhaustion leaves output and Stop usable. Pipe input uses write backpressure and has no cumulative input budget. Output keeps the existing 128 KiB buffer and explicit expiry gaps.
 
 The pinned node-pty 1.2.0-beta.17 dependency ships native bindings; source installation permits that dependency's build scripts through the checked-in pnpm configuration. When a matching prebuild is absent, installation needs Python, a C/C++ toolchain and node-gyp. The supervised service targets Linux and macOS; real PTY and packed-install verification here is on macOS arm64. Linux runtime and Windows are not verified, and the service requires Unix signals, sockets and `/bin/ps`.
+
+## Gmail plugin
+
+Gmail is optional and starts disconnected. One account can be connected through
+**Settings → Plugins → Gmail**. The service records new message candidates and
+lets a paired owner inspect them. An agent can search and read mail in chat only
+after both agent access and a separate, explicit model disclosure decision.
+Connecting Gmail alone does not authorize sending email to a model. The opt-in inbox assistant can assess new candidates and send scoped Slack updates. Optional Google scopes allow an agent to propose a reply or inbox change for approval in Slack.
+
+To prepare an owner-operated connection:
+
+1. In your own Google Cloud project, enable the Gmail API and configure the
+   OAuth consent screen. Create an OAuth client of type **Desktop app** and
+   obtain its client ID and client secret. If the app is in external Testing
+   mode, add the Google account as a test user. The connection requests
+   `https://www.googleapis.com/auth/gmail.readonly`, a restricted scope used
+   for read/search and history. Reply sending additionally requests
+   `https://www.googleapis.com/auth/gmail.send`. Inbox changes additionally request
+   `https://www.googleapis.com/auth/gmail.modify`, which Google also permits for
+   sending; Staf separately requires its send setting and approval for replies.
+   Google's [scope documentation](https://developers.google.com/workspace/gmail/api/auth/scopes)
+   and [restricted-scope verification guidance](https://developers.google.com/identity/protocols/oauth2/production-readiness/restricted-scope-verification)
+   explain applicable verification and exceptions. Do not assume that a
+   particular personal or organizational configuration qualifies.
+2. Open Staf using `http://127.0.0.1:3210/` or its selected loopback port.
+   For a remote host, use an SSH tunnel forwarding the same port and open the
+   loopback address locally; the OAuth callback needs that loopback address.
+   The HTTPS LAN gateway is not an OAuth callback address. Use the paired
+   browser and open **Settings → Plugins → Gmail**.
+3. Enter the intended Gmail address, desktop client ID and client secret. To
+   allow approved replies, select **Allow Gmail to send replies after explicit
+   approval in Slack**. To allow approved label, archive, and mark-read changes,
+   select **Allow Gmail inbox changes after explicit approval in Slack**.
+   Reconnect and select the permissions you want if the existing connection
+   lacks them. Select
+   **Begin Google authorization**, then **Open Google authorization**. Sign in
+   to the intended account and grant the requested access. Google redirects to
+   the local Staf callback. Return to Settings and refresh Gmail status. Staf
+   checks that the Google profile email matches the address entered; the
+   connection starts disabled and agent access starts off.
+4. Choose **Enable** to start monitoring. To let an agent read mail, allow its
+   access and separately confirm **Allow Gmail to** the displayed provider and
+   model. That decision allows message text and search results to be sent to
+   that provider during this agent's chat. It does not apply to another provider
+   or model. To use Gmail in background tasks or Slack-originated work, separately
+   confirm **Allow Gmail in tasks and Slack work**. Existing chat permissions do
+   not grant that access. Revoke either permission in Settings. Enabling and
+   **Check Gmail connection** refresh the token and check the profile. After a restart,
+   connection status is **Not checked** until the next check or successful poll.
+
+Staf captures the Gmail history ID when the account is first connected, without
+reporting existing mail. While enabled, it polls approximately every 30 seconds
+and commits message IDs, evidence and the history cursor together. The same ID
+is recorded once across retries and restarts. Settings lists all mailbox additions
+and lets the paired owner inspect them without a model call.
+
+Gmail history entries normally contain only message and thread IDs. For each new
+addition, Staf separately reads the message's current labels and last-modified
+history ID. It infers inbox evidence only when that ID equals the addition's
+history record ID and `INBOX` is present; it excludes messages carrying `SENT`,
+`DRAFT`, `SPAM`, or `TRASH`. A matching ID and other labels are recorded as a
+non-inbox candidate. If IDs or labels are missing, the message has since changed,
+or metadata cannot be retrieved, inbox membership is uncertain. These candidates
+remain in Settings for owner review and are not automatically assessed or sent to
+Slack. This conservative inference is not a guarantee of exact historical
+classification, and a move into the inbox after a non-inbox addition is not a new
+message arrival. To assess an uncertain candidate, inspect it and choose **Assess this candidate** in Gmail settings. Confirm the model disclosure; the assessment always requires private clarification before Slack shares details. This does not change the recorded evidence or establish historical inbox membership.
+Legacy candidates without recorded evidence remain uncertain; their pending
+assistant deliveries are marked stale on upgrade rather than sent. See Google's
+[history reference](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.history/list)
+and [message resource](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.messages)
+for the available fields. Gmail's [watch](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users/watch)
+filters push notifications; Staf uses history polling, not watch.
+
+
+To enable the inbox assistant, first configure an approved Slack DM bound to the
+same agent, and grant that agent both Gmail model permissions above. Under
+**Inbox assistant**, enter attention guidance and sensitive topics, then enable
+monitoring and confirm the displayed model-provider disclosure. Staf sends the
+candidate sender, subject, snippet and bounded plain text to that provider for
+assessment. The captured agent instructions and attention guidance are used. Optionally, you can separately approve sending relevant active agent and user memories to that same model provider. Pending sensitive-memory proposals and other agents’ private memories are excluded. Memory must remain enabled. When any memory is used, Staf asks for private approval before disclosing the resulting summary in Slack. A model can make
+mistakes, so define sensitive topics and review the results. Staf also treats a
+match to a configured sensitive term, truncated message, or message without extractable plain text as private. HTML and attachments are not assessed.
+
+A relevant candidate classified non-sensitive and urgent receives a useful update in the
+approved DM. Less urgent candidates accumulate into a digest at the configured interval (1–1,440 minutes). The interval is measured from setup or the last due check, rather than a fixed local clock time. Empty digests are quiet. Digest batches and their individual items survive restart; an uncertain send is never automatically repeated. A sensitive or uncertain candidate receives only a generic question
+in that DM; reply yes or no in its thread. An affirmative response authorizes
+that one summary in the same thread. Other replies ask for clarification. No
+sender, subject or message content appears in the initial question. Staf does
+processes eligible additions recorded since the connection baseline, including
+those collected during initial setup, only after monitoring and model access are
+explicitly enabled. A later re-enable resumes unprocessed eligible additions;
+previously claimed items are not processed a second time. Compatible preference edits retain pending immediate updates, private questions and digest items. Changes to sensitive topics or memory with the same authority send pending unapproved details for private clarification. Authority changes mark pending work stale for review. Changes to Gmail, Slack, agent or model authorization
+pause the assistant; enable it again after reviewing permissions.
+
+History checks and evaluation failures are recorded. The assistant sends one
+generic Slack alert for a continuing failure when the approved DM is available;
+a recovered check permits a later failure alert. A failed or safely stale assessment can be explicitly retried from Gmail settings under current authority; failed attempts with other recorded actions cannot be retried. To find an older assessment, use **Load older candidates** in Gmail settings. Each member of a stale digest can be reassessed separately. Staf retains the earlier assessment and batch evidence and asks privately before sharing the new result. This starts a new assessment rather than replaying actions. A definite Slack rate-limit rejection retains the full valid retry delay across restart and reassessment. If Slack gives an invalid or unrepresentable delay, the delivery is held for owner review and is not retried automatically. A Slack send with an unknown outcome is marked uncertain and is not automatically repeated. In Gmail settings, review the exact attempted text and inspect Slack. You can mark a message delivered, dismiss it, or explicitly confirm sending the same text again; a resend can duplicate it and requires current authority; Staf refuses a resend when a subsequent privacy change requires renewed review. An uncertain generic clarification cannot be marked delivered because its Slack thread is unknown. The Settings status also flags failed and stale work for review in agent tasks.
+Reply in an individual update or clarification thread with a correction such as
+“This should have been less urgent” or “This is sensitive.” Staf records the
+correction for inspection in Gmail settings and may use it as context for later
+messages with the same normalized From header, matched by a keyed digest rather
+than a stored sender address. This is not proof of sender identity. A sensitivity correction also moves pending updates from that
+sender to private clarification and treats later messages from that sender as
+private, even if you later correct that item’s urgency or say it is not sensitive. To remove that correction, reply “Forget that correction” in the same
+individual thread. Saying “not sensitive” is a correction, not
+permission to share the current private message or automatically downgrade later
+messages: answer the separate question explicitly. For a digest with several items, identify the position, for example “The second item should have been urgent.” To clear a correction on a digest item, reply “The second item forget that correction.” Staf asks for the position when the target is ambiguous. Edit the attention and sensitive-topic
+preferences in Settings when you want a standing rule.
+
+Assessment and delivery use controlled fixtures only; live provider quality,
+Slack and Google behavior have not been verified.
+
+If Gmail reports that the saved history ID expired, Settings reports an unknown
+interval and stops automatic polling. **Start monitoring from now** records the
+gap and establishes a new baseline only after confirmation; it cannot reconstruct
+missing arrivals. Accounts connected by an older Staf version have no baseline:
+they require that same explicit step and record the earlier interval as unknown.
+Disable pauses polling without deleting the cursor or candidates. Gmail's history
+can expire during a long outage or while disabled. A scan is limited to 100
+history pages and 10,000 distinct message IDs. If that limit or a connection
+error prevents a scan, it reports failure and keeps the old cursor. An explicit
+restart from now records the unknown interval rather than claiming recovery.
+
+In Direct, Hybrid, and Code Mode, an agent with access and model permission can
+call `gmail_search` and `gmail_read` in main chat. Slack-originated chat also
+requires the separate task and Slack model permission.
+Search returns at most 20 IDs per call and signals when
+more exist; narrow the query to find others. Read returns bounded plain text,
+headers and a snippet; HTML and attachments are not included. Gmail content is
+untrusted data, not instructions. Read fails rather than truncating a Gmail API
+response over 2 MiB, and displayed plain text is limited to 16,000 characters.
+For a background task, the paired owner can include `gmailQuery` in the
+`POST /api/tasks` body. The exact query is the task's Gmail scope. The task can
+read only IDs returned by that query in that attempt. Retries, scheduled tasks,
+and helper assignments do not inherit this scope. In an authorized Slack DM,
+`work gmail: in:inbox` starts a task scoped to the exact query `in:inbox`.
+Replace that query with the intended Gmail search. The agent must already have
+Gmail access and both model permissions when the task starts. Changes to
+the connection or any permission stop subsequent Gmail work.
+
+After a Gmail result in a turn, other tools are unavailable for the rest of that
+turn except Gmail search, read, and approved action proposals. Inbox monitoring tasks are restricted to the scoped read and cannot propose Gmail changes. This also applies to guest calls already queued behind the Gmail action. Ordinary Slack updates remain
+generic. To propose a reply, the agent must read the original message in that
+work and have an enabled Slack connection for the same agent. Staf first asks
+the approved Slack user a generic question before showing the proposal. If the
+user chooses **Show proposal**, Slack displays the account, recipient, subject,
+and complete plain-text body with **Approve send**, **Request changes**, and
+**Deny** buttons. To request changes, select **Request changes**, then reply in
+the indicated thread. The old buttons stop working. The agent receives your
+direction and must make a new proposal with a new disclosure and approval.
+Only an approval of that proposal can send it. A reply has one recipient and no
+attachments. The subject must be nonempty, at most 400 characters, and match the
+original message, as required by [Gmail threading](https://developers.google.com/workspace/gmail/api/guides/threads).
+The body limit is up to 2,600 characters; the complete proposal must fit within
+3,000 characters. An agent may need another instruction if it cannot revise
+the proposal. Edits are requests to the agent, not direct edits of the email.
+
+For an inbox change, the agent must first read the target message in the same
+work. It can propose adding an existing user label by its exact name, archiving
+the message, or marking it read. Staf resolves the label name to its Gmail ID
+and checks it again before dispatch. Slack shows the account, message, and exact
+change after the generic disclosure question. Approval applies only that change.
+The Gmail account can change between the final check and Google's operation.
+
+Slack receives a generic send result. A timeout, lost connection, or interrupted
+send or change can leave the outcome unknown. Staf does not replay an uncertain
+action and blocks further actions on that message until the owner reviews it.
+In **Settings → Plugins → Gmail**, review **Gmail outcomes needing review**.
+Check Sent mail or the message's labels in Gmail, then record your finding. If
+you are unsure, leave it unresolved. Recording a finding does not retry anything;
+a new action still needs a new approval. The paired command or task API also
+includes `gmailReplies` with the recorded effect and state. Pending
+approvals are interrupted on restart and old buttons cannot send. The separately enabled inbox assistant uses the scoped disclosure flow above. The owner's
+visible chat, task activity, and proposal records can contain the email and
+should be protected like the mailbox.
+Gmail tool results and generated replies from that turn are omitted from later
+model replay and captured task context; the owner's original request remains.
+An agent must search again to use the mail in a later turn. This cannot recall
+content already sent to the explicitly allowed provider.
+
+Disable retains credentials, agent access and model disclosure settings.
+Disconnect disables the plugin and removes its local credentials, but retains
+account configuration and all permissions. Reconnecting the same account can
+therefore make an existing model permission usable again; revoke it separately
+if that is not wanted. Delete Gmail configuration removes all permissions.
+Neither action
+revokes the grant at Google; revoke it in Google account settings if desired.
+Reconnect requires the client secret and Google consent again. The client secret
+and refresh token are stored in host-local `auth/gmail.json` with restrictive
+permissions, outside SQLite and outside normal dataset backups. Protect the
+host and securely backed-up credentials; otherwise reconnect after restore.
+External apps in Google Testing mode with this scope generally receive refresh
+tokens that expire after seven days; Google can also revoke tokens for other
+reasons. See Google's [OAuth token expiration guidance](https://developers.google.com/identity/protocols/oauth2#expiration).
+
+OAuth, monitoring, read/search, and reply sending are covered by synthetic HTTP
+and controlled model fixtures. Real Google sign-in, token refresh, mail, history
+delivery, Slack interactions, and model behavior have not been tested. No live
+account is needed for tests.
+
+## Slack plugin
+
+Slack is bundled and inactive until the owner configures it. This preview binds
+one workspace, one approved Slack user and one direct-message channel to an
+existing Staf agent. It uses Socket Mode, so Slack does not need a public Staf
+URL. It does not accept channels, group DMs, other users, message edits or bot
+messages. The approved user can interact with that agent's main chat and the
+agent's existing capabilities and permissions; messages and responses are sent
+to its selected model provider. Choose these identities with that access in mind.
+
+To set up your own Slack app:
+
+1. Create an app in the desired workspace, enable Socket Mode, and create an
+   app-level token with `connections:write`. Under OAuth & Permissions add the
+   bot scopes `im:history` and `chat:write`; under Event Subscriptions subscribe
+   the bot to `message.im`. Enable **Interactivity** for the approval buttons.
+   Install the app in the workspace. Enable the Messages
+   tab and allow users to send messages if Slack presents that setting.
+2. Open the app's direct message and find the workspace ID (`T...`), your user
+   ID (`U...`), and the DM channel ID (`D...`). Slack's profile and workspace
+   links expose user and workspace IDs; a copied link to a message in the app DM
+   includes the DM channel ID. IDs identify the approved conversation; names
+   are not sufficient. Slack's [Socket Mode guide](https://docs.slack.dev/apis/events-api/using-socket-mode/),
+   [`message.im` reference](https://docs.slack.dev/reference/events/message.im/),
+   and [`chat.postMessage` reference](https://docs.slack.dev/reference/methods/chat.postMessage/)
+   describe the transport, scopes and reply behavior.
+3. In **Settings → Plugins → Slack**, enter the app-level and bot user tokens,
+   the IDs and an existing active agent. **Connect** checks the bot token's
+   workspace with Slack. Then explicitly **Allow agent access** and **Enable**.
+   A connected status means the Socket Mode WebSocket opened, not that a DM
+   has been tested. An app token or Slack settings error may require correcting
+   the setup and enabling again.
+4. Send a harmless test DM from the approved user. The agent's response should
+   appear in that DM, or in the originating thread for a threaded message.
+   Inspect the corresponding main chat and **Recent message outcomes** in
+   Settings. A busy agent or failed model request is recorded, not queued.
+
+Disable stops the socket and cancels active Slack chat responses while retaining
+configuration, access, and history. Accepted Slack background tasks continue;
+their delivery waits until the same approved destination and agent are enabled again. Disconnect also removes the locally saved
+Slack tokens, while preserving the binding and history. Delete saved configuration
+removes the binding and agent access as well. These actions do not uninstall the
+Slack app or revoke tokens at Slack. Reconnect requires the tokens again. Tokens
+are stored as a host-local `auth/slack.json` file with restricted permissions;
+they are not returned to clients or included in the instance database. Protect
+host access and backups. Consult the backup instructions for which files are
+included; reconnect Slack after a restore unless the credential file was
+explicitly and securely restored.
+
+Ask the agent for work in a normal DM, for example, “Please investigate this
+and let me know what you find.” A tool-capable model can choose to start
+independent work; the service uses your original message as its objective and
+sends a receipt in that message's thread. For an update, direction, an answer,
+or Stop, reply in that same thread in ordinary language. Staf binds these actions
+to that thread's task. If there is no unique binding or open question, it asks
+for clarification and makes no change. If older work shares a thread, quote the
+full original request from the offered choices to identify it. Start a new
+top-level message for a new task. An agent can run one background task at a time.
+
+The agent still uses its captured identity, context, tool mode, permissions and
+task scope, and service approval rules continue to apply. This task workflow does
+not itself decide action approvals; Slack email approval is addressed separately
+in [issue #109](https://github.com/lancewilhelm/Staf/issues/109). A model that
+cannot call tools cannot use the natural-language task capabilities. Existing
+`work:` and ID-based controls remain available for diagnostics and older threads.
+
+Receipt, actual tool progress, questions and the terminal outcome are sent to
+the request's thread. A result does not require another DM. If Slack is disabled,
+disconnected or rate limited, pending delivery is retained for the same
+workspace, user, channel and agent; reconnect and enable that same binding to
+resume. A confirmed Slack acceptance is not proof that a person read the message.
+Inspect **Recent task deliveries** in plugin settings. A send with an unknown
+result is marked uncertain and never automatically replayed. Inspect Slack and the
+stored task before deciding what to do. A service restart interrupts unfinished
+tasks; it does not rerun model work or uncertain effects, and the interrupted
+outcome is delivered when possible. Duplicate events are not run again. Replies
+are limited to 39,000 characters. Socket Mode does not backfill events missed
+while disconnected. Slack and model behavior have controlled offline coverage;
+real workspace setup and delivery have not been validated by the implementation
+tests.
+
+## Home-network browser access
+
+The optional [native HTTPS gateway](native-linux-installation.md#enable-home-network-https-access) lets a paired browser reach the loopback instance over a trusted home network. Each browser origin needs pairing; CLI access and ChatGPT loopback sign-in use SSH forwarding. Native Linux, LAN and live sign-in remain unverified.

@@ -194,12 +194,26 @@ remain service-controlled. Live provider execution remains unverified.
 The shared chat-completions adapter passes caller cancellation and its timeout
 to the HTTP transport.
 
-The background-task preview stores tasks, linked attempts, captured profiles and context, ordered Activity, and private sessions in SQLite. A partial unique index enforces one queued, running, or stopping attempt per bot. Startup marks unfinished attempts interrupted. Stop intent is saved before requesting transport cancellation; observed terminal output and usage can still arrive. Clock permissions and approval modes are implemented. Explicit task inputs are stored in an ordered inbox and incorporated at provider boundaries; completion and input acceptance are serialized. Structured `ask_owner` calls wait for an answer to the recorded question ID, without consuming the execution timer. Main chat does not implicitly direct a task. Explicit replacement is captured while waiting and becomes queued in the same transaction that records the original attempt settling. The MVP workspace hides Activity and task questions; explicit task API/CLI operations remain available. Offline tests do not establish live provider behavior.
+The background-task preview stores tasks, linked attempts, captured profiles and context, ordered Activity, and private sessions in SQLite. A partial unique index enforces one queued, running, or stopping attempt per bot. Startup marks unfinished attempts interrupted. Stop intent is saved before requesting transport cancellation; observed terminal output and usage can still arrive. Clock permissions and approval modes are implemented. Explicit task inputs are stored in an ordered inbox and incorporated at provider boundaries; completion and input acceptance are serialized. Structured `ask_owner` calls wait for an answer to the recorded question ID, without consuming the execution timer. Main chat does not implicitly direct a task. Explicit replacement is captured while waiting and becomes queued in the same transaction that records the original attempt settling. The shared chat snapshot places task attempts at their existing acceptance notices, with unanchored older attempts shown separately. It exposes the service-owned state and activity; the workspace can request Stop and decide task approvals. Task question answers remain API/CLI operations. Stop settles as stopped even if the provider returns text later; observed text and usage remain evidence. Explicit task API/CLI operations remain available. Offline tests do not establish live provider behavior.
 
 
 ### Shared-instance skills
 
 Database version 8 adds the immutable skill catalog, per-bot availability, task catalog snapshots and command load evidence in the migration transaction after a protected backup. Configured credential values are redacted from new catalog records before storage and from existing records on read; catalog digests identify the original submitted bytes. Load evidence labels that value `sourceDigest` and records `loadedContentDigest` for the exact redacted UTF-8 body in the tool result. Older records do not contain the latter. Earlier database records and backups are not rewritten. The runtime offers at most 32 metadata records to tool-capable providers. A structured selection validates the captured ID and revision and current availability before returning untrusted text as a tool result. The task Activity and command status record successful loads. Availability is rechecked before later provider calls and actions. Clock authorization remains independent. Prior direct skill results and code results linked to actual skill child actions are replaced in the next turn's provider request; stored history, backups and already-sent provider data are not erased. Synthetic provider tests do not establish live model selection or resistance to prompt injection.
+
+### Instance tool availability
+
+Schema 41 stores revision-checked instance switches for clock, memory, web
+research and files. The shared action coordinator filters offers and rechecks
+availability at the same action boundaries used by direct and guest calls.
+Availability is independent of permissions, task scopes, configuration, and
+approvals. Web disable aborts active web/search controllers; it cannot reverse
+an already dispatched request. Memory disable also suppresses automatic recall,
+while owner inspection and retained records remain available. Native terminal
+capabilities are not governed by the file switch. Existing instances gain the
+enabled availability defaults without changing their existing permissions.
+Controlled-provider tests exercise these boundaries; they do not establish live
+provider or network behavior.
 
 ### Shared-instance memory
 
@@ -208,10 +222,12 @@ authenticated scoped list APIs. It validates each response against the requested
 audience and paginates the complete snapshot locally in groups of 20. Leaving a
 memory page aborts its request; later responses cannot repopulate another page.
 Pairing loss unmounts settings and memory views. Archived agents remain
-inspectable without restoration. No memory mutation or provider call is added.
+inspectable without restoration. Saved-entry lists are read-only; the agent memory page also resolves sensitive proposals.
 
 
-Version 6 adds scoped memory in the instance database transaction after a protected migration backup. The store enforces bot and user scopes and optimistic versions. Provider calls receive bounded keyword-matched memories as untrusted request-only data. The session retains ordinary messages rather than the injected memory. Main-chat owner phrases and registered model actions can change agent memory or existing shared entries. Shared creation by a model creates a proposal, which requires separate owner confirmation. Version 7 adds durable, bot-bound shared-memory proposals. A separate explicit owner confirmation atomically saves the proposed text once, and cancellation clears the pending proposal text without creating memory. The original text and proposal response remain in chat history and may be sent in future model requests or task context; cancellation does not erase backups or already-sent data. This is an offline-tested preview and not a general intent interpreter.
+Version 6 adds scoped memory in the instance database transaction after a protected migration backup. The store enforces bot and user scopes and optimistic versions. Provider calls receive bounded keyword-matched memories as untrusted request-only data. The session retains ordinary messages rather than the injected memory. Main-chat owner phrases and registered model actions can change agent memory or existing shared entries. Model saves and updates pass sensitivity rules; sensitive or uncertain changes require owner review. Shared creation by a model still requires separate shared-memory confirmation. Version 7 adds durable, bot-bound shared-memory proposals. A separate explicit owner confirmation atomically saves the proposed text once, and cancellation clears the pending proposal text without creating memory. The original text and proposal response remain in chat history and may be sent in future model requests or task context; cancellation does not erase backups or already-sent data. This is an offline-tested preview and not a general intent interpreter.
+
+Schema 43 combines Slack work with revision-checked sensitivity rules and pending model-memory proposals. The default allows a model-classified ordinary change unless it matches an owner-defined sensitive term; missing and uncertain classifications require review, and review-all removes reliance on that classification for automatic saves. Model judgments and substring matching can miss sensitivity. A pending proposal contains the exact text in a separate instance table, with an instance-keyed fingerprint binding the agent, scope, target version and text. Paired owners decide it atomically; disabling memory or archiving its agent denies pending proposals and cancels their pending shared confirmations. Shared creation still needs the existing shared confirmation, which rechecks the approved text and current authority. New memory write invocations use keyed input fingerprints rather than durable plaintext input; older records are not rewritten, while existing action recovery checks current memory against that fingerprint. These protections do not erase or suppress conversation, provider, runtime event, Code Mode source or backup disclosures.
 
 ### Shared-instance clock dispatch
 
@@ -416,3 +432,85 @@ summary excludes message boundaries.
 The built-in core describes general assistant behavior without naming tools.
 Capability definitions and service enforcement remain separate. Custom and empty
 core overrides keep their existing upgrade and reset behavior.
+
+
+## Bundled plugins and Slack
+
+Bundled plugin definitions describe identity, configuration, lifecycle, tools,
+events and account identity without a marketplace. The instance database stores
+connection configuration, per-agent access and a durable account/event ledger.
+Slack's Socket Mode transport admits only the configured workspace, user and DM.
+It submits a normal service-owned command with the captured agent identity; the
+existing work/action boundary still governs capabilities. Agent access and plugin
+state are checked again for actions and before reply dispatch. A dispatch is
+marked before the Slack API call so a crash or ambiguous response is not replayed.
+For an approved Slack command, the model can invoke service-owned, journaled
+task capabilities in the agent’s configured tool mode. Starting work captures
+the owner’s original message and atomically binds the task attempt to its Slack
+thread. Follow-up capabilities use that thread’s unique binding, never a
+model-selected task ID; missing or ambiguous bindings require clarification. For
+older threads with multiple tasks, a selection requires the owner to quote the
+full original objective and the service to match it uniquely.
+The older explicit `work:` route remains available for diagnostics. A durable delivery ledger derives progress and terminal
+outcomes from the task record. It claims a dispatch before the external call,
+retries a known rate limit, and marks ambiguous in-flight dispatches uncertain.
+Current plugin access and the exact captured destination are checked before each
+send. Disable pauses delivery but does not cancel accepted background tasks.
+A restart interrupts unfinished tasks rather than replaying their effects.
+Tokens live separately in the host credential directory. A reconnecting socket
+can miss events during an outage; this slice has no Slack history backfill.
+These paths are exercised with controlled providers, not live Slack.
+
+Gmail uses the same account-keyed connection and agent-access tables. A paired
+client starts an in-memory desktop OAuth attempt with PKCE and a loopback
+callback; the service exchanges the code, verifies the Gmail profile identity,
+and saves the client secret and refresh token in a separate host credential file.
+The service fences an in-flight exchange against cancellation, expiry, client
+revocation and connection revision changes. The connection-time history ID and
+candidate message IDs are stored in SQLite; complete pages and the next cursor
+commit atomically. A 404 retains an uncertain gap until the owner explicitly
+rebaselines. The scanner reads field-limited current label metadata for new additions and compares
+the message's last-modified history ID with the addition record ID. Matching IDs
+and an INBOX label provide conservative inbox evidence; missing fields, a changed
+ID, or a failed metadata read leave membership uncertain. SENT, DRAFT, SPAM and
+TRASH are excluded. This inference does not prove exact historical membership;
+uncertain and non-inbox candidates remain visible for review; an owner can explicitly queue an uncertain candidate for private assessment, while non-inbox candidates cannot start
+assistant work. Evidence and cursor commit with candidate IDs. Schema 50 adds the
+evidence table; legacy candidates remain unknown and legacy pending deliveries
+without evidence are marked stale rather than sent. The assistant's initial
+checkpoint includes all recorded additions after the connection baseline, and
+claimed items cannot be processed again on re-enable. The history scanner itself
+does not send mail to a model. Separate per-agent permission binds
+read/search to an explicitly approved provider and model, with current
+connection revision and access rechecked at dispatch and result release. A separate
+owner grant is required for tasks and Slack-originated work, so existing chat-only
+approvals do not expand. Paired
+tasks capture an exact Gmail query and the account revision at acceptance; they
+can read only IDs returned for that attempt. A Slack task can capture the query
+through an explicit command. Private work is marked before results are released,
+and the work-action service rejects other capabilities after that point except
+the scoped Gmail action proposals, even when guest calls were queued earlier. Slack
+receives generic notifications for private Gmail work. A proposal first
+requires a generic Slack disclosure decision; only then is its exact effect shown
+for a separate approval. The proposal binds the action fingerprint, work, agent,
+Gmail account and revision, Slack identity and revision, and message. The action
+journal claims dispatch after current authority is checked. A revision request
+invalidates the earlier proposal and carries the owner's thread reply to the
+model. Label, archive, and mark-read changes use the same approval boundary and
+an optional Google modify grant. A restarted or ambiguous action is uncertain
+and is not replayed; an owner can reconcile it after checking Gmail. Gmail
+tool results and generated replies are excluded from subsequent model replay and
+captured task context; the owner's request remains. Other tools are fenced for
+the rest of that turn. The separately enabled inbox assistant creates an isolated task scoped to one
+recorded candidate and captures agent and plugin revisions. The existing Gmail
+action boundary performs the read. A validated model assessment queues either
+a non-sensitive summary or a fixed generic private question. A Slack thread ID
+binds an affirmative owner response to that candidate; uncertain sends are never
+automatically repeated. Authority is checked again at evaluation and delivery.
+A durable failure state deduplicates generic alerts while individual history
+scans remain recorded. An explicit memory-provider opt-in allows retrieval of active memories from the bound agent and user scopes; pending proposals and other agents’ private memory are excluded. Live memory availability and selected versions are checked around provider calls, and any recalled memory forces private clarification before Slack disclosure. Non-sensitive less-urgent summaries are atomically batched for interval-based delivery; an uncertain batch remains inspectable and requires an explicit exact-text owner decision. Bound corrections are retained per item and keyed sender, without storing the sender in the feedback index. All active sensitive corrections are enforced independently of the bounded feedback sent to the model. Explicit failed-assessment retries use current authority and do not replay prior actions; uncertain deliveries remain owner-resolved. Known Slack 429 rejections preserve the full representable retry delay; invalid delays require review. Changes to privacy or sender sensitivity while a send is in flight are reconciled on a definite rejection, with the retry deadline retained for every separated digest member. Ambiguous sends remain uncertain. Schema 51 stores candidate review requests and delivery retry deadlines. Schema 52 separates active sender sensitivity from later corrections, retains new correction events and prior assessment and digest linkage, and makes all members of stale batches reviewable. Earlier overwritten corrections cannot be reconstructed. Model classification can be wrong, and the inbox evidence is an inference rather than a historical guarantee. Synthetic Google, Slack and model fixtures cover these paths; live
+behavior remains unverified.
+
+## Native home-network transport
+
+The optional native HTTPS gateway binds a configured private IPv4 address and checks the external Host and Origin before forwarding to the fixed loopback service. TLS ends at the gateway; the service still owns pairing, client revocation, permissions and persistent state. The gateway adds no public owner API and is independent of the loopback CLI and callback. Controlled local tests cover this transport; Linux VM and LAN operation remain unverified. See [native installation](native-linux-installation.md).

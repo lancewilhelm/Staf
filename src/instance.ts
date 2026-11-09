@@ -28,11 +28,14 @@ import { WorkActionService, workActionsSchema, type ActionIdentity } from './wor
 import type { ByteRedactor } from './config.js';
 import { NativeProcesses, nativeProcessSchema } from './native-processes.js';
 import { ApprovalGrants, approvalGrantSchema, type GrantBoundary } from './approval-grants.js';
+import { PluginStore, pluginSchema, slackWorkSchema, type SlackConfig } from './plugins.js';
+import {GmailHistory,gmailHistorySchema,gmailMonitorRunsSchema,gmailArrivalEvidenceSchema,type GmailHistoryTransport} from './gmail-history.js';
+import {InboxMonitorStore,inboxMonitorSchema} from './inbox-monitor.js';
 
 const clockAction: Action = { capability:'clock', operation:'read', resource:'utc', effect:'read', limits:{}, risk:'safe' };
 const clockBoundary = { enabledCapabilities:['clock'], actions:[clockAction] };
 const modes: ApprovalMode[] = ['ask-every-time','ask-for-risky-actions','never-ask'];
-export const INSTANCE_SCHEMA_VERSION = 39;
+export const INSTANCE_SCHEMA_VERSION = 52;
 const MAINTENANCE_VERSION = 2147483647;
 
 export const starterSoul = "You are an assistant working for the owner. Be clear and candid. Distinguish observations from assumptions. Follow the owner's role instructions and work within the permissions and task scope granted to you.";
@@ -90,6 +93,8 @@ export class Instance {
   private actionService: WorkActionService | undefined;
   private readonly grantControllers = new Map<string,Set<AbortController>>();
   readonly migrationBackup: string | undefined;
+  readonly plugins: PluginStore;
+  readonly inboxMonitor: InboxMonitorStore;
   constructor(path: string, private readonly redactSkill: (text:string) => string = text => text, maintenanceToken?:string) {
     assertDatasetAvailable(path,maintenanceToken);
     this.temporaryConfigRoot = path === ':memory:' ? mkdtempSync(join(tmpdir(),'staf-config-')) : undefined;
@@ -206,6 +211,53 @@ export class Instance {
     if(version < 30 && !this.db.prepare("SELECT 1 FROM pragma_table_info('command_runtime_events') WHERE name='detail'").get())this.db.exec('ALTER TABLE command_runtime_events ADD COLUMN detail TEXT');
     if(version < 38 && !this.db.prepare("SELECT 1 FROM pragma_table_info('command_runtime_events') WHERE name='call_id'").get())this.db.exec('ALTER TABLE command_runtime_events ADD COLUMN call_id TEXT');
     this.db.exec('CREATE INDEX IF NOT EXISTS command_runtime_events_command ON command_runtime_events(command_id,seq)');
+    if(version < 40) this.db.exec(pluginSchema);
+    this.db.exec(slackWorkSchema);
+    if(version < 44) this.db.exec(gmailHistorySchema);
+    if(version < 50) this.db.exec(gmailArrivalEvidenceSchema);
+    if(version < 45) this.db.exec(`CREATE TABLE IF NOT EXISTS gmail_task_scopes (attempt_id TEXT PRIMARY KEY, account_id TEXT NOT NULL, revision INTEGER NOT NULL, query TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS gmail_task_messages (attempt_id TEXT NOT NULL, message_id TEXT NOT NULL, PRIMARY KEY(attempt_id,message_id));
+      CREATE TABLE IF NOT EXISTS gmail_private_tasks (attempt_id TEXT PRIMARY KEY);
+      CREATE TABLE IF NOT EXISTS gmail_work_model_access (account_id TEXT NOT NULL, bot_id TEXT NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL, PRIMARY KEY(account_id,bot_id));`);
+    if(version < 49) this.db.exec(gmailMonitorRunsSchema);
+    if(version < 49) this.db.exec(inboxMonitorSchema);
+    if(version < 49) {
+      for(const [name,definition] of Object.entries({digest_minutes:'INTEGER NOT NULL DEFAULT 60',next_digest_at:'INTEGER NOT NULL DEFAULT 0',memory_context:'INTEGER NOT NULL DEFAULT 0'}))if(!this.db.prepare("SELECT 1 FROM pragma_table_info('inbox_monitor_settings') WHERE name=?").get(name))this.db.exec(`ALTER TABLE inbox_monitor_settings ADD COLUMN ${name} ${definition}`);
+      for(const [name,definition] of Object.entries({delivery_ts:'TEXT',uncertain_from:'TEXT',urgency:'TEXT',correction:'TEXT',sender_key:'TEXT'}))if(!this.db.prepare("SELECT 1 FROM pragma_table_info('inbox_monitor_items') WHERE name=?").get(name))this.db.exec(`ALTER TABLE inbox_monitor_items ADD COLUMN ${name} ${definition}`);
+      this.db.exec(`CREATE TABLE IF NOT EXISTS inbox_digest_batches (id TEXT PRIMARY KEY, settings_revision INTEGER NOT NULL, state TEXT NOT NULL, text TEXT NOT NULL, thread_ts TEXT, created_at INTEGER NOT NULL);
+        CREATE TABLE IF NOT EXISTS inbox_digest_items (batch_id TEXT NOT NULL REFERENCES inbox_digest_batches(id),attempt_id TEXT NOT NULL UNIQUE REFERENCES inbox_monitor_items(attempt_id),PRIMARY KEY(batch_id,attempt_id));`);
+    }
+    if(version < 51) this.db.exec("CREATE TABLE IF NOT EXISTS inbox_candidate_reviews (account_id TEXT NOT NULL,message_id TEXT NOT NULL,settings_revision INTEGER NOT NULL,PRIMARY KEY(account_id,message_id)); CREATE TABLE IF NOT EXISTS inbox_delivery_retry (kind TEXT NOT NULL,id TEXT NOT NULL,retry_at INTEGER NOT NULL,PRIMARY KEY(kind,id))");
+    if(version < 50) this.db.exec(`
+      UPDATE inbox_monitor_items SET state='stale'
+        WHERE state IN ('evaluating','ready','clarify','awaiting','approved','digest_pending','digest_batched')
+        AND NOT EXISTS (SELECT 1 FROM gmail_arrival_evidence e WHERE e.account_id=inbox_monitor_items.account_id AND e.message_id=inbox_monitor_items.message_id AND e.inbox='yes');
+      UPDATE inbox_digest_batches SET state='stale' WHERE state='pending'
+        AND EXISTS (SELECT 1 FROM inbox_digest_items d JOIN inbox_monitor_items i ON i.attempt_id=d.attempt_id WHERE d.batch_id=inbox_digest_batches.id AND i.state='stale');
+    `);
+    if(version < 52) {
+      if(!this.db.prepare("SELECT 1 FROM pragma_table_info('inbox_monitor_items') WHERE name='recheck_private'").get())this.db.exec('ALTER TABLE inbox_monitor_items ADD COLUMN recheck_private INTEGER NOT NULL DEFAULT 0');
+      this.db.exec(`CREATE TABLE IF NOT EXISTS inbox_sensitive_corrections (account_id TEXT NOT NULL,message_id TEXT NOT NULL,PRIMARY KEY(account_id,message_id));
+        CREATE TABLE IF NOT EXISTS inbox_correction_events (event_id TEXT PRIMARY KEY,account_id TEXT NOT NULL,message_id TEXT NOT NULL,correction TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS inbox_legacy_corrections (account_id TEXT NOT NULL,message_id TEXT NOT NULL,correction TEXT NOT NULL,PRIMARY KEY(account_id,message_id));
+        CREATE TABLE IF NOT EXISTS inbox_assessment_history (attempt_id TEXT PRIMARY KEY,account_id TEXT NOT NULL,message_id TEXT NOT NULL,snapshot TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS inbox_digest_history (batch_id TEXT NOT NULL,attempt_id TEXT NOT NULL,PRIMARY KEY(batch_id,attempt_id));
+        CREATE TABLE IF NOT EXISTS inbox_digest_archive (batch_id TEXT PRIMARY KEY,snapshot TEXT NOT NULL);
+        INSERT OR IGNORE INTO inbox_sensitive_corrections SELECT account_id,message_id FROM inbox_monitor_items WHERE correction='sensitive';
+        INSERT OR IGNORE INTO inbox_legacy_corrections SELECT account_id,message_id,correction FROM inbox_monitor_items WHERE correction IS NOT NULL;
+        UPDATE inbox_monitor_items SET state='stale' WHERE state='digest_batched' AND attempt_id IN (SELECT d.attempt_id FROM inbox_digest_items d JOIN inbox_digest_batches b ON b.id=d.batch_id WHERE b.state='stale');`);
+    }
+    this.db.prepare("UPDATE gmail_monitor_runs SET outcome='interrupted',finished_at=? WHERE outcome='running'").run(Date.now());
+    if(version < 49) this.db.exec(`CREATE TABLE IF NOT EXISTS gmail_reply_proposals (action_id TEXT PRIMARY KEY REFERENCES action_journal(id), fingerprint TEXT NOT NULL, work_kind TEXT NOT NULL, work_id TEXT NOT NULL, bot_id TEXT NOT NULL, account_id TEXT NOT NULL, gmail_revision INTEGER NOT NULL, slack_revision INTEGER NOT NULL, team_id TEXT NOT NULL, user_id TEXT NOT NULL, channel_id TEXT NOT NULL, message_id TEXT NOT NULL, effect TEXT NOT NULL, digest TEXT NOT NULL, effect_digest TEXT NOT NULL, state TEXT NOT NULL, prompt_ts TEXT, detail TEXT);
+      CREATE INDEX IF NOT EXISTS gmail_reply_account_message ON gmail_reply_proposals(account_id,message_id);`);
+    this.db.exec("INSERT OR IGNORE INTO slack_notices SELECT action_id||':send-outcome',team_id,user_id,channel_id,NULL,bot_id,CASE WHEN json_extract(effect,'$.kind')='modify' THEN 'The Gmail inbox change outcome is unknown after restart. Inspect the message before trying again.' ELSE 'The Gmail send outcome is unknown after restart. Check Sent mail before trying again.' END, 'pending',0 FROM gmail_reply_proposals WHERE state='dispatching'; UPDATE gmail_reply_proposals SET state='interrupted',detail='Instance restarted before dispatch' WHERE state IN ('disclosure','review','revision','approved'); UPDATE gmail_reply_proposals SET state='uncertain',detail='Instance restarted during Gmail dispatch; inspect the account before taking further action' WHERE state='dispatching'");
+    this.plugins = new PluginStore(this.db);
+    this.inboxMonitor = new InboxMonitorStore(this.db);
+    this.inboxMonitor.recover();
+    this.db.exec("CREATE TABLE IF NOT EXISTS tool_defaults (id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL, clock INTEGER NOT NULL CHECK(clock IN (0,1)), memory INTEGER NOT NULL CHECK(memory IN (0,1)), web INTEGER NOT NULL CHECK(web IN (0,1)), files INTEGER NOT NULL CHECK(files IN (0,1))); INSERT OR IGNORE INTO tool_defaults VALUES (1,1,1,1,1,1)");
+    if(version < 44) this.db.exec(`CREATE TABLE IF NOT EXISTS memory_sensitivity (id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL, mode TEXT NOT NULL CHECK(mode IN ('model','review-all')), terms TEXT NOT NULL);
+      INSERT OR IGNORE INTO memory_sensitivity VALUES (1,1,'model','["medical","health","diagnosis","medication","therapy","sexual","financial","password"]');
+      CREATE TABLE IF NOT EXISTS sensitive_memory_proposals (id TEXT PRIMARY KEY, bot_id TEXT NOT NULL REFERENCES bots(id), work_kind TEXT NOT NULL CHECK(work_kind IN ('command','task')), work_id TEXT NOT NULL, scope TEXT NOT NULL CHECK(scope IN ('bot','user')), operation TEXT NOT NULL CHECK(operation IN ('create','update')), target_id TEXT, target_version INTEGER, text TEXT, fingerprint TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('pending','confirmed','denied')), CHECK((state='pending' AND text IS NOT NULL) OR (state<>'pending' AND text IS NULL)));`);
     if (!maintenanceToken) this.db.exec(`PRAGMA user_version=${INSTANCE_SCHEMA_VERSION}`);
     for (const row of this.db.prepare("SELECT id,bot_id FROM task_attempts WHERE state IN ('queued','running','stopping','waiting') ORDER BY rowid").all()) {
       if (typeof row.id !== 'string' || typeof row.bot_id !== 'string') throw Error('Invalid interrupted task');
@@ -237,6 +289,59 @@ export class Instance {
     mkdirSync(directory,{recursive:true,mode:0o700});
     this.db.prepare('INSERT OR IGNORE INTO work_bindings VALUES (?,?,?,?)').run(work.kind,work.id,botId,directory);
   }
+  gmailHistory(transport?:GmailHistoryTransport,assertAuthority:()=>void=()=>{}) {return new GmailHistory(this.db,transport,assertAuthority);}
+  inboxSenderKey(accountId:string,botId:string,sender:string) {return createHmac('sha256',this.fingerprintKey).update(JSON.stringify([accountId,botId,sender.trim().toLocaleLowerCase()])).digest('hex');}
+  gmailWorkIdentity(work:WorkRef) {
+    const row=work.kind==='command' ? this.db.prepare("SELECT c.bot_id,p.profile FROM commands c JOIN command_profiles p ON p.command_id=c.id WHERE c.id=? AND c.state='pending'").get(work.id) : this.db.prepare("SELECT bot_id,profile FROM task_attempts WHERE id=? AND state='running'").get(work.id);
+    if(typeof row?.bot_id!=='string'||typeof row.profile!=='string')return null;
+    const profile=parseCapturedProfile(JSON.parse(row.profile)),bot=this.bot(row.bot_id);
+    if(!profile.model || !bot || bot.archived || bot.provider!==profile.provider || bot.model!==profile.model)return null;
+    return {botId:row.bot_id,provider:profile.provider,model:profile.model};
+  }
+  gmailPrivateCommand(id:string) {return !!this.db.prepare('SELECT 1 FROM gmail_private_commands WHERE command_id=?').get(id);}
+  markGmailPrivate(id:string) {this.db.prepare('INSERT OR IGNORE INTO gmail_private_commands VALUES (?)').run(id);}
+  gmailPrivateWork(work:WorkRef) {return work.kind==='command'?this.gmailPrivateCommand(work.id):!!this.db.prepare('SELECT 1 FROM gmail_private_tasks WHERE attempt_id=?').get(work.id);}
+  markGmailPrivateWork(work:WorkRef) {if(work.kind==='command')this.markGmailPrivate(work.id);else this.db.prepare('INSERT OR IGNORE INTO gmail_private_tasks VALUES (?)').run(work.id);}
+  gmailTaskScope(id:string) {return this.db.prepare('SELECT account_id AS accountId,revision,query FROM gmail_task_scopes WHERE attempt_id=?').get(id);}
+  gmailTaskMessageAllowed(id:string,messageId:string) {return !!this.db.prepare('SELECT 1 FROM gmail_task_messages WHERE attempt_id=? AND message_id=?').get(id,messageId);}
+  rememberGmailTaskMessages(id:string,ids:string[]) {for(const messageId of ids)this.db.prepare('INSERT OR IGNORE INTO gmail_task_messages VALUES (?,?)').run(id,messageId);}
+  createGmailReply(input:{actionId:string;fingerprint:string;work:WorkRef;botId:string;accountId:string;gmailRevision:number;slackRevision:number;teamId:string;userId:string;channelId:string;messageId:string;effect:string}) {
+    const digest=createHmac('sha256',this.fingerprintKey).update(JSON.stringify([input.work,input.botId,input.accountId,input.gmailRevision,input.slackRevision,input.teamId,input.userId,input.channelId,input.messageId,input.effect,input.actionId,input.fingerprint])).digest('hex');
+    const same=createHmac('sha256',this.fingerprintKey).update(JSON.stringify([input.accountId,input.messageId,input.effect])).digest('hex');
+    const isModify=JSON.parse(input.effect).kind==='modify';
+    if(this.db.prepare("SELECT 1 FROM gmail_reply_proposals WHERE account_id=? AND message_id=? AND (state IN ('dispatching','uncertain') OR (?=0 AND state IN ('succeeded','reconciled_sent') AND effect_digest=?))").get(input.accountId,input.messageId,isModify?1:0,same))throw Error('Previous Gmail action requires review or already succeeded');
+    this.db.prepare("INSERT INTO gmail_reply_proposals VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'disclosure',NULL,NULL)").run(input.actionId,input.fingerprint,input.work.kind,input.work.id,input.botId,input.accountId,input.gmailRevision,input.slackRevision,input.teamId,input.userId,input.channelId,input.messageId,input.effect,digest,same);
+  }
+  gmailReply(id:string) {return this.db.prepare('SELECT * FROM gmail_reply_proposals WHERE action_id=?').get(id);}
+  gmailReplyIntact(id:string) {
+    const r=this.gmailReply(id);if(!r || typeof r.effect!=='string')return false;
+    const digest=createHmac('sha256',this.fingerprintKey).update(JSON.stringify([{kind:r.work_kind,id:r.work_id},r.bot_id,r.account_id,r.gmail_revision,r.slack_revision,r.team_id,r.user_id,r.channel_id,r.message_id,r.effect,r.action_id,r.fingerprint])).digest('hex');const same=createHmac('sha256',this.fingerprintKey).update(JSON.stringify([r.account_id,r.message_id,r.effect])).digest('hex');return digest===r.digest && same===r.effect_digest;
+  }
+  gmailReplyPrompt(id:string,state:'disclosure'|'review',ts:string) {return this.db.prepare('UPDATE gmail_reply_proposals SET prompt_ts=? WHERE action_id=? AND state=? AND prompt_ts IS NULL').run(ts,id,state).changes===1;}
+  gmailReplyDecision(id:string,state:'disclosure'|'review',next:'review'|'approved'|'denied'|'revision',ts:string) {return this.db.prepare('UPDATE gmail_reply_proposals SET state=?,prompt_ts=NULL WHERE action_id=? AND state=? AND prompt_ts=?').run(next,id,state,ts).changes===1;}
+  gmailReplyRevised(id:string,text:string) {if(this.db.prepare("UPDATE gmail_reply_proposals SET state='revision_requested',detail=? WHERE action_id=? AND state='revision'").run(text,id).changes!==1)throw Error('Revision request is no longer active');}
+  gmailReplyStart(id:string) {
+    const r=this.gmailReply(id);if(!r || typeof r.account_id!=='string' || typeof r.message_id!=='string' || typeof r.effect!=='string' || !this.gmailReplyIntact(id))throw Error('Gmail reply approval changed');
+    const same=createHmac('sha256',this.fingerprintKey).update(JSON.stringify([r.account_id,r.message_id,r.effect])).digest('hex');
+    const isModify=JSON.parse(r.effect).kind==='modify';
+    if(this.db.prepare("SELECT 1 FROM gmail_reply_proposals WHERE action_id<>? AND account_id=? AND message_id=? AND (state IN ('dispatching','uncertain') OR (?=0 AND state IN ('succeeded','reconciled_sent') AND effect_digest=?))").get(id,r.account_id,r.message_id,isModify?1:0,same))throw Error('Previous Gmail action requires review or already succeeded');
+    if(this.db.prepare("UPDATE gmail_reply_proposals SET state='dispatching' WHERE action_id=? AND state='approved'").run(id).changes!==1)throw Error('Gmail reply approval changed');
+  }
+  gmailReplyFinish(id:string,state:'succeeded'|'failed'|'uncertain'|'interrupted',detail:string) {this.db.prepare("UPDATE gmail_reply_proposals SET state=?,detail=? WHERE action_id=? AND state IN ('disclosure','review','approved','dispatching')").run(state,detail,id);}
+  gmailReplyCancel(id:string) {this.db.prepare("UPDATE gmail_reply_proposals SET state='interrupted',detail='Approval or dispatch was interrupted' WHERE action_id=? AND state IN ('disclosure','review','revision','approved')").run(id);}
+  gmailReplies(work:WorkRef) {return this.db.prepare('SELECT action_id AS actionId,fingerprint,account_id AS accountId,effect,state,detail FROM gmail_reply_proposals WHERE work_kind=? AND work_id=? ORDER BY rowid').all(work.kind,work.id).map(row=>({...row,effect:typeof row.effect==='string'?JSON.parse(row.effect):null}));}
+  gmailUncertain() {return this.db.prepare("SELECT action_id AS actionId,fingerprint,account_id AS accountId,effect,work_kind AS workKind,work_id AS workId,detail FROM gmail_reply_proposals WHERE state='uncertain' ORDER BY rowid DESC LIMIT 100").all().map(row=>{const intact=typeof row.actionId==='string' && this.gmailReplyIntact(row.actionId);let effect:unknown=null;if(intact && typeof row.effect==='string')try{effect=JSON.parse(row.effect);}catch{return {...row,intact:false,effect:null};}return {...row,intact,effect};});}
+  reconcileGmailReply(id:string,fingerprint:string,outcome:'sent'|'not-sent') {
+    const r=this.gmailReply(id);if(!r || r.state!=='uncertain' || r.fingerprint!==fingerprint || !this.gmailReplyIntact(id))throw new BotConflict('Gmail reply is not the uncertain proposal reviewed');
+    if(typeof r.effect!=='string' || JSON.parse(r.effect).kind==='modify')throw new BotConflict('This is not a Gmail reply');
+    const detail=outcome==='sent'?'Owner reported that Gmail sent the reply':'Owner reported that Gmail did not send the reply';
+    if(this.db.prepare("UPDATE gmail_reply_proposals SET state=?,detail=? WHERE action_id=? AND state='uncertain' AND fingerprint=?").run(outcome==='sent'?'reconciled_sent':'reconciled_not_sent',detail,id,fingerprint).changes!==1)throw new BotConflict('Gmail reply changed');
+  }
+  reconcileGmailChange(id:string,fingerprint:string,outcome:'applied'|'not-applied') {
+    const r=this.gmailReply(id);if(!r || r.state!=='uncertain' || r.fingerprint!==fingerprint || !this.gmailReplyIntact(id) || typeof r.effect!=='string' || JSON.parse(r.effect).kind!=='modify')throw new BotConflict('Gmail change is not the uncertain proposal reviewed');
+    const detail=outcome==='applied'?'Owner reported that the Gmail change was applied':'Owner reported that the Gmail change was not applied';
+    if(this.db.prepare("UPDATE gmail_reply_proposals SET state=?,detail=? WHERE action_id=? AND state='uncertain' AND fingerprint=?").run(outcome==='applied'?'reconciled_applied':'reconciled_not_applied',detail,id,fingerprint).changes!==1)throw new BotConflict('Gmail change changed');
+  }
   workContext(work:WorkRef, signal:AbortSignal) {
     const binding=this.db.prepare('SELECT bot_id,working_directory FROM work_bindings WHERE kind=? AND work_id=?').get(work.kind,work.id);
     if (typeof binding?.bot_id !== 'string' || typeof binding.working_directory !== 'string' || !isAbsolute(binding.working_directory)) throw Error('Accepted work binding unavailable');
@@ -254,7 +359,7 @@ export class Instance {
       (work,signal)=>this.workContext(work,signal),
       work=>{
         const record=work.kind==='command' ? this.command(work.id) : this.taskAttempt(work.id);
-        if (!record || typeof record.botId !== 'string' || record.state!==(work.kind==='command' ? 'pending' : 'running') || this.botIdentity(record.botId)?.archived !== false || (work.kind==='command' && this.responseStopping(work.id)) || (work.kind==='task' && this.scheduleOrigin(work.id)?.revoked === 1)) throw Error('Work is no longer active or authorized');
+        if (!record || typeof record.botId !== 'string' || record.state!==(work.kind==='command' ? 'pending' : 'running') || this.botIdentity(record.botId)?.archived !== false || (work.kind==='command' && this.responseStopping(work.id)) || (work.kind==='task' && this.scheduleOrigin(work.id)?.revoked === 1) || (this.plugins.isPluginCommand(work.id) && !(work.kind==='command' ? this.plugins.authority(work.id) : this.plugins.currentAuthority(work.id)))) throw Error('Work is no longer active or authorized');
       },32,work=>work.kind==='task' && this.taskHasPending(work.id),this.redactSkill);
     return this.actionService;
   }
@@ -295,6 +400,60 @@ export class Instance {
   }
   get skills() { return new SkillCatalog(this.db, this.redactSkill); }
   get memories() { return new MemoryStore(this.db); }
+  memorySensitivity() {
+    const row=this.db.prepare('SELECT revision,mode,terms FROM memory_sensitivity WHERE id=1').get();
+    if(!row || (row.mode!=='model' && row.mode!=='review-all') || typeof row.terms!=='string')throw Error('Invalid sensitivity rules');
+    const terms:unknown=JSON.parse(row.terms);
+    if(!Array.isArray(terms) || !terms.every(term=>typeof term==='string'))throw Error('Invalid sensitivity rules');
+    return {revision:Number(row.revision),mode:row.mode,terms};
+  }
+  setMemorySensitivity(input:{revision:number;mode:'model'|'review-all';terms:string[]}) {
+    if(!Number.isSafeInteger(input.revision) || input.revision<1 || input.terms.length>100 || input.terms.some(term=>typeof term!=='string' || !term.trim() || term.length>100))throw Error('Invalid sensitivity rules');
+    const terms=[...new Set(input.terms.map(term=>term.trim().toLowerCase()))];
+    if(!this.db.prepare('UPDATE memory_sensitivity SET revision=revision+1,mode=?,terms=? WHERE id=1 AND revision=?').run(input.mode,JSON.stringify(terms),input.revision).changes)throw new BotConflict('Sensitivity rules changed. Refresh before editing.');
+    return this.memorySensitivity();
+  }
+  memoryNeedsApproval(text:string,classification:'ordinary'|'sensitive'|'uncertain'|undefined) {
+    const rules=this.memorySensitivity();
+    return rules.mode==='review-all' || classification!=='ordinary' || rules.terms.some(term=>text.toLowerCase().includes(term));
+  }
+  private sensitiveMemoryFingerprint(input:{id:string;botId:string;work:WorkRef;scope:'bot'|'user';operation:'create'|'update';targetId:string|null;targetVersion:number|null;text:string}) {
+    return createHmac('sha256',this.fingerprintKey).update(JSON.stringify([input.id,input.botId,input.work.kind,input.work.id,input.scope,input.operation,input.targetId,input.targetVersion,input.text])).digest('hex');
+  }
+  proposeSensitiveMemory(input:{id:string;botId:string;work:WorkRef;scope:'bot'|'user';operation:'create'|'update';targetId?:string;targetVersion?:number;text:string}) {
+    const fingerprint=this.sensitiveMemoryFingerprint({...input,targetId:input.targetId ?? null,targetVersion:input.targetVersion ?? null});
+    this.db.prepare("INSERT INTO sensitive_memory_proposals VALUES (?,?,?,?,?,?,?,?,?,?,'pending')").run(input.id,input.botId,input.work.kind,input.work.id,input.scope,input.operation,input.targetId ?? null,input.targetVersion ?? null,input.text,fingerprint);
+    return {id:input.id,fingerprint};
+  }
+  sensitiveMemoryProposals(botId:string) {
+    return this.db.prepare("SELECT id,scope,operation,target_id AS targetId,target_version AS targetVersion,text,fingerprint FROM sensitive_memory_proposals WHERE bot_id=? AND state='pending' ORDER BY rowid").all(botId);
+  }
+  hasSensitiveMemoryProposal(id:string) {return !!this.db.prepare('SELECT 1 FROM sensitive_memory_proposals WHERE id=?').get(id);}
+  sensitiveMemoryProposalStatus(botId:string,id:string) {
+    const row=this.db.prepare('SELECT state,scope,operation FROM sensitive_memory_proposals WHERE id=? AND bot_id=?').get(id,botId);
+    if(!row || (row.state!=='pending' && row.state!=='confirmed' && row.state!=='denied'))return null;
+    return {id,kind:'sensitive' as const,state:row.state,...(row.scope==='user' && row.operation==='create' && row.state==='confirmed'?{sharedState:this.sharedMemoryProposal(botId,id)?.state ?? 'unavailable'}:{})};
+  }
+  decideSensitiveMemory(id:string,fingerprint:string,decision:'confirm'|'deny') {
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const row=this.db.prepare('SELECT * FROM sensitive_memory_proposals WHERE id=?').get(id);
+      if(!row || row.state!=='pending' || row.fingerprint!==fingerprint || typeof row.text!=='string' || typeof row.bot_id!=='string')throw new BotConflict('Proposal is stale or no longer pending.');
+      if((row.work_kind!=='command' && row.work_kind!=='task') || typeof row.work_id!=='string' || (row.scope!=='bot' && row.scope!=='user') || (row.operation!=='create' && row.operation!=='update') || !(row.target_id===null || typeof row.target_id==='string') || !(row.target_version===null || typeof row.target_version==='number'))throw Error('Invalid memory proposal');
+      if(this.sensitiveMemoryFingerprint({id,botId:row.bot_id,work:{kind:row.work_kind,id:row.work_id},scope:row.scope,operation:row.operation,targetId:row.target_id,targetVersion:row.target_version,text:row.text})!==fingerprint)throw new BotConflict('Proposal changed. Refresh before deciding.');
+      if(decision==='confirm') {
+        if(!this.toolDefaults().memory || this.botIdentity(row.bot_id)?.archived!==false)throw new BotConflict('Memory access is no longer available.');
+        if(this.plugins.isPluginCommand(row.work_id) && !this.plugins.currentAuthority(row.work_id))throw new BotConflict('Plugin access is no longer available.');
+        const scope:MemoryScope=row.scope==='user'?{kind:'user'}:{kind:'bot',botId:row.bot_id};
+        if(row.operation==='create' && row.scope==='user') this.proposeSharedMemory(row.bot_id,row.text,id);
+        else if(row.operation==='create')this.memories.create({scope,text:row.text});
+        else if(row.operation==='update' && typeof row.target_id==='string' && typeof row.target_version==='number')this.memories.update({id:row.target_id,scope,version:row.target_version,text:row.text});
+        else throw Error('Invalid memory proposal');
+      }
+      this.db.prepare('UPDATE sensitive_memory_proposals SET state=?,text=NULL WHERE id=? AND state=\'pending\'').run(decision==='confirm'?'confirmed':'denied',id);
+      this.db.exec('COMMIT');return {decision,sharedConfirmationRequired:decision==='confirm' && row.scope==='user' && row.operation==='create'};
+    } catch(error){this.db.exec('ROLLBACK');throw error;}
+  }
   proposeSharedMemory(botId:string,text:string,id:string=randomUUID()) {
     const clean=text.trim();
     if (!clean || clean.length>4000) throw Error('Invalid memory text');
@@ -305,6 +464,12 @@ export class Instance {
     const row=this.db.prepare('SELECT id,state FROM memory_proposals WHERE id=? AND bot_id=?').get(id,botId);
     if (!row || (row.state!=='pending' && row.state!=='confirmed' && row.state!=='cancelled')) return null;
     return {id:String(row.id),state:row.state};
+  }
+  private sensitiveSharedMemoryAllowed(botId:string,id:string,text:string) {
+    const row=this.db.prepare('SELECT * FROM sensitive_memory_proposals WHERE id=? AND bot_id=?').get(id,botId);
+    if(!row)return true;
+    if(row.state!=='confirmed' || row.scope!=='user' || row.operation!=='create' || (row.work_kind!=='command' && row.work_kind!=='task') || typeof row.work_id!=='string' || typeof row.fingerprint!=='string' || row.target_id!==null || row.target_version!==null) return false;
+    return this.toolDefaults().memory && this.botIdentity(botId)?.archived===false && (!this.plugins.isPluginCommand(row.work_id) || this.plugins.currentAuthority(row.work_id)) && this.sensitiveMemoryFingerprint({id,botId,work:{kind:row.work_kind,id:row.work_id},scope:'user',operation:'create',targetId:null,targetVersion:null,text})===row.fingerprint;
   }
 
   get #approvalGrants() { return new ApprovalGrants(this.db); }
@@ -347,6 +512,20 @@ export class Instance {
     if(boundary.kind==='search' && !this.searchAllowed(work,boundary.origin,boundary.revision))throw new BotConflict('Search access revoked');
     if(boundary.kind==='shell' && !this.shellAllowed(work,boundary.revision))throw new BotConflict('Shell access revoked');
     return this.#approvalGrants.create(boundary,scope==='bot'?{kind:'bot',botId}:{kind:'all-bots'},lifetime==='task'?{kind:'task',taskId:work.id}:{kind:'remembered'});
+  }
+  toolDefaults() {
+    const row=this.db.prepare('SELECT revision,clock,memory,web,files FROM tool_defaults WHERE id=1').get();
+    if (!row) throw Error('Missing tool defaults');
+    return {revision:Number(row.revision),clock:row.clock===1,memory:row.memory===1,web:row.web===1,files:row.files===1};
+  }
+  setToolDefaults(input:{revision:number;clock:boolean;memory:boolean;web:boolean;files:boolean}) {
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const result=this.db.prepare('UPDATE tool_defaults SET revision=revision+1,clock=?,memory=?,web=?,files=? WHERE id=1 AND revision=?').run(Number(input.clock),Number(input.memory),Number(input.web),Number(input.files),input.revision);
+      if(!result.changes)throw new BotConflict('Tool defaults changed. Refresh before editing.');
+      if(!input.memory)this.db.exec("UPDATE sensitive_memory_proposals SET state='denied',text=NULL WHERE state='pending'; UPDATE memory_proposals SET state='cancelled',text=NULL WHERE state='pending' AND id IN (SELECT id FROM sensitive_memory_proposals WHERE state='confirmed')");
+      const saved=this.toolDefaults();this.db.exec('COMMIT');return saved;
+    }catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   approvalSettings(scope: string) {
     const row=this.db.prepare('SELECT mode,clock_enabled FROM approval_settings WHERE scope=?').get(scope);
@@ -812,6 +991,10 @@ export class Instance {
         this.configs.publishFiles(id,files.settings,files.instructions,bot.archived,revision);
         published=true;
         this.db.prepare('UPDATE bot_profiles SET archived=? WHERE bot_id=?').run(archived ? 1 : 0, id);
+        if(archived) {
+          this.db.prepare("UPDATE sensitive_memory_proposals SET state='denied',text=NULL WHERE bot_id=? AND state='pending'").run(id);
+          this.db.prepare("UPDATE memory_proposals SET state='cancelled',text=NULL WHERE bot_id=? AND state='pending' AND id IN (SELECT id FROM sensitive_memory_proposals WHERE state='confirmed')").run(id);
+        }
       }
       const result = this.bot(id);
       try { this.db.exec('COMMIT'); } catch { throw new AgentConfigUncertain('Archive state may have changed. Inspect the agent before retrying.'); }
@@ -836,7 +1019,7 @@ export class Instance {
     const {capturedProfile,...visible}=row as typeof attempt & {capturedProfile:unknown};
     return {...visible,toolMode:parseToolModeFromProfile(capturedProfile), workActions:this.workActions().inspectActions({kind:'task',id}),codeExecutions:this.workActions().inspect({kind:'task',id}), waitReason, inbox, usage:session?.usage ?? [], activity: this.db.prepare('SELECT seq,event FROM task_activity WHERE attempt_id=? ORDER BY seq').all(id).map(event => { const value = JSON.parse(String(event.event)); if (value.type === 'tool_result' && value.name === 'select_skill' && typeof value.content === 'string') { value.content = this.redactSkill(value.content); if (value.success) { try { const detail=JSON.parse(value.content); if (typeof detail.digest === 'string' && detail.sourceDigest === undefined) { detail.sourceDigest=detail.digest; delete detail.digest; value.content=JSON.stringify(detail); } } catch { /* Historical error text is not structured selection evidence. */ } } } return {seq:event.seq, ...value}; })};
   }
-  acceptTask(input: {id:string; botId:string; objective:string; limitMs:number; predecessor?:string; delegateClock?:boolean}, visibleObjective=input.objective) {
+  acceptTask(input: {id:string; botId:string; objective:string; limitMs:number; predecessor?:string; delegateClock?:boolean; gmailQuery?:string}, visibleObjective=input.objective) {
     this.db.exec('BEGIN IMMEDIATE');
     try {
       const result=this.acceptTaskInTransaction(input,visibleObjective);
@@ -844,8 +1027,48 @@ export class Instance {
       return result;
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
   }
-  private acceptTaskInTransaction(input: {id:string; botId:string; objective:string; limitMs:number; predecessor?:string; delegateClock?:boolean}, visibleObjective=input.objective, isolated=false) {
-    const digest=createHmac('sha256',this.fingerprintKey).update(JSON.stringify([input.id,input.botId,input.objective,input.limitMs,input.predecessor ?? null,...(input.delegateClock ? ['delegate-clock'] : [])])).digest('hex');
+  acceptInboxTask(input:{id:string;botId:string;accountId:string;messageId:string;revision:number;objective:string}) {
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const settings=this.inboxMonitor.settings();
+      if(!settings?.enabled || settings.revision!==input.revision || settings.accountId!==input.accountId || settings.botId!==input.botId || this.inboxMonitor.next()!==input.messageId)throw new BotConflict('Inbox monitor scope changed');
+      const result=this.acceptTaskInTransaction({id:input.id,botId:input.botId,objective:input.objective,limitMs:300000,gmailQuery:'inbox-monitor'},input.objective,true);
+      if(result.kind==='accepted') {
+        this.rememberGmailTaskMessages(input.id,[input.messageId]);
+        this.inboxMonitor.add(input.accountId,input.messageId,input.revision,input.id);
+        this.markGmailPrivateWork({kind:'task',id:input.id});
+      }
+      this.db.exec('COMMIT');return result;
+    } catch(error){this.db.exec('ROLLBACK');throw error;}
+  }
+  acceptSlackTask(input:{id:string; eventId:string; revision:number; config:SlackConfig; threadTs?:string; objective:string; gmailQuery?:string},visibleObjective:string) {
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      if(!this.plugins.reserve(input.eventId,input.id,input.revision)) {this.db.exec('COMMIT');return {kind:'duplicate' as const};}
+      const result=this.acceptTaskInTransaction({id:input.id,botId:input.config.botId,objective:input.objective,limitMs:300000,...(input.gmailQuery?{gmailQuery:input.gmailQuery}:{})},visibleObjective);
+      if(result.kind==='accepted') {
+        this.db.prepare('INSERT INTO slack_work VALUES (?,?,?,?,?,?)').run(input.id,input.config.teamId,input.config.userId,input.config.channelId,input.threadTs ?? null,input.config.botId);
+        this.db.prepare("INSERT INTO slack_deliveries (id,attempt_id,text,state) VALUES (?,?,?,'pending')").run(input.id+':receipt',input.id,`Task ${input.id} accepted. Use “status task ${input.id}”, “direct task ${input.id}: …”, or “stop task ${input.id}”.`);
+        this.plugins.state(input.id,'task','Task accepted; delivery tracked separately');
+      } else {this.plugins.state(input.id,'failed','Agent already has active work');this.plugins.queueNotice({id:input.id+':busy',config:input.config,...(input.threadTs?{threadTs:input.threadTs}:{}),text:'This agent already has active work. The new request was not accepted.'});}
+      this.db.exec('COMMIT');return result;
+    } catch(error) {this.db.exec('ROLLBACK');throw error;}
+  }
+  acceptSlackChatTask(input:{id:string;config:SlackConfig;threadTs:string;objective:string},visibleObjective:string) {
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      if(!this.plugins.authority(input.id))throw Error('Slack authorization changed');
+      if(this.plugins.threadWork(input.config,input.threadTs).length) {this.db.exec('COMMIT');return {kind:'ambiguous' as const};}
+      const result=this.acceptTaskInTransaction({id:input.id,botId:input.config.botId,objective:input.objective,limitMs:300000},visibleObjective);
+      if(result.kind==='accepted') {
+        this.db.prepare('INSERT INTO slack_work VALUES (?,?,?,?,?,?)').run(input.id,input.config.teamId,input.config.userId,input.config.channelId,input.threadTs,input.config.botId);
+        this.db.prepare("INSERT INTO slack_deliveries (id,attempt_id,text,state) VALUES (?,?,?,'pending')").run(input.id+':receipt',input.id,'I’ve started working on this. You can ask for an update, give me direction, or ask me to stop in this thread.');
+      }
+      this.db.exec('COMMIT');return result;
+    } catch(error) {this.db.exec('ROLLBACK');throw error;}
+  }
+  private acceptTaskInTransaction(input: {id:string; botId:string; objective:string; limitMs:number; predecessor?:string; delegateClock?:boolean; gmailQuery?:string}, visibleObjective=input.objective, isolated=false) {
+    const digest=createHmac('sha256',this.fingerprintKey).update(JSON.stringify([input.id,input.botId,input.objective,input.limitMs,input.predecessor ?? null,...(input.delegateClock ? ['delegate-clock'] : []),...(input.gmailQuery ? ['gmail',input.gmailQuery] : [])])).digest('hex');
       const existing = this.taskAttempt(input.id);
       if (existing) {
         if (this.db.prepare('SELECT digest FROM task_fingerprints WHERE attempt_id=?').get(input.id)?.digest !== digest) throw new BotConflict('Task command ID conflict');
@@ -877,6 +1100,11 @@ export class Instance {
       const capturedProfile=typeof previousCapture?.profile==='string' ? previousCapture.profile : JSON.stringify({...bot,core:effectiveCore});
       const capturedContext=typeof previousCapture?.context==='string' ? previousCapture.context : JSON.stringify(isolated ? [] : this.taskContext(input.botId));
       this.db.prepare("INSERT INTO task_attempts (id,task_id,bot_id,predecessor,profile,context,state,limit_ms) VALUES (?,?,?,?,?,?,'queued',?)").run(input.id,taskId,input.botId,input.predecessor ?? null,capturedProfile,capturedContext,input.limitMs);
+      if(input.gmailQuery) {
+        const c=this.plugins.gmailConnection(),profile=parseCapturedProfile(JSON.parse(capturedProfile));
+        if(input.predecessor || !c?.connected || !c.enabled || !c.agentAccessIds.includes(input.botId) || !profile.model || !this.plugins.gmailModelAllowed(c.accountId,input.botId,profile.provider,profile.model) || !this.plugins.gmailWorkModelAllowed(c.accountId,input.botId,profile.provider,profile.model))throw new BotConflict('Gmail task scope is not authorized');
+        this.db.prepare('INSERT INTO gmail_task_scopes VALUES (?,?,?,?)').run(input.id,c.accountId,c.revision,input.gmailQuery);
+      }
       if (input.delegateClock) this.db.prepare('UPDATE task_attempts SET delegation_clock=1 WHERE id=?').run(input.id);
       if (origin) { if (typeof origin.schedule_id !== 'string' || typeof origin.due_at !== 'number') throw Error('Invalid schedule origin'); this.db.prepare('INSERT INTO schedule_task_retries VALUES (?,?,?)').run(input.id,origin.schedule_id,origin.due_at); const scope=this.db.prepare('SELECT url FROM schedule_web_scopes WHERE attempt_id=?').get(input.predecessor ?? '');if(typeof scope?.url==='string'){this.db.prepare('INSERT INTO schedule_web_scopes VALUES (?,?)').run(input.id,scope.url);const priorPermission=this.db.prepare('SELECT enabled FROM web_permissions WHERE scope=?').get('task:'+(input.predecessor ?? ''));if(priorPermission?.enabled===0)this.db.prepare('INSERT INTO web_permissions VALUES (?,0)').run('task:'+input.id);}const search=this.db.prepare('SELECT query,origin,revision FROM schedule_search_scopes WHERE attempt_id=?').get(input.predecessor ?? '');if(typeof search?.query==='string' && typeof search.origin==='string' && typeof search.revision==='number'){this.db.prepare('INSERT INTO schedule_search_scopes VALUES (?,?,?,?)').run(input.id,search.query,search.origin,search.revision);const prior=this.db.prepare('SELECT enabled FROM search_permissions WHERE scope=?').get('task:'+(input.predecessor ?? ''));if(prior?.enabled===0)this.db.prepare('INSERT INTO search_permissions VALUES (?,0)').run('task:'+input.id);}const shell=this.db.prepare('SELECT command,docker_binary,docker_socket,image_id,revision FROM schedule_shell_scopes WHERE attempt_id=?').get(input.predecessor ?? '');if(typeof shell?.command==='string' && typeof shell.docker_binary==='string' && typeof shell.docker_socket==='string' && typeof shell.image_id==='string' && typeof shell.revision==='number'){this.db.prepare('INSERT INTO schedule_shell_scopes VALUES (?,?,?,?,?,?)').run(input.id,shell.command,shell.docker_binary,shell.docker_socket,shell.image_id,shell.revision);const prior=this.db.prepare('SELECT enabled FROM shell_permissions WHERE scope=?').get('task:'+(input.predecessor ?? ''));if(prior?.enabled===0)this.db.prepare('INSERT INTO shell_permissions VALUES (?,0)').run('task:'+input.id);} }
       this.bindWork({kind:'task',id:input.id},input.botId);
@@ -1117,6 +1345,10 @@ export class Instance {
     this.taskEvent(helperAttemptId,{type:'collaboration_result',assignmentId,messageId:key('message'),parentAttemptId:parentId,late:!active});
   }
   private finishTask(id:string,state:'completed'|'failed'|'stopped',outcome:string,disclosureId?:string) {
+    if(state === 'stopped') {
+      const stop=this.db.prepare("SELECT json_extract(event,'$.message') AS reason FROM task_activity WHERE attempt_id=? AND json_extract(event,'$.type')='stopping' ORDER BY seq LIMIT 1").get(id);
+      if(stop?.reason === 'Execution limit reached') outcome='Execution limit reached';
+    }
     this.cancelDelegations(id);
     this.deliverHelperOutcome(id,state,outcome,disclosureId);
     this.cancelTaskInputs(id);
@@ -1125,7 +1357,7 @@ export class Instance {
     if(!result.changes) throw Error('Task already finished');
     this.db.prepare("UPDATE schedule_occurrences SET status='completed' WHERE task_id=? AND status IN ('claimed','started')").run(id);
     this.taskEvent(id,{type:state,message:outcome}); const attempt=this.taskAttempt(id);
-    if(attempt) this.taskAnnouncement(attempt.botId,`Task ${id} ${state}: ${outcome}`);
+    if(attempt) this.taskAnnouncement(attempt.botId,this.gmailPrivateWork({kind:'task',id})?`Task ${id} ${state}. Gmail details are available in the task.`:`Task ${id} ${state}: ${outcome}`);
     const next=this.db.prepare("SELECT id FROM task_attempts WHERE predecessor=? AND state='waiting'").get(id);
     if(typeof next?.id === 'string') {this.db.prepare("UPDATE task_attempts SET state='queued' WHERE id=?").run(next.id);this.taskEvent(next.id,{type:'queued',message:'Previous attempt settled'});}
     return typeof next?.id === 'string' ? next.id : undefined;
@@ -1133,7 +1365,7 @@ export class Instance {
   taskComplete(id:string,session:Session,disclosureId?:string) {
     const answer=session.messages.at(-1);if(!answer || answer.role !== 'assistant' || typeof answer.content !== 'string') throw Error('Missing task outcome');
     this.db.exec('BEGIN IMMEDIATE');
-    try {const attempt=this.taskAttempt(id); if(!attempt) throw Error('Task not found'); if(this.isHelperAttempt(id) && attempt.state === 'stopping') {this.taskSave(id,session);this.taskEvent(id,{type:'assistant_observed',text:answer.content,late:true});const next=this.finishTask(id,'stopped','Task stopped');this.db.exec('COMMIT');return {completed:true as const,next};} if(new TaskInbox(this.db).hasPending({botId:attempt.botId,attemptId:id})) {this.db.exec('ROLLBACK');return {completed:false as const};} this.taskSave(id,session);this.taskEvent(id,{type:'assistant',text:answer.content});const next=this.finishTask(id,'completed',answer.content,disclosureId);this.db.exec('COMMIT');return {completed:true as const,next};}
+    try {const attempt=this.taskAttempt(id); if(!attempt) throw Error('Task not found'); if(attempt.state === 'stopping') {this.taskSave(id,session);this.taskEvent(id,{type:'assistant_observed',text:answer.content,late:true});const next=this.finishTask(id,'stopped','Task stopped');this.db.exec('COMMIT');return {completed:true as const,next};} if(new TaskInbox(this.db).hasPending({botId:attempt.botId,attemptId:id})) {this.db.exec('ROLLBACK');return {completed:false as const};} this.taskSave(id,session);this.taskEvent(id,{type:'assistant',text:answer.content});const next=this.finishTask(id,'completed',answer.content,disclosureId);this.db.exec('COMMIT');return {completed:true as const,next};}
     catch(error){this.db.exec('ROLLBACK');if(disclosureId)this.interruptDisclosure(disclosureId);throw error;}
   }
   taskFinish(id:string,state:'failed'|'stopped',outcome:string,disclosureId?:string) {
@@ -1141,7 +1373,7 @@ export class Instance {
     try {const next=this.finishTask(id,state,outcome,disclosureId);this.db.exec('COMMIT');return next;}
     catch(error){this.db.exec('ROLLBACK');if(disclosureId)this.interruptDisclosure(disclosureId);throw error;}
   }
-  private taskContext(botId:string) { return this.db.prepare('SELECT m.id,m.role,m.content,EXISTS(SELECT 1 FROM task_notices n WHERE n.message_id=m.id) AS isNotice FROM messages m WHERE m.bot_id=? ORDER BY m.seq').all(botId); }
+  private taskContext(botId:string) { return this.db.prepare('SELECT m.id,m.role,m.content,EXISTS(SELECT 1 FROM task_notices n WHERE n.message_id=m.id) AS isNotice FROM messages m WHERE m.bot_id=? AND NOT EXISTS(SELECT 1 FROM gmail_private_messages p WHERE p.message_id=m.id) ORDER BY m.seq').all(botId); }
   messages(botId: string) { return this.db.prepare('SELECT id, role, content FROM messages WHERE bot_id=? ORDER BY seq').all(botId); }
   hasBot(botId:string) {return !!this.botIdentity(botId);}
   command(id: string) { const row=this.db.prepare('SELECT c.id,c.bot_id AS botId,c.content,c.state,c.error,p.profile AS capturedProfile FROM commands c LEFT JOIN command_profiles p ON p.command_id=c.id WHERE c.id=?').get(id);if(!row)return undefined;const {capturedProfile,...command}=row;return {id:command.id,botId:command.botId,content:command.content,state:command.state,error:command.error,toolMode:parseToolModeFromProfile(capturedProfile)}; }
@@ -1165,7 +1397,8 @@ export class Instance {
     try {
       const command=this.command(id),progress=this.responseProgress(id);
       if(command?.state==='pending' && this.responseStopping(id) && typeof command.botId==='string') {
-        this.db.prepare("INSERT INTO messages VALUES (?, ?, 'assistant_stopped', ?, (SELECT COALESCE(MAX(seq),0)+1 FROM messages WHERE bot_id=?))").run(randomUUID(),command.botId,String(progress?.text ?? ''),command.botId);
+        const messageId=randomUUID();this.db.prepare("INSERT INTO messages VALUES (?, ?, 'assistant_stopped', ?, (SELECT COALESCE(MAX(seq),0)+1 FROM messages WHERE bot_id=?))").run(messageId,command.botId,String(progress?.text ?? ''),command.botId);
+        if(this.gmailPrivateCommand(id))this.db.prepare('INSERT INTO gmail_private_messages VALUES (?)').run(messageId);
         this.db.prepare("UPDATE commands SET state='stopped',error=NULL WHERE id=? AND state='pending'").run(id);
       }
       this.db.exec('COMMIT');
@@ -1194,7 +1427,22 @@ export class Instance {
       const id=String(row.id);
       return {id,toolMode:parseToolModeFromProfile(row.capturedProfile),progress:this.responseProgress(id),events:byCommand.get(id) ?? [],codeExecutions:this.workActions().inspect({kind:'command',id}),processes:this.processes().forWork({kind:'command',id})};
     });
-    return {requests,messages:this.db.prepare('SELECT id,role,content FROM messages WHERE bot_id=? AND id NOT IN (SELECT message_id FROM task_notices) ORDER BY seq').all(botId)};
+    // The acceptance notice is an existing conversation record. Match its exact
+    // service-authored text for older databases too; never replace its identity.
+    const anchors=this.db.prepare(`SELECT a.id AS attemptId,m.id AS messageId FROM task_attempts a JOIN tasks t ON t.id=a.task_id
+      JOIN task_notices n ON n.bot_id=a.bot_id JOIN messages m ON m.id=n.message_id
+      WHERE a.bot_id=? AND m.content IN ('Task ' || a.id || ' accepted: ' || t.objective, 'Replacement task ' || a.id || ' accepted: ' || t.objective)
+      ORDER BY m.seq`).all(botId);
+    const anchorByMessage=new Map(anchors.map(row=>[String(row.messageId),String(row.attemptId)]));
+    const anchorByAttempt=new Map(anchors.map(row=>[String(row.attemptId),String(row.messageId)]));
+    const messages=this.db.prepare('SELECT m.id,m.role,m.content,n.message_id AS noticeId FROM messages m LEFT JOIN task_notices n ON n.message_id=m.id WHERE m.bot_id=? ORDER BY m.seq').all(botId).flatMap(({noticeId,...message})=>{
+      const id=String(message.id),attemptId=anchorByMessage.get(id);
+      if(attemptId)return [{id,role:'task',content:'',taskAttemptId:attemptId}];
+      if(noticeId)return [];
+      return [message];
+    });
+    const tasks=this.db.prepare('SELECT id FROM task_attempts WHERE bot_id=? ORDER BY rowid').all(botId).map(row=>({...this.taskAttempt(String(row.id))!,anchorMessageId:anchorByAttempt.get(String(row.id)) ?? null}));
+    return {requests,messages,tasks};
   }
   chatSession(botId:string):Session {
     const bot=this.botIdentity(botId);if(!bot || typeof bot.chatId !== 'string')throw Error('Agent not found');
@@ -1246,7 +1494,7 @@ export class Instance {
       session = parsed;
     } else {
       const messages: Message[] = [];
-      for (const m of this.db.prepare('SELECT id,role,content FROM messages WHERE bot_id=? AND id NOT IN (SELECT message_id FROM task_notices) ORDER BY seq').all(command.botId).slice(0, -1)) {
+      for (const m of this.db.prepare('SELECT id,role,content FROM messages WHERE bot_id=? AND id NOT IN (SELECT message_id FROM task_notices) AND id NOT IN (SELECT message_id FROM gmail_private_messages) ORDER BY seq').all(command.botId).slice(0, -1)) {
         if (m.role === 'user' && typeof m.content === 'string') { if (messages.at(-1)?.role === 'user') messages.pop(); messages.push({role:'user',content:m.content}); }
         else if (m.role === 'assistant' && typeof m.content === 'string' && messages.at(-1)?.role === 'user') messages.push({role:'assistant',content:m.content});
       }
@@ -1273,6 +1521,7 @@ export class Instance {
         else if (row.state === 'cancelled') reply='That shared memory proposal was cancelled. No changes were made.';
         else if (row.state !== 'pending' || typeof row.text !== 'string') throw Error('Invalid memory proposal');
         else if (proposal.kind === 'cancel') {this.db.prepare("UPDATE memory_proposals SET state='cancelled',text=NULL WHERE id=? AND state='pending'").run(proposal.id); reply='Shared memory proposal cancelled. No memory was saved.';}
+        else if(!this.sensitiveSharedMemoryAllowed(command.botId,proposal.id,row.text)) reply='Memory access or the approved proposal changed. No memory was saved.';
         else {this.memories.create({scope:{kind:'user'},text:row.text}); this.db.prepare("UPDATE memory_proposals SET state='confirmed',text=NULL WHERE id=? AND state='pending'").run(proposal.id);reply='Confirmed and saved to shared user memory. All agents can retrieve it.';}
       }
       if (operation) {
@@ -1302,11 +1551,20 @@ export class Instance {
     try {
       const command = this.command(id);
       if (!command || command.state !== 'pending' || this.responseStopping(id) || typeof command.botId !== 'string') throw Error('Command is not pending');
-      this.db.prepare('INSERT INTO sessions VALUES (?,?) ON CONFLICT(bot_id) DO UPDATE SET session=excluded.session').run(command.botId,JSON.stringify(session));
+      const privateCommand=this.gmailPrivateCommand(id);
+      let stored=session;
+      if(success && privateCommand) {
+        const turns=session.turns??[],turn=turns.at(-1);if(!turn || !Number.isSafeInteger(turn.start))throw Error('Gmail turn boundary unavailable');
+        const user=session.messages[turn.start];if(!user || user.role!=='user')throw Error('Gmail user message unavailable');
+        const messages=[...session.messages.slice(0,turn.start),user,{role:'assistant' as const,content:'A private Gmail result was shown to the owner and is not replayed.'}];
+        stored={...session,messages,turns:[...turns.slice(0,-1),{...turn,end:messages.length}]};
+      }
+      this.db.prepare('INSERT INTO sessions VALUES (?,?) ON CONFLICT(bot_id) DO UPDATE SET session=excluded.session').run(command.botId,JSON.stringify(stored));
       if (success) {
         const answer=session.messages.at(-1);
         if (!answer || answer.role !== 'assistant' || typeof answer.content !== 'string') throw Error('Missing assistant answer');
-        this.db.prepare("INSERT INTO messages VALUES (?, ?, 'assistant', ?, (SELECT COALESCE(MAX(seq),0)+1 FROM messages WHERE bot_id=?))").run(randomUUID(),command.botId,answer.content,command.botId);
+        const messageId=randomUUID();this.db.prepare("INSERT INTO messages VALUES (?, ?, 'assistant', ?, (SELECT COALESCE(MAX(seq),0)+1 FROM messages WHERE bot_id=?))").run(messageId,command.botId,answer.content,command.botId);
+        if(privateCommand)this.db.prepare('INSERT INTO gmail_private_messages VALUES (?)').run(messageId);
         this.updateResponse(id,answer.content);
         this.db.prepare("UPDATE commands SET state='completed' WHERE id=?").run(id);
         this.db.prepare('UPDATE task_notices SET delivered=1 WHERE message_id IN (SELECT message_id FROM command_notices WHERE command_id=?)').run(id);

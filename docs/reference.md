@@ -279,9 +279,12 @@ redactor must leave both raw and parsed JSON unchanged before private invocation
 or journal persistence. Rejected input is never executed with substituted text.
 This includes invalid identifiers and normalized inputs, not only memory writes.
 
-The shared action registry exports `memory_search`, `memory_read`, `memory_remember`, `memory_update`, `memory_forget`, and `memory_proposal_status`. Both individual calls and QuickJS child calls use these registrations. Scope is `{ "kind": "agent" }` or `{ "kind": "user" }`; agent identity comes only from accepted work. Search accepts `query` and an optional cursor and returns at most 20 matching items and `nextCursor`. Read returns an item with its ID, stored scope and version. Update and forget require the ID, scope and version. A stale or wrong-scope mutation is a definite failed action. Text requiring current instance credential redaction is rejected during input parsing, before invocation inputs, action records, creation, proposal or update, so confirmation cannot save hidden text that differs from the review. Shared remember returns a pending, agent-bound proposal ID, never an active shared memory; only the owner chat confirmation or cancellation can resolve it. Proposal status is readable by the originating agent. Helpers are ineligible. These adapters use the common command/task context. The Code Mode description includes the eligible registered names and input schemas.
+The shared action registry exports `memory_search`, `memory_read`, `memory_remember`, `memory_update`, `memory_forget`, and `memory_proposal_status`. Both individual calls and QuickJS child calls use these registrations. Scope is `{ "kind": "agent" }` or `{ "kind": "user" }`; agent identity comes only from accepted work. Search accepts `query` and an optional cursor and returns at most 20 matching items and `nextCursor`. Read returns an item with its ID, stored scope and version. Update and forget require the ID, scope and version. A stale or wrong-scope mutation is a definite failed action. Text requiring current instance credential redaction is rejected during input parsing, before invocation inputs, action records, creation, proposal or update, so confirmation cannot save hidden text that differs from the review. Saves and updates take `classification` (`ordinary`, `sensitive`, or `uncertain`); omission fails closed to review. Owner rules can require review for matching text or every change. Pending sensitive proposals return an ID and fingerprint, never the proposed text in the action result. Shared remember additionally returns or creates the separately governed agent-bound shared proposal; only the owner chat confirmation or cancellation resolves that shared proposal. Proposal status is readable by the originating agent. Helpers are ineligible. These adapters use the common command/task context. The Code Mode description includes the eligible registered names and input schemas.
 
 ### Shared-instance memory API
+
+`GET /api/memory-sensitivity` reads `{revision, mode, terms}`; `POST` uses the current revision, `mode` of `model` or `review-all`, and a bounded string array of case-insensitive substring terms. `GET /api/memory-proposals/BOT_ID` lists that agent's pending sensitive proposals including exact text and fingerprint. A paired owner sends the fingerprint to `POST /api/memory-proposals/ID/confirm` or `/deny`. Confirmation checks the exact stored proposal, active memory availability, agent state and target version. Sensitive shared creation creates a separate shared proposal requiring the normal chat confirmation; that final step rechecks the approved text and current authority. Proposals survive restart; disabling memory or archiving the agent denies pending sensitive proposals and cancels their pending shared confirmations. Plugin-originated proposals also require the originating connection and access revision to remain current. Schema 43 combines these tables with Slack work migrations without modifying existing memory or shared proposals. Model classification and term matching are imperfect; `review-all` requires review for every model save/update.
+
 
 The workspace uses the authenticated `GET` routes below for read-only memory
 pages. Each route returns the complete scope; browser pagination uses 20 entries
@@ -358,7 +361,7 @@ Browser choice controls load model metadata on open and provider change. The com
 
 ### Chat work records
 
-Paired `GET /api/bots/{id}/chat-work` returns `messages` (excluding background-task notices) and ordered `requests`. Each request contains its command `id`, service-owned response `progress`, and ordered `events` with stable numeric `id`, `type`, `name`, nullable numeric `success`, nullable `detail`, nullable `arguments`, nullable `callId`, and its `command_id`. Event types are `tool_start`, `tool_result`, and `assistant_message`. The latter retains intermediate assistant text in `detail` (up to 1,000,000 characters), with null `callId`, arguments, and success. Schema 39 fences older readers that cannot distinguish message boundaries. The CLI runtime-event summary still contains only tools. New start and result events share a service-generated call ID. Older events have a null call ID and cannot be reliably paired. Argument and result details are redacted and capped at 16,000 characters. Re-fetch replaces the snapshot; clients must not append duplicate events. Pending chat approvals come from `/api/inbox` and are matched by bot and command ID. Existing exact-ID approval decision endpoints and permission enforcement are unchanged. Background tasks remain available through explicit task endpoints and CLI operations, but are not offered to ordinary chat providers.
+Paired `GET /api/bots/{id}/chat-work` returns ordered `messages`, `requests`, and `tasks`. A task acceptance notice appears as a message with role `task`, its existing message ID, and `taskAttemptId`; each task snapshot carries its existing attempt and activity IDs and an `anchorMessageId` when an acceptance notice can be matched. Unmatched older attempts have a null anchor. Other task notices remain excluded from the chat message list. Each request contains its command `id`, service-owned response `progress`, and ordered `events` with stable numeric `id`, `type`, `name`, nullable numeric `success`, nullable `detail`, nullable `arguments`, nullable `callId`, and its `command_id`. Event types are `tool_start`, `tool_result`, and `assistant_message`. The latter retains intermediate assistant text in `detail` (up to 1,000,000 characters), with null `callId`, arguments, and success. Schema 39 fences older readers that cannot distinguish message boundaries. The CLI runtime-event summary still contains only tools. New start and result events share a service-generated call ID. Older events have a null call ID and cannot be reliably paired. Argument and result details are redacted and capped at 16,000 characters. Re-fetch replaces the snapshot; clients must not append duplicate events. Pending chat and task approvals come from `/api/inbox` and are matched by bot and work ID. Existing exact-ID approval decision endpoints and permission enforcement are unchanged. Background tasks remain available through explicit task endpoints and CLI operations, but are not offered to ordinary chat providers.
 
 ## Agent image configuration and API
 
@@ -426,6 +429,22 @@ This extension needs no database schema migration. Older checkouts do not
 recognize the new configuration field: remove `image` fields or restore a
 compatible backup before running one. Retain accepted assets if you intend to
 use those images again.
+
+## Instance tool availability
+
+Paired `GET /api/tool-defaults` returns `revision`, `clock`, `memory`, `web`,
+and `files`. `POST` accepts the same object with the current numeric revision
+and four booleans; a stale revision returns 409. Schema 41 adds the backed-up
+instance setting, initialized to enabled for both fresh and upgraded databases
+without changing existing permission or configuration records. These switches
+filter registered capability offers and are rechecked at action authorization,
+start and result release. `web` covers `read_web`, redirect hops and `search_web`;
+`files` covers registered `file_*` actions; `memory` covers registered
+`memory_*` actions and automatic recall. Owner memory inspection and native
+terminal capabilities remain separate. In-flight web/search requests are aborted
+on disable, but an already dispatched effect may have reached its destination.
+Clock permission, web/search permissions, task scope and approvals remain
+independent and authoritative. Search still needs a configured backend.
 
 ## Saved tool mode contract
 
@@ -545,3 +564,93 @@ Paired owners can POST `/api/processes/ID/input` with `{ "data": "text\n" }`, `/
 `limits.inputBytes` is 16,384 per request, `pendingInputs` is eight per process, and `ptyInputBytes` is a cumulative 1,048,576 bytes per PTY lifetime. Input and resize requests are serialized per process. Stop closes interaction admission and interrupts queued input; it does not wait behind a blocked write. A receipt proves submission, not consumption. Pipe EOF closes input permanently; PTY EOF submits Ctrl-D. PTY output uses the `terminal` stream. Output bounds and redaction are shared with pipe mode.
 
 Schema 36 adds process retention, input counters/closure and PTY dimensions through the protected migration process, preserving combined native/search schema 35. Old records default to nonretained. Unknown handles cannot receive input, EOF, resize or signals after restart.
+
+
+## Bundled plugin management
+
+Paired clients use `GET /api/plugins` to inspect bundled definitions, Slack
+configuration without tokens, connection state, agent access, recent event
+outcomes, and recent task delivery states (`pending`, `sending`, `sent`, or
+`uncertain`). `sent` records Slack acceptance, not a human read. `POST /api/plugins/slack/connect` accepts `appToken`, `botToken`,
+`teamId`, `userId`, `channelId`, and `botId`; it validates the bot token against
+the workspace. `POST /api/plugins/slack/access` takes `botId` and `enabled`.
+The `enable`, `disable`, `disconnect`, and `delete-config` endpoints take empty
+objects. Connections are instance-owned and keyed by service account identity;
+this slice exposes one Slack account. Tokens remain host-local and are never
+returned. Slack-originated model turns can use the service-owned `start_slack_task`
+and `manage_slack_task` capabilities; thread and owner message identity are
+captured by the service, not supplied as tool arguments. See [Slack setup](usage.md#slack-plugin) for limits and recovery.
+
+Gmail uses `POST /api/plugins/gmail/start` with `email`, `clientId`,
+`clientSecret`, and optional booleans `sendEnabled` and `modifyEnabled`; it
+returns an authorization URL, not a credential. Both options default to false
+and request their respective Google scopes when true. Google
+returns to the loopback `/gmail/oauth/callback` with the one-time state and code.
+
+`GET /api/plugins` includes the 30 latest Gmail history scan `runs`, with start
+and finish times and an outcome. Interrupted scans are marked on restart. These
+records cover history scans only; they do not establish agent processing or
+Slack delivery. When the separately enabled inbox assistant is active, continuing
+monitoring failures can trigger a deduplicated generic Slack notice.
+The paired owner can call `check`, `enable`, `disable`, `disconnect`, `poll`, or
+`delete-config` with an empty object, and `access` with `botId` and `enabled`.
+`model-access` takes `botId`, `provider`, `model`, and `enabled`; enabling it
+requires an exact match to the current agent profile and existing agent access.
+`work-model-access` takes the same fields and requires the existing model grant;
+it separately permits tasks and Slack-originated work for that exact agent and
+model. Setting or revoking the model grant clears the task and Slack grant.
+`read` takes a `messageId` for owner inspection. `rebaseline` requires
+`{"confirm":true}` and retains a record of the unknown interval.
+`POST /api/plugins/gmail/inbox-preferences` takes `preferences` with `enabled`,
+`attention`, `sensitiveTerms`, `digestMinutes` (1–1440), and `memoryContext`, the last observed `revision` (or `null` before setup), and `confirmModelAccess: true` with the `inboxTarget` identity, account and connection revisions as `target` when enabling (omit its display-only `name`). Opting into `memoryContext` additionally requires `confirmMemoryAccess: true` and enabled memory tools. Stale revisions and changed targets are rejected.
+It binds to the current Slack agent, Gmail account, model and connection
+revisions, and scans from the connection baseline. Initial setup includes eligible recorded candidates; compatible edits preserve pending updates, questions, digests and the candidate checkpoint. Unknown candidates require an explicit owner request; privacy changes under the same authority move pending details to private clarification, while authority changes make them stale. `inboxPreferences` and `inboxStatus`
+in the plugin status expose settings, recent item states and current failure.
+A message candidate is scoped to one service-owned task and its journaled Gmail
+read. Only the exact bound Slack thread can resolve its private clarification.
+Digest items and batches are durable. `POST /api/plugins/gmail/review-candidate` takes `messageId`, current monitoring `revision`, and `confirm: true` to assess an unknown candidate with private clarification; it does not change inbox evidence. `POST /api/plugins/gmail/retry-evaluation` takes `attemptId`, current monitoring `revision`, and `confirm: true` to retry a failed read-only or safely stale assessment under current authority. Stale digest members are reassessed individually, with prior assessment and batch linkage retained. Definite Slack rate limits retain the full valid delay across restart and reassessment; invalid or unrepresentable delays require owner review. A send interrupted or with an unknown result is uncertain and is not retried. `POST /api/plugins/gmail/resolve-delivery` takes `kind` (`item` or `digest`), its `id`, `decision` (`sent`, `dismiss`, or `resend`), the exact `expectedText`, and `confirm: true`. Resending requires current monitoring authority and is an explicit owner action that may duplicate the original send. Clarifications without a confirmed thread cannot be marked sent.
+The Gmail entry in `GET /api/plugins` includes the account, connection state,
+agent access IDs, model access, task and Slack model access, `sendEnabled`,
+`modifyEnabled`, monitoring state, recent candidate IDs, inbox evidence (`yes`, `no`, or `unknown`), and gaps;
+it never returns the client secret or refresh token. Older candidates are paged
+through `GET /api/plugins/gmail/arrivals?before=CURSOR` using `nextBefore`.
+There is one Gmail account in this implementation. The shared database keys
+connections and access by plugin and account. The local credential file is
+separate from SQLite. `gmail_search` and `gmail_read` are journaled read actions
+for explicitly permitted chat and task work in all three tool modes. A paired
+`POST /api/tasks` may include `gmailQuery`, a nonempty query of at most 500
+characters. The captured account, revision and exact query scope the attempt;
+only message IDs returned by that attempt's searches can be read. The scope is
+not inherited by retries, scheduled tasks, or helpers. `work gmail: QUERY` in an
+authorized Slack DM creates a task with that exact scope. Gmail-derived Slack
+responses are generic, except for a proposal the approved user has chosen
+to reveal and the separately enabled inbox assistant’s scoped updates. `gmail_reply` requires the original message to be read in the same
+work, the Google send scope, an enabled Slack connection for the agent, a
+disclosure decision, and an exact approval. Slack revision requests invalidate
+the original proposal and return the owner's direction to the model. A new
+proposal requires a new approval. `gmail_modify` uses the same boundary for
+`label`, `archive`, and `mark_read`, with the separate Google modify scope.
+The command and task read endpoints include `gmailReplies` with the recorded
+effect and outcome. `GET /api/plugins/gmail/uncertain` lists up to 100 uncertain
+actions for paired clients. To reconcile an
+uncertain send after checking Gmail, a paired owner can call
+`POST /api/plugins/gmail/reconcile` with `actionId`, the recorded `fingerprint`,
+and `outcome` of `sent` or `not-sent`. Reconciliation records the owner's
+finding; it never sends mail. For an inbox change, use
+`POST /api/plugins/gmail/reconcile-change` with the same identity fields and
+an `outcome` of `applied` or `not-applied`.
+Schema 44 adds Gmail history, disclosure and private-turn records while also
+ensuring sensitive-memory schema is present. Both independent schema 43
+predecessors upgrade without replacing their existing records. See
+[Gmail setup](usage.md#gmail-plugin) for OAuth requirements and limitations.
+Schema 45 adds task Gmail scopes, scoped message IDs, private-task markers, and
+the separately approved task and Slack model permission. Schema 46 had independent
+predecessors for history scans and Gmail action proposals; schema 49 merges both,
+retains inbox monitoring settings and decisions, and adds digest, feedback,
+memory opt-in, and uncertain-delivery recovery. Schema 50 adds inbox evidence;
+older candidates remain unknown, and undelivered work lacking evidence is marked
+stale. Schema 51 adds candidate review requests and delivery retry deadlines. Schema 52 stores active sensitivity separately from the latest correction, retains new correction events and old assessment and digest linkage, and marks all members of stale batches for review. A previously overwritten sensitivity correction cannot be reconstructed. Existing records and uncertain effects are preserved.
+
+## Native home-network gateway
+
+The optional native gateway uses `STAF_LAN_ADDRESS` (a specific private IPv4), `STAF_LAN_PORT` (1024–65535, default 3443), and absolute `STAF_LAN_KEY` and `STAF_LAN_CERT` paths in its systemd environment file. It serves HTTPS and forwards to the unchanged loopback service. See [installation and recovery](native-linux-installation.md#enable-home-network-https-access) for certificate trust, pairing and limits. The standard CLI remains loopback-only.

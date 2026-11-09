@@ -188,6 +188,11 @@ For a workspace change, run the served GUI smoke journey after building:
 node test/browser/gui-smoke.mjs
 ```
 
+For Gmail plugin behavior, run `node --test test/gmail-plugin.test.js test/gmail-action.test.js test/gmail-work-paths.test.js test/gmail-monitor.test.js` and
+`node test/browser/gmail-plugin-smoke.mjs` after building. These use synthetic
+Google HTTP responses and a disposable instance; they do not authenticate a
+Google account or establish live mail and history behavior.
+
 For shared core settings changes, also run the disposable paired browser and CLI
 journey after building:
 
@@ -247,6 +252,14 @@ Open `http://127.0.0.1:3211`, pair with the code printed by that process,
 and create an agent from **New agent** with provider `lmstudio` and model
 `fixture-model`. This fixture supplies a synthetic provider and stores review
 data separately under `.staf/chat-review`; it does not contact LM Studio.
+
+For an offline background-task check, pair a CLI client with this fixture and
+use `instance task-start` for the fixture agent with the objective `Hold task
+for late output`. The task appears in the agent's conversation. Select **Stop
+task**, then enter `release-late-task` in the fixture terminal. The task should
+settle as stopped and show the observed late text. Refresh the browser to check
+that the same task and observation remain. This is a synthetic provider; the
+fixture does not exercise a live model.
 
 **Connect ChatGPT** opens a loopback page labeled **Simulated ChatGPT sign-in**.
 Choose **Complete simulated sign-in** to exercise the connected state. This does
@@ -388,6 +401,34 @@ distinguish synthetic coverage from live provider, VM, or Docker acceptance.
 For docs-only changes, report the relevant documentation checks instead of
 requiring an application launch.
 
+## Review the Gmail-to-Slack journey
+
+Start the normal development workspace with `corepack pnpm dev` and reuse the
+paired browser and existing development data as described above. In **Settings →
+Plugins**, configure Slack and Gmail for the same agent, then grant the separate
+agent, model, and task/Slack permissions. Enable the inbox assistant and confirm
+the displayed provider disclosure. The [Gmail setup and monitoring guide](usage.md#gmail-plugin)
+and [Slack setup](usage.md#slack-plugin) describe the required account and app
+settings. The owner chooses whether to use real accounts and a real model; the
+setup shares email content with that provider for assessment.
+
+Send a new test message to the connected account after setup. Expect a relevant
+update in the approved Slack DM, or a generic question before any sensitive or
+uncertain details. Ask for a reply in that thread; disclose the proposal, request
+a revision, and inspect the exact recipient, subject, and revised text before
+approving. Expect one send and a recorded outcome in Staf. Restart the service
+and check the records remain; inspect Gmail and Slack before resolving any
+uncertain outcome rather than assuming it failed or retrying it. Existing mail
+is excluded from the initial stream. History candidates can include non-inbox mail. Candidates with uncertain inbox
+membership are held for owner review; inspect the list as explained in the Gmail
+guide.
+
+For the intended Linux host, follow the [native installation guide](native-linux-installation.md)
+for the service, pairing, optional home-network gateway, and backup. Verify the
+service and paired access after a reboot before trying the account journey above.
+Those Linux, network, and live-account steps are owner-led and are not established
+by the controlled service and browser tests.
+
 ## Review the agent editor
 
 On the implementation branch, stop another development launcher using the same
@@ -509,3 +550,24 @@ providers and does not measure live model behavior or cache reuse.
 ## Verify the model picker
 
 For model picker changes, build the application and run `node test/browser/provider-picker-smoke.mjs` and `node test/browser/gui-smoke.mjs`. The picker journey uses a disposable paired instance and controlled metadata. It does not verify live provider access or inference.
+
+### Verify sensitive memory with a controlled provider
+
+Use the disposable [chat review fixture](#review-chat-locally-without-a-provider),
+not a real account, and create its `fixture-model` agent. In **Settings → Tools**,
+select **Review every model memory change**. In the agent chat send `Sensitive
+memory fixture`, then open **Agent settings → View agent memory → Memory
+proposals**. The exact synthetic text and agent audience should appear; confirm
+it and refresh memory to see the entry. Repeat the prompt and deny the proposal;
+no second memory should appear. Select **Allow model-classified ordinary
+memories** and send `Ordinary memory fixture`; the synthetic interruption
+preference should appear after refreshing without a proposal. Repeat with Direct,
+Hybrid, and Code Mode. These scripted responses test the service and controls;
+they do not establish live model classification or empathy.
+
+After building, `node --test test/personal-memory.test.js` exercises the paired
+service with controlled responses, real SQLite, all three modes, approval,
+revocation, replay and schema migration. `node test/browser/sensitive-memory-smoke.mjs`
+uses disposable data and a controlled provider to check the settings and owner
+proposal controls. The existing memory browser journey remains a separate
+regression check.
