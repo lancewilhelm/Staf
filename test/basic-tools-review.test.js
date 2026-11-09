@@ -157,7 +157,7 @@ test('memory evidence resolves a lost receipt but an apparent repeat still requi
   const setup=new Instance(path);let bot,memory;
   try {bot=setup.createBot({provider:'live',model:'fixture-offline',name:'Memory evidence',instructions:'',toolMode:'hybrid'});memory=setup.memories.create({scope:{kind:'bot',botId:bot.id},text:'before'});setup.db.exec("CREATE TRIGGER lost_receipt AFTER UPDATE ON memories BEGIN SELECT RAISE(FAIL, 'lost receipt'); END");}finally{setup.close();}
   let ready,release;const held=new Promise(resolve=>ready=resolve),gate=new Promise(resolve=>release=resolve),seen=[];
-  const input={scope:{kind:'agent'},id:memory.id,version:1,text:'after'};
+  const input={scope:{kind:'agent'},id:memory.id,version:1,text:'after',classification:'ordinary'};
   const f=await paired(path,async(_profile,messages)=>{
     const results=messages.slice(messages.findLastIndex(message=>message.role==='user')+1).filter(message=>message.role==='tool');seen.push(structuredClone(results));
     if(!results.length)return tool('code_mode',{source:`return await capabilities.memory_update(${JSON.stringify(input)});`});
