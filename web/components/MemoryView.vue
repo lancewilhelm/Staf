@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import DisclosureSummary from './DisclosureSummary.vue';
+import MemoryProposals from './MemoryProposals.vue';
 import { computed, nextTick, onMounted, onScopeDispose, ref, shallowRef, watch } from 'vue';
 import type { Memory, MemoryScope } from '../../src/memory-types';
 import { useWorkspace } from '../workspace';
@@ -52,11 +53,13 @@ onMounted(() => { heading.value?.focus(); });
     <p class="memory-audience badge">{{ scope.kind === 'user' ? 'Available to all your agents' : `Available only to ${agent?.name ?? 'this agent'}` }}</p>
     <p v-if="agent?.archived" class="meta">This agent is archived. Its memory is retained for inspection.</p>
     <p class="page-intro">Inspect saved memory. Retrieval is selective: relevant entries may be sent to the selected provider.</p>
+    <p class="meta">Models and term matching can miss sensitive details. Deleting a memory does not erase conversation or action history, backups, in-flight work, or information already sent to a provider.</p>
     <div class="row memory-actions">
       <button class="quiet" @click="emit('back')">{{ backLabel }}</button>
       <button v-if="scope.kind === 'bot'" class="quiet shared-memory-link" @click="emit('shared')">View shared user memory</button>
       <button class="quiet" :disabled="state.kind === 'loading'" @click="load">Refresh memory</button>
     </div>
+    <MemoryProposals v-if="scope.kind === 'bot'" :bot-id="scope.botId" />
     <p v-if="state.kind === 'loading'" role="status">Loading memory…</p>
     <div v-else-if="state.kind === 'error'" role="alert">
       <p>Could not load memory. Check your connection and access, then try again.</p>

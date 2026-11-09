@@ -376,6 +376,15 @@ export class Controller {
   async saveCore(revision:string,content:string|null) { return parseCore(await this.api<unknown>('/api/core',{revision,content})); }
   async toolDefaults(){const value=await this.api<unknown>('/api/tool-defaults');if(!isRecord(value)||typeof value.revision!=='number'||typeof value.clock!=='boolean'||typeof value.memory!=='boolean'||typeof value.web!=='boolean'||typeof value.files!=='boolean')throw Error('Invalid tool defaults');return {revision:value.revision,clock:value.clock,memory:value.memory,web:value.web,files:value.files}}
   async saveToolDefaults(value:Awaited<ReturnType<Controller['toolDefaults']>>){return this.api('/api/tool-defaults',value)}
+  async memorySensitivity(){return z.object({revision:z.number().int().positive(),mode:z.enum(['model','review-all']),terms:z.array(z.string())}).parse(await this.api<unknown>('/api/memory-sensitivity'))}
+  async saveMemorySensitivity(value:Awaited<ReturnType<Controller['memorySensitivity']>>){return this.api('/api/memory-sensitivity',value)}
+  private async memoryProposalRequest(path:string,body?:unknown,signal?:AbortSignal):Promise<unknown>{
+    const token=this.token;
+    try {const value=await this.api<unknown>(path,body,signal);signal?.throwIfAborted();if(!token || this.token!==token)throw Error('Memory access is no longer available.');return value;}
+    catch(error){if(!signal?.aborted && this.token===token && error instanceof ApiError && error.status===401){this.token='';this.generation++;this.watchResponse(null);localStorage.removeItem('staf-token');this.update({connection:{kind:'pairing',message:'Pairing expired or was revoked.'}});}throw error;}
+  }
+  async memoryProposals(botId:string,signal?:AbortSignal){return z.array(z.object({id:z.string(),scope:z.enum(['bot','user']),operation:z.enum(['create','update']),targetId:z.string().nullable(),targetVersion:z.number().nullable(),text:z.string(),fingerprint:z.string()})).parse(await this.memoryProposalRequest('/api/memory-proposals/'+encodeURIComponent(botId),undefined,signal))}
+  async decideMemoryProposal(id:string,fingerprint:string,decision:'confirm'|'deny'){return z.object({decision:z.enum(['confirm','deny']),sharedConfirmationRequired:z.boolean()}).parse(await this.memoryProposalRequest('/api/memory-proposals/'+encodeURIComponent(id)+'/'+decision,{fingerprint}))}
   async searchConfig(){const value=await this.api<unknown>('/api/search-config');if(!isRecord(value)||typeof value.revision!=='number'||!isNullableString(value.origin))throw Error('Invalid search configuration');return {revision:value.revision,origin:value.origin}}
   async saveSearchConfig(revision:number,origin:string|null){return this.api('/api/search-config',{revision,origin})}
   async creationDefaults(){const value=await this.api<unknown>('/api/creation-defaults');if(!isRecord(value)||typeof value.revision!=='number'||typeof value.provider!=='string'||!isNullableString(value.model)||!isNullableString(value.reasoning))throw Error('Invalid creation defaults');return {revision:value.revision,provider:value.provider,model:value.model,reasoning:value.reasoning,toolMode:parseToolMode(value.toolMode)}}

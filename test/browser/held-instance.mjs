@@ -22,6 +22,11 @@ return {
     const prompt=options?.currentUserInput ?? '';
     const scripted=tools.some(tool=>tool.function.name==='code_mode');
     const calls=items=>({role:'assistant',content:null,tool_calls:items.map(([name,input])=>({id:name,type:'function',function:{name,arguments:JSON.stringify(input)}}))});
+    if (prompt==='Sensitive memory fixture' || prompt==='Ordinary memory fixture') {
+      if(messages.at(-1)?.role==='tool')return {role:'assistant',content:'Memory fixture finished. Review proposals in agent memory when needed.'};
+      const input={scope:{kind:'agent'},text:prompt==='Sensitive memory fixture'?'medical synthetic fixture detail':'fixture prefers fewer interruptions',classification:prompt==='Sensitive memory fixture'?'sensitive':'ordinary'};
+      return calls([[scripted?'code_mode':'memory_remember',scripted?{source:`return await capabilities.memory_remember(${JSON.stringify(input)});`}:input]]);
+    }
     if (prompt.startsWith('Basic tools fixture ') || prompt.startsWith('Revise basic tools fixture ')) {
       const revise=prompt.startsWith('Revise');
       const results=messages.slice(messages.findLastIndex(message=>message.role==='user')+1).filter(message=>message.role==='tool');
@@ -32,16 +37,16 @@ return {
           const file=(await capabilities.file_read({path:'basic-acceptance.txt'})).value;
           const memory=(await capabilities.memory_search({scope:{kind:'agent'},query:'browser acceptance'})).value.items[0];
           await capabilities.file_edit({path:'basic-acceptance.txt',expectedHash:file.sha256,oldText:'before',newText:'after'});
-          const updated=(await capabilities.memory_update({scope:{kind:'agent'},id:memory.id,version:memory.version,text:'updated browser acceptance'})).value;
+          const updated=(await capabilities.memory_update({scope:{kind:'agent'},id:memory.id,version:memory.version,text:'updated browser acceptance',classification:'ordinary'})).value;
           const found=(await capabilities.file_search({path:'basic-acceptance.txt',query:'after'})).value;
           await capabilities.memory_forget({scope:{kind:'agent'},id:updated.id,version:updated.version});
           return found;
-        `:`await capabilities.file_write({path:'basic-acceptance.txt',content:'before'}); return (await capabilities.memory_remember({scope:{kind:'agent'},text:'browser acceptance'})).value;`;
+        `:`await capabilities.file_write({path:'basic-acceptance.txt',content:'before'}); return (await capabilities.memory_remember({scope:{kind:'agent'},text:'browser acceptance',classification:'ordinary'})).value;`;
         return calls([['code_mode',{source}]]);
       }
-      if(!revise && !results.length)return calls([['file_write',{path:'basic-acceptance.txt',content:'before'}],['memory_remember',{scope:{kind:'agent'},text:'browser acceptance'}]]);
+      if(!revise && !results.length)return calls([['file_write',{path:'basic-acceptance.txt',content:'before'}],['memory_remember',{scope:{kind:'agent'},text:'browser acceptance',classification:'ordinary'}]]);
       if(revise && !results.length)return calls([['file_read',{path:'basic-acceptance.txt'}],['memory_search',{scope:{kind:'agent'},query:'browser acceptance'}]]);
-      if(revise && results.length===2){const memory=result('memory_search').items[0];return calls([['file_edit',{path:'basic-acceptance.txt',expectedHash:result('file_read').sha256,oldText:'before',newText:'after'}],['memory_update',{scope:{kind:'agent'},id:memory.id,version:memory.version,text:'updated browser acceptance'}]]);}
+      if(revise && results.length===2){const memory=result('memory_search').items[0];return calls([['file_edit',{path:'basic-acceptance.txt',expectedHash:result('file_read').sha256,oldText:'before',newText:'after'}],['memory_update',{scope:{kind:'agent'},id:memory.id,version:memory.version,text:'updated browser acceptance',classification:'ordinary'}]]);}
       if(revise && results.length===4){const memory=result('memory_update');return calls([['file_search',{path:'basic-acceptance.txt',query:'after'}],['memory_forget',{scope:{kind:'agent'},id:memory.id,version:memory.version}]]);}
       return {role:'assistant',content:prompt+' completed.'};
     }

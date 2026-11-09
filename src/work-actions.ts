@@ -38,6 +38,9 @@ export type Capability<I,O> = {
   authorize(input:I,work:WorkContext,action:ActionIdentity):Promise<void|AuthorityClaim>;
   execute(input:I,work:WorkContext,action:ActionIdentity):Promise<O>;
   visibleResult(output:O):string;
+  /** Safe durable representation; the digest function is keyed by the instance. */
+  journalInput?(input:I,work:WorkContext,digest:(value:string)=>string):Json;
+  restoreJournalInput?(input:Json,work:WorkContext,action:ActionIdentity):unknown;
   maxResultBytes?:number;
   releaseResult?(output:O,work:WorkContext):void;
   recovery?: {overlaps?(previous:I,next:I,work:WorkContext):boolean; reconcile?(input:I,evidence:unknown,work:WorkContext,action:ActionIdentity):boolean};
@@ -72,6 +75,8 @@ type ErasedCapability = {
   execute(input:Json,work:WorkContext,action:ActionIdentity):Promise<Json>;visible(output:Json):string;releaseResult?(output:Json,work:WorkContext):void;
   overlaps?: (previous:Json,next:Json,work:WorkContext)=>boolean;
   reconcile?: (input:Json,evidence:unknown,work:WorkContext,action:ActionIdentity)=>boolean;
+  journalInput?: (input:Json,work:WorkContext,digest:(value:string)=>string)=>Json;
+  restoreJournalInput?: (input:Json,work:WorkContext,action:ActionIdentity)=>Json;
 };
 
 /** One instance owns this coordinator and its registry. Callers cannot choose action IDs. */
@@ -104,6 +109,8 @@ export class WorkActionService {
       authorize:(input,work,action)=>capability.authorize(parse(input),work,action),
       execute:async (input,work,action)=>jsonValue.parse(capability.parseResult(await capability.execute(parse(input),work,action))),
       visible:output=>capability.visibleResult(capability.parseResult(output)),
+      ...(capability.journalInput ? {journalInput:(input:Json,work:WorkContext,digest:(value:string)=>string)=>jsonValue.parse(capability.journalInput!(parse(input),work,digest))} : {}),
+      ...(capability.restoreJournalInput ? {restoreJournalInput:(input:Json,work:WorkContext,action:ActionIdentity)=>jsonValue.parse(parse(capability.restoreJournalInput!(input,work,action)))} : {}),
       ...(capability.releaseResult ? {releaseResult:(output:Json,work:WorkContext)=>{try{capability.releaseResult!(capability.parseResult(output),work);}catch(error){if(!(error instanceof ActionDeferred))this.close(work,'authority');throw error;}}} : {}),
       ...(capability.recovery?.overlaps ? {overlaps:(a:Json,b:Json,work:WorkContext)=>capability.recovery!.overlaps!(parse(a),parse(b),work)} : {}),
       ...(capability.recovery?.reconcile ? {reconcile:(input:Json,evidence:unknown,work:WorkContext,action:ActionIdentity)=>capability.recovery!.reconcile!(parse(input),evidence,work,action)} : {}),
@@ -153,9 +160,12 @@ export class WorkActionService {
     const cap=record && this.capabilities.get(record.capability);
     if(!record || !cap?.reconcile)throw Error('Feature reconciliation did not establish the outcome');
     const identity=Object.freeze({id:record.action.id,fingerprint:record.action.fingerprint});
-    cap.check(record.input,context,identity);
-    if(!cap.reconcile(record.input,evidence,context,identity))throw Error('Feature reconciliation did not establish the outcome');
-    this.admit(context);cap.check(record.input,context,identity);
+    const legacy=cap.journalInput && record.input!==null && !Array.isArray(record.input) && typeof record.input==='object' && 'text' in record.input;
+    const restored=cap.restoreJournalInput && !legacy ? cap.restoreJournalInput(record.input,context,identity) : record.input;
+    if(cap.journalInput && !legacy && encoded(cap.journalInput(restored,context,value=>this.digest(value)))!==encoded(record.input))throw Error('Feature reconciliation did not establish the outcome');
+    cap.check(restored,context,identity);
+    if(!cap.reconcile(restored,evidence,context,identity))throw Error('Feature reconciliation did not establish the outcome');
+    this.admit(context);cap.check(restored,context,identity);
     this.db.exec('BEGIN IMMEDIATE');
     try {const added=this.db.prepare('INSERT OR IGNORE INTO work_action_resolutions VALUES (?)').run(actionId);if(added.changes)this.db.prepare('UPDATE work_action_state SET epoch=epoch+1 WHERE kind=? AND work_id=?').run(context.work.kind,context.work.id);this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
@@ -227,6 +237,8 @@ export class WorkActionService {
     const canonical=encoded(input);
     if(Buffer.byteLength(canonical)>256*1024)throw Error('Parsed input exceeds the limit');
     if(this.inputRedactor(canonical)!==canonical)return {kind:'blocked',reason:'Tool input cannot be retained faithfully under the instance redaction rules.'};
+    const journalInput=cap.journalInput ? encoded(cap.journalInput(input,context,value=>this.digest(value))) : canonical;
+    const matchesInput=(previous:Json)=>encoded(previous)===journalInput || (!!cap.journalInput && encoded(previous)===canonical);
     const digest=this.digest(encoded([request.name,rawInput,request.intent]));
     const pending=this.db.prepare('SELECT digest,challenge,reason FROM work_action_requests WHERE kind=? AND work_id=? AND source=?').get(context.work.kind,context.work.id,source);
     if(pending) {
@@ -237,7 +249,7 @@ export class WorkActionService {
       const previous=this.db.prepare('SELECT epoch,prior_ids,consumed FROM work_action_challenges WHERE id=?').get(pending.challenge);
       if(typeof previous?.prior_ids!=='string') throw Error('Missing recovery challenge');
       const state=this.state(context.work);
-      const matching=this.records(context).filter(item=>this.accounted(item.action) && item.capability===request.name && encoded(item.input)===canonical).map(item=>item.action);
+      const matching=this.records(context).filter(item=>this.accounted(item.action) && item.capability===request.name && matchesInput(item.input)).map(item=>item.action);
       const priorIds=JSON.stringify(matching.map(item=>item.id));
       if(previous.epoch!==state.epoch || previous.prior_ids!==priorIds || previous.consumed!==0) {
         const challenge=randomUUID();
@@ -262,9 +274,9 @@ export class WorkActionService {
     if(request.intent.kind==='resume') {
       const actionId=request.intent.actionId;
       const record=records.find(item=>item.action.id===actionId);
-      if(!record || record.capability!==request.name || encoded(record.input)!==canonical)throw new ActionConflict('Resume does not match the recorded action');
+      if(!record || record.capability!==request.name || !matchesInput(record.input))throw new ActionConflict('Resume does not match the recorded action');
       cap.check(input,context,{id:record.action.id,fingerprint:record.action.fingerprint});
-      this.db.prepare('INSERT INTO work_action_invocations (kind,work_id,source,digest,action_id,capability,input,description) VALUES (?,?,?,?,?,?,?,?)').run(context.work.kind,context.work.id,source,digest,record.action.id,record.capability,canonical,JSON.stringify(record.description));
+      this.db.prepare('INSERT INTO work_action_invocations (kind,work_id,source,digest,action_id,capability,input,description) VALUES (?,?,?,?,?,?,?,?)').run(context.work.kind,context.work.id,source,digest,record.action.id,record.capability,journalInput,JSON.stringify(record.description));
       const value=this.retainedResult(record.action.id);
       if(record.action.state==='succeeded' && value!==undefined) {cap.releaseResult?.(value,context);return {kind:'completed',actionId:record.action.id,value};}
       return {kind:'status',action:record.action};
@@ -272,13 +284,13 @@ export class WorkActionService {
     const description=actionDescription.parse(cap.describe(input,context));
     if(description.effect==='change') {
       const uncertain=records.filter(item=>(item.action.state==='uncertain' || item.action.state==='started') && item.description.effect==='change' && !this.resolved(item.action.id));
-      if(uncertain.some(item=>item.description.opaque || description.opaque || item.capability!==request.name || !cap.overlaps || cap.overlaps(item.input,input,context))) {
+      if(uncertain.some(item=>item.description.opaque || description.opaque || item.capability!==request.name || !!cap.journalInput || !cap.overlaps || cap.overlaps(item.input,input,context))) {
         const reason='Uncertain overlapping change requires reconciliation';
         this.db.prepare('INSERT INTO work_action_requests VALUES (?,?,?,?,NULL,?)').run(context.work.kind,context.work.id,source,digest,reason);return {kind:'blocked',reason};
       }
       const state=this.state(context.work);
-      const matching=Number(state.epoch)>0 ? records.filter(item=>this.accounted(item.action) && item.capability===request.name && encoded(item.input)===canonical).map(item=>item.action) : [];
-      const ambiguous=Number(state.epoch)>0 && records.some(item=>item.action.state==='succeeded' && item.description.effect==='change' && (item.description.opaque || description.opaque) && !(item.capability===request.name && encoded(item.input)===canonical) && !this.resolved(item.action.id));
+      const matching=Number(state.epoch)>0 ? records.filter(item=>this.accounted(item.action) && item.capability===request.name && matchesInput(item.input)).map(item=>item.action) : [];
+      const ambiguous=Number(state.epoch)>0 && records.some(item=>item.action.state==='succeeded' && item.description.effect==='change' && (item.description.opaque || description.opaque) && !(item.capability===request.name && matchesInput(item.input)) && !this.resolved(item.action.id));
       if(ambiguous) {
         const reason='Opaque prior change requires reconciliation';
         this.db.prepare('INSERT INTO work_action_requests VALUES (?,?,?,?,NULL,?)').run(context.work.kind,context.work.id,source,digest,reason);return {kind:'blocked',reason};
@@ -299,7 +311,7 @@ export class WorkActionService {
       this.admit(context);
       if(request.intent.kind==='repeat' && this.db.prepare('UPDATE work_action_challenges SET consumed=1 WHERE id=? AND consumed=0').run(request.intent.challenge).changes!==1)throw new ActionConflict('Repeat challenge already consumed');
       prepared=this.journal.prepareInInstanceTransaction({id:actionId,fingerprint,work:context.work,summary:description.summary},this.db);
-      this.db.prepare('INSERT INTO work_action_invocations (kind,work_id,source,digest,action_id,capability,input,description) VALUES (?,?,?,?,?,?,?,?)').run(context.work.kind,context.work.id,source,digest,actionId,request.name,canonical,JSON.stringify(description));
+      this.db.prepare('INSERT INTO work_action_invocations (kind,work_id,source,digest,action_id,capability,input,description) VALUES (?,?,?,?,?,?,?,?)').run(context.work.kind,context.work.id,source,digest,actionId,request.name,journalInput,JSON.stringify(description));
       this.db.exec('COMMIT');
     } catch(error){this.db.exec('ROLLBACK');throw error;}
     if(prepared.kind!=='created')throw Error('New action already exists');

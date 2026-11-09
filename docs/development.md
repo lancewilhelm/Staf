@@ -522,3 +522,24 @@ providers and does not measure live model behavior or cache reuse.
 ## Verify the model picker
 
 For model picker changes, build the application and run `node test/browser/provider-picker-smoke.mjs` and `node test/browser/gui-smoke.mjs`. The picker journey uses a disposable paired instance and controlled metadata. It does not verify live provider access or inference.
+
+### Verify sensitive memory with a controlled provider
+
+Use the disposable [chat review fixture](#review-chat-locally-without-a-provider),
+not a real account, and create its `fixture-model` agent. In **Settings → Tools**,
+select **Review every model memory change**. In the agent chat send `Sensitive
+memory fixture`, then open **Agent settings → View agent memory → Memory
+proposals**. The exact synthetic text and agent audience should appear; confirm
+it and refresh memory to see the entry. Repeat the prompt and deny the proposal;
+no second memory should appear. Select **Allow model-classified ordinary
+memories** and send `Ordinary memory fixture`; the synthetic interruption
+preference should appear after refreshing without a proposal. Repeat with Direct,
+Hybrid, and Code Mode. These scripted responses test the service and controls;
+they do not establish live model classification or empathy.
+
+After building, `node --test test/personal-memory.test.js` exercises the paired
+service with controlled responses, real SQLite, all three modes, approval,
+revocation, replay and schema migration. `node test/browser/sensitive-memory-smoke.mjs`
+uses disposable data and a controlled provider to check the settings and owner
+proposal controls. The existing memory browser journey remains a separate
+regression check.

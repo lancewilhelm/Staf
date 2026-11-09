@@ -59,7 +59,7 @@ The optional [Gmail plugin](docs/usage.md#gmail-plugin) supports owner-operated 
 
 The shared instance supports owner-imported [skills](docs/usage.md#skills-in-the-shared-instance) as an offline-tested preview. Eligible chat and task work can select them in Direct, Hybrid, or Code Mode.
 
-The shared instance supports [scoped memory](docs/usage.md#scoped-memory-in-the-shared-instance) in an offline-tested preview, with read-only agent and shared user memory pages in Settings.
+The shared instance supports [scoped memory](docs/usage.md#scoped-memory-in-the-shared-instance) in an offline-tested preview, with agent and shared user memory pages, configurable sensitivity rules, and owner review of proposed sensitive changes.
 
 Agents can keep their initials, choose a geometric avatar with a separate color,
 or use a cropped uploaded image. Use **Change image** in New agent or agent
