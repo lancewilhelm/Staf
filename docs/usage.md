@@ -785,9 +785,8 @@ Gmail is optional and starts disconnected. One account can be connected through
 lets a paired owner inspect them. An agent can search and read mail in chat only
 after both agent access and a separate, explicit model disclosure decision.
 Connecting Gmail alone does not authorize sending email to a model. An optional
-Google permission allows an agent to propose a reply for approval in Slack.
-Mailbox changes, reply revisions, and automatic sensitivity classification are
-not implemented.
+Google permissions allow an agent to propose a reply or inbox change for approval
+in Slack. Automatic sensitivity classification is not implemented.
 
 To prepare an owner-operated connection:
 
@@ -797,7 +796,10 @@ To prepare an owner-operated connection:
    mode, add the Google account as a test user. The connection requests
    `https://www.googleapis.com/auth/gmail.readonly`, a restricted scope used
    for read/search and history. Reply sending additionally requests
-   `https://www.googleapis.com/auth/gmail.send`. Google's [scope documentation](https://developers.google.com/workspace/gmail/api/auth/scopes)
+   `https://www.googleapis.com/auth/gmail.send`. Inbox changes additionally request
+   `https://www.googleapis.com/auth/gmail.modify`, which Google also permits for
+   sending; Staf separately requires its send setting and approval for replies.
+   Google's [scope documentation](https://developers.google.com/workspace/gmail/api/auth/scopes)
    and [restricted-scope verification guidance](https://developers.google.com/identity/protocols/oauth2/production-readiness/restricted-scope-verification)
    explain applicable verification and exceptions. Do not assume that a
    particular personal or organizational configuration qualifies.
@@ -808,8 +810,10 @@ To prepare an owner-operated connection:
    browser and open **Settings → Plugins → Gmail**.
 3. Enter the intended Gmail address, desktop client ID and client secret. To
    allow approved replies, select **Allow Gmail to send replies after explicit
-   approval in Slack**. Reconnect and grant the send scope if the account was
-   previously connected without it. Select
+   approval in Slack**. To allow approved label, archive, and mark-read changes,
+   select **Allow Gmail inbox changes after explicit approval in Slack**.
+   Reconnect and select the permissions you want if the existing connection
+   lacks them. Select
    **Begin Google authorization**, then **Open Google authorization**. Sign in
    to the intended account and grant the requested access. Google redirects to
    the local Staf callback. Return to Settings and refresh Gmail status. Staf
@@ -866,26 +870,38 @@ Gmail access and both model permissions when the task starts. Changes to
 the connection or any permission stop subsequent Gmail work.
 
 After a Gmail result in a turn, other tools are unavailable for the rest of that
-turn except Gmail search, read, and reply proposal. This also applies to guest
+turn except Gmail search, read, and approved action proposals. This also applies to guest
 calls already queued behind the Gmail action. Ordinary Slack updates remain
 generic. To propose a reply, the agent must read the original message in that
 work and have an enabled Slack connection for the same agent. Staf first asks
 the approved Slack user a generic question before showing the proposal. If the
 user chooses **Show proposal**, Slack displays the account, recipient, subject,
-and complete plain-text body with **Approve send** and **Deny** buttons. Only an
-approval of that proposal can send it. A reply has one recipient and no
+and complete plain-text body with **Approve send**, **Request changes**, and
+**Deny** buttons. To request changes, select **Request changes**, then reply in
+the indicated thread. The old buttons stop working. The agent receives your
+direction and must make a new proposal with a new disclosure and approval.
+Only an approval of that proposal can send it. A reply has one recipient and no
 attachments. The subject must be nonempty, at most 400 characters, and match the
 original message, as required by [Gmail threading](https://developers.google.com/workspace/gmail/api/guides/threads).
-The body limit is 1,800 characters. A new draft requires a
-new request and approval. Editing a proposal in Slack is not yet available.
+The body limit is up to 2,600 characters; the complete proposal must fit within
+3,000 characters. An agent may need another instruction if it cannot revise
+the proposal. Edits are requests to the agent, not direct edits of the email.
+
+For an inbox change, the agent must first read the target message in the same
+work. It can propose adding an existing user label by its exact name, archiving
+the message, or marking it read. Staf resolves the label name to its Gmail ID
+and checks it again before dispatch. Slack shows the account, message, and exact
+change after the generic disclosure question. Approval applies only that change.
+The Gmail account can change between the final check and Google's operation.
 
 Slack receives a generic send result. A timeout, lost connection, or interrupted
-send can leave the outcome unknown. Staf does not resend an uncertain reply and
-blocks further replies to that message until the owner reviews the outcome.
-The paired command or task API includes `gmailReplies`, including the account,
-effect, fingerprint, and state. After checking Gmail Sent mail, a paired owner
-can report `sent` or `not-sent` through the reconciliation endpoint in the
-[reference](reference.md). A new send still needs a new approval. Pending
+send or change can leave the outcome unknown. Staf does not replay an uncertain
+action and blocks further actions on that message until the owner reviews it.
+In **Settings → Plugins → Gmail**, review **Gmail outcomes needing review**.
+Check Sent mail or the message's labels in Gmail, then record your finding. If
+you are unsure, leave it unresolved. Recording a finding does not retry anything;
+a new action still needs a new approval. The paired command or task API also
+includes `gmailReplies` with the recorded effect and state. Pending
 approvals are interrupted on restart and old buttons cannot send. The owner's
 visible chat, task activity, and proposal records can contain the email and
 should be protected like the mailbox.

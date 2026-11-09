@@ -480,14 +480,16 @@ tasks capture an exact Gmail query and the account revision at acceptance; they
 can read only IDs returned for that attempt. A Slack task can capture the query
 through an explicit command. Private work is marked before results are released,
 and the work-action service rejects other capabilities after that point except
-the scoped reply proposal, even when guest calls were queued earlier. Slack
-receives generic notifications for private Gmail work. A reply proposal first
+the scoped Gmail action proposals, even when guest calls were queued earlier. Slack
+receives generic notifications for private Gmail work. A proposal first
 requires a generic Slack disclosure decision; only then is its exact effect shown
 for a separate approval. The proposal binds the action fingerprint, work, agent,
 Gmail account and revision, Slack identity and revision, and message. The action
-journal claims dispatch after current authority is checked. A restarted or
-ambiguous send is uncertain and is not replayed; an owner can reconcile it after
-checking Gmail. Gmail
+journal claims dispatch after current authority is checked. A revision request
+invalidates the earlier proposal and carries the owner's thread reply to the
+model. Label, archive, and mark-read changes use the same approval boundary and
+an optional Google modify grant. A restarted or ambiguous action is uncertain
+and is not replayed; an owner can reconcile it after checking Gmail. Gmail
 tool results and generated replies are excluded from subsequent model replay and
 captured task context; the owner's request remains. Other tools are fenced for
 the rest of that turn. The owner's general sensitive-email
