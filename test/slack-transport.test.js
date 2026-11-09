@@ -40,3 +40,31 @@ test('HTTP 429 exposes a safe retry delay while other transport failures remain 
   await assert.rejects(slackTransport.post(tokens,{channel:'D123',text:'test'}),error=>!(error instanceof SlackRateLimited));
  }finally{globalThis.fetch=original;}
 });
+
+test('Socket Mode carries button identity and refuses malformed interactive messages',async()=>{
+ const originalFetch=globalThis.fetch,OriginalWebSocket=globalThis.WebSocket,requests=[],interactions=[];let socket;
+ class FakeSocket extends EventTarget {
+  static OPEN=1;readyState=1;sent=[];
+  constructor(){super();socket=this;}
+  send(text){this.sent.push(JSON.parse(text));}
+  close(){this.readyState=3;this.dispatchEvent(new Event('close'));}
+  incoming(data){this.dispatchEvent(new MessageEvent('message',{data:JSON.stringify(data)}));}
+ }
+ globalThis.WebSocket=FakeSocket;
+ globalThis.fetch=async(url,options)=>{requests.push(JSON.parse(options.body));return Response.json(String(url).endsWith('apps.connections.open')?{ok:true,url:'wss://wss.slack.com/link'}:{ok:true});};
+ try {
+  const tokens={appToken:'xapp-synthetic',botToken:'xoxb-synthetic'};
+  const stop=await slackTransport.start(tokens,async()=>{},undefined,async interaction=>{if(interaction.eventId==='failed')throw Error('Persistence unavailable');interactions.push(interaction)});
+  const payload={type:'block_actions',team:{id:'T123'},user:{id:'U123'},channel:{id:'D123'},container:{channel_id:'D123',message_ts:'1.2'},actions:[{type:'button',action_id:'approve',value:'exact-control'}]};
+  socket.incoming({type:'interactive',envelope_id:'one',payload});
+  socket.incoming({type:'interactive',envelope_id:'two',payload:{...payload,container:{...payload.container,channel_id:'D999'}}});
+  socket.incoming({type:'interactive',envelope_id:'three',payload:{...payload,actions:[...payload.actions,...payload.actions]}});
+  socket.incoming({type:'interactive',envelope_id:'failed',payload});
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.deepEqual(interactions,[{eventId:'one',teamId:'T123',userId:'U123',channelId:'D123',messageTs:'1.2',actionId:'approve',value:'exact-control'}]);
+  assert.deepEqual(socket.sent.map(x=>x.envelope_id).sort(),['one','three','two']);
+  await slackTransport.post(tokens,{channel:'D123',threadTs:'1.1',text:'Exact text',buttons:[{text:'Approve',actionId:'approve',value:'exact-control'}]});
+  assert.deepEqual(requests.at(-1).blocks,[{type:'section',text:{type:'plain_text',text:'Exact text'}},{type:'actions',elements:[{type:'button',text:{type:'plain_text',text:'Approve'},action_id:'approve',value:'exact-control'}]}]);
+  stop();
+ } finally {globalThis.fetch=originalFetch;globalThis.WebSocket=OriginalWebSocket;}
+});
