@@ -68,3 +68,15 @@ test('Socket Mode carries button identity and refuses malformed interactive mess
   stop();
  } finally {globalThis.fetch=originalFetch;globalThis.WebSocket=OriginalWebSocket;}
 });
+test('Slack honors a two-hour Retry-After without truncation',async()=>{
+ const {SlackRateLimited}=await import('../dist/slack.js');const original=globalThis.fetch;
+ try {globalThis.fetch=async()=>new Response('',{status:429,headers:{'retry-after':'7200'}});await assert.rejects(slackTransport.post({appToken:'xapp-synthetic',botToken:'xoxb-synthetic'},{channel:'D123',text:'test'}),error=>error instanceof SlackRateLimited && error.retryAfterMs===7200000);}finally{globalThis.fetch=original;}
+});
+test('invalid or unrepresentable Retry-After fails closed',async()=>{
+ const {SlackRateLimited}=await import('../dist/slack.js');const original=globalThis.fetch;
+ try {for(const header of [null,'-1','1e100','999999999999999999999']){globalThis.fetch=async()=>new Response('',{status:429,...(header===null?{}:{headers:{'retry-after':header}})});await assert.rejects(slackTransport.post({appToken:'xapp-synthetic',botToken:'xoxb-synthetic'},{channel:'D123',text:'test'}),error=>error instanceof SlackRateLimited && error.retryAt(Date.now())===null);}}finally{globalThis.fetch=original;}
+});
+test('zero Retry-After is a valid immediate deadline',async()=>{
+ const {SlackRateLimited}=await import('../dist/slack.js');const original=globalThis.fetch;
+ try {globalThis.fetch=async()=>new Response('',{status:429,headers:{'retry-after':'0'}});await assert.rejects(slackTransport.post({appToken:'xapp-synthetic',botToken:'xoxb-synthetic'},{channel:'D123',text:'test'}),error=>error instanceof SlackRateLimited && error.retryAt(1000)===1000);}finally{globalThis.fetch=original;}
+});

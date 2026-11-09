@@ -687,7 +687,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
           if(from==='clarify' && result?.messageTs && /^\d+\.\d+$/.test(result.messageTs))instance.inboxMonitor.markClarification(item.attempt_id,result.messageTs);
           else if(from==='clarify')instance.inboxMonitor.markUncertain(item.attempt_id,sending);
           else instance.inboxMonitor.markDelivered(item.attempt_id,sending,from==='approved' && typeof item.clarification_ts==='string'?item.clarification_ts:result?.messageTs ?? null);
-        } catch(error) {if(!closing){if(error instanceof SlackRateLimited)instance.inboxMonitor.deferDelivery('item',item.attempt_id,sending,from,Date.now()+(Number.isFinite(error.retryAfterMs)?Math.max(1000,Math.min(error.retryAfterMs,3600000)):30000));else instance.inboxMonitor.markUncertain(item.attempt_id,sending);}}
+        } catch(error) {if(!closing){if(error instanceof SlackRateLimited)instance.inboxMonitor.deferDelivery('item',item.attempt_id,sending,from,error.retryAt(Date.now()),inboxAuthority(instance.inboxMonitor.settings()?.revision ?? 0));else instance.inboxMonitor.markUncertain(item.attempt_id,sending);}}
       }
       instance.inboxMonitor.claimDigest('digest-'+randomUUID(),settings.revision,(options.inboxNow??Date.now)());
       for(const batch of instance.inboxMonitor.digestBatches()) {
@@ -695,7 +695,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
         const connection=instance.plugins.connection(),tokens=loadSlackTokens(dataDir);if(!connection || !tokens || slackStatus==='reconnecting')break;
         if(!instance.inboxMonitor.setBatchState(batch.id,'pending','sending'))continue;
         try {const result=await slack.post(tokens,{channel:connection.config.channelId,text:batch.text});if(closing)return;instance.inboxMonitor.finishDigest(batch.id,result?.messageTs ?? null);}
-        catch(error) {if(!closing){if(error instanceof SlackRateLimited)instance.inboxMonitor.deferDelivery('digest',batch.id,'sending','pending',Date.now()+(Number.isFinite(error.retryAfterMs)?Math.max(1000,Math.min(error.retryAfterMs,3600000)):30000));else instance.inboxMonitor.setBatchState(batch.id,'sending','uncertain');}}
+        catch(error) {if(!closing){if(error instanceof SlackRateLimited)instance.inboxMonitor.deferDelivery('digest',batch.id,'sending','pending',error.retryAt(Date.now()),inboxAuthority(instance.inboxMonitor.settings()?.revision ?? 0));else instance.inboxMonitor.setBatchState(batch.id,'sending','uncertain');}}
       }
       if(closing)return;
       const candidate=instance.inboxMonitor.next();
@@ -834,8 +834,8 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
           if(!closing)instance.plugins.finishWorkDelivery(row.id,row.kind,'sent');
         } catch(error) {
           if(!closing) {
-            if(error instanceof SlackRateLimited)instance.plugins.finishWorkDelivery(row.id,row.kind,'pending',Date.now()+error.retryAfterMs);
-            else instance.plugins.finishWorkDelivery(row.id,row.kind,'uncertain');
+            const retryAt=error instanceof SlackRateLimited?error.retryAt(Date.now()):null;
+            if(retryAt!==null)instance.plugins.finishWorkDelivery(row.id,row.kind,'pending',retryAt);else instance.plugins.finishWorkDelivery(row.id,row.kind,'uncertain');
           }
         }
       }
@@ -1051,7 +1051,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
       if(req.method==='POST' && req.url==='/api/plugins/gmail/retry-evaluation') {
         const input=z.strictObject({attemptId:z.string().min(1).max(200),revision:z.number().int().positive(),confirm:z.literal(true)}).parse(value);
         const settings=instance.inboxMonitor.settings(),item=instance.inboxMonitor.item(input.attemptId),attempt=instance.taskAttempt(input.attemptId);
-        if(!settings || !inboxAuthority(input.revision) || item?.account_id!==settings.accountId || !attempt || attempt.workActions.some(action=>action?.summary!=='Read Gmail message'))throw new BotConflict('Evaluation cannot be safely retried under current authority');
+        if(!settings || !inboxAuthority(input.revision) || item?.account_id!==settings.accountId || (!attempt && item?.state!=='stale') || (attempt && attempt.workActions.some(action=>action?.summary!=='Read Gmail message')))throw new BotConflict('Evaluation cannot be safely retried under current authority');
         instance.inboxMonitor.retryEvaluation(input.attemptId,input.revision);void tickInbox();return json(200,pluginStatus()[1]);
       }
       if(req.method==='POST' && req.url==='/api/plugins/gmail/resolve-delivery') {

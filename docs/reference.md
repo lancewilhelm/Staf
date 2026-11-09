@@ -608,7 +608,7 @@ revisions, and scans from the connection baseline. Initial setup includes eligib
 in the plugin status expose settings, recent item states and current failure.
 A message candidate is scoped to one service-owned task and its journaled Gmail
 read. Only the exact bound Slack thread can resolve its private clarification.
-Digest items and batches are durable. `POST /api/plugins/gmail/review-candidate` takes `messageId`, current monitoring `revision`, and `confirm: true` to assess an unknown candidate with private clarification; it does not change inbox evidence. `POST /api/plugins/gmail/retry-evaluation` takes `attemptId`, current monitoring `revision`, and `confirm: true` to retry a failed read-only assessment under current authority. Definite Slack rate limits are retried after a persisted bounded delay. A send interrupted or with an unknown result is uncertain and is not retried. `POST /api/plugins/gmail/resolve-delivery` takes `kind` (`item` or `digest`), its `id`, `decision` (`sent`, `dismiss`, or `resend`), the exact `expectedText`, and `confirm: true`. Resending requires current monitoring authority and is an explicit owner action that may duplicate the original send. Clarifications without a confirmed thread cannot be marked sent.
+Digest items and batches are durable. `POST /api/plugins/gmail/review-candidate` takes `messageId`, current monitoring `revision`, and `confirm: true` to assess an unknown candidate with private clarification; it does not change inbox evidence. `POST /api/plugins/gmail/retry-evaluation` takes `attemptId`, current monitoring `revision`, and `confirm: true` to retry a failed read-only or safely stale assessment under current authority. Stale digest members are reassessed individually, with prior assessment and batch linkage retained. Definite Slack rate limits retain the full valid delay across restart and reassessment; invalid or unrepresentable delays require owner review. A send interrupted or with an unknown result is uncertain and is not retried. `POST /api/plugins/gmail/resolve-delivery` takes `kind` (`item` or `digest`), its `id`, `decision` (`sent`, `dismiss`, or `resend`), the exact `expectedText`, and `confirm: true`. Resending requires current monitoring authority and is an explicit owner action that may duplicate the original send. Clarifications without a confirmed thread cannot be marked sent.
 The Gmail entry in `GET /api/plugins` includes the account, connection state,
 agent access IDs, model access, task and Slack model access, `sendEnabled`,
 `modifyEnabled`, monitoring state, recent candidate IDs, inbox evidence (`yes`, `no`, or `unknown`), and gaps;
@@ -649,7 +649,7 @@ predecessors for history scans and Gmail action proposals; schema 49 merges both
 retains inbox monitoring settings and decisions, and adds digest, feedback,
 memory opt-in, and uncertain-delivery recovery. Schema 50 adds inbox evidence;
 older candidates remain unknown, and undelivered work lacking evidence is marked
-stale. Schema 51 adds candidate review requests and delivery retry deadlines. Existing records and uncertain effects are preserved.
+stale. Schema 51 adds candidate review requests and delivery retry deadlines. Schema 52 stores active sensitivity separately from the latest correction, retains new correction events and old assessment and digest linkage, and marks all members of stale batches for review. A previously overwritten sensitivity correction cannot be reconstructed. Existing records and uncertain effects are preserved.
 
 ## Native home-network gateway
 

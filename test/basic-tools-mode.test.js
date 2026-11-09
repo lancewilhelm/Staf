@@ -106,7 +106,7 @@ test('version 30 databases migrate with backup and preserve existing configurati
     let db=new DatabaseSync(path);db.exec('ALTER TABLE creation_defaults DROP COLUMN tool_mode; PRAGMA user_version=30');db.close();
     instance=new Instance(path);assert.ok(instance.migrationBackup && existsSync(instance.migrationBackup));
     assert.equal(instance.creationDefaults().toolMode,'hybrid');assert.equal(instance.bot(agent.id).name,'Existing');
-    assert.equal(INSTANCE_SCHEMA_VERSION,51);instance.close();
+    assert.equal(INSTANCE_SCHEMA_VERSION,52);instance.close();
     db=new DatabaseSync(path);assert.equal(db.prepare('PRAGMA user_version').get().user_version,INSTANCE_SCHEMA_VERSION);db.close();
   } finally {rmSync(dir,{recursive:true,force:true});}
 });
