@@ -64,6 +64,13 @@ try {
  await until(()=>evaluate("document.body.innerText.includes('Allow Gmail in tasks and Slack work?')"),'task model disclosure');
  await evaluate("[...document.querySelectorAll('dialog button')].find(b=>b.textContent.trim()==='Allow task and Slack access').click()");
  await until(()=>evaluate("[...document.querySelectorAll('[aria-label=\"Gmail plugin\"] button')].some(b=>b.textContent.trim()==='Revoke task and Slack Gmail access'&&!b.disabled)"),'task model access saved');
+ await evaluate(`(async()=>{const token=localStorage.getItem('staf-token'),headers={Authorization:'Bearer '+token,'Content-Type':'application/json'};const bot=(await (await fetch('/api/bots',{headers})).json()).find(b=>b.name==='Gmail agent');for(const [path,body] of [['connect',{appToken:'xapp-synthetic',botToken:'xoxb-synthetic',teamId:'T123',userId:'U123',channelId:'D123',botId:bot.id}],['access',{botId:bot.id,enabled:true}],['enable',{}]]){const r=await fetch('/api/plugins/slack/'+path,{method:'POST',headers,body:JSON.stringify(body)});if(!r.ok)throw Error(await r.text());}})()`);
+ await evaluate("[...document.querySelectorAll('[aria-label=\"Gmail plugin\"] button')].find(b=>b.textContent.trim()==='Refresh Gmail status').click()");
+ await until(()=>evaluate("[...document.querySelectorAll('[aria-label=\"Gmail plugin\"] button')].some(b=>b.textContent.trim()==='Enable inbox monitoring'&&!b.disabled)"),'inbox monitoring available');
+ await evaluate("[...document.querySelectorAll('[aria-label=\"Gmail plugin\"] button')].find(b=>b.textContent.trim()==='Enable inbox monitoring').click()");
+ await until(()=>evaluate("document.body.innerText.includes('Allow ongoing Gmail assessment?')"),'monitor consent');
+ const disclosure=await evaluate("document.querySelector('dialog').innerText");assert.match(disclosure,/recorded since Gmail was connected/);assert.match(disclosure,/while monitoring was disabled/);assert.match(disclosure,/not assessed again automatically/);
+ await evaluate("[...document.querySelectorAll('dialog button')].find(b=>b.textContent.trim()==='Cancel').click()");
  await evaluate("[...document.querySelectorAll('[aria-label=\"Gmail plugin\"] button')].find(b=>b.textContent.trim()==='Disable').click()");
  await until(()=>evaluate("document.querySelector('[aria-label=\"Gmail plugin\"] .badge').textContent.trim()==='Disabled' && [...document.querySelectorAll('[aria-label=\"Gmail plugin\"] button')].some(b=>b.textContent.trim()==='Disconnect Gmail'&&!b.disabled)"),'disabled');
  await evaluate("[...document.querySelectorAll('[aria-label=\"Gmail plugin\"] button')].find(b=>b.textContent.trim()==='Disconnect Gmail').click()");

@@ -35,7 +35,7 @@ import {InboxMonitorStore,inboxMonitorSchema} from './inbox-monitor.js';
 const clockAction: Action = { capability:'clock', operation:'read', resource:'utc', effect:'read', limits:{}, risk:'safe' };
 const clockBoundary = { enabledCapabilities:['clock'], actions:[clockAction] };
 const modes: ApprovalMode[] = ['ask-every-time','ask-for-risky-actions','never-ask'];
-export const INSTANCE_SCHEMA_VERSION = 50;
+export const INSTANCE_SCHEMA_VERSION = 51;
 const MAINTENANCE_VERSION = 2147483647;
 
 export const starterSoul = "You are an assistant working for the owner. Be clear and candid. Distinguish observations from assumptions. Follow the owner's role instructions and work within the permissions and task scope granted to you.";
@@ -227,6 +227,7 @@ export class Instance {
       this.db.exec(`CREATE TABLE IF NOT EXISTS inbox_digest_batches (id TEXT PRIMARY KEY, settings_revision INTEGER NOT NULL, state TEXT NOT NULL, text TEXT NOT NULL, thread_ts TEXT, created_at INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS inbox_digest_items (batch_id TEXT NOT NULL REFERENCES inbox_digest_batches(id),attempt_id TEXT NOT NULL UNIQUE REFERENCES inbox_monitor_items(attempt_id),PRIMARY KEY(batch_id,attempt_id));`);
     }
+    if(version < 51) this.db.exec("CREATE TABLE IF NOT EXISTS inbox_candidate_reviews (account_id TEXT NOT NULL,message_id TEXT NOT NULL,settings_revision INTEGER NOT NULL,PRIMARY KEY(account_id,message_id)); CREATE TABLE IF NOT EXISTS inbox_delivery_retry (kind TEXT NOT NULL,id TEXT NOT NULL,retry_at INTEGER NOT NULL,PRIMARY KEY(kind,id))");
     if(version < 50) this.db.exec(`
       UPDATE inbox_monitor_items SET state='stale'
         WHERE state IN ('evaluating','ready','clarify','awaiting','approved','digest_pending','digest_batched')

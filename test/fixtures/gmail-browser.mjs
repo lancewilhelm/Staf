@@ -21,5 +21,6 @@ const gmailRequest=async(url)=>{
  }
  throw Error('Unexpected provider request');
 };
-const app=startInstance(path,Number(port),{env:{},gmailRequest});await app.listen();process.stdout.write('Pairing code: '+app.code+'\n');
+const slackTransport={identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async()=>()=>{},post:async()=>({messageTs:'1.1'})};
+const app=startInstance(path,Number(port),{env:{},gmailRequest,slackTransport});await app.listen();process.stdout.write('Pairing code: '+app.code+'\n');
 process.on('SIGTERM',()=>{void app.close().then(()=>process.exit(0));});

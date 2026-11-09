@@ -843,7 +843,7 @@ or metadata cannot be retrieved, inbox membership is uncertain. These candidates
 remain in Settings for owner review and are not automatically assessed or sent to
 Slack. This conservative inference is not a guarantee of exact historical
 classification, and a move into the inbox after a non-inbox addition is not a new
-message arrival. The assistant only processes candidates with inbox evidence.
+message arrival. To assess an uncertain candidate, inspect it and choose **Assess this candidate** in Gmail settings. Confirm the model disclosure; the assessment always requires private clarification before Slack shares details. This does not change the recorded evidence or establish historical inbox membership.
 Legacy candidates without recorded evidence remain uncertain; their pending
 assistant deliveries are marked stale on upgrade rather than sent. See Google's
 [history reference](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.history/list)
@@ -869,13 +869,12 @@ sender, subject or message content appears in the initial question. Staf does
 processes eligible additions recorded since the connection baseline, including
 those collected during initial setup, only after monitoring and model access are
 explicitly enabled. A later re-enable resumes unprocessed eligible additions;
-previously claimed items are not processed a second time. Compatible preference
-edits retain the candidate checkpoint. Changing monitoring settings makes unanswered questions and pending immediate updates stale. When the account, agent, provider, permissions, sensitive topics and memory setting remain the same, changing attention or digest timing retains pending digest items. Privacy changes with the same authority move those items to private clarification. Authority changes mark them stale for review. Changes to Gmail, Slack, agent or model authorization
+previously claimed items are not processed a second time. Compatible preference edits retain pending immediate updates, private questions and digest items. Changes to sensitive topics or memory with the same authority send pending unapproved details for private clarification. Authority changes mark pending work stale for review. Changes to Gmail, Slack, agent or model authorization
 pause the assistant; enable it again after reviewing permissions.
 
 History checks and evaluation failures are recorded. The assistant sends one
 generic Slack alert for a continuing failure when the approved DM is available;
-a recovered check permits a later failure alert. A Slack send with an unknown outcome is marked uncertain and is not automatically repeated. In Gmail settings, review the exact attempted text and inspect Slack. You can mark a message delivered, dismiss it, or explicitly confirm sending the same text again; a resend can duplicate it and requires current authority. An uncertain generic clarification cannot be marked delivered because its Slack thread is unknown. The Settings status also flags failed and stale work for review in agent tasks.
+a recovered check permits a later failure alert. A failed assessment can be explicitly retried from Gmail settings under current authority if its recorded actions were limited to reading Gmail. This starts a new assessment rather than replaying actions. Slack rate limits that definitively reject an individual or digest delivery are retried after a bounded delay under current authority, including after restart. A Slack send with an unknown outcome is marked uncertain and is not automatically repeated. In Gmail settings, review the exact attempted text and inspect Slack. You can mark a message delivered, dismiss it, or explicitly confirm sending the same text again; a resend can duplicate it and requires current authority. An uncertain generic clarification cannot be marked delivered because its Slack thread is unknown. The Settings status also flags failed and stale work for review in agent tasks.
 Reply in an individual update or clarification thread with a correction such as
 “This should have been less urgent” or “This is sensitive.” Staf records the
 correction for inspection in Gmail settings and may use it as context for later

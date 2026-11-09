@@ -474,7 +474,7 @@ the message's last-modified history ID with the addition record ID. Matching IDs
 and an INBOX label provide conservative inbox evidence; missing fields, a changed
 ID, or a failed metadata read leave membership uncertain. SENT, DRAFT, SPAM and
 TRASH are excluded. This inference does not prove exact historical membership;
-uncertain and non-inbox candidates remain visible for review, but cannot start
+uncertain and non-inbox candidates remain visible for review; an owner can explicitly queue an uncertain candidate for private assessment, while non-inbox candidates cannot start
 assistant work. Evidence and cursor commit with candidate IDs. Schema 50 adds the
 evidence table; legacy candidates remain unknown and legacy pending deliveries
 without evidence are marked stale rather than sent. The assistant's initial
@@ -508,7 +508,7 @@ a non-sensitive summary or a fixed generic private question. A Slack thread ID
 binds an affirmative owner response to that candidate; uncertain sends are never
 automatically repeated. Authority is checked again at evaluation and delivery.
 A durable failure state deduplicates generic alerts while individual history
-scans remain recorded. An explicit memory-provider opt-in allows retrieval of active memories from the bound agent and user scopes; pending proposals and other agents’ private memory are excluded. Live memory availability and selected versions are checked around provider calls, and any recalled memory forces private clarification before Slack disclosure. Non-sensitive less-urgent summaries are atomically batched for interval-based delivery; an uncertain batch remains inspectable and requires an explicit exact-text owner decision. Bound corrections are retained per item and keyed sender, without storing the sender in the feedback index. Model classification can be wrong, and the inbox evidence is an inference rather than a historical guarantee. Synthetic Google, Slack and model fixtures cover these paths; live
+scans remain recorded. An explicit memory-provider opt-in allows retrieval of active memories from the bound agent and user scopes; pending proposals and other agents’ private memory are excluded. Live memory availability and selected versions are checked around provider calls, and any recalled memory forces private clarification before Slack disclosure. Non-sensitive less-urgent summaries are atomically batched for interval-based delivery; an uncertain batch remains inspectable and requires an explicit exact-text owner decision. Bound corrections are retained per item and keyed sender, without storing the sender in the feedback index. All active sensitive corrections are enforced independently of the bounded feedback sent to the model. Explicit failed-assessment retries use current authority and do not replay prior actions; uncertain deliveries remain owner-resolved. Known Slack 429 rejections return to pending with a persisted bounded retry time. Schema 51 stores candidate review requests and delivery retry deadlines. Model classification can be wrong, and the inbox evidence is an inference rather than a historical guarantee. Synthetic Google, Slack and model fixtures cover these paths; live
 behavior remains unverified.
 
 ## Native home-network transport
