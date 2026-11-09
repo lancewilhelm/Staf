@@ -10,13 +10,13 @@ const form=ref({email:'',clientId:'',clientSecret:''});
 const confirm=ref<'disconnect'|'delete-config'|'rebaseline'|null>(null),grant=ref<{botId:string;provider:string;model:string}|null>(null);
 const inspected=ref<Awaited<ReturnType<typeof app.gmailRead>>|null>(null);let timer:ReturnType<typeof setInterval>|undefined;
 const older=ref<Array<{messageId:string;inbox:'unknown'}>>([]),olderBefore=ref<number|null>(null),loadedOlder=ref(false);
-async function refresh(fillForm=false){gmail.value=await app.gmailPlugin();if(fillForm && gmail.value.config){form.value.email=gmail.value.config.email;form.value.clientId=gmail.value.config.clientId;}if(gmail.value.authorizationStatus==='Connected')authorizationUrl.value='';}
+async function refresh(fillForm=false){const previous=gmail.value?.accountId,next=await app.gmailPlugin();if(previous!==next.accountId){older.value=[];olderBefore.value=null;loadedOlder.value=false;inspected.value=null;}gmail.value=next;if(fillForm && next.config){form.value.email=next.config.email;form.value.clientId=next.config.clientId;}if(next.authorizationStatus==='Connected')authorizationUrl.value='';}
 function onFocus(){void refresh().catch(()=>{message.value='Could not refresh Gmail status.';});}
 onMounted(()=>{window.addEventListener('focus',onFocus);void refresh(true).catch(()=>{message.value='Could not load Gmail status.';});timer=setInterval(()=>{if(!busy.value)void refresh().catch(()=>{});},10000);});
 onUnmounted(()=>{window.removeEventListener('focus',onFocus);if(timer)clearInterval(timer);});
 async function action(name:'start'|'check'|'enable'|'disable'|'disconnect'|'delete-config'|'access'|'model-access'|'poll'|'rebaseline',body:object={}) {
  if(busy.value)return;busy.value=true;message.value='';
- try {const result=await app.gmailAction(name,body);if(name==='start'){authorizationUrl.value=result.url??'';form.value.clientSecret='';message.value='Open Google authorization, then return here.';}else{authorizationUrl.value='';message.value='Gmail settings updated.';}await refresh();}
+ try {const result=await app.gmailAction(name,body);if(name==='start'){authorizationUrl.value=result.url??'';form.value.clientSecret='';message.value='Open Google authorization, then return here.';}else{authorizationUrl.value='';message.value='Gmail settings updated.';if(name==='disable'||name==='disconnect'||name==='delete-config')inspected.value=null;}await refresh();}
  catch(error){message.value='Gmail could not be updated. '+String(error);await refresh().catch(()=>{});}
  finally{busy.value=false;confirm.value=null;grant.value=null;}
 }
@@ -62,7 +62,7 @@ async function loadOlder(){const before=loadedOlder.value?olderBefore.value:gmai
    <p v-if="!gmail.monitor">A baseline is missing. Earlier arrivals cannot be established.</p>
    <p v-else>Monitoring: {{ gmail.monitor.state }}<span v-if="gmail.monitor.detail"> — {{ gmail.monitor.detail }}</span></p>
    <p v-for="(gap,index) in gmail.gaps" :key="index">History gap: {{ gap.reason }}. Arrivals in that interval are unknown.</p>
-   <button v-if="gmail.connected && (!gmail.monitor || gmail.monitor.state==='uncertain')" class="quiet" :disabled="busy" @click="confirm='rebaseline'">Start monitoring from now</button>
+   <button v-if="gmail.connected && (!gmail.monitor || gmail.monitor.state==='uncertain' || gmail.monitor.state==='failed')" class="quiet" :disabled="busy" @click="confirm='rebaseline'">Start monitoring from now</button>
    <button v-if="gmail.enabled && gmail.monitor" class="quiet" :disabled="busy" @click="action('poll')">Check for new candidates</button>
    <p v-if="!gmail.arrivals.length">No candidates recorded.</p>
    <ul v-else><li v-for="arrival in [...gmail.arrivals,...older.filter(item=>!gmail?.arrivals.some(current=>current.messageId===item.messageId))]" :key="arrival.messageId">{{ arrival.messageId }} — inbox membership unknown <button class="quiet" :disabled="busy || !gmail.enabled" @click="inspect(arrival.messageId)">Inspect</button></li></ul>
@@ -72,7 +72,7 @@ async function loadOlder(){const before=loadedOlder.value?olderBefore.value:gmai
   <button v-if="gmail?.config" class="quiet" :disabled="busy" @click="confirm='delete-config'">Delete Gmail configuration</button>
   <button class="quiet" :disabled="busy" @click="refresh().catch(()=>{message='Could not refresh Gmail status.'})">Refresh Gmail status</button>
   <p role="status">{{ busy?'Updating Gmail…':message }}</p>
-  <ConfirmAction v-if="confirm" :title="confirm==='disconnect'?'Disconnect Gmail?':confirm==='rebaseline'?'Start monitoring from now?':'Delete Gmail configuration?'" :message="confirm==='disconnect'?'This disables Gmail and removes its stored credentials. The account and agent access settings remain.':confirm==='rebaseline'?'Arrivals in the missing interval cannot be recovered or identified. Staf will record this gap and start from the current Gmail history ID.':'This removes the stored credentials, account configuration, and agent access settings.'" :action="confirm==='disconnect'?'Disconnect':confirm==='rebaseline'?'Start from now':'Delete configuration'" @cancel="confirm=null" @confirm="confirm==='rebaseline'?action('rebaseline',{confirm:true}):action(confirm)" />
+  <ConfirmAction v-if="confirm" :title="confirm==='disconnect'?'Disconnect Gmail?':confirm==='rebaseline'?'Start monitoring from now?':'Delete Gmail configuration?'" :message="confirm==='disconnect'?'This disables Gmail and removes its credentials. Account, agent access, and model permissions remain and can apply again after reconnecting.':confirm==='rebaseline'?'Arrivals in the missing interval cannot be recovered or identified. Staf will record this gap and start from the current Gmail history ID.':'This removes the stored credentials, account configuration, agent access, and model permissions.'" :action="confirm==='disconnect'?'Disconnect':confirm==='rebaseline'?'Start from now':'Delete configuration'" @cancel="confirm=null" @confirm="confirm==='rebaseline'?action('rebaseline',{confirm:true}):action(confirm)" />
   <ConfirmAction v-if="grant" title="Allow Gmail data to this model?" :message="`Gmail search results and message content can be sent to ${grant.provider} / ${grant.model} during this agent's chat. The owner-visible answer may contain email. This grant applies only to that provider and model; Gmail turns are not replayed to later model requests.`" action="Allow Gmail data" @cancel="grant=null" @confirm="action('model-access',{...grant,enabled:true})" />
  </div>
 </template>

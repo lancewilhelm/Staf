@@ -836,7 +836,10 @@ gap and establishes a new baseline only after confirmation; it cannot reconstruc
 missing arrivals. Accounts connected by an older Staf version have no baseline:
 they require that same explicit step and record the earlier interval as unknown.
 Disable pauses polling without deleting the cursor or candidates. Gmail's history
-can expire during a long outage or while disabled.
+can expire during a long outage or while disabled. A scan is limited to 100
+history pages and 10,000 distinct message IDs. If that limit or a connection
+error prevents a scan, it reports failure and keeps the old cursor. An explicit
+restart from now records the unknown interval rather than claiming recovery.
 
 In Direct or Hybrid main chat, an agent with both permissions can call
 `gmail_search` and `gmail_read`. Search returns at most 20 IDs and signals when
@@ -852,9 +855,12 @@ The private Gmail turn is omitted from later model replay and from captured task
 context; an agent must search again to use it in a later turn. This cannot recall
 content already sent to the explicitly allowed provider.
 
-Disable retains credentials and access settings. Disconnect disables the plugin
-and removes its local credentials, but retains account configuration and agent
-access. Delete Gmail configuration also removes those settings. Neither action
+Disable retains credentials, agent access and model disclosure settings.
+Disconnect disables the plugin and removes its local credentials, but retains
+account configuration and both permissions. Reconnecting the same account can
+therefore make an existing model permission usable again; revoke it separately
+if that is not wanted. Delete Gmail configuration removes both permissions.
+Neither action
 revokes the grant at Google; revoke it in Google account settings if desired.
 Reconnect requires the client secret and Google consent again. The client secret
 and refresh token are stored in host-local `auth/gmail.json` with restrictive
