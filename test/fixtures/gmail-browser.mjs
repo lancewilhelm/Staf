@@ -8,7 +8,13 @@ const [path,port]=process.argv.slice(2);
  const actionId='11111111-1111-4111-8111-111111111111',fingerprint='a'.repeat(64);
  new ActionJournal(instance.db).prepare({id:actionId,fingerprint,work,summary:'Send synthetic reply'});
  instance.createGmailReply({actionId,fingerprint,work,botId:bot.id,accountId:'owner@example.test',gmailRevision:1,slackRevision:1,teamId:'T123',userId:'U123',channelId:'D123',messageId:'fixture1',effect:JSON.stringify({messageId:'fixture1',to:'friend@example.test',subject:'Synthetic subject',body:'Synthetic uncertain body',threadId:'t1',inReplyTo:'<synthetic@example.test>'})});
- instance.db.prepare("UPDATE gmail_reply_proposals SET state='uncertain',detail='Outcome unknown' WHERE action_id=?").run(actionId);instance.close();
+ instance.db.prepare("UPDATE gmail_reply_proposals SET state='uncertain',detail='Outcome unknown' WHERE action_id=?").run(actionId);
+ const arrival=instance.db.prepare('INSERT INTO gmail_arrivals(account_id,message_id) VALUES (?,?)');
+ arrival.run('owner@example.test','old-stale');
+ instance.db.prepare("INSERT INTO gmail_arrival_evidence(account_id,message_id,inbox) VALUES ('owner@example.test','old-stale','yes')").run();
+ instance.db.prepare("INSERT INTO inbox_monitor_items(account_id,message_id,settings_revision,attempt_id,state) VALUES ('owner@example.test','old-stale',1,'old-stale-attempt','stale')").run();
+ for(let i=0;i<105;i++){arrival.run('owner@example.test','new-'+i);if(i<35)instance.db.prepare("INSERT INTO inbox_monitor_items(account_id,message_id,settings_revision,attempt_id,state) VALUES ('owner@example.test',?,1,?,'delivered')").run('new-'+i,'new-attempt-'+i);}
+ instance.close();
 }
 const gmailRequest=async(url)=>{
  const host=new URL(url).hostname;

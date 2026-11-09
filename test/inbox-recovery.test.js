@@ -70,6 +70,20 @@ test('stale digest members can each be explicitly reassessed without changing un
   assert.equal(store.item('u').state,'uncertain');assert.equal(db.prepare("SELECT text FROM inbox_digest_batches WHERE id='stale-batch'").get().text,'old digest');
  }finally{db.close();}
 });
+test('older stale and failed assessments remain reachable outside the recent status window',()=>{
+ const {db,store}=setup();try {
+  const insert=db.prepare('INSERT INTO inbox_monitor_items(account_id,message_id,settings_revision,attempt_id,state) VALUES (?,?,?,?,?)');
+  insert.run('owner','old-stale',1,'stale-attempt','stale');
+  insert.run('owner','old-failed',1,'failed-attempt','failed');
+  insert.run('other','private',1,'other-attempt','stale');
+  for(let i=0;i<35;i++)insert.run('owner','new-'+i,1,'new-attempt-'+i,'delivered');
+  assert.equal(store.status().items.some(item=>item.messageId==='old-stale'),false);
+  const page=store.annotateArrivals('owner',[{messageId:'old-stale'},{messageId:'old-failed'},{messageId:'private'},{messageId:'new-0'}]);
+  assert.deepEqual(page.map(item=>[item.assessmentExists,item.retryAttemptId]),[[true,'stale-attempt'],[true,'failed-attempt'],[false,null],[true,null]]);
+  store.retryEvaluation('stale-attempt',1);
+  assert.equal(store.annotateArrivals('owner',[{messageId:'old-stale'}])[0].retryAttemptId,null);
+ }finally{db.close();}
+});
 test('sensitive sender protection survives same-item urgency and not-sensitive edits until clear',()=>{
  const {db,store}=setup();try {
   for(const id of ['old','new'])db.prepare('INSERT INTO inbox_monitor_items(account_id,message_id,settings_revision,attempt_id,state,sender_key) VALUES (?,?,?,?,?,?)').run('owner',id,1,id,id==='old'?'delivered':'evaluating','sender');
