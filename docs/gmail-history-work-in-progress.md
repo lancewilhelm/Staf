@@ -11,6 +11,12 @@ instead of silently replacing the cursor. The service owns the schema, scheduled
 polling and lifecycle checks. A stored message ID is not proof that the message
 was in the inbox, inspected, or processed by an agent.
 
+Each started history scan records its start and outcome in the instance
+database. The plugin status API returns the 30 most recent scans. A scan left
+running by a service restart is marked interrupted. The records contain no mail
+content or raw provider errors. They describe history scans, not agent review or
+Slack delivery; they do not yet generate failure notifications.
+
 The experimental transport requests unfiltered `messageAdded` history and
 records all message IDs as candidates. Gmail's history response typically
 provides message IDs without label details; its release notes describe returned

@@ -48,6 +48,7 @@ test('failed pages and stale polls never advance the checkpoint or lose arrivals
     await assert.rejects(history.poll('owner@example.test'),/offline/);
     assert.equal(history.status('owner@example.test').cursor,'10');assert.deepEqual(history.arrivals('owner@example.test'),[]);
     assert.equal(history.status('owner@example.test').state,'failed');
+    assert.deepEqual(history.snapshot('owner@example.test').runs.map(run=>run.outcome),['failed']);
     fail=false;const first=history.poll('owner@example.test'),second=history.poll('owner@example.test');release();
     const results=await Promise.allSettled([first,second]);assert.equal(results.filter(x=>x.status==='fulfilled').length,1);
     assert.equal(history.status('owner@example.test').cursor,'20');assert.deepEqual(history.arrivals('owner@example.test').map(x=>x.messageId),['a']);
@@ -63,6 +64,7 @@ test('revoking authority during a scan prevents committing the fetched page', as
     const poll=history.poll('owner@example.test');await startedPromise;allowed=false;release();
     await assert.rejects(poll,/revoked/);
     assert.equal(history.status('owner@example.test').cursor,'10');assert.deepEqual(history.arrivals('owner@example.test'),[]);
+    assert.equal(history.snapshot('owner@example.test').runs[0].outcome,'interrupted');
   } finally {db.close();}
 });
 

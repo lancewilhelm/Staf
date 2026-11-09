@@ -29,12 +29,12 @@ import type { ByteRedactor } from './config.js';
 import { NativeProcesses, nativeProcessSchema } from './native-processes.js';
 import { ApprovalGrants, approvalGrantSchema, type GrantBoundary } from './approval-grants.js';
 import { PluginStore, pluginSchema, slackWorkSchema, type SlackConfig } from './plugins.js';
-import {GmailHistory,gmailHistorySchema,type GmailHistoryTransport} from './gmail-history.js';
+import {GmailHistory,gmailHistorySchema,gmailMonitorRunsSchema,type GmailHistoryTransport} from './gmail-history.js';
 
 const clockAction: Action = { capability:'clock', operation:'read', resource:'utc', effect:'read', limits:{}, risk:'safe' };
 const clockBoundary = { enabledCapabilities:['clock'], actions:[clockAction] };
 const modes: ApprovalMode[] = ['ask-every-time','ask-for-risky-actions','never-ask'];
-export const INSTANCE_SCHEMA_VERSION = 45;
+export const INSTANCE_SCHEMA_VERSION = 46;
 const MAINTENANCE_VERSION = 2147483647;
 
 export const starterSoul = "You are an assistant working for the owner. Be clear and candid. Distinguish observations from assumptions. Follow the owner's role instructions and work within the permissions and task scope granted to you.";
@@ -216,6 +216,8 @@ export class Instance {
       CREATE TABLE IF NOT EXISTS gmail_task_messages (attempt_id TEXT NOT NULL, message_id TEXT NOT NULL, PRIMARY KEY(attempt_id,message_id));
       CREATE TABLE IF NOT EXISTS gmail_private_tasks (attempt_id TEXT PRIMARY KEY);
       CREATE TABLE IF NOT EXISTS gmail_work_model_access (account_id TEXT NOT NULL, bot_id TEXT NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL, PRIMARY KEY(account_id,bot_id));`);
+    if(version < 46) this.db.exec(gmailMonitorRunsSchema);
+    this.db.prepare("UPDATE gmail_monitor_runs SET outcome='interrupted',finished_at=? WHERE outcome='running'").run(Date.now());
     this.plugins = new PluginStore(this.db);
     this.db.exec("CREATE TABLE IF NOT EXISTS tool_defaults (id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL, clock INTEGER NOT NULL CHECK(clock IN (0,1)), memory INTEGER NOT NULL CHECK(memory IN (0,1)), web INTEGER NOT NULL CHECK(web IN (0,1)), files INTEGER NOT NULL CHECK(files IN (0,1))); INSERT OR IGNORE INTO tool_defaults VALUES (1,1,1,1,1,1)");
     if(version < 44) this.db.exec(`CREATE TABLE IF NOT EXISTS memory_sensitivity (id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL, mode TEXT NOT NULL CHECK(mode IN ('model','review-all')), terms TEXT NOT NULL);

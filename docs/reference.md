@@ -584,6 +584,11 @@ captured by the service, not supplied as tool arguments. See [Slack setup](usage
 Gmail uses `POST /api/plugins/gmail/start` with `email`, `clientId`, and
 `clientSecret`; it returns an authorization URL, not a credential. Google
 returns to the loopback `/gmail/oauth/callback` with the one-time state and code.
+
+`GET /api/plugins` includes the 30 latest Gmail history scan `runs`, with start
+and finish times and an outcome. Interrupted scans are marked on restart. These
+records cover history scans only; they do not establish agent processing or
+Slack delivery, and do not yet trigger failure notifications.
 The paired owner can call `check`, `enable`, `disable`, `disconnect`, `poll`, or
 `delete-config` with an empty object, and `access` with `botId` and `enabled`.
 `model-access` takes `botId`, `provider`, `model`, and `enabled`; enabling it
