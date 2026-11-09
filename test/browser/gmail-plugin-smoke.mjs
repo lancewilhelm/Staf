@@ -49,10 +49,18 @@ try {
  await evaluate("[...document.querySelectorAll('[aria-label=\"Gmail arrivals\"] button')].find(b=>b.textContent.trim()==='Load older candidates').click()");
  await until(()=>evaluate("[...document.querySelectorAll('[aria-label=\"Gmail arrivals\"] li')].some(li=>li.textContent.includes('old-stale'))"),'older stale assessment');
  assert.equal(await evaluate("[...document.querySelectorAll('[aria-label=\"Gmail arrivals\"] li')].find(li=>li.textContent.includes('old-stale')).querySelector('button:last-child').textContent.trim()"),'Retry assessment');
+ assert.equal(await evaluate("document.querySelector('[aria-label=\"Gmail arrivals\"]').innerText.includes('new-5')"),true);
+ await evaluate("[...document.querySelectorAll('[aria-label=\"Gmail plugin\"] button')].find(b=>b.textContent.trim()==='Check for new candidates').click()");
+ await until(()=>evaluate("document.querySelector('[aria-label=\"Gmail arrivals\"]').innerText.includes('candidate-1')"),'refreshed new arrival');
+ assert.equal(await evaluate("document.querySelector('[aria-label=\"Gmail arrivals\"]').innerText.includes('new-5')"),true,'page boundary remains visible when new mail arrives');
+ await evaluate(`(()=>{window.assessmentRunning=true;const original=window.fetch;window.fetch=async(...args)=>{const response=await original(...args);if(window.assessmentRunning && String(args[0]).includes('/api/plugins/gmail/arrivals?')){const page=await response.clone().json();for(const item of page.arrivals)if(item.messageId==='old-stale')item.retryAttemptId=null;return new Response(JSON.stringify(page),{status:response.status,headers:response.headers});}return response;};})()`);
+ await evaluate("[...document.querySelectorAll('[aria-label=\"Gmail plugin\"] button')].find(b=>b.textContent.trim()==='Refresh Gmail status').click()");
+ await until(()=>evaluate("![...document.querySelectorAll('[aria-label=\"Gmail arrivals\"] li')].find(li=>li.textContent.includes('old-stale')).innerText.includes('Retry assessment')"),'assessment running');
+ await evaluate('window.assessmentRunning=false');
+ await evaluate("[...document.querySelectorAll('[aria-label=\"Gmail plugin\"] button')].find(b=>b.textContent.trim()==='Refresh Gmail status').click()");
+ await until(()=>evaluate("[...document.querySelectorAll('[aria-label=\"Gmail arrivals\"] li')].find(li=>li.textContent.includes('old-stale')).innerText.includes('Retry assessment')"),'failed assessment can be retried again');
  assert.equal(await evaluate("document.querySelector('[aria-label=\"Gmail plugin\"]').innerText.includes('Inbox assistant')"),true);
  assert.equal(await evaluate("[...document.querySelectorAll('[aria-label=\"Gmail plugin\"] button')].find(b=>b.textContent.trim()==='Enable inbox monitoring').disabled"),true);
- await evaluate("[...document.querySelectorAll('[aria-label=\"Gmail plugin\"] button')].find(b=>b.textContent.trim()==='Check for new candidates').click()");
- await until(()=>evaluate("document.querySelector('[aria-label=\"Gmail arrivals\"]').innerText.includes('candidate-1')"),'candidate visible');
  assert.equal(await evaluate("document.querySelector('[aria-label=\"Gmail arrivals\"]').innerText.includes('inbox membership uncertain')"),true);
  await until(()=>evaluate("[...document.querySelectorAll('[aria-label=\"Gmail arrivals\"] button')].some(b=>b.textContent.trim()==='Inspect'&&!b.disabled)"),'inspection available');
  await evaluate("[...document.querySelectorAll('[aria-label=\"Gmail arrivals\"] button')].find(b=>b.textContent.trim()==='Inspect').click()");
@@ -81,4 +89,4 @@ try {
  await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Disconnect').click()");
  await until(()=>evaluate("document.querySelector('[aria-label=\"Gmail plugin\"] .badge').textContent.trim()==='Not connected'"),'disconnected');
  console.log('PASS controlled Gmail plugin account and agent access journey');
-}finally{socket?.close();browser?.kill();if(service){service.kill('SIGTERM');await new Promise(resolve=>service.once('exit',resolve));}await rm(temp,{recursive:true,force:true});}
+}finally{socket?.close();browser?.kill();if(service && service.exitCode===null && service.signalCode===null){service.kill('SIGTERM');await new Promise(resolve=>service.once('exit',resolve));}await rm(temp,{recursive:true,force:true});}

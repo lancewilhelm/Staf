@@ -884,7 +884,7 @@ sender to private clarification and treats later messages from that sender as
 private, even if you later correct that item’s urgency or say it is not sensitive. To remove that correction, reply “Forget that correction” in the same
 individual thread. Saying “not sensitive” is a correction, not
 permission to share the current private message or automatically downgrade later
-messages: answer the separate question explicitly. For a digest with several items, identify the position, for example “The second item should have been urgent.” Staf asks for the position when the target is ambiguous. Edit the attention and sensitive-topic
+messages: answer the separate question explicitly. For a digest with several items, identify the position, for example “The second item should have been urgent.” To clear a correction on a digest item, reply “The second item forget that correction.” Staf asks for the position when the target is ambiguous. Edit the attention and sensitive-topic
 preferences in Settings when you want a standing rule.
 
 Assessment and delivery use controlled fixtures only; live provider quality,

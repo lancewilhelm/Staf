@@ -868,7 +868,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
       : /^(?:(?:this|that|it) (?:is|was|should be|should have been) )?(?:less urgent|not urgent|routine)$/.test(correctionPhrase)?'less-urgent'
       : /^(?:(?:this|that|it) (?:is|was|should be|should have been) )?(?:sensitive|private)$/.test(correctionPhrase)?'sensitive'
       : /^(?:(?:this|that|it) (?:is|was|should be|should have been) )?(?:not sensitive|not private)$/.test(correctionPhrase)?'not-sensitive'
-      : /^(?:please )?forget (?:that|my|the) correction$/.test(correctionPhrase)?'clear':null;
+      : /^(?:please )?forget (?:that|my|the) correction$/.test(ordinal?phrase.slice(ordinal[0].length):phrase)?'clear':null;
     if(correction && event.threadTs) {
       const matches=pending?[pending]:instance.inboxMonitor.delivered(event.threadTs);
       const index=ordinal?['first','second','third','fourth','fifth','sixth','seventh','eighth','ninth','tenth'].indexOf(ordinal[1]??''):matches.length===1?0:-1;
