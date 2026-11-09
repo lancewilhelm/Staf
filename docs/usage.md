@@ -824,16 +824,22 @@ host access and backups. Consult the backup instructions for which files are
 included; reconnect Slack after a restore unless the credential file was
 explicitly and securely restored.
 
-To start independent work, send `work: Investigate the topic` in the approved
-DM. The receipt contains an attempt ID. Use `status task ID`, `direct task ID:
-new direction`, or `stop task ID` in that DM; replace `ID` with the full ID from
-the receipt. For a task question use `answer task ID QUESTION_ID: answer`.
-Controls name the exact attempt, so a late stop cannot target a later task.
-Action approvals still require a paired Staf client; Slack task controls do not
-approve actions. The
-agent can run one background task at a time; an additional request is declined.
-Normal DMs continue to use main chat. A task uses the agent's captured identity,
-context, permissions and scope; actions still use the service's approval rules.
+Ask the agent for work in a normal DM, for example, “Please investigate this
+and let me know what you find.” A tool-capable model can choose to start
+independent work; the service uses your original message as its objective and
+sends a receipt in that message's thread. For an update, direction, an answer,
+or Stop, reply in that same thread in ordinary language. Staf binds these actions
+to that thread's task. If there is no unique binding or open question, it asks
+for clarification and makes no change. If older work shares a thread, quote the
+full original request from the offered choices to identify it. Start a new
+top-level message for a new task. An agent can run one background task at a time.
+
+The agent still uses its captured identity, context, tool mode, permissions and
+task scope, and service approval rules continue to apply. This task workflow does
+not itself decide action approvals; Slack email approval is addressed separately
+in [issue #109](https://github.com/lancewilhelm/Staf/issues/109). A model that
+cannot call tools cannot use the natural-language task capabilities. Existing
+`work:` and ID-based controls remain available for diagnostics and older threads.
 
 Receipt, actual tool progress, questions and the terminal outcome are sent to
 the request's thread. A result does not require another DM. If Slack is disabled,

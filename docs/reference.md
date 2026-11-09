@@ -574,7 +574,9 @@ the workspace. `POST /api/plugins/slack/access` takes `botId` and `enabled`.
 The `enable`, `disable`, `disconnect`, and `delete-config` endpoints take empty
 objects. Connections are instance-owned and keyed by service account identity;
 this slice exposes one Slack account. Tokens remain host-local and are never
-returned. See [Slack setup](usage.md#slack-plugin) for limits and recovery.
+returned. Slack-originated model turns can use the service-owned `start_slack_task`
+and `manage_slack_task` capabilities; thread and owner message identity are
+captured by the service, not supplied as tool arguments. See [Slack setup](usage.md#slack-plugin) for limits and recovery.
 
 ## Native home-network gateway
 

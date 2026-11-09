@@ -873,6 +873,19 @@ export class Instance {
       this.db.exec('COMMIT');return result;
     } catch(error) {this.db.exec('ROLLBACK');throw error;}
   }
+  acceptSlackChatTask(input:{id:string;config:SlackConfig;threadTs:string;objective:string},visibleObjective:string) {
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      if(!this.plugins.authority(input.id))throw Error('Slack authorization changed');
+      if(this.plugins.threadWork(input.config,input.threadTs).length) {this.db.exec('COMMIT');return {kind:'ambiguous' as const};}
+      const result=this.acceptTaskInTransaction({id:input.id,botId:input.config.botId,objective:input.objective,limitMs:300000},visibleObjective);
+      if(result.kind==='accepted') {
+        this.db.prepare('INSERT INTO slack_work VALUES (?,?,?,?,?,?)').run(input.id,input.config.teamId,input.config.userId,input.config.channelId,input.threadTs,input.config.botId);
+        this.db.prepare("INSERT INTO slack_deliveries (id,attempt_id,text,state) VALUES (?,?,?,'pending')").run(input.id+':receipt',input.id,'I’ve started working on this. You can ask for an update, give me direction, or ask me to stop in this thread.');
+      }
+      this.db.exec('COMMIT');return result;
+    } catch(error) {this.db.exec('ROLLBACK');throw error;}
+  }
   private acceptTaskInTransaction(input: {id:string; botId:string; objective:string; limitMs:number; predecessor?:string; delegateClock?:boolean}, visibleObjective=input.objective, isolated=false) {
     const digest=createHmac('sha256',this.fingerprintKey).update(JSON.stringify([input.id,input.botId,input.objective,input.limitMs,input.predecessor ?? null,...(input.delegateClock ? ['delegate-clock'] : [])])).digest('hex');
       const existing = this.taskAttempt(input.id);
