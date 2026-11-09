@@ -30,11 +30,12 @@ import { NativeProcesses, nativeProcessSchema } from './native-processes.js';
 import { ApprovalGrants, approvalGrantSchema, type GrantBoundary } from './approval-grants.js';
 import { PluginStore, pluginSchema, slackWorkSchema, type SlackConfig } from './plugins.js';
 import {GmailHistory,gmailHistorySchema,gmailMonitorRunsSchema,type GmailHistoryTransport} from './gmail-history.js';
+import {InboxMonitorStore,inboxMonitorSchema} from './inbox-monitor.js';
 
 const clockAction: Action = { capability:'clock', operation:'read', resource:'utc', effect:'read', limits:{}, risk:'safe' };
 const clockBoundary = { enabledCapabilities:['clock'], actions:[clockAction] };
 const modes: ApprovalMode[] = ['ask-every-time','ask-for-risky-actions','never-ask'];
-export const INSTANCE_SCHEMA_VERSION = 46;
+export const INSTANCE_SCHEMA_VERSION = 47;
 const MAINTENANCE_VERSION = 2147483647;
 
 export const starterSoul = "You are an assistant working for the owner. Be clear and candid. Distinguish observations from assumptions. Follow the owner's role instructions and work within the permissions and task scope granted to you.";
@@ -93,6 +94,7 @@ export class Instance {
   private readonly grantControllers = new Map<string,Set<AbortController>>();
   readonly migrationBackup: string | undefined;
   readonly plugins: PluginStore;
+  readonly inboxMonitor: InboxMonitorStore;
   constructor(path: string, private readonly redactSkill: (text:string) => string = text => text, maintenanceToken?:string) {
     assertDatasetAvailable(path,maintenanceToken);
     this.temporaryConfigRoot = path === ':memory:' ? mkdtempSync(join(tmpdir(),'staf-config-')) : undefined;
@@ -217,8 +219,11 @@ export class Instance {
       CREATE TABLE IF NOT EXISTS gmail_private_tasks (attempt_id TEXT PRIMARY KEY);
       CREATE TABLE IF NOT EXISTS gmail_work_model_access (account_id TEXT NOT NULL, bot_id TEXT NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL, PRIMARY KEY(account_id,bot_id));`);
     if(version < 46) this.db.exec(gmailMonitorRunsSchema);
+    if(version < 47) this.db.exec(inboxMonitorSchema);
     this.db.prepare("UPDATE gmail_monitor_runs SET outcome='interrupted',finished_at=? WHERE outcome='running'").run(Date.now());
     this.plugins = new PluginStore(this.db);
+    this.inboxMonitor = new InboxMonitorStore(this.db);
+    this.inboxMonitor.recover();
     this.db.exec("CREATE TABLE IF NOT EXISTS tool_defaults (id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL, clock INTEGER NOT NULL CHECK(clock IN (0,1)), memory INTEGER NOT NULL CHECK(memory IN (0,1)), web INTEGER NOT NULL CHECK(web IN (0,1)), files INTEGER NOT NULL CHECK(files IN (0,1))); INSERT OR IGNORE INTO tool_defaults VALUES (1,1,1,1,1,1)");
     if(version < 44) this.db.exec(`CREATE TABLE IF NOT EXISTS memory_sensitivity (id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL, mode TEXT NOT NULL CHECK(mode IN ('model','review-all')), terms TEXT NOT NULL);
       INSERT OR IGNORE INTO memory_sensitivity VALUES (1,1,'model','["medical","health","diagnosis","medication","therapy","sexual","financial","password"]');
@@ -953,6 +958,20 @@ export class Instance {
       this.db.exec('COMMIT');
       return result;
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
+  }
+  acceptInboxTask(input:{id:string;botId:string;accountId:string;messageId:string;revision:number;objective:string}) {
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const settings=this.inboxMonitor.settings();
+      if(!settings?.enabled || settings.revision!==input.revision || settings.accountId!==input.accountId || settings.botId!==input.botId || this.inboxMonitor.next()!==input.messageId)throw new BotConflict('Inbox monitor scope changed');
+      const result=this.acceptTaskInTransaction({id:input.id,botId:input.botId,objective:input.objective,limitMs:300000,gmailQuery:'inbox-monitor'},input.objective,true);
+      if(result.kind==='accepted') {
+        this.rememberGmailTaskMessages(input.id,[input.messageId]);
+        this.inboxMonitor.add(input.accountId,input.messageId,input.revision,input.id);
+        this.markGmailPrivateWork({kind:'task',id:input.id});
+      }
+      this.db.exec('COMMIT');return result;
+    } catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   acceptSlackTask(input:{id:string; eventId:string; revision:number; config:SlackConfig; threadTs?:string; objective:string; gmailQuery?:string},visibleObjective:string) {
     this.db.exec('BEGIN IMMEDIATE');

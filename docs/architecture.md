@@ -471,7 +471,7 @@ candidate message IDs are stored in SQLite; complete pages and the next cursor
 commit atomically. A 404 retains an uncertain gap until the owner explicitly
 rebaselines. Gmail's current labels do not establish historical inbox membership,
 so all message-added records are exposed as candidates with unknown membership.
-The monitor does not send mail to a model. Separate per-agent permission binds
+The history scanner itself does not send mail to a model. Separate per-agent permission binds
 read/search to an explicitly approved provider and model, with current
 connection revision and access rechecked at dispatch and result release. A separate
 owner grant is required for tasks and Slack-originated work, so existing chat-only
@@ -484,9 +484,17 @@ when guest calls were queued earlier. Slack receives generic notifications for
 private Gmail work. Gmail
 tool results and generated replies are excluded from subsequent model replay and
 captured task context; the owner's request remains. Other tools are fenced for
-the rest of that turn. The owner's general sensitive-email
-and model-provider policy remains unresolved. Synthetic Google HTTP, model and
-browser fixtures cover these paths; real Google behavior remains unverified.
+the rest of that turn. The separately enabled inbox assistant creates an isolated task scoped to one
+recorded candidate and captures agent and plugin revisions. The existing Gmail
+action boundary performs the read. A validated model assessment queues either
+a non-sensitive summary or a fixed generic private question. A Slack thread ID
+binds an affirmative owner response to that candidate; uncertain sends are never
+automatically repeated. Authority is checked again at evaluation and delivery.
+A durable failure state deduplicates generic alerts while individual history
+scans remain recorded. Monitoring deliberately skips automatic memory recall;
+its model classification can be wrong, and Gmail history does not prove inbox
+membership. Synthetic Google, Slack and model fixtures cover these paths; live
+behavior remains unverified.
 
 ## Native home-network transport
 

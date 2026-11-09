@@ -588,7 +588,8 @@ returns to the loopback `/gmail/oauth/callback` with the one-time state and code
 `GET /api/plugins` includes the 30 latest Gmail history scan `runs`, with start
 and finish times and an outcome. Interrupted scans are marked on restart. These
 records cover history scans only; they do not establish agent processing or
-Slack delivery, and do not yet trigger failure notifications.
+Slack delivery. When the separately enabled inbox assistant is active, continuing
+monitoring failures can trigger a deduplicated generic Slack notice.
 The paired owner can call `check`, `enable`, `disable`, `disconnect`, `poll`, or
 `delete-config` with an empty object, and `access` with `botId` and `enabled`.
 `model-access` takes `botId`, `provider`, `model`, and `enabled`; enabling it
@@ -598,6 +599,15 @@ it separately permits tasks and Slack-originated work for that exact agent and
 model. Setting or revoking the model grant clears the task and Slack grant.
 `read` takes a `messageId` for owner inspection. `rebaseline` requires
 `{"confirm":true}` and retains a record of the unknown interval.
+`POST /api/plugins/gmail/inbox-preferences` takes `preferences` with `enabled`,
+`attention`, and `sensitiveTerms`, the last observed `revision` (or `null` before setup), and `confirmModelAccess: true` with the `inboxTarget` identity, account and connection revisions as `target` when enabling (omit its display-only `name`). Stale revisions and changed targets are rejected.
+It binds to the current Slack agent, Gmail account, model and connection
+revisions, and performs a baseline scan. Changes make outstanding decisions
+stale and start after recorded candidates. `inboxPreferences` and `inboxStatus`
+in the plugin status expose settings, recent item states and current failure.
+A message candidate is scoped to one service-owned task and its journaled Gmail
+read. Only the exact bound Slack thread can resolve its private clarification.
+A send interrupted or with an unknown result is uncertain and is not retried.
 The Gmail entry in `GET /api/plugins` includes the account, connection state,
 agent access IDs, model access, task and Slack model access, monitoring state, recent candidate IDs and gaps;
 it never returns the client secret or refresh token. Older candidates are paged
@@ -610,14 +620,15 @@ for explicitly permitted chat and task work in all three tool modes. A paired
 characters. The captured account, revision and exact query scope the attempt;
 only message IDs returned by that attempt's searches can be read. The scope is
 not inherited by retries, scheduled tasks, or helpers. `work gmail: QUERY` in an
-authorized Slack DM creates a task with that exact scope. Gmail-derived Slack
-responses are replaced with a generic instruction to inspect Staf.
+authorized Slack DM creates a task with that exact scope. Ordinary Gmail-derived Slack
+responses are replaced with a generic instruction to inspect Staf; the opt-in
+inbox assistant has the separate scoped disclosure flow described above.
 Schema 44 adds Gmail history, disclosure and private-turn records while also
 ensuring sensitive-memory schema is present. Both independent schema 43
 predecessors upgrade without replacing their existing records. See
 [Gmail setup](usage.md#gmail-plugin) for OAuth requirements and limitations.
 Schema 45 adds task Gmail scopes, scoped message IDs, private-task markers, and
-the separately approved task and Slack model permission.
+the separately approved task and Slack model permission. Schema 46 adds history scan records; schema 47 adds inbox assistant settings, candidate decisions and failure state.
 
 ## Native home-network gateway
 

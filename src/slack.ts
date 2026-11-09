@@ -8,9 +8,9 @@ export class SlackRateLimited extends Error {
 export interface SlackTransport {
  identify(tokens:SlackTokens):Promise<{teamId:string;botUserId:string}>;
  start(tokens:SlackTokens,receive:(event:SlackEvent)=>Promise<void>,status?:(status:'connected'|'reconnecting')=>void):Promise<()=>void>;
- post(tokens:SlackTokens,message:{channel:string;threadTs?:string;text:string}):Promise<void>;
+ post(tokens:SlackTokens,message:{channel:string;threadTs?:string;text:string}):Promise<void|{ts:string}>;
 }
-const apiResult=z.object({ok:z.boolean(),team_id:z.string().optional(),user_id:z.string().optional(),url:z.string().optional()});
+const apiResult=z.object({ok:z.boolean(),team_id:z.string().optional(),user_id:z.string().optional(),url:z.string().optional(),ts:z.string().optional()});
 async function api(method:string,token:string,body:object) {
  const response=await fetch('https://slack.com/api/'+method,{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(body),signal:AbortSignal.timeout(15000)});
  if(response.status===429) {const seconds=Number(response.headers.get('retry-after'));throw new SlackRateLimited(Number.isFinite(seconds) && seconds>0 ? Math.min(seconds*1000,3600000) : 30000);}
@@ -45,5 +45,5 @@ export const slackTransport:SlackTransport={
   try {await connect();} catch {if(!stopped){status?.('reconnecting');retry();}}
   return ()=>{stopped=true;if(timer)clearTimeout(timer);socket?.close();};
  },
- async post(tokens,message){await api('chat.postMessage',tokens.botToken,{channel:message.channel,text:message.text,unfurl_links:false,unfurl_media:false,...(message.threadTs?{thread_ts:message.threadTs}:{})});},
+ async post(tokens,message){const result=await api('chat.postMessage',tokens.botToken,{channel:message.channel,text:message.text,unfurl_links:false,unfurl_media:false,...(message.threadTs?{thread_ts:message.threadTs}:{})});if(result.ts)return {ts:result.ts};},
 };

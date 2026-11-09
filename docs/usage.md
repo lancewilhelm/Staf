@@ -784,9 +784,7 @@ Gmail is optional and starts disconnected. One account can be connected through
 **Settings → Plugins → Gmail**. The service records new message candidates and
 lets a paired owner inspect them. An agent can search and read mail in chat only
 after both agent access and a separate, explicit model disclosure decision.
-Connecting Gmail alone does not authorize sending email to a model. Sending mail,
-changing mailbox state, automatic sensitivity classification and Slack updates
-are not implemented.
+Connecting Gmail alone does not authorize sending email to a model. An explicitly enabled inbox assistant can assess new candidates and send updates to the approved Slack DM. Sending mail and changing mailbox state are not implemented.
 
 To prepare an owner-operated connection:
 
@@ -827,10 +825,42 @@ is recorded once across retries and restarts. Settings shows candidates and lets
 the paired owner inspect them without a model call. Candidates include all Gmail
 `messageAdded` events, not just inbox mail: Google history does not establish
 historical inbox membership from the current labels, so Staf labels that fact
-unknown. Sent or draft mail may appear. It does not automatically classify or
-forward any candidate. Google's [history reference](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.history/list)
+unknown. Sent or draft mail may appear. The inbox assistant evaluates candidates only after its separate opt-in described below. Google's [history reference](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.history/list)
 and [release notes](https://developers.google.com/workspace/gmail/release-notes)
 describe the available records and current labels.
+
+To enable the inbox assistant, first configure an approved Slack DM bound to the
+same agent, and grant that agent both Gmail model permissions above. Under
+**Inbox assistant**, enter attention guidance and sensitive topics, then enable
+monitoring and confirm the displayed model-provider disclosure. Staf sends the
+candidate sender, subject, snippet and bounded plain text to that provider for
+assessment. The captured agent instructions and attention guidance are used;
+automatic memory recall is currently disabled for this work. A model can make
+mistakes, so define sensitive topics and review the results. Staf also treats a
+match to a configured sensitive term, truncated message, or message without extractable plain text as private. HTML and attachments are not assessed.
+
+A relevant candidate classified non-sensitive receives a useful update in the
+approved DM. A sensitive or uncertain candidate receives only a generic question
+in that DM; reply yes or no in its thread. An affirmative response authorizes
+that one summary in the same thread. Other replies ask for clarification. No
+sender, subject or message content appears in the initial question. Staf does
+not automatically process previously recorded candidates when monitoring is
+enabled or its settings change. Setup first completes a history scan, then
+starts after the recorded candidates; a candidate arriving around that boundary
+may be included in that scan and excluded from assessment. The owner can inspect
+the candidate list. Changing monitoring settings makes unanswered questions and
+pending updates stale. Changes to Gmail, Slack, agent or model authorization
+pause the assistant; enable it again after reviewing permissions.
+
+History checks and evaluation failures are recorded. The assistant sends one
+generic Slack alert for a continuing failure when the approved DM is available;
+a recovered check permits a later failure alert. A Slack send with an unknown
+outcome is marked uncertain and is not automatically repeated. The Settings
+status flags failed, stale and uncertain work; review the corresponding agent
+tasks. This slice does not provide a digest, automated urgency feedback, memory
+recall for monitoring, or a retry/reconciliation interface for uncertain sends.
+Assessment and delivery use controlled fixtures only; live provider quality,
+Slack and Google behavior have not been verified.
 
 If Gmail reports that the saved history ID expired, Settings reports an unknown
 interval and stops automatic polling. **Start monitoring from now** records the
@@ -861,9 +891,7 @@ Gmail access and both model permissions when the task starts. Changes to
 the connection or any permission stop subsequent Gmail work.
 
 After a Gmail result in a turn, other tools are unavailable for the rest of that
-turn, including guest calls already queued behind the Gmail action. Slack receives
-a generic notification directing the owner to Staf, not the Gmail-derived
-answer. The owner's visible chat and task activity can contain the email and
+turn, including guest calls already queued behind the Gmail action. For ordinary Slack-originated Gmail work, Slack receives a generic notification directing the owner to Staf. The separately enabled inbox assistant uses the scoped disclosure flow above. The owner's visible chat and task activity can contain the email and
 should be protected like the mailbox.
 Gmail tool results and generated replies from that turn are omitted from later
 model replay and captured task context; the owner's original request remains.
