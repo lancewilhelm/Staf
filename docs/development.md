@@ -401,6 +401,34 @@ distinguish synthetic coverage from live provider, VM, or Docker acceptance.
 For docs-only changes, report the relevant documentation checks instead of
 requiring an application launch.
 
+## Review the Gmail-to-Slack journey
+
+Start the normal development workspace with `corepack pnpm dev` and reuse the
+paired browser and existing development data as described above. In **Settings →
+Plugins**, configure Slack and Gmail for the same agent, then grant the separate
+agent, model, and task/Slack permissions. Enable the inbox assistant and confirm
+the displayed provider disclosure. The [Gmail setup and monitoring guide](usage.md#gmail-plugin)
+and [Slack setup](usage.md#slack-plugin) describe the required account and app
+settings. The owner chooses whether to use real accounts and a real model; the
+setup shares email content with that provider for assessment.
+
+Send a new test message to the connected account after setup. Expect a relevant
+update in the approved Slack DM, or a generic question before any sensitive or
+uncertain details. Ask for a reply in that thread; disclose the proposal, request
+a revision, and inspect the exact recipient, subject, and revised text before
+approving. Expect one send and a recorded outcome in Staf. Restart the service
+and check the records remain; inspect Gmail and Slack before resolving any
+uncertain outcome rather than assuming it failed or retrying it. Existing mail
+is excluded from the initial stream. History candidates can include non-inbox mail. Candidates with uncertain inbox
+membership are held for owner review; inspect the list as explained in the Gmail
+guide.
+
+For the intended Linux host, follow the [native installation guide](native-linux-installation.md)
+for the service, pairing, optional home-network gateway, and backup. Verify the
+service and paired access after a reboot before trying the account journey above.
+Those Linux, network, and live-account steps are owner-led and are not established
+by the controlled service and browser tests.
+
 ## Review the agent editor
 
 On the implementation branch, stop another development launcher using the same

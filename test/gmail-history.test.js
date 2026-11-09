@@ -73,3 +73,21 @@ test('all persisted candidates remain reachable through bounded pages',async()=>
   const transport={profile:async()=>({emailAddress:'owner@example.test',historyId:'10'}),history:async()=>({historyId:'11',messageIds:Array.from({length:105},(_,i)=>'message-'+i)})};
   try {const history=new GmailHistory(db,transport);await history.connect('owner@example.test');await history.poll('owner@example.test');const first=history.snapshot('owner@example.test');assert.equal(first.arrivals.length,100);const second=history.page('owner@example.test',first.nextBefore);assert.equal(second.arrivals.length,5);assert.equal(second.nextBefore,null);assert.equal(new Set([...first.arrivals,...second.arrivals].map(item=>item.messageId)).size,105);}finally{db.close();}
 });
+
+test('only additions with unchanged inbox evidence are eligible; moved and incomplete records remain visible',async()=>{
+ const db=new DatabaseSync(':memory:');db.exec(gmailHistorySchema);
+ const transport={profile:async()=>({emailAddress:'owner@example.test',historyId:'10'}),history:async()=>({historyId:'30',messageIds:['inbox','sent','draft','spam','archive','moved','missing'],additions:['inbox','sent','draft','spam','archive','moved','missing'].map(messageId=>({messageId,historyId:'20'}))}),messageMetadata:async messageId=>({id:messageId,historyId:messageId==='moved'?'21':'20',...(messageId==='missing'?{}:{labelIds:{inbox:['INBOX'],sent:['SENT'],draft:['DRAFT'],spam:['SPAM'],archive:['IMPORTANT'],moved:['INBOX']}[messageId]})})};
+ try {const history=new GmailHistory(db,transport);await history.connect('owner@example.test');await history.poll('owner@example.test');const states=Object.fromEntries(history.arrivals('owner@example.test').map(item=>[item.messageId,item.inbox]));assert.deepEqual(states,{inbox:'yes',sent:'no',draft:'no',spam:'no',archive:'no',moved:'unknown',missing:'unknown'});}finally{db.close();}
+});
+
+test('incomplete or conflicting addition records cannot establish inbox evidence',async()=>{
+ const db=new DatabaseSync(':memory:');db.exec(gmailHistorySchema);
+ const transport={profile:async()=>({emailAddress:'owner@example.test',historyId:'10'}),history:async()=>({historyId:'30',messageIds:['missing','conflict'],additions:[{messageId:'missing',historyId:'20'},{messageId:'missing',historyId:null},{messageId:'conflict',historyId:'20'},{messageId:'conflict',historyId:'21'}]}),messageMetadata:async id=>({id,historyId:'20',labelIds:['INBOX']})};
+ try{const history=new GmailHistory(db,transport);await history.connect('owner@example.test');await history.poll('owner@example.test');assert.deepEqual(history.arrivals('owner@example.test').map(item=>item.inbox),['unknown','unknown']);}finally{db.close();}
+});
+
+test('revocation while label evidence is being fetched does not advance the history cursor',async()=>{
+ const db=new DatabaseSync(':memory:');db.exec(gmailHistorySchema);let allowed=true,enter,release;const entered=new Promise(resolve=>{enter=resolve}),gate=new Promise(resolve=>{release=resolve});
+ const transport={profile:async()=>({emailAddress:'owner@example.test',historyId:'10'}),history:async()=>({historyId:'20',messageIds:['m1'],additions:[{messageId:'m1',historyId:'20'}]}),messageMetadata:async()=>{enter();await gate;return {id:'m1',historyId:'20',labelIds:['INBOX']};}};
+ try{const history=new GmailHistory(db,transport,()=>{if(!allowed)throw Error('revoked');});await history.connect('owner@example.test');const pending=history.poll('owner@example.test');await entered;allowed=false;release();await assert.rejects(pending,/revoked/);assert.equal(history.status('owner@example.test').cursor,'10');assert.deepEqual(history.arrivals('owner@example.test'),[]);assert.equal(history.snapshot('owner@example.test').runs[0].outcome,'interrupted');}finally{release();db.close();}
+});

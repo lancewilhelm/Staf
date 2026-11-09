@@ -829,14 +829,28 @@ To prepare an owner-operated connection:
 
 Staf captures the Gmail history ID when the account is first connected, without
 reporting existing mail. While enabled, it polls approximately every 30 seconds
-and atomically stores new message IDs and the history cursor. The same message ID
-is recorded once across retries and restarts. Settings shows candidates and lets
-the paired owner inspect them without a model call. Candidates include all Gmail
-`messageAdded` events, not just inbox mail: Google history does not establish
-historical inbox membership from the current labels, so Staf labels that fact
-unknown. Sent or draft mail may appear. The inbox assistant evaluates candidates only after its separate opt-in described below. Google's [history reference](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.history/list)
-and [release notes](https://developers.google.com/workspace/gmail/release-notes)
-describe the available records and current labels.
+and commits message IDs, evidence and the history cursor together. The same ID
+is recorded once across retries and restarts. Settings lists all mailbox additions
+and lets the paired owner inspect them without a model call.
+
+Gmail history entries normally contain only message and thread IDs. For each new
+addition, Staf separately reads the message's current labels and last-modified
+history ID. It infers inbox evidence only when that ID equals the addition's
+history record ID and `INBOX` is present; it excludes messages carrying `SENT`,
+`DRAFT`, `SPAM`, or `TRASH`. A matching ID and other labels are recorded as a
+non-inbox candidate. If IDs or labels are missing, the message has since changed,
+or metadata cannot be retrieved, inbox membership is uncertain. These candidates
+remain in Settings for owner review and are not automatically assessed or sent to
+Slack. This conservative inference is not a guarantee of exact historical
+classification, and a move into the inbox after a non-inbox addition is not a new
+message arrival. The assistant only processes candidates with inbox evidence.
+Legacy candidates without recorded evidence remain uncertain; their pending
+assistant deliveries are marked stale on upgrade rather than sent. See Google's
+[history reference](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.history/list)
+and [message resource](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.messages)
+for the available fields. Gmail's [watch](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users/watch)
+filters push notifications; Staf uses history polling, not watch.
+
 
 To enable the inbox assistant, first configure an approved Slack DM bound to the
 same agent, and grant that agent both Gmail model permissions above. Under
@@ -852,12 +866,11 @@ approved DM. Less urgent candidates accumulate into a digest at the configured i
 in that DM; reply yes or no in its thread. An affirmative response authorizes
 that one summary in the same thread. Other replies ask for clarification. No
 sender, subject or message content appears in the initial question. Staf does
-not automatically process previously recorded candidates when monitoring is
-first enabled or re-enabled after an authority change. Compatible preference
-edits retain the candidate checkpoint. Initial setup completes a history scan, then
-starts after the recorded candidates; a candidate arriving around that boundary
-may be included in that scan and excluded from assessment. The owner can inspect
-the candidate list. Changing monitoring settings makes unanswered questions and pending immediate updates stale. When the account, agent, provider, permissions, sensitive topics and memory setting remain the same, changing attention or digest timing retains pending digest items. Privacy changes with the same authority move those items to private clarification. Authority changes mark them stale for review. Changes to Gmail, Slack, agent or model authorization
+processes eligible additions recorded since the connection baseline, including
+those collected during initial setup, only after monitoring and model access are
+explicitly enabled. A later re-enable resumes unprocessed eligible additions;
+previously claimed items are not processed a second time. Compatible preference
+edits retain the candidate checkpoint. Changing monitoring settings makes unanswered questions and pending immediate updates stale. When the account, agent, provider, permissions, sensitive topics and memory setting remain the same, changing attention or digest timing retains pending digest items. Privacy changes with the same authority move those items to private clarification. Authority changes mark them stale for review. Changes to Gmail, Slack, agent or model authorization
 pause the assistant; enable it again after reviewing permissions.
 
 History checks and evaluation failures are recorded. The assistant sends one

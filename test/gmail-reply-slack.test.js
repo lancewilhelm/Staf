@@ -11,19 +11,21 @@ import {ActionJournal} from '../dist/action-journal.js';
 const wait=async fn=>{for(let i=0;i<700;i++){const v=await fn();if(v)return v;await new Promise(resolve=>setTimeout(resolve,10));}throw Error('Timed out');};
 
 async function setup({uncertain=false,inflight=false,sendEnabled=true,modifyEnabled=false,modifyAction,uncertainModify=false,inflightModify=false,mode='direct',proposedSubject='Synthetic subject',proposedBody='Thank you!\nSee you soon.'}={}) {
- const dir=mkdtempSync(join(tmpdir(),'staf-reply-')),path=join(dir,'db'),posts=[],sends=[],changes=[];let interact,receive,sequence=0,refreshGate,labels=[{id:'Label_1',name:'Projects',type:'user'}];
+ const dir=mkdtempSync(join(tmpdir(),'staf-reply-')),path=join(dir,'db'),posts=[],sends=[],changes=[],assessed=[];let interact,receive,sequence=0,refreshGate,historyGate,arrivals=[],history=10,evidence=new Map(),labels=[{id:'Label_1',name:'Projects',type:'user'}];
  const slackTransport={identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async(_tokens,handler,_status,interactions)=>{receive=handler;interact=interactions;return ()=>{interact=undefined;receive=undefined}},post:async(_tokens,message)=>{const messageTs=String(++sequence)+'.1';posts.push({...message,messageTs});return {messageTs};}};
  const gmailRequest=async(url,options={})=>{
   const u=new URL(url);
   if(u.hostname==='oauth2.googleapis.com'){if(refreshGate && String(options.body).includes('grant_type=refresh_token')){refreshGate.entered();await refreshGate.wait;}return Response.json({access_token:'access',refresh_token:'refresh',scope:'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.modify',token_type:'Bearer'});}
   if(u.pathname.endsWith('/profile'))return Response.json({emailAddress:'owner@example.test',historyId:'10'});
-  if(u.pathname.endsWith('/messages/m1'))return Response.json({id:'m1',threadId:'t1',payload:{mimeType:'text/plain',headers:[{name:'From',value:'friend@example.test'},{name:'Subject',value:'Synthetic subject'},{name:'Message-ID',value:'<original@example.test>'}],body:{data:Buffer.from('private synthetic message').toString('base64url')}}});
+  if(u.pathname.endsWith('/history')){const batch=arrivals;arrivals=[];const id=String(++history);for(const message of batch)evidence.set(message,id);if(historyGate){historyGate.entered();await historyGate.wait;}return Response.json({historyId:id,history:batch.map(message=>({id,messagesAdded:[{message:{id:message}}]}))});}
+  if(u.searchParams.get('fields')==='id,historyId,labelIds'){const id=u.pathname.split('/').at(-1);if(id==='unavailable')return new Response('',{status:404});const labelIds={sent:['SENT'],draft:['DRAFT'],spam:['SPAM'],archive:['IMPORTANT'],moved:['INBOX'],'moved-out':['IMPORTANT'],missing:undefined}[id]??(id==='missing'?undefined:['INBOX']);return Response.json({id,historyId:['moved','moved-out'].includes(id)?'999':evidence.get(id),...(labelIds?{labelIds}:{})});}
+  if(u.pathname.endsWith('/messages/m1') || u.pathname.endsWith('/messages/m2') || u.pathname.endsWith('/messages/m3'))return Response.json({id:u.pathname.split('/').at(-1),threadId:'t1',payload:{mimeType:'text/plain',headers:[{name:'From',value:'friend@example.test'},{name:'Subject',value:'Synthetic subject'},{name:'Message-ID',value:'<original@example.test>'}],body:{data:Buffer.from('private synthetic message').toString('base64url')}}});
   if(u.pathname.endsWith('/labels'))return Response.json({labels});
   if(u.pathname.endsWith('/messages/m1/modify')){changes.push(JSON.parse(options.body));if(inflightModify)return new Promise((_,reject)=>{if(options.signal.aborted)reject(Error('aborted'));else options.signal.addEventListener('abort',()=>reject(Error('aborted')),{once:true});});if(uncertainModify)throw Error('connection lost');return Response.json({id:'m1'});}
   if(u.pathname.endsWith('/messages/send')){sends.push(JSON.parse(options.body));if(inflight)return new Promise((_,reject)=>{if(options.signal.aborted)reject(Error('aborted'));else options.signal.addEventListener('abort',()=>reject(Error('aborted')),{once:true});});if(uncertain)throw Error('connection lost');return Response.json({id:'sent1',threadId:'t1'});}
   throw Error('Unexpected Gmail request: '+u.pathname);
  };
- const providerFactory=async()=>({name:'fixture',capabilities:{toolCalls:true,incrementalText:false},async complete(messages){const last=messages.findLastIndex(m=>m.role==='user'),results=messages.slice(last+1).filter(m=>m.role==='tool');if(mode==='code' && !results.length)return {role:'assistant',content:null,tool_calls:[{id:'code',type:'function',function:{name:'code_mode',arguments:JSON.stringify({source:'await capabilities.gmail_read({messageId:"m1"}); return await capabilities.gmail_reply({messageId:"m1",to:"friend@example.test",subject:"Synthetic subject",body:"Thank you!\\nSee you soon."});'})}}]};if(mode==='code' && results.length===1 && results[0].content.includes('ownerRevision'))return {role:'assistant',content:null,tool_calls:[{id:'code-revised',type:'function',function:{name:'code_mode',arguments:JSON.stringify({source:'return await capabilities.gmail_reply({messageId:"m1",to:"friend@example.test",subject:"Synthetic subject",body:"Thank you so much! I look forward to seeing you."});'})}}]};if(mode==='code')return {role:'assistant',content:'Finished.'};if(!results.length)return {role:'assistant',content:null,tool_calls:[{id:'read',type:'function',function:{name:'gmail_read',arguments:'{"messageId":"m1"}'}}]};if(results.length===1 && modifyAction)return {role:'assistant',content:null,tool_calls:[{id:'modify',type:'function',function:{name:'gmail_modify',arguments:JSON.stringify({messageId:'m1',action:modifyAction,...(modifyAction==='label'?{labelName:'Projects'}:{})})}}]};if(!modifyAction && (results.length===1 || (results.length===2 && results[1].content.includes('revision-requested'))))return {role:'assistant',content:null,tool_calls:[{id:results.length===1?'reply':'revised',type:'function',function:{name:'gmail_reply',arguments:JSON.stringify({messageId:'m1',to:'friend@example.test',subject:proposedSubject,body:results.length===1?proposedBody:'Thank you so much! I look forward to seeing you.'})}}]};return {role:'assistant',content:'Finished.'};}});
+ const providerFactory=async()=>({name:'fixture',capabilities:{toolCalls:true,incrementalText:false},async complete(messages,_tools,options){if(options.currentUserInput?.includes('Evaluate exactly Gmail message')){const messageId=/Gmail message ([\w-]+)/.exec(options.currentUserInput)?.[1];if(!messages.some(m=>m.role==='tool')){assessed.push(messageId);return {role:'assistant',content:null,tool_calls:[{id:'inbox-read',type:'function',function:{name:'gmail_read',arguments:JSON.stringify({messageId})}}]};}return {role:'assistant',content:JSON.stringify({relevance:'relevant',sensitivity:'non-sensitive',urgency:'urgent',summary:'A friend sent a synthetic invitation.'})};}const last=messages.findLastIndex(m=>m.role==='user'),results=messages.slice(last+1).filter(m=>m.role==='tool');if(mode==='code' && !results.length)return {role:'assistant',content:null,tool_calls:[{id:'code',type:'function',function:{name:'code_mode',arguments:JSON.stringify({source:'await capabilities.gmail_read({messageId:"m1"}); return await capabilities.gmail_reply({messageId:"m1",to:"friend@example.test",subject:"Synthetic subject",body:"Thank you!\\nSee you soon."});'})}}]};if(mode==='code' && results.length===1 && results[0].content.includes('ownerRevision'))return {role:'assistant',content:null,tool_calls:[{id:'code-revised',type:'function',function:{name:'code_mode',arguments:JSON.stringify({source:'return await capabilities.gmail_reply({messageId:"m1",to:"friend@example.test",subject:"Synthetic subject",body:"Thank you so much! I look forward to seeing you."});'})}}]};if(mode==='code')return {role:'assistant',content:'Finished.'};if(!results.length)return {role:'assistant',content:null,tool_calls:[{id:'read',type:'function',function:{name:'gmail_read',arguments:'{"messageId":"m1"}'}}]};if(results.length===1 && modifyAction)return {role:'assistant',content:null,tool_calls:[{id:'modify',type:'function',function:{name:'gmail_modify',arguments:JSON.stringify({messageId:'m1',action:modifyAction,...(modifyAction==='label'?{labelName:'Projects'}:{})})}}]};if(!modifyAction && (results.length===1 || (results.length===2 && results[1].content.includes('revision-requested'))))return {role:'assistant',content:null,tool_calls:[{id:results.length===1?'reply':'revised',type:'function',function:{name:'gmail_reply',arguments:JSON.stringify({messageId:'m1',to:'friend@example.test',subject:proposedSubject,body:results.length===1?proposedBody:'Thank you so much! I look forward to seeing you.'})}}]};return {role:'assistant',content:'Finished.'};}});
  const options={env:{},gmailRequest,slackTransport,providerFactory,gmailPollIntervalMs:3600000};let app=startInstance(path,0,options),port=await app.listen();
  const call=async(route,token,body)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body===undefined?'GET':'POST',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body===undefined?{}:{'Content-Type':'application/json'})},...(body===undefined?{}:{body:JSON.stringify(body)})});return [response.status,await response.json()];};
  const token=(await call('/api/pair','',{code:app.code}))[1].token,bot=(await call('/api/bots',token,{name:'Reply agent',provider:'live',model:'fixture',toolMode:mode}))[1];
@@ -33,10 +35,76 @@ async function setup({uncertain=false,inflight=false,sendEnabled=true,modifyEnab
  const click=async(post,actionId,override={})=>interact({eventId:'event-'+Math.random(),teamId:'T123',userId:'U123',channelId:'D123',messageTs:post.messageTs,actionId,value:post.buttons[0].value,...override});
  const restart=async()=>{await app.close();app=startInstance(path,0,options);port=await app.listen();await wait(()=>interact);};
  const beginSlack=async()=>{assert.equal((await call('/api/plugins/gmail/work-model-access',token,{botId:bot.id,provider:'live',model:'fixture',enabled:true}))[0],200);await receive({eventId:'EvReply',teamId:'T123',userId:'U123',channelId:'D123',messageTs:'77.1',text:modifyAction?`Read the message and propose ${modifyAction}`:'Read the message and propose a reply'});return wait(()=>posts.find(p=>p.buttons?.some(b=>b.actionId==='gmail_disclose')));};
+ const holdHistory=()=>{let entered,release;const started=new Promise(resolve=>{entered=resolve}),wait=new Promise(resolve=>{release=resolve});historyGate={entered,wait};return {started,release:()=>{historyGate=undefined;release();}};};
  const holdRefresh=()=>{let entered,release;const started=new Promise(resolve=>{entered=resolve}),wait=new Promise(resolve=>{release=resolve});refreshGate={entered,wait};return {started,release:()=>{refreshGate=undefined;release();}};};
  const say=async(event)=>receive(event);
- return {dir,path,posts,sends,changes,call,token,bot,begin,beginSlack,click,say,restart,holdRefresh,setLabels:value=>{labels=value;},close:async()=>{await app.close();rmSync(dir,{recursive:true,force:true});}};
+ return {dir,path,posts,sends,changes,assessed,call,token,bot,begin,beginSlack,click,say,restart,holdRefresh,holdHistory,setArrivals:value=>{arrivals=value;},setLabels:value=>{labels=value;},close:async()=>{await app.close();rmSync(dir,{recursive:true,force:true});}};
 }
+
+
+test('initial scan and concurrent arrivals are handed off once, with uncertain mailbox additions held for review',async()=>{
+ const f=await setup();let gate;try{
+  assert.equal((await f.call('/api/plugins/gmail/work-model-access',f.token,{botId:f.bot.id,provider:'live',model:'fixture',enabled:true}))[0],200);
+  const gmail=(await f.call('/api/plugins',f.token))[1].find(p=>p.id==='gmail'),{name,...target}=gmail.inboxTarget;
+  f.setArrivals(['m1','sent','draft','spam','archive','moved','moved-out','missing','unavailable']);gate=f.holdHistory();
+  const enabling=f.call('/api/plugins/gmail/inbox-preferences',f.token,{preferences:{enabled:true,attention:'Invitations matter',sensitiveTerms:[]},revision:null,target,confirmModelAccess:true});
+  await gate.started;assert.deepEqual(f.assessed,[]);f.setArrivals(['m2']);gate.release();assert.equal((await enabling)[0],200);
+  await wait(()=>f.posts.filter(p=>p.text.includes('A friend sent a synthetic invitation.')).length===1);
+  assert.equal((await f.call('/api/plugins/gmail/poll',f.token,{}))[0],200);
+  await wait(()=>f.posts.filter(p=>p.text.includes('A friend sent a synthetic invitation.')).length===2);
+  let states=Object.fromEntries((await f.call('/api/plugins',f.token))[1].find(p=>p.id==='gmail').arrivals.map(item=>[item.messageId,item.inbox]));
+  assert.deepEqual(states,{m1:'yes',sent:'no',draft:'no',spam:'no',archive:'no',moved:'unknown','moved-out':'unknown',missing:'unknown',unavailable:'unknown',m2:'yes'});
+  assert.deepEqual([...f.assessed].sort(),['m1','m2']);
+  await f.restart();f.setArrivals(['m1','sent','moved','m2']);assert.equal((await f.call('/api/plugins/gmail/poll',f.token,{}))[0],200);
+  states=Object.fromEntries((await f.call('/api/plugins',f.token))[1].find(p=>p.id==='gmail').arrivals.map(item=>[item.messageId,item.inbox]));assert.equal(states.moved,'unknown');assert.equal(states.sent,'no');
+  assert.deepEqual([...f.assessed].sort(),['m1','m2']);assert.equal(f.posts.filter(p=>p.text.includes('A friend sent a synthetic invitation.')).length,2);
+  let current=(await f.call('/api/plugins',f.token))[1].find(p=>p.id==='gmail');const prefs={enabled:false,attention:'Invitations matter',sensitiveTerms:[]};
+  assert.equal((await f.call('/api/plugins/gmail/inbox-preferences',f.token,{preferences:prefs,revision:current.inboxPreferences.revision}))[0],200);
+  f.setArrivals(['m3']);assert.equal((await f.call('/api/plugins/gmail/poll',f.token,{}))[0],200);assert.deepEqual([...f.assessed].sort(),['m1','m2']);
+  current=(await f.call('/api/plugins',f.token))[1].find(p=>p.id==='gmail');const {name:ignored,...resumedTarget}=current.inboxTarget;
+  assert.equal((await f.call('/api/plugins/gmail/inbox-preferences',f.token,{preferences:{...prefs,enabled:true},revision:current.inboxPreferences.revision,target:resumedTarget,confirmModelAccess:true}))[0],200);
+  await wait(()=>f.posts.filter(p=>p.text.includes('A friend sent a synthetic invitation.')).length===3);assert.deepEqual([...f.assessed].sort(),['m1','m2','m3']);
+ }finally{gate?.release();await f.close();}
+});
+
+test('revoking Gmail during the enablement scan prevents handoff and model disclosure',async()=>{
+ const f=await setup();let gate;try{
+  assert.equal((await f.call('/api/plugins/gmail/work-model-access',f.token,{botId:f.bot.id,provider:'live',model:'fixture',enabled:true}))[0],200);
+  const g=(await f.call('/api/plugins',f.token))[1].find(p=>p.id==='gmail'),{name,...target}=g.inboxTarget;
+  f.setArrivals(['m1']);gate=f.holdHistory();const enabling=f.call('/api/plugins/gmail/inbox-preferences',f.token,{preferences:{enabled:true,attention:'',sensitiveTerms:[]},revision:null,target,confirmModelAccess:true});
+  await gate.started;assert.equal((await f.call('/api/plugins/gmail/access',f.token,{botId:f.bot.id,enabled:false}))[0],200);gate.release();assert.notEqual((await enabling)[0],200);
+  const after=(await f.call('/api/plugins',f.token))[1].find(p=>p.id==='gmail');assert.equal(after.inboxPreferences,null);assert.deepEqual(f.assessed,[]);assert.equal(f.posts.length,0);
+ }finally{gate?.release();await f.close();}
+});
+
+test('new mail leads from an inbox update through revised Slack approval and persists after restart',async()=>{
+ const f=await setup();try{
+  assert.equal((await f.call('/api/plugins/gmail/work-model-access',f.token,{botId:f.bot.id,provider:'live',model:'fixture',enabled:true}))[0],200);
+  const gmail=(await f.call('/api/plugins',f.token))[1].find(p=>p.id==='gmail');
+  const {name,...target}=gmail.inboxTarget;
+  assert.equal((await f.call('/api/plugins/gmail/inbox-preferences',f.token,{preferences:{enabled:true,attention:'Invitations matter',sensitiveTerms:[]},revision:null,target,confirmModelAccess:true}))[0],200);
+  assert.equal(f.posts.length,0);
+  f.setArrivals(['m1','m1']);assert.equal((await f.call('/api/plugins/gmail/poll',f.token,{}))[0],200);
+  const update=await wait(()=>f.posts.find(p=>p.text.includes('A friend sent a synthetic invitation.')));
+  assert.equal(update.channel,'D123');assert.equal(f.posts.filter(p=>p.text.includes('A friend sent a synthetic invitation.')).length,1);
+  await wait(async()=>((await f.call('/api/plugins',f.token))[1].find(p=>p.id==='gmail')).inboxStatus.items.some(item=>item.state==='delivered'));
+  await f.say({eventId:'OwnerFeedback',teamId:'T123',userId:'U123',channelId:'D123',threadTs:update.messageTs,messageTs:'80.0',text:'This should have been less urgent'});
+  await wait(()=>f.posts.find(p=>p.threadTs===update.messageTs && p.text.includes('I noted your correction')));
+  await f.say({eventId:'OwnerReply',teamId:'T123',userId:'U123',channelId:'D123',threadTs:update.messageTs,messageTs:'80.1',text:'Read the message and propose a reply'});
+  const question=await wait(async()=>{const p=f.posts.find(p=>p.buttons?.some(b=>b.actionId==='gmail_disclose'));if(p)return p;const id='slack-'+createHash('sha256').update(JSON.stringify(['T123','OwnerReply'])).digest('hex');const [status,item]=await f.call('/api/commands/'+id,f.token);if(status===200 && item.state!=='pending')throw Error(JSON.stringify({item,posts:f.posts}));return null;});assert.equal(question.threadTs,update.messageTs);
+  await f.click(question,'gmail_disclose');const original=await wait(()=>f.posts.find(p=>p.buttons?.some(b=>b.actionId==='gmail_revise')));
+  await f.click(original,'gmail_revise');await wait(()=>f.posts.find(p=>p.text.startsWith('Reply in this thread')));
+  await f.say({eventId:'OwnerRevision',teamId:'T123',userId:'U123',channelId:'D123',threadTs:update.messageTs,messageTs:'80.2',text:'Make it warmer'});
+  const second=await wait(()=>f.posts.filter(p=>p.buttons?.some(b=>b.actionId==='gmail_disclose'))[1]);await f.click(second,'gmail_disclose');
+  const revised=await wait(()=>f.posts.filter(p=>p.buttons?.some(b=>b.actionId==='gmail_approve'))[1]);assert.match(revised.text,/To: friend@example.test/);assert.match(revised.text,/Thank you so much/);
+  await f.click(original,'gmail_approve');assert.equal(f.sends.length,0);await f.click(revised,'gmail_approve');await wait(()=>f.sends.length===1);
+  const raw=Buffer.from(f.sends[0].raw,'base64url').toString();assert.equal(Buffer.from(raw.split('\r\n\r\n')[1].replace(/\s/g,''),'base64').toString(),'Thank you so much! I look forward to seeing you.');
+  const id='slack-'+createHash('sha256').update(JSON.stringify(['T123','OwnerReply'])).digest('hex');
+  await wait(async()=>{const item=(await f.call('/api/commands/'+id,f.token))[1];return item.state!=='pending'&&item;});
+  await f.restart();const persisted=(await f.call('/api/commands/'+id,f.token))[1];assert.equal(persisted.gmailReplies.at(-1).state,'succeeded');
+  await f.click(revised,'gmail_approve');f.setArrivals(['m1']);await f.call('/api/plugins/gmail/poll',f.token,{});assert.equal(f.sends.length,1);assert.equal(f.posts.filter(p=>p.text.includes('A friend sent a synthetic invitation.')).length,1);
+ }finally{await f.close();}
+});
 
 test('exact reply requires scoped disclosure and one approved Slack decision',async()=>{
  const f=await setup();try {

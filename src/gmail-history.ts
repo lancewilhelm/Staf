@@ -9,6 +9,13 @@ CREATE TABLE IF NOT EXISTS gmail_monitor_runs (
 );
 CREATE INDEX IF NOT EXISTS gmail_monitor_runs_account ON gmail_monitor_runs(account_id,id DESC);`;
 
+export const gmailArrivalEvidenceSchema = `
+CREATE TABLE IF NOT EXISTS gmail_arrival_evidence (
+  account_id TEXT NOT NULL, message_id TEXT NOT NULL,
+  inbox TEXT NOT NULL CHECK(inbox IN ('yes','no','unknown')),
+  PRIMARY KEY(account_id,message_id)
+);`;
+
 // The cursor and all arrivals from a complete history scan are committed together.
 export const gmailHistorySchema = `
 CREATE TABLE IF NOT EXISTS gmail_history (account_id TEXT PRIMARY KEY, cursor TEXT NOT NULL, state TEXT NOT NULL, detail TEXT);
@@ -17,14 +24,17 @@ CREATE TABLE IF NOT EXISTS gmail_history_gaps (account_id TEXT NOT NULL, previou
 CREATE TABLE IF NOT EXISTS gmail_model_access (account_id TEXT NOT NULL, bot_id TEXT NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL, PRIMARY KEY(account_id,bot_id));
 CREATE TABLE IF NOT EXISTS gmail_private_commands (command_id TEXT PRIMARY KEY);
 CREATE TABLE IF NOT EXISTS gmail_private_messages (message_id TEXT PRIMARY KEY);
-${gmailMonitorRunsSchema}`;
+${gmailMonitorRunsSchema}
+${gmailArrivalEvidenceSchema}`;
 
 const profileSchema=z.object({emailAddress:z.email(),historyId:z.string().regex(/^\d+$/)});
-const pageSchema=z.object({historyId:z.string().regex(/^\d+$/),nextPageToken:z.string().min(1).optional(),messageIds:z.array(z.string().min(1).max(200)).max(10000)});
+const pageSchema=z.object({historyId:z.string().regex(/^\d+$/),nextPageToken:z.string().min(1).optional(),messageIds:z.array(z.string().min(1).max(200)).max(10000),additions:z.array(z.object({messageId:z.string().min(1).max(200),historyId:z.string().regex(/^\d+$/).nullable()})).max(10000).optional()});
+const metadataSchema=z.object({id:z.string(),historyId:z.string().regex(/^\d+$/).optional(),labelIds:z.array(z.string()).max(1000).optional()});
 export interface GmailHistoryTransport {
   profile():Promise<unknown>;
   // Gmail does not prove historical inbox membership in its message-added record.
   history(input:{startHistoryId:string;pageToken?:string}):Promise<unknown>;
+  messageMetadata?(messageId:string):Promise<unknown>;
 }
 export class GmailHistoryExpired extends Error {
   constructor(){super('Gmail history expired; the interval cannot be reconstructed');}
@@ -40,14 +50,14 @@ export class GmailHistory {
   }
 
   arrivals(accountId:string) {
-    return this.db.prepare('SELECT message_id AS messageId FROM gmail_arrivals WHERE account_id=? ORDER BY rowid DESC LIMIT 100').all(accountId).reverse().map(row=>({messageId:String(row.messageId),inbox:'unknown' as const}));
+    return this.page(accountId).arrivals.reverse();
   }
 
   page(accountId:string,before?:number) {
     if(before!==undefined && (!Number.isSafeInteger(before)||before<1))throw Error('Invalid Gmail arrival cursor');
-    const rows=this.db.prepare('SELECT rowid AS seq,message_id AS messageId FROM gmail_arrivals WHERE account_id=? AND (? IS NULL OR rowid<?) ORDER BY rowid DESC LIMIT 101').all(accountId,before??null,before??null);
+    const rows=this.db.prepare("SELECT a.rowid AS seq,a.message_id AS messageId,COALESCE(e.inbox,'unknown') AS inbox FROM gmail_arrivals a LEFT JOIN gmail_arrival_evidence e ON e.account_id=a.account_id AND e.message_id=a.message_id WHERE a.account_id=? AND (? IS NULL OR a.rowid<?) ORDER BY a.rowid DESC LIMIT 101").all(accountId,before??null,before??null);
     const selected=rows.slice(0,100);
-    return {arrivals:selected.map(row=>({messageId:String(row.messageId),inbox:'unknown' as const})),nextBefore:rows.length>100?Number(selected.at(-1)?.seq):null};
+    return {arrivals:selected.map(row=>({messageId:String(row.messageId),inbox:z.enum(['yes','no','unknown']).parse(row.inbox)})),nextBefore:rows.length>100?Number(selected.at(-1)?.seq):null};
   }
 
   snapshot(accountId:string) {
@@ -80,7 +90,7 @@ export class GmailHistory {
 
   async poll(accountId:string) {
     if(!this.transport)throw Error('Gmail transport unavailable');
-    const {cursor}=this.status(accountId),messages=new Set<string>(),tokens=new Set<string>();
+    const {cursor}=this.status(accountId),messages=new Set<string>(),additions=new Map<string,string>(),tokens=new Set<string>();
     this.assertAuthority();
     const runId=this.db.prepare("INSERT INTO gmail_monitor_runs (account_id,started_at,outcome) VALUES (?,?,'running')").run(accountId,Date.now()).lastInsertRowid;
     let pageToken:string|undefined,latest=cursor;
@@ -91,19 +101,46 @@ export class GmailHistory {
         const result=pageSchema.parse(await this.transport.history({startHistoryId:cursor,...(pageToken?{pageToken}:{})}));
         latest=result.historyId;
         for(const id of result.messageIds)messages.add(id);
+        for(const addition of result.additions??[]) {
+          if(!messages.has(addition.messageId))throw Error('Unexpected Gmail addition evidence');
+          const previous=additions.get(addition.messageId),current=addition.historyId??'';
+          additions.set(addition.messageId,previous===undefined || previous===current?current:'');
+        }
         if(messages.size>10000)throw Error('Gmail history scan exceeds the arrival limit');
         if(!result.nextPageToken)break;
         if(tokens.has(result.nextPageToken))throw Error('Gmail history pagination repeated');
         tokens.add(result.nextPageToken);pageToken=result.nextPageToken;
       }
       if(BigInt(latest)<BigInt(cursor))throw Error('Gmail history cursor moved backwards');
+      const evidence=new Map<string,'yes'|'no'|'unknown'>();
+      const existing=this.db.prepare('SELECT 1 FROM gmail_arrivals WHERE account_id=? AND message_id=?');
+      const unseen=[...messages].filter(id=>!existing.get(accountId,id));
+      let index=0;
+      await Promise.all(Array.from({length:Math.min(8,unseen.length)},async()=>{
+        while(index<unseen.length) {
+          const id=unseen[index++]!,addition=additions.get(id);let state:'yes'|'no'|'unknown'='unknown';
+          if(addition && this.transport?.messageMetadata) {
+            try {
+              this.assertAuthority();const metadata=metadataSchema.parse(await this.transport.messageMetadata(id));this.assertAuthority();
+              // Matching IDs tie the current labels to the last message change;
+              // Gmail does not guarantee a complete historical classification.
+              if(metadata.id===id && metadata.historyId===addition && metadata.labelIds) {
+                const labels=metadata.labelIds;
+                state=labels.includes('INBOX') && !labels.some(label=>['SENT','DRAFT','SPAM','TRASH'].includes(label))?'yes':'no';
+              }
+            } catch {this.assertAuthority();}
+          }
+          evidence.set(id,state);
+        }
+      }));
       this.assertAuthority();
       this.db.exec('BEGIN IMMEDIATE');
       try {
         const changed=this.db.prepare("UPDATE gmail_history SET cursor=?,state='ready',detail=NULL WHERE account_id=? AND cursor=?").run(latest,accountId,cursor);
         if(changed.changes!==1)throw Error('Gmail history checkpoint changed');
         const insert=this.db.prepare('INSERT OR IGNORE INTO gmail_arrivals VALUES (?,?)');
-        for(const id of messages)insert.run(accountId,id);
+        const record=this.db.prepare('INSERT INTO gmail_arrival_evidence VALUES (?,?,?)');
+        for(const id of messages)if(insert.run(accountId,id).changes===1)record.run(accountId,id,evidence.get(id)??'unknown');
         this.db.prepare("UPDATE gmail_monitor_runs SET outcome='completed',finished_at=? WHERE id=? AND outcome='running'").run(Date.now(),runId);
         this.db.exec('COMMIT');
       } catch(error){this.db.exec('ROLLBACK');throw error;}
