@@ -442,6 +442,19 @@ It submits a normal service-owned command with the captured agent identity; the
 existing work/action boundary still governs capabilities. Agent access and plugin
 state are checked again for actions and before reply dispatch. A dispatch is
 marked before the Slack API call so a crash or ambiguous response is not replayed.
+For an approved Slack command, the model can invoke service-owned, journaled
+task capabilities in the agent’s configured tool mode. Starting work captures
+the owner’s original message and atomically binds the task attempt to its Slack
+thread. Follow-up capabilities use that thread’s unique binding, never a
+model-selected task ID; missing or ambiguous bindings require clarification. For
+older threads with multiple tasks, a selection requires the owner to quote the
+full original objective and the service to match it uniquely.
+The older explicit `work:` route remains available for diagnostics. A durable delivery ledger derives progress and terminal
+outcomes from the task record. It claims a dispatch before the external call,
+retries a known rate limit, and marks ambiguous in-flight dispatches uncertain.
+Current plugin access and the exact captured destination are checked before each
+send. Disable pauses delivery but does not cancel accepted background tasks.
+A restart interrupts unfinished tasks rather than replaying their effects.
 Tokens live separately in the host credential directory. A reconnecting socket
 can miss events during an outage; this slice has no Slack history backfill.
 These paths are exercised with controlled providers, not live Slack. Gmail is a

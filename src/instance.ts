@@ -28,12 +28,12 @@ import { WorkActionService, workActionsSchema, type ActionIdentity } from './wor
 import type { ByteRedactor } from './config.js';
 import { NativeProcesses, nativeProcessSchema } from './native-processes.js';
 import { ApprovalGrants, approvalGrantSchema, type GrantBoundary } from './approval-grants.js';
-import { PluginStore, pluginSchema } from './plugins.js';
+import { PluginStore, pluginSchema, slackWorkSchema, type SlackConfig } from './plugins.js';
 
 const clockAction: Action = { capability:'clock', operation:'read', resource:'utc', effect:'read', limits:{}, risk:'safe' };
 const clockBoundary = { enabledCapabilities:['clock'], actions:[clockAction] };
 const modes: ApprovalMode[] = ['ask-every-time','ask-for-risky-actions','never-ask'];
-export const INSTANCE_SCHEMA_VERSION = 41;
+export const INSTANCE_SCHEMA_VERSION = 42;
 const MAINTENANCE_VERSION = 2147483647;
 
 export const starterSoul = "You are an assistant working for the owner. Be clear and candid. Distinguish observations from assumptions. Follow the owner's role instructions and work within the permissions and task scope granted to you.";
@@ -209,8 +209,9 @@ export class Instance {
     if(version < 38 && !this.db.prepare("SELECT 1 FROM pragma_table_info('command_runtime_events') WHERE name='call_id'").get())this.db.exec('ALTER TABLE command_runtime_events ADD COLUMN call_id TEXT');
     this.db.exec('CREATE INDEX IF NOT EXISTS command_runtime_events_command ON command_runtime_events(command_id,seq)');
     if(version < 40) this.db.exec(pluginSchema);
+    if(version < 42) this.db.exec(slackWorkSchema);
     this.plugins = new PluginStore(this.db);
-    if(version < 41) this.db.exec("CREATE TABLE IF NOT EXISTS tool_defaults (id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL, clock INTEGER NOT NULL CHECK(clock IN (0,1)), memory INTEGER NOT NULL CHECK(memory IN (0,1)), web INTEGER NOT NULL CHECK(web IN (0,1)), files INTEGER NOT NULL CHECK(files IN (0,1))); INSERT OR IGNORE INTO tool_defaults VALUES (1,1,1,1,1,1)");
+    if(version < 42) this.db.exec("CREATE TABLE IF NOT EXISTS tool_defaults (id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL, clock INTEGER NOT NULL CHECK(clock IN (0,1)), memory INTEGER NOT NULL CHECK(memory IN (0,1)), web INTEGER NOT NULL CHECK(web IN (0,1)), files INTEGER NOT NULL CHECK(files IN (0,1))); INSERT OR IGNORE INTO tool_defaults VALUES (1,1,1,1,1,1)");
     if (!maintenanceToken) this.db.exec(`PRAGMA user_version=${INSTANCE_SCHEMA_VERSION}`);
     for (const row of this.db.prepare("SELECT id,bot_id FROM task_attempts WHERE state IN ('queued','running','stopping','waiting') ORDER BY rowid").all()) {
       if (typeof row.id !== 'string' || typeof row.bot_id !== 'string') throw Error('Invalid interrupted task');
@@ -858,6 +859,32 @@ export class Instance {
       this.db.exec('COMMIT');
       return result;
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
+  }
+  acceptSlackTask(input:{id:string; eventId:string; revision:number; config:SlackConfig; threadTs?:string; objective:string},visibleObjective:string) {
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      if(!this.plugins.reserve(input.eventId,input.id,input.revision)) {this.db.exec('COMMIT');return {kind:'duplicate' as const};}
+      const result=this.acceptTaskInTransaction({id:input.id,botId:input.config.botId,objective:input.objective,limitMs:300000},visibleObjective);
+      if(result.kind==='accepted') {
+        this.db.prepare('INSERT INTO slack_work VALUES (?,?,?,?,?,?)').run(input.id,input.config.teamId,input.config.userId,input.config.channelId,input.threadTs ?? null,input.config.botId);
+        this.db.prepare("INSERT INTO slack_deliveries (id,attempt_id,text,state) VALUES (?,?,?,'pending')").run(input.id+':receipt',input.id,`Task ${input.id} accepted. Use “status task ${input.id}”, “direct task ${input.id}: …”, or “stop task ${input.id}”.`);
+        this.plugins.state(input.id,'task','Task accepted; delivery tracked separately');
+      } else {this.plugins.state(input.id,'failed','Agent already has active work');this.plugins.queueNotice({id:input.id+':busy',config:input.config,...(input.threadTs?{threadTs:input.threadTs}:{}),text:'This agent already has active work. The new request was not accepted.'});}
+      this.db.exec('COMMIT');return result;
+    } catch(error) {this.db.exec('ROLLBACK');throw error;}
+  }
+  acceptSlackChatTask(input:{id:string;config:SlackConfig;threadTs:string;objective:string},visibleObjective:string) {
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      if(!this.plugins.authority(input.id))throw Error('Slack authorization changed');
+      if(this.plugins.threadWork(input.config,input.threadTs).length) {this.db.exec('COMMIT');return {kind:'ambiguous' as const};}
+      const result=this.acceptTaskInTransaction({id:input.id,botId:input.config.botId,objective:input.objective,limitMs:300000},visibleObjective);
+      if(result.kind==='accepted') {
+        this.db.prepare('INSERT INTO slack_work VALUES (?,?,?,?,?,?)').run(input.id,input.config.teamId,input.config.userId,input.config.channelId,input.threadTs,input.config.botId);
+        this.db.prepare("INSERT INTO slack_deliveries (id,attempt_id,text,state) VALUES (?,?,?,'pending')").run(input.id+':receipt',input.id,'I’ve started working on this. You can ask for an update, give me direction, or ask me to stop in this thread.');
+      }
+      this.db.exec('COMMIT');return result;
+    } catch(error) {this.db.exec('ROLLBACK');throw error;}
   }
   private acceptTaskInTransaction(input: {id:string; botId:string; objective:string; limitMs:number; predecessor?:string; delegateClock?:boolean}, visibleObjective=input.objective, isolated=false) {
     const digest=createHmac('sha256',this.fingerprintKey).update(JSON.stringify([input.id,input.botId,input.objective,input.limitMs,input.predecessor ?? null,...(input.delegateClock ? ['delegate-clock'] : [])])).digest('hex');
