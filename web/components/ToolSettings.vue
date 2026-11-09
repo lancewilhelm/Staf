@@ -1,13 +1,17 @@
 <script setup lang="ts">
 import {onMounted, ref} from 'vue';
 import {useWorkspace} from '../workspace';
+import SelectControl from './SelectControl.vue';
 
 const {app}=useWorkspace();
 type Defaults=Awaited<ReturnType<typeof app.toolDefaults>>;
 const saved=ref<Defaults|null>(null), draft=ref<Defaults|null>(null), latest=ref<Defaults|null>(null);
 const search=ref<Awaited<ReturnType<typeof app.searchConfig>>|null>(null), origin=ref('');
+const sensitivity=ref<Awaited<ReturnType<typeof app.memorySensitivity>>|null>(null), terms=ref(''), sensitivityStatus=ref(''), sensitivityNeedsReload=ref(false), currentSensitivity=ref<Awaited<ReturnType<typeof app.memorySensitivity>>|null>(null);
 const busy=ref(false), needsReload=ref(false), searchNeedsReload=ref(false), status=ref(''), searchStatus=ref('');
-onMounted(async()=>{await Promise.all([reload(),reloadSearch()]);});
+onMounted(async()=>{await Promise.all([reload(),reloadSearch(),reloadSensitivity()]);});
+async function reloadSensitivity(){try{const value=await app.memorySensitivity();currentSensitivity.value=value;if(sensitivity.value)sensitivity.value.revision=value.revision;else{sensitivity.value={...value,terms:[...value.terms]};terms.value=value.terms.join('\n');}sensitivityNeedsReload.value=false;}catch{ sensitivityNeedsReload.value=true;sensitivityStatus.value='Could not load memory sensitivity rules.'; }}
+async function saveSensitivity(){if(!sensitivity.value || busy.value || sensitivityNeedsReload.value)return;busy.value=true;try{await app.saveMemorySensitivity({...sensitivity.value,terms:terms.value.split('\n').map(x=>x.trim()).filter(Boolean)});sensitivity.value=null;await reloadSensitivity();sensitivityStatus.value='Memory sensitivity rules saved.';}catch{sensitivityNeedsReload.value=true;sensitivityStatus.value='Save failed or is uncertain. Your entries are retained; compare current rules before retrying.';}finally{busy.value=false;}}
 async function reload(){
   try {const value=await app.toolDefaults(); if(!draft.value)draft.value={...value}; saved.value=value;latest.value=value;needsReload.value=false;}
   catch(error){needsReload.value=true;status.value='Could not load tool settings. '+String(error);}
@@ -34,7 +38,7 @@ async function saveSearch(){
 <template>
   <section class="settings-section" aria-label="Tools">
     <h2 class="section-title">Tools</h2>
-    <p>These instance-wide controls make tools available to agents. Permissions, task scope and approvals still determine whether a call can run. Disabling preserves settings and records.</p>
+    <p>These instance-wide controls make tools available to agents. Permissions, task scope and approvals still determine whether a call can run. Disabling memory denies pending sensitive proposals; saved memories and settings remain.</p>
     <template v-if="draft">
       <label class="tool-toggle"><input v-model="draft.clock" type="checkbox" :disabled="busy" /> Clock</label>
       <label class="tool-toggle"><input v-model="draft.memory" type="checkbox" :disabled="busy" /> Memory</label>
@@ -46,6 +50,16 @@ async function saveSearch(){
     <p role="status">{{ status }}</p>
     <button v-if="needsReload" class="quiet" :disabled="busy" @click="reload">Compare current settings</button>
     <p v-if="latest && status">Current saved: clock {{ latest.clock ? 'on' : 'off' }}, memory {{ latest.memory ? 'on' : 'off' }}, web {{ latest.web ? 'on' : 'off' }}, files {{ latest.files ? 'on' : 'off' }}. Your choices above are retained.</p>
+    <h3>Memory sensitivity</h3>
+    <p>Models can misclassify personal details. Matching terms always require review, as do uncertain or missing classifications. Review every change for a stricter setting.</p>
+    <template v-if="sensitivity">
+      <label>Review policy<SelectControl><select v-model="sensitivity.mode" :disabled="busy"><option value="model">Allow model-classified ordinary memories</option><option value="review-all">Review every model memory change</option></select></SelectControl></label>
+      <label>Sensitive terms, one per line<textarea v-model="terms" :disabled="busy" rows="5"></textarea></label>
+      <button :disabled="busy || sensitivityNeedsReload" @click="saveSensitivity">Save sensitivity rules</button>
+    </template>
+    <button v-if="!sensitivity || sensitivityNeedsReload" :disabled="busy" @click="reloadSensitivity">Compare current sensitivity rules</button>
+    <p v-if="currentSensitivity && sensitivityStatus" class="meta">Current saved policy: {{ currentSensitivity.mode === 'review-all' ? 'review every change' : 'allow model-classified ordinary changes' }}. Current terms: {{ currentSensitivity.terms.join(', ') || 'none' }}.</p>
+    <p role="status">{{ sensitivityStatus }}</p>
     <h3>Search backend</h3>
     <p>Web search needs a trusted local SearXNG backend at <code>http://127.0.0.1:PORT</code>, plus separate instance and agent permissions and approval. Web page reading has separate permissions. See the usage guide for permission controls.</p>
     <template v-if="search">

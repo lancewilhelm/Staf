@@ -54,10 +54,10 @@ test('one accepted workflow combines skills, files, memory and retained native i
         return tools([['code_mode',{source:`
           await capabilities.select_skill({id:${JSON.stringify(skill.id)},revision:1});
           const file=(await capabilities.file_write({path:'acceptance.txt',content:'one'})).value;
-          const memory=(await capabilities.memory_remember({scope:{kind:'agent'},text:'first memory'})).value;
+          const memory=(await capabilities.memory_remember({scope:{kind:'agent'},text:'first memory',classification:'ordinary'})).value;
           const process=(await capabilities.terminal_run(${JSON.stringify(shell)})).value;
           await capabilities.file_edit({path:'acceptance.txt',expectedHash:file.sha256,oldText:'one',newText:'two'});
-          const updated=(await capabilities.memory_update({scope:{kind:'agent'},id:memory.id,version:memory.version,text:'updated memory'})).value;
+          const updated=(await capabilities.memory_update({scope:{kind:'agent'},id:memory.id,version:memory.version,text:'updated memory',classification:'ordinary'})).value;
           await capabilities.terminal_write({processId:process.id,data:'line\\n'});
           const found=(await capabilities.file_search({path:'acceptance.txt',query:'two'})).value;
           await capabilities.memory_forget({scope:{kind:'agent'},id:updated.id,version:updated.version});
@@ -68,12 +68,12 @@ test('one accepted workflow combines skills, files, memory and retained native i
       if (results.length===0) return tools([
         ['select_skill',{id:skill.id,revision:1}],
         ['file_write',{path:'acceptance.txt',content:'one'}],
-        ['memory_remember',{scope,text:'first memory'}],
+        ['memory_remember',{scope,text:'first memory',classification:'ordinary'}],
         ['terminal_run',shell]
       ]);
       if (results.length===4) return tools([
         ['file_edit',{path:'acceptance.txt',expectedHash:value('file_write').sha256,oldText:'one',newText:'two'}],
-        ['memory_update',{scope,id:value('memory_remember').id,version:value('memory_remember').version,text:'updated memory'}],
+        ['memory_update',{scope,id:value('memory_remember').id,version:value('memory_remember').version,text:'updated memory',classification:'ordinary'}],
         ['terminal_write',{processId:value('terminal_run').id,data:'line\n'}]
       ]);
       if (results.length===7) return tools([
@@ -151,7 +151,7 @@ test('a real SQLite effect with a lost receipt fences later paired changing call
       const count=after.filter(message=>message.role==='tool').length;
       if (count===2) return assistant('Uncertain work reported.');
       const {memory}=rows.find(row=>row.bot.toolMode===profile.toolMode);
-      const input={scope,id:memory.id,version:count+1,text:count?'must not run':'uncertain change'};
+      const input={scope,id:memory.id,version:count+1,text:count?'must not run':'uncertain change',classification:'ordinary'};
       const route=profile.toolMode==='direct' || (profile.toolMode==='hybrid' && count===1);
       return route?tools([['memory_update',input]]):tools([['code_mode',{source:`return await capabilities.memory_update(${JSON.stringify(input)});`}]]);
     }})});
