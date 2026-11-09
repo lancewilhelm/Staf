@@ -814,8 +814,10 @@ To prepare an owner-operated connection:
    access and separately confirm **Allow Gmail to** the displayed provider and
    model. That decision allows message text and search results to be sent to
    that provider during this agent's chat. It does not apply to another provider
-   or model. Revoke it independently in Settings. Enabling and **Check Gmail
-   connection** refresh the token and check the profile. After a restart,
+   or model. To use Gmail in background tasks or Slack-originated work, separately
+   confirm **Allow Gmail in tasks and Slack work**. Existing chat permissions do
+   not grant that access. Revoke either permission in Settings. Enabling and
+   **Check Gmail connection** refresh the token and check the profile. After a restart,
    connection status is **Not checked** until the next check or successful poll.
 
 Staf captures the Gmail history ID when the account is first connected, without
@@ -841,16 +843,28 @@ history pages and 10,000 distinct message IDs. If that limit or a connection
 error prevents a scan, it reports failure and keeps the old cursor. An explicit
 restart from now records the unknown interval rather than claiming recovery.
 
-In Direct or Hybrid main chat, an agent with both permissions can call
-`gmail_search` and `gmail_read`. Search returns at most 20 IDs and signals when
+In Direct, Hybrid, and Code Mode, an agent with access and model permission can
+call `gmail_search` and `gmail_read` in main chat. Slack-originated chat also
+requires the separate task and Slack model permission.
+Search returns at most 20 IDs per call and signals when
 more exist; narrow the query to find others. Read returns bounded plain text,
 headers and a snippet; HTML and attachments are not included. Gmail content is
 untrusted data, not instructions. Read fails rather than truncating a Gmail API
 response over 2 MiB, and displayed plain text is limited to 16,000 characters.
-Gmail actions are unavailable in Code Mode,
-background tasks and Slack-originated chat. After a Gmail result in a turn,
-other tools are unavailable for the rest of that turn. The owner's visible chat
-and activity can contain the email and should be protected like the mailbox.
+For a background task, the paired owner can include `gmailQuery` in the
+`POST /api/tasks` body. The exact query is the task's Gmail scope. The task can
+read only IDs returned by that query in that attempt. Retries, scheduled tasks,
+and helper assignments do not inherit this scope. In an authorized Slack DM,
+`work gmail: in:inbox` starts a task scoped to the exact query `in:inbox`.
+Replace that query with the intended Gmail search. The agent must already have
+Gmail access and both model permissions when the task starts. Changes to
+the connection or any permission stop subsequent Gmail work.
+
+After a Gmail result in a turn, other tools are unavailable for the rest of that
+turn, including guest calls already queued behind the Gmail action. Slack receives
+a generic notification directing the owner to Staf, not the Gmail-derived
+answer. The owner's visible chat and task activity can contain the email and
+should be protected like the mailbox.
 Gmail tool results and generated replies from that turn are omitted from later
 model replay and captured task context; the owner's original request remains.
 An agent must search again to use the mail in a later turn. This cannot recall
@@ -858,9 +872,9 @@ content already sent to the explicitly allowed provider.
 
 Disable retains credentials, agent access and model disclosure settings.
 Disconnect disables the plugin and removes its local credentials, but retains
-account configuration and both permissions. Reconnecting the same account can
+account configuration and all permissions. Reconnecting the same account can
 therefore make an existing model permission usable again; revoke it separately
-if that is not wanted. Delete Gmail configuration removes both permissions.
+if that is not wanted. Delete Gmail configuration removes all permissions.
 Neither action
 revokes the grant at Google; revoke it in Google account settings if desired.
 Reconnect requires the client secret and Google consent again. The client secret

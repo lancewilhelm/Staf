@@ -46,6 +46,11 @@ try {
  await until(()=>evaluate("document.body.innerText.includes('Allow Gmail data to this model?')"),'model disclosure');
  await evaluate("[...document.querySelectorAll('dialog button')].find(b=>b.textContent.trim()==='Allow Gmail data').click()");
  await until(()=>evaluate("[...document.querySelectorAll('[aria-label=\"Gmail plugin\"] button')].some(b=>b.textContent.trim()==='Revoke Gmail model access'&&!b.disabled)"),'model access saved');
+ await until(()=>evaluate("[...document.querySelectorAll('[aria-label=\"Gmail plugin\"] button')].some(b=>b.textContent.trim()==='Allow Gmail in tasks and Slack work'&&!b.disabled)"),'task model choice available');
+ await evaluate("[...document.querySelectorAll('[aria-label=\"Gmail plugin\"] button')].find(b=>b.textContent.trim()==='Allow Gmail in tasks and Slack work').click()");
+ await until(()=>evaluate("document.body.innerText.includes('Allow Gmail in tasks and Slack work?')"),'task model disclosure');
+ await evaluate("[...document.querySelectorAll('dialog button')].find(b=>b.textContent.trim()==='Allow task and Slack access').click()");
+ await until(()=>evaluate("[...document.querySelectorAll('[aria-label=\"Gmail plugin\"] button')].some(b=>b.textContent.trim()==='Revoke task and Slack Gmail access'&&!b.disabled)"),'task model access saved');
  await evaluate("[...document.querySelectorAll('[aria-label=\"Gmail plugin\"] button')].find(b=>b.textContent.trim()==='Disable').click()");
  await until(()=>evaluate("document.querySelector('[aria-label=\"Gmail plugin\"] .badge').textContent.trim()==='Disabled' && [...document.querySelectorAll('[aria-label=\"Gmail plugin\"] button')].some(b=>b.textContent.trim()==='Disconnect Gmail'&&!b.disabled)"),'disabled');
  await evaluate("[...document.querySelectorAll('[aria-label=\"Gmail plugin\"] button')].find(b=>b.textContent.trim()==='Disconnect Gmail').click()");

@@ -588,21 +588,31 @@ The paired owner can call `check`, `enable`, `disable`, `disconnect`, `poll`, or
 `delete-config` with an empty object, and `access` with `botId` and `enabled`.
 `model-access` takes `botId`, `provider`, `model`, and `enabled`; enabling it
 requires an exact match to the current agent profile and existing agent access.
+`work-model-access` takes the same fields and requires the existing model grant;
+it separately permits tasks and Slack-originated work for that exact agent and
+model. Setting or revoking the model grant clears the task and Slack grant.
 `read` takes a `messageId` for owner inspection. `rebaseline` requires
 `{"confirm":true}` and retains a record of the unknown interval.
 The Gmail entry in `GET /api/plugins` includes the account, connection state,
-agent access IDs, model access, monitoring state, recent candidate IDs and gaps;
+agent access IDs, model access, task and Slack model access, monitoring state, recent candidate IDs and gaps;
 it never returns the client secret or refresh token. Older candidates are paged
 through `GET /api/plugins/gmail/arrivals?before=CURSOR` using `nextBefore`.
 There is one Gmail account in this implementation. The shared database keys
 connections and access by plugin and account. The local credential file is
 separate from SQLite. `gmail_search` and `gmail_read` are journaled read actions
-for explicitly permitted Direct or Hybrid main chat; they are not available to
-guest code, tasks, or Slack-originated work.
+for explicitly permitted chat and task work in all three tool modes. A paired
+`POST /api/tasks` may include `gmailQuery`, a nonempty query of at most 500
+characters. The captured account, revision and exact query scope the attempt;
+only message IDs returned by that attempt's searches can be read. The scope is
+not inherited by retries, scheduled tasks, or helpers. `work gmail: QUERY` in an
+authorized Slack DM creates a task with that exact scope. Gmail-derived Slack
+responses are replaced with a generic instruction to inspect Staf.
 Schema 44 adds Gmail history, disclosure and private-turn records while also
 ensuring sensitive-memory schema is present. Both independent schema 43
 predecessors upgrade without replacing their existing records. See
 [Gmail setup](usage.md#gmail-plugin) for OAuth requirements and limitations.
+Schema 45 adds task Gmail scopes, scoped message IDs, private-task markers, and
+the separately approved task and Slack model permission.
 
 ## Native home-network gateway
 

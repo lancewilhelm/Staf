@@ -24,8 +24,8 @@ export async function runCode(input:{actions:WorkActions;responseId:string;callI
     if(fatal || actions.context.signal.aborted) return {ok:false as const,error:'Work stopped or closed'};
     try {
       input.ensureSkills?.();
-      if(message.type==='emit') {emitted.push(keep(message.value));persist();return {ok:true as const,value:null};}
-      if(message.type==='reuse') {const value=receipts.get(message.receipt);if(value===undefined)return {ok:false as const,error:'Receipt unavailable'};return {ok:true as const,value};}
+      if(message.type==='emit') {actions.assertPrivateDisclosure();emitted.push(keep(message.value));persist();return {ok:true as const,value:null};}
+      if(message.type==='reuse') {actions.assertPrivateDisclosure();const value=receipts.get(message.receipt);if(value===undefined)return {ok:false as const,error:'Receipt unavailable'};return {ok:true as const,value};}
       const eventId=`${id}:${message.seq}`;
       input.emit?.({type:'tool_start',id:eventId,name:message.name,arguments:JSON.stringify(safe(message.input))});
       let result:Awaited<ReturnType<WorkActions['invoke']>>;
@@ -54,6 +54,7 @@ export async function runCode(input:{actions:WorkActions;responseId:string;callI
   await Promise.allSettled([...pending]);
   if(!fatal && actions.closedReason()) fatal=`Action admission closed: ${actions.closedReason()}`;
   if(actions.context.signal.aborted && !fatal) {fatal='Work stopped';actions.close(fatal);}
+  try {actions.assertPrivateDisclosure();} catch {fatal='Gmail permission changed before model disclosure';actions.close('authority');}
   let result:Json={emitted};
   if(end.outcome==='return' && !fatal) {try {result={emitted,value:keep(end.value)};} catch { /* limit closed admission */ }}
   actions.finishExecution(id,fatal?'closed':end.outcome,JSON.stringify(result));

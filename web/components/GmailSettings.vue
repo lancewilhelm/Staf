@@ -8,17 +8,18 @@ const {app,state}=useWorkspace();
 const gmail=ref<Awaited<ReturnType<typeof app.gmailPlugin>>|null>(null),busy=ref(false),message=ref(''),authorizationUrl=ref('');
 const form=ref({email:'',clientId:'',clientSecret:''});
 const confirm=ref<'disconnect'|'delete-config'|'rebaseline'|null>(null),grant=ref<{botId:string;provider:string;model:string}|null>(null);
+const workGrant=ref<{botId:string;provider:string;model:string}|null>(null);
 const inspected=ref<Awaited<ReturnType<typeof app.gmailRead>>|null>(null);let timer:ReturnType<typeof setInterval>|undefined;
 const older=ref<Array<{messageId:string;inbox:'unknown'}>>([]),olderBefore=ref<number|null>(null),loadedOlder=ref(false);
 async function refresh(fillForm=false){const previous=gmail.value?.accountId,next=await app.gmailPlugin();if(previous!==next.accountId){older.value=[];olderBefore.value=null;loadedOlder.value=false;inspected.value=null;}gmail.value=next;if(fillForm && next.config){form.value.email=next.config.email;form.value.clientId=next.config.clientId;}if(next.authorizationStatus==='Connected')authorizationUrl.value='';}
 function onFocus(){void refresh().catch(()=>{message.value='Could not refresh Gmail status.';});}
 onMounted(()=>{window.addEventListener('focus',onFocus);void refresh(true).catch(()=>{message.value='Could not load Gmail status.';});timer=setInterval(()=>{if(!busy.value)void refresh().catch(()=>{});},10000);});
 onUnmounted(()=>{window.removeEventListener('focus',onFocus);if(timer)clearInterval(timer);});
-async function action(name:'start'|'check'|'enable'|'disable'|'disconnect'|'delete-config'|'access'|'model-access'|'poll'|'rebaseline',body:object={}) {
+async function action(name:'start'|'check'|'enable'|'disable'|'disconnect'|'delete-config'|'access'|'model-access'|'work-model-access'|'poll'|'rebaseline',body:object={}) {
  if(busy.value)return;busy.value=true;message.value='';
  try {const result=await app.gmailAction(name,body);if(name==='start'){authorizationUrl.value=result.url??'';form.value.clientSecret='';message.value='Open Google authorization, then return here.';}else{authorizationUrl.value='';message.value='Gmail settings updated.';if(name==='disable'||name==='disconnect'||name==='delete-config')inspected.value=null;}await refresh();}
  catch(error){message.value='Gmail could not be updated. '+String(error);await refresh().catch(()=>{});}
- finally{busy.value=false;confirm.value=null;grant.value=null;}
+ finally{busy.value=false;confirm.value=null;grant.value=null;workGrant.value=null;}
 }
 async function inspect(id:string){if(busy.value)return;busy.value=true;message.value='';try{inspected.value=await app.gmailRead(id);}catch(error){inspected.value=null;message.value='Could not inspect this message. '+String(error);}finally{busy.value=false;}}
 async function loadOlder(){const before=loadedOlder.value?olderBefore.value:gmail.value?.nextBefore;if(!before || busy.value)return;busy.value=true;try{const page=await app.gmailArrivals(before);older.value.push(...page.arrivals);olderBefore.value=page.nextBefore;loadedOlder.value=true;}catch{message.value='Could not load older candidates.';}finally{busy.value=false;}}
@@ -53,6 +54,10 @@ async function loadOlder(){const before=loadedOlder.value?olderBefore.value:gmai
     <template v-if="gmail.agentAccessIds.includes(bot.id) && bot.model">
      <button v-if="gmail.modelAccess.some(item=>item.botId===bot.id && item.provider===bot.provider && item.model===bot.model)" class="quiet" :disabled="busy" @click="action('model-access',{botId:bot.id,provider:bot.provider,model:bot.model,enabled:false})">Revoke Gmail model access</button>
      <button v-else class="quiet" :disabled="busy" @click="grant={botId:bot.id,provider:bot.provider,model:bot.model}">Allow Gmail to {{ bot.provider }} / {{ bot.model }}</button>
+     <template v-if="gmail.modelAccess.some(item=>item.botId===bot.id && item.provider===bot.provider && item.model===bot.model)">
+      <button v-if="gmail.workModelAccess.some(item=>item.botId===bot.id && item.provider===bot.provider && item.model===bot.model)" class="quiet" :disabled="busy" @click="action('work-model-access',{botId:bot.id,provider:bot.provider,model:bot.model,enabled:false})">Revoke task and Slack Gmail access</button>
+      <button v-else class="quiet" :disabled="busy" @click="workGrant={botId:bot.id,provider:bot.provider,model:bot.model}">Allow Gmail in tasks and Slack work</button>
+     </template>
     </template>
    </div>
   </fieldset>
@@ -74,5 +79,6 @@ async function loadOlder(){const before=loadedOlder.value?olderBefore.value:gmai
   <p role="status">{{ busy?'Updating Gmail…':message }}</p>
   <ConfirmAction v-if="confirm" :title="confirm==='disconnect'?'Disconnect Gmail?':confirm==='rebaseline'?'Start monitoring from now?':'Delete Gmail configuration?'" :message="confirm==='disconnect'?'This disables Gmail and removes its credentials. Account, agent access, and model permissions remain and can apply again after reconnecting.':confirm==='rebaseline'?'Arrivals in the missing interval cannot be recovered or identified. Staf will record this gap and start from the current Gmail history ID.':'This removes the stored credentials, account configuration, agent access, and model permissions.'" :action="confirm==='disconnect'?'Disconnect':confirm==='rebaseline'?'Start from now':'Delete configuration'" @cancel="confirm=null" @confirm="confirm==='rebaseline'?action('rebaseline',{confirm:true}):action(confirm)" />
   <ConfirmAction v-if="grant" title="Allow Gmail data to this model?" :message="`Gmail search results and message content can be sent to ${grant.provider} / ${grant.model} during this agent's chat. The owner-visible answer may contain email. This grant applies only to that provider and model. Gmail results and generated replies are omitted from later model requests; your request remains.`" action="Allow Gmail data" @cancel="grant=null" @confirm="action('model-access',{...grant,enabled:true})" />
+  <ConfirmAction v-if="workGrant" title="Allow Gmail in tasks and Slack work?" :message="`Gmail results and message content can be sent to ${workGrant.provider} / ${workGrant.model} in scoped background tasks and Slack-originated chat or tasks. Slack receives a generic notification; email details remain visible in Staf. This permission applies only to this agent and model.`" action="Allow task and Slack access" @cancel="workGrant=null" @confirm="action('work-model-access',{...workGrant,enabled:true})" />
  </div>
 </template>

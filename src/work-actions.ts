@@ -87,8 +87,13 @@ export class WorkActionService {
   private readonly journal:ActionJournal;
   private workCheck:(work:WorkRef)=>void=()=>{};
   private availability:(name:string)=>boolean=()=>true;
+  private privateWork:(work:WorkContext)=>boolean=()=>false;
+  private privateDisclosure:(work:WorkContext)=>void=()=>{};
   setAvailability(check:(name:string)=>boolean):void {this.availability=check;}
   setWorkCheck(check:(work:WorkRef)=>void):void {this.workCheck=check;}
+  setPrivateWork(check:(work:WorkContext)=>boolean,disclosure:(work:WorkContext)=>void):void {this.privateWork=check;this.privateDisclosure=disclosure;}
+  isPrivate(context:WorkContext):boolean {return this.privateWork(context);}
+  assertPrivateDisclosure(context:WorkContext):void {if(this.privateWork(context))this.privateDisclosure(context);}
   private readonly closures=new Map<string,{controller:AbortController;refs:number}>();
   private readonly completedHopParents=new Set<string>();
   private readonly readReceipts=new Map<string,{work:string;value:Json}>();
@@ -126,7 +131,7 @@ export class WorkActionService {
   }
   offers(context:WorkContext,route:'direct'|'guest'):ToolDefinition[] {
     if ((route==='direct' && context.mode==='code') || (route==='guest' && context.mode==='direct')) return [];
-    return [...this.capabilities.values()].filter(cap=>!cap.internal && !(route==='guest' && cap.directOnly) && cap.eligible(context)).map(cap=>structuredClone(cap.definition));
+    return [...this.capabilities.values()].filter(cap=>!cap.internal && !(route==='guest' && cap.directOnly) && (!this.privateWork(context) || ['gmail_search','gmail_read'].includes(cap.name)) && cap.eligible(context)).map(cap=>structuredClone(cap.definition));
   }
   recognizes(name:string):boolean {const cap=this.capabilities.get(name);return !!cap && !cap.internal;}
   private digest(value:string):string {return createHmac('sha256',this.key).update(value).digest('hex');}
@@ -224,6 +229,8 @@ export class WorkActionService {
   }
   private async dispatch(context:WorkContext,request:{source:InvocationSource|InternalInvocationSource;name:string;input:unknown;intent:ActionIntent}):Promise<InvocationResult> {
     this.admit(context);
+    if(this.privateWork(context) && !['gmail_search','gmail_read'].includes(request.name)) return {kind:'blocked',reason:'Capability unavailable after private Gmail data was read'};
+    this.assertPrivateDisclosure(context);
     const route=request.source.kind==='provider'?'direct':request.source.kind==='guest'?'guest':'internal';
     const cap=this.capabilities.get(request.name);
     if (!cap || (route==='internal' ? !cap.internal : cap.internal) || (route==='direct' && context.mode==='code') || (route==='guest' && (context.mode==='direct' || cap.directOnly))) throw Error('Capability is not offered for this work');
@@ -340,6 +347,8 @@ export class WorkActions {
   dispose() {if(!this.disposed){this.disposed=true;this.release();}}
   offers(route:'direct'|'guest') {return this.service.offers(this.context,route);}
   recognizes(name:string) {return this.service.recognizes(name);}
+  isPrivate() {return this.service.isPrivate(this.context);}
+  assertPrivateDisclosure() {this.service.assertPrivateDisclosure(this.context);}
   isSkillExecution(id:string,callId:string) {return this.service.isSkillExecution(id,callId);}
   invoke(request:{source:InvocationSource;name:string;input:unknown;intent:ActionIntent}) {return this.service.invoke(this.context,request);}
   beginRecovery() {return this.service.beginRecovery(this.context);}
