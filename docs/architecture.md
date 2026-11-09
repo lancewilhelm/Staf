@@ -474,8 +474,9 @@ so all message-added records are exposed as candidates with unknown membership.
 The monitor does not send mail to a model. Separate per-agent permission binds
 chat read/search to an explicitly approved provider and model, with current
 connection revision and access rechecked at dispatch and result release. Gmail
-turns are excluded from subsequent model replay and captured task context; other
-tools are fenced for the rest of that turn. The owner's general sensitive-email
+tool results and generated replies are excluded from subsequent model replay and
+captured task context; the owner's request remains. Other tools are fenced for
+the rest of that turn. The owner's general sensitive-email
 and model-provider policy remains unresolved. Synthetic Google HTTP, model and
 browser fixtures cover these paths; real Google behavior remains unverified.
 

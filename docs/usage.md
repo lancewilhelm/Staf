@@ -851,8 +851,9 @@ Gmail actions are unavailable in Code Mode,
 background tasks and Slack-originated chat. After a Gmail result in a turn,
 other tools are unavailable for the rest of that turn. The owner's visible chat
 and activity can contain the email and should be protected like the mailbox.
-The private Gmail turn is omitted from later model replay and from captured task
-context; an agent must search again to use it in a later turn. This cannot recall
+Gmail tool results and generated replies from that turn are omitted from later
+model replay and captured task context; the owner's original request remains.
+An agent must search again to use the mail in a later turn. This cannot recall
 content already sent to the explicitly allowed provider.
 
 Disable retains credentials, agent access and model disclosure settings.
