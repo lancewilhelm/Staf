@@ -581,6 +581,39 @@ returned. Slack-originated model turns can use the service-owned `start_slack_ta
 and `manage_slack_task` capabilities; thread and owner message identity are
 captured by the service, not supplied as tool arguments. See [Slack setup](usage.md#slack-plugin) for limits and recovery.
 
+Gmail uses `POST /api/plugins/gmail/start` with `email`, `clientId`, and
+`clientSecret`; it returns an authorization URL, not a credential. Google
+returns to the loopback `/gmail/oauth/callback` with the one-time state and code.
+The paired owner can call `check`, `enable`, `disable`, `disconnect`, `poll`, or
+`delete-config` with an empty object, and `access` with `botId` and `enabled`.
+`model-access` takes `botId`, `provider`, `model`, and `enabled`; enabling it
+requires an exact match to the current agent profile and existing agent access.
+`work-model-access` takes the same fields and requires the existing model grant;
+it separately permits tasks and Slack-originated work for that exact agent and
+model. Setting or revoking the model grant clears the task and Slack grant.
+`read` takes a `messageId` for owner inspection. `rebaseline` requires
+`{"confirm":true}` and retains a record of the unknown interval.
+The Gmail entry in `GET /api/plugins` includes the account, connection state,
+agent access IDs, model access, task and Slack model access, monitoring state, recent candidate IDs and gaps;
+it never returns the client secret or refresh token. Older candidates are paged
+through `GET /api/plugins/gmail/arrivals?before=CURSOR` using `nextBefore`.
+There is one Gmail account in this implementation. The shared database keys
+connections and access by plugin and account. The local credential file is
+separate from SQLite. `gmail_search` and `gmail_read` are journaled read actions
+for explicitly permitted chat and task work in all three tool modes. A paired
+`POST /api/tasks` may include `gmailQuery`, a nonempty query of at most 500
+characters. The captured account, revision and exact query scope the attempt;
+only message IDs returned by that attempt's searches can be read. The scope is
+not inherited by retries, scheduled tasks, or helpers. `work gmail: QUERY` in an
+authorized Slack DM creates a task with that exact scope. Gmail-derived Slack
+responses are replaced with a generic instruction to inspect Staf.
+Schema 44 adds Gmail history, disclosure and private-turn records while also
+ensuring sensitive-memory schema is present. Both independent schema 43
+predecessors upgrade without replacing their existing records. See
+[Gmail setup](usage.md#gmail-plugin) for OAuth requirements and limitations.
+Schema 45 adds task Gmail scopes, scoped message IDs, private-task markers, and
+the separately approved task and Slack model permission.
+
 ## Native home-network gateway
 
 The optional native gateway uses `STAF_LAN_ADDRESS` (a specific private IPv4), `STAF_LAN_PORT` (1024–65535, default 3443), and absolute `STAF_LAN_KEY` and `STAF_LAN_CERT` paths in its systemd environment file. It serves HTTPS and forwards to the unchanged loopback service. See [installation and recovery](native-linux-installation.md#enable-home-network-https-access) for certificate trust, pairing and limits. The standard CLI remains loopback-only.

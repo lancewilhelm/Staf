@@ -28,6 +28,7 @@ export type AuthorityClaim = {start():void;release():void};
 export type Capability<I,O> = {
   name:string;
   internal?:boolean;
+  directOnly?:boolean;
   definition:ToolDefinition;
   parseInput(input:unknown):I;
   parseResult(output:unknown):O;
@@ -68,7 +69,7 @@ function sourceKey(source:InvocationSource|InternalInvocationSource):string {
 }
 
 type ErasedCapability = {
-  name:string;internal:boolean;definition:ToolDefinition;eligible(work:WorkContext):boolean;maxResultBytes:number;
+  name:string;internal:boolean;directOnly:boolean;definition:ToolDefinition;eligible(work:WorkContext):boolean;maxResultBytes:number;
   parse(input:unknown):Json;describe(input:Json,work:WorkContext):Description;
   check(input:Json,work:WorkContext,action?:ActionIdentity):void;authorize(input:Json,work:WorkContext,action:ActionIdentity):Promise<void|AuthorityClaim>;
   execute(input:Json,work:WorkContext,action:ActionIdentity):Promise<Json>;visible(output:Json):string;releaseResult?(output:Json,work:WorkContext):void;
@@ -86,8 +87,13 @@ export class WorkActionService {
   private readonly journal:ActionJournal;
   private workCheck:(work:WorkRef)=>void=()=>{};
   private availability:(name:string)=>boolean=()=>true;
+  private privateWork:(work:WorkContext)=>boolean=()=>false;
+  private privateDisclosure:(work:WorkContext)=>void=()=>{};
   setAvailability(check:(name:string)=>boolean):void {this.availability=check;}
   setWorkCheck(check:(work:WorkRef)=>void):void {this.workCheck=check;}
+  setPrivateWork(check:(work:WorkContext)=>boolean,disclosure:(work:WorkContext)=>void):void {this.privateWork=check;this.privateDisclosure=disclosure;}
+  isPrivate(context:WorkContext):boolean {return this.privateWork(context);}
+  assertPrivateDisclosure(context:WorkContext):void {if(this.privateWork(context))this.privateDisclosure(context);}
   private readonly closures=new Map<string,{controller:AbortController;refs:number}>();
   private readonly completedHopParents=new Set<string>();
   private readonly readReceipts=new Map<string,{work:string;value:Json}>();
@@ -101,7 +107,7 @@ export class WorkActionService {
     if (!capability.name || capability.name==='code_mode' || this.capabilities.has(capability.name) || capability.definition.function.name!==capability.name) throw Error('Invalid or duplicate capability');
     const parse=(input:unknown)=>capability.parseInput(input);
     this.capabilities.set(capability.name,{
-      name:capability.name,internal:capability.internal===true,definition:structuredClone(capability.definition),eligible:work=>this.availability(capability.name) && capability.eligible(work),maxResultBytes:capability.maxResultBytes ?? 256*1024,
+      name:capability.name,internal:capability.internal===true,directOnly:capability.directOnly===true,definition:structuredClone(capability.definition),eligible:work=>this.availability(capability.name) && capability.eligible(work),maxResultBytes:capability.maxResultBytes ?? 256*1024,
       parse:input=>jsonValue.parse(parse(input)),
       describe:(input,work)=>capability.describe(parse(input),work),
       check:(input,work,action)=>{const parsed=parse(input);if(this.deferred(work.work))throw new ActionDeferred('Owner input is pending');try{if(!this.availability(capability.name))throw Error('Tool is disabled');capability.check(parsed,work,action);}catch(error){if(!(error instanceof ActionDeferred))this.close(work,'authority');throw error;}},
@@ -125,7 +131,7 @@ export class WorkActionService {
   }
   offers(context:WorkContext,route:'direct'|'guest'):ToolDefinition[] {
     if ((route==='direct' && context.mode==='code') || (route==='guest' && context.mode==='direct')) return [];
-    return [...this.capabilities.values()].filter(cap=>!cap.internal && cap.eligible(context)).map(cap=>structuredClone(cap.definition));
+    return [...this.capabilities.values()].filter(cap=>!cap.internal && !(route==='guest' && cap.directOnly) && (!this.privateWork(context) || ['gmail_search','gmail_read'].includes(cap.name)) && cap.eligible(context)).map(cap=>structuredClone(cap.definition));
   }
   recognizes(name:string):boolean {const cap=this.capabilities.get(name);return !!cap && !cap.internal;}
   private digest(value:string):string {return createHmac('sha256',this.key).update(value).digest('hex');}
@@ -223,9 +229,11 @@ export class WorkActionService {
   }
   private async dispatch(context:WorkContext,request:{source:InvocationSource|InternalInvocationSource;name:string;input:unknown;intent:ActionIntent}):Promise<InvocationResult> {
     this.admit(context);
+    if(this.privateWork(context) && !['gmail_search','gmail_read'].includes(request.name)) return {kind:'blocked',reason:'Capability unavailable after private Gmail data was read'};
+    this.assertPrivateDisclosure(context);
     const route=request.source.kind==='provider'?'direct':request.source.kind==='guest'?'guest':'internal';
     const cap=this.capabilities.get(request.name);
-    if (!cap || (route==='internal' ? !cap.internal : cap.internal) || (route==='direct' && context.mode==='code') || (route==='guest' && context.mode==='direct')) throw Error('Capability is not offered for this work');
+    if (!cap || (route==='internal' ? !cap.internal : cap.internal) || (route==='direct' && context.mode==='code') || (route==='guest' && (context.mode==='direct' || cap.directOnly))) throw Error('Capability is not offered for this work');
     if(!cap.eligible(context)) {this.close(context,'authority');throw Error('Capability is no longer authorized');}
     const source=sourceKey(request.source),rawInput=jsonValue.parse(request.input),raw=encoded(rawInput);
     if(Buffer.byteLength(source)>2048 || Buffer.byteLength(raw)>256*1024)throw Error('Invocation input exceeds the limit');
@@ -339,6 +347,8 @@ export class WorkActions {
   dispose() {if(!this.disposed){this.disposed=true;this.release();}}
   offers(route:'direct'|'guest') {return this.service.offers(this.context,route);}
   recognizes(name:string) {return this.service.recognizes(name);}
+  isPrivate() {return this.service.isPrivate(this.context);}
+  assertPrivateDisclosure() {this.service.assertPrivateDisclosure(this.context);}
   isSkillExecution(id:string,callId:string) {return this.service.isSkillExecution(id,callId);}
   invoke(request:{source:InvocationSource;name:string;input:unknown;intent:ActionIntent}) {return this.service.invoke(this.context,request);}
   beginRecovery() {return this.service.beginRecovery(this.context);}

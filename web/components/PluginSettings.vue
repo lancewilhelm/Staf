@@ -3,6 +3,7 @@ import {onMounted, ref} from 'vue';
 import {useWorkspace} from '../workspace';
 import ConfirmAction from './ConfirmAction.vue';
 import DisclosureSummary from './DisclosureSummary.vue';
+import GmailSettings from './GmailSettings.vue';
 
 const {app,state}=useWorkspace();
 type Plugin=Awaited<ReturnType<typeof app.plugins>>[number];
@@ -22,7 +23,7 @@ function connect(){void action('connect',{...form.value});}
  <section class="settings-section" aria-label="Plugins">
   <h2 class="section-title">Plugins</h2>
   <p class="section-help">Connections belong to this instance. Agent access is controlled separately.</p>
-  <div v-for="plugin in plugins" :key="plugin.id" class="provider provider-settings provider-card">
+  <div v-for="plugin in plugins.filter(item=>item.id==='slack')" :key="plugin.id" class="provider provider-settings provider-card">
    <div class="provider-title"><h3>{{ plugin.name }}</h3><span class="badge">{{ plugin.enabled ? plugin.status : plugin.connected ? 'Disabled' : 'Not connected' }}</span></div>
    <p>{{ plugin.description }}</p>
    <p v-if="plugin.config">Workspace {{ plugin.config.teamId }} · User {{ plugin.config.userId }} · DM {{ plugin.config.channelId }}</p>
@@ -49,6 +50,7 @@ function connect(){void action('connect',{...form.value});}
    <details v-if="plugin.events.length" class="saved-settings"><DisclosureSummary>Recent message outcomes</DisclosureSummary><ul><li v-for="event in plugin.events" :key="event.commandId">{{ event.state }}<span v-if="event.detail">: {{ event.detail }}</span> <span class="meta">({{ event.commandId }})</span></li></ul></details>
    <details v-if="plugin.deliveries.length" class="saved-settings"><DisclosureSummary>Recent task deliveries</DisclosureSummary><p>Sent means Slack accepted the message, not that it was read. Uncertain sends are not retried automatically.</p><ul><li v-for="delivery in plugin.deliveries" :key="delivery.id">{{ delivery.state }} <span class="meta">({{ delivery.id }})</span></li></ul></details>
   </div>
+  <GmailSettings />
   <p role="status">{{ busy ? 'Updating plugin…' : status }}</p>
   <ConfirmAction v-if="confirm" :title="confirm === 'disconnect' ? 'Disconnect Slack?' : 'Delete Slack configuration?'" :message="confirm === 'disconnect' ? 'This stops Slack and removes its saved tokens. The binding and history remain.' : 'This stops Slack, removes its tokens and saved binding. Message history remains.'" :action="confirm === 'disconnect' ? 'Disconnect' : 'Delete configuration'" @cancel="confirm=null" @confirm="action(confirm)" />
  </section>

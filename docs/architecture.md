@@ -459,8 +459,34 @@ send. Disable pauses delivery but does not cancel accepted background tasks.
 A restart interrupts unfinished tasks rather than replaying their effects.
 Tokens live separately in the host credential directory. A reconnecting socket
 can miss events during an outage; this slice has no Slack history backfill.
-These paths are exercised with controlled providers, not live Slack. Gmail is a
-future bundled integration and is not implemented by this interface.
+These paths are exercised with controlled providers, not live Slack.
+
+Gmail uses the same account-keyed connection and agent-access tables. A paired
+client starts an in-memory desktop OAuth attempt with PKCE and a loopback
+callback; the service exchanges the code, verifies the Gmail profile identity,
+and saves the client secret and refresh token in a separate host credential file.
+The service fences an in-flight exchange against cancellation, expiry, client
+revocation and connection revision changes. The connection-time history ID and
+candidate message IDs are stored in SQLite; complete pages and the next cursor
+commit atomically. A 404 retains an uncertain gap until the owner explicitly
+rebaselines. Gmail's current labels do not establish historical inbox membership,
+so all message-added records are exposed as candidates with unknown membership.
+The monitor does not send mail to a model. Separate per-agent permission binds
+read/search to an explicitly approved provider and model, with current
+connection revision and access rechecked at dispatch and result release. A separate
+owner grant is required for tasks and Slack-originated work, so existing chat-only
+approvals do not expand. Paired
+tasks capture an exact Gmail query and the account revision at acceptance; they
+can read only IDs returned for that attempt. A Slack task can capture the query
+through an explicit command. Private work is marked before results are released,
+and the work-action service rejects other capabilities after that point, even
+when guest calls were queued earlier. Slack receives generic notifications for
+private Gmail work. Gmail
+tool results and generated replies are excluded from subsequent model replay and
+captured task context; the owner's request remains. Other tools are fenced for
+the rest of that turn. The owner's general sensitive-email
+and model-provider policy remains unresolved. Synthetic Google HTTP, model and
+browser fixtures cover these paths; real Google behavior remains unverified.
 
 ## Native home-network transport
 

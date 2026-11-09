@@ -16,9 +16,15 @@ export const bundledPlugins: readonly PluginDefinition[] = [{
   id:'slack', name:'Slack', description:'Chat with an agent in an approved Slack direct message.',
   configuration:[{name:'appToken',secret:true,description:'Socket Mode app token'}, {name:'botToken',secret:true,description:'Bot user token'}, {name:'teamId',secret:false,description:'Workspace ID'}, {name:'userId',secret:false,description:'Approved user ID'}, {name:'channelId',secret:false,description:'Direct message channel ID'}, {name:'botId',secret:false,description:'Staf agent ID'}],
   lifecycle:['connect','enable','disable','disconnect','delete-config'],tools:[],events:['direct_message'],accountIdentity:'Slack workspace ID',
+},{
+  id:'gmail',name:'Gmail',description:'Search Gmail and inspect new message candidates.',
+  configuration:[{name:'email',secret:false,description:'Google account email'},{name:'clientId',secret:false,description:'Google desktop OAuth client ID'},{name:'clientSecret',secret:true,description:'Google desktop OAuth client secret'}],
+  lifecycle:['connect','enable','disable','disconnect','delete-config'],tools:['gmail_search','gmail_read'],events:['message_candidate'],accountIdentity:'Gmail address',
 }];
 export const slackConfigSchema=z.strictObject({teamId:z.string().regex(/^T[A-Z0-9]+$/),userId:z.string().regex(/^U[A-Z0-9]+$/),channelId:z.string().regex(/^D[A-Z0-9]+$/),botId:z.string().regex(/^[\w-]+$/)});
 export type SlackConfig=z.infer<typeof slackConfigSchema>;
+export const gmailConfigSchema=z.strictObject({email:z.email().max(320),clientId:z.string().min(1).max(500)});
+export type GmailConfig=z.infer<typeof gmailConfigSchema>;
 export const pluginSchema=`
 CREATE TABLE IF NOT EXISTS plugin_connections (plugin_id TEXT NOT NULL, account_id TEXT NOT NULL, config TEXT NOT NULL, connected INTEGER NOT NULL, enabled INTEGER NOT NULL, revision INTEGER NOT NULL, PRIMARY KEY(plugin_id,account_id));
 CREATE TABLE IF NOT EXISTS plugin_agent_access (plugin_id TEXT NOT NULL, account_id TEXT NOT NULL, bot_id TEXT NOT NULL REFERENCES bots(id), enabled INTEGER NOT NULL, PRIMARY KEY(plugin_id,account_id,bot_id));
@@ -58,13 +64,42 @@ export class PluginStore {
  isPluginCommand(commandId:string) {return !!this.db.prepare('SELECT 1 FROM plugin_events WHERE command_id=?').get(commandId);}
  state(commandId:string,state:'sending'|'sent'|'failed'|'uncertain'|'interrupted'|'task',detail:string|null=null) {this.db.prepare('UPDATE plugin_events SET state=?,detail=? WHERE command_id=?').run(state,detail,commandId);}
  events() {return this.db.prepare("SELECT event_id AS eventId,command_id AS commandId,state,detail FROM plugin_events WHERE plugin_id='slack' ORDER BY rowid DESC LIMIT 30").all();}
+ gmailConnection() {
+  const row=this.db.prepare("SELECT account_id,config,connected,enabled,revision FROM plugin_connections WHERE plugin_id='gmail' LIMIT 1").get();
+  if(!row)return null;
+  const config=gmailConfigSchema.parse(JSON.parse(String(row.config)));
+  const agentAccessIds=this.db.prepare("SELECT bot_id FROM plugin_agent_access WHERE plugin_id='gmail' AND account_id=? AND enabled=1 ORDER BY bot_id").all(String(row.account_id)).map(item=>String(item.bot_id));
+  return {accountId:String(row.account_id),config,connected:row.connected===1,enabled:row.enabled===1,revision:Number(row.revision),agentAccessIds};
+ }
+ gmailConnect(config:GmailConfig,historyId:string) {
+  const existing=this.gmailConnection();if(existing && existing.accountId!==config.email)throw Error('Delete the existing Gmail configuration before changing accounts');
+  if(!/^\d+$/.test(historyId))throw Error('Invalid Gmail history ID');this.db.exec('BEGIN IMMEDIATE');
+  try {
+   const baseline=this.db.prepare('SELECT 1 FROM gmail_history WHERE account_id=?').get(config.email);
+   if(existing && !baseline)this.db.prepare('INSERT INTO gmail_history_gaps VALUES (?,NULL,?,?,?)').run(config.email,historyId,'Monitoring began after the account was connected',Date.now());
+   this.db.prepare("INSERT OR IGNORE INTO gmail_history VALUES (?,?,'ready',NULL)").run(config.email,historyId);
+   this.db.prepare("INSERT INTO plugin_connections VALUES ('gmail',?,?,1,0,1) ON CONFLICT(plugin_id,account_id) DO UPDATE SET config=excluded.config,connected=1,enabled=0,revision=plugin_connections.revision+1").run(config.email,JSON.stringify(config));
+   this.db.exec('COMMIT');
+  }catch(error){this.db.exec('ROLLBACK');throw error;}
+  return this.gmailConnection();
+ }
+ gmailSetEnabled(enabled:boolean) {const c=this.gmailConnection();if(!c || (enabled && !c.connected))throw Error('Connect Gmail first');this.db.prepare("UPDATE plugin_connections SET enabled=?,revision=revision+1 WHERE plugin_id='gmail' AND account_id=?").run(enabled?1:0,c.accountId);return this.gmailConnection();}
+ gmailSetAccess(botId:string,enabled:boolean) {const c=this.gmailConnection();if(!c)throw Error('Configure Gmail first');if(!this.db.prepare('SELECT 1 FROM bots WHERE id=?').get(botId))throw Error('Agent not found');this.db.prepare("INSERT INTO plugin_agent_access VALUES ('gmail',?,?,?) ON CONFLICT(plugin_id,account_id,bot_id) DO UPDATE SET enabled=excluded.enabled").run(c.accountId,botId,enabled?1:0);this.db.prepare("UPDATE plugin_connections SET revision=revision+1 WHERE plugin_id='gmail' AND account_id=?").run(c.accountId);return this.gmailConnection();}
+ gmailModelAccess() {const c=this.gmailConnection();if(!c)return [];return this.db.prepare('SELECT bot_id AS botId,provider,model FROM gmail_model_access WHERE account_id=? ORDER BY bot_id').all(c.accountId);}
+ gmailModelAllowed(accountId:string,botId:string,provider:string,model:string) {return !!this.db.prepare('SELECT 1 FROM gmail_model_access WHERE account_id=? AND bot_id=? AND provider=? AND model=?').get(accountId,botId,provider,model);}
+ gmailWorkModelAccess() {const c=this.gmailConnection();if(!c)return [];return this.db.prepare('SELECT bot_id AS botId,provider,model FROM gmail_work_model_access WHERE account_id=? ORDER BY bot_id').all(c.accountId);}
+ gmailWorkModelAllowed(accountId:string,botId:string,provider:string,model:string) {return !!this.db.prepare('SELECT 1 FROM gmail_work_model_access WHERE account_id=? AND bot_id=? AND provider=? AND model=?').get(accountId,botId,provider,model);}
+ gmailSetWorkModelAccess(botId:string,provider:string,model:string,enabled:boolean) {const c=this.gmailConnection();if(!c)throw Error('Configure Gmail first');if(enabled)this.db.prepare('INSERT INTO gmail_work_model_access VALUES (?,?,?,?) ON CONFLICT(account_id,bot_id) DO UPDATE SET provider=excluded.provider,model=excluded.model').run(c.accountId,botId,provider,model);else this.db.prepare('DELETE FROM gmail_work_model_access WHERE account_id=? AND bot_id=?').run(c.accountId,botId);this.db.prepare("UPDATE plugin_connections SET revision=revision+1 WHERE plugin_id='gmail' AND account_id=?").run(c.accountId);}
+ gmailSetModelAccess(botId:string,provider:string,model:string,enabled:boolean) {const c=this.gmailConnection();if(!c)throw Error('Configure Gmail first');this.db.prepare('DELETE FROM gmail_work_model_access WHERE account_id=? AND bot_id=?').run(c.accountId,botId);if(enabled)this.db.prepare('INSERT INTO gmail_model_access VALUES (?,?,?,?) ON CONFLICT(account_id,bot_id) DO UPDATE SET provider=excluded.provider,model=excluded.model').run(c.accountId,botId,provider,model);else this.db.prepare('DELETE FROM gmail_model_access WHERE account_id=? AND bot_id=?').run(c.accountId,botId);this.db.prepare("UPDATE plugin_connections SET revision=revision+1 WHERE plugin_id='gmail' AND account_id=?").run(c.accountId);}
+ gmailDisconnect() {const c=this.gmailConnection();if(c)this.db.prepare("UPDATE plugin_connections SET connected=0,enabled=0,revision=revision+1 WHERE plugin_id='gmail' AND account_id=?").run(c.accountId);return this.gmailConnection();}
+ gmailDeleteConfig() {const c=this.gmailConnection();if(c){this.db.prepare('DELETE FROM gmail_work_model_access WHERE account_id=?').run(c.accountId);this.db.prepare('DELETE FROM gmail_model_access WHERE account_id=?').run(c.accountId);this.db.prepare("DELETE FROM plugin_agent_access WHERE plugin_id='gmail' AND account_id=?").run(c.accountId);this.db.prepare("DELETE FROM plugin_connections WHERE plugin_id='gmail' AND account_id=?").run(c.accountId);}return null;}
  work() {return this.db.prepare("SELECT w.* FROM slack_work w JOIN task_attempts a ON a.id=w.attempt_id WHERE a.state IN ('queued','running','stopping','waiting') OR NOT EXISTS (SELECT 1 FROM slack_deliveries d WHERE d.id=w.attempt_id||':outcome') ORDER BY w.rowid").all();}
  workBinding(id:string) {return this.db.prepare('SELECT * FROM slack_work WHERE attempt_id=?').get(id);}
  threadWork(config:SlackConfig,threadTs:string) {return this.db.prepare('SELECT attempt_id FROM slack_work WHERE team_id=? AND user_id=? AND channel_id=? AND bot_id=? AND thread_ts=? ORDER BY rowid').all(config.teamId,config.userId,config.channelId,config.botId,threadTs).map(row=>String(row.attempt_id));}
  deliveries() {return this.db.prepare("SELECT attemptId,id,state FROM (SELECT attempt_id AS attemptId,id,state,rowid AS ordering FROM slack_deliveries UNION ALL SELECT NULL AS attemptId,id,state,rowid AS ordering FROM slack_notices) ORDER BY ordering DESC LIMIT 30").all();}
  queueNotice(input:{id:string;config:SlackConfig;threadTs?:string;text:string}) {this.db.prepare("INSERT OR IGNORE INTO slack_notices VALUES (?,?,?,?,?,?,?,'pending',0)").run(input.id,input.config.teamId,input.config.userId,input.config.channelId,input.threadTs ?? null,input.config.botId,input.text);}
  queueWork(id:string,key:string,text:string) {this.db.prepare("INSERT OR IGNORE INTO slack_deliveries (id,attempt_id,text,state) VALUES (?,?,?,'pending')").run(key,id,text);}
- pendingWork(now:number) {return this.db.prepare(`SELECT 'work' AS kind,d.id,d.text,w.team_id,w.user_id,w.channel_id,w.thread_ts,w.bot_id FROM slack_deliveries d JOIN slack_work w ON w.attempt_id=d.attempt_id WHERE d.state='pending' AND d.retry_at<=? AND NOT EXISTS (SELECT 1 FROM slack_deliveries prior WHERE prior.attempt_id=d.attempt_id AND prior.state IN ('pending','sending') AND prior.rowid<d.rowid) UNION ALL SELECT 'notice' AS kind,id,text,team_id,user_id,channel_id,thread_ts,bot_id FROM slack_notices WHERE state='pending' AND retry_at<=? LIMIT 20`).all(now,now);}
+ pendingWork(now:number) {return this.db.prepare(`SELECT 'work' AS kind,d.id,d.text,d.attempt_id,w.team_id,w.user_id,w.channel_id,w.thread_ts,w.bot_id FROM slack_deliveries d JOIN slack_work w ON w.attempt_id=d.attempt_id WHERE d.state='pending' AND d.retry_at<=? AND NOT EXISTS (SELECT 1 FROM slack_deliveries prior WHERE prior.attempt_id=d.attempt_id AND prior.state IN ('pending','sending') AND prior.rowid<d.rowid) UNION ALL SELECT 'notice' AS kind,id,text,NULL AS attempt_id,team_id,user_id,channel_id,thread_ts,bot_id FROM slack_notices WHERE state='pending' AND retry_at<=? LIMIT 20`).all(now,now);}
  beginWorkDelivery(id:string,kind:'work'|'notice') {const table=kind==='work'?'slack_deliveries':'slack_notices';return this.db.prepare(`UPDATE ${table} SET state='sending' WHERE id=? AND state='pending'`).run(id).changes===1;}
  finishWorkDelivery(id:string,kind:'work'|'notice',state:'sent'|'uncertain'|'pending',retryAt=0) {const table=kind==='work'?'slack_deliveries':'slack_notices';this.db.prepare(`UPDATE ${table} SET state=?,retry_at=? WHERE id=? AND state='sending'`).run(state,retryAt,id);}
 }

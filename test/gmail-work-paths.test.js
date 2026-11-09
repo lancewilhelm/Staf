@@ -1,0 +1,81 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {mkdtempSync,rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {DatabaseSync} from 'node:sqlite';
+import {createHash} from 'node:crypto';
+import {startInstance} from '../dist/instance-service.js';
+
+const until=async fn=>{for(let i=0;i<600;i++){const value=await fn();if(value)return value;await new Promise(resolve=>setTimeout(resolve,10));}throw Error('Timed out');};
+
+test('Gmail follows work identity, scoped task and Slack boundaries across tool modes',async()=>{
+ const dir=mkdtempSync(join(tmpdir(),'staf-gmail-work-')),path=join(dir,'db'),seen=[],posts=[],requests=[];let receive;
+ const gmailRequest=async url=>{const u=new URL(url);if(u.hostname==='oauth2.googleapis.com')return Response.json({access_token:'access',refresh_token:'refresh',scope:'https://www.googleapis.com/auth/gmail.readonly',token_type:'Bearer'});if(u.pathname.endsWith('/profile'))return Response.json({emailAddress:'owner@example.test',historyId:'10'});requests.push(u.toString());if(u.pathname.endsWith('/messages'))return Response.json({messages:[{id:'m1'}]});if(u.pathname.endsWith('/messages/m1'))return Response.json({id:'m1',payload:{mimeType:'text/plain',body:{data:Buffer.from('SYNTHETIC PRIVATE MAIL').toString('base64url')}}});throw Error('Unexpected Gmail request');};
+ const slackTransport={identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async(_tokens,handler)=>{receive=handler;return ()=>{receive=undefined;}},post:async(_tokens,message)=>{posts.push(message);}};
+ const providerFactory=async profile=>({name:'fixture',capabilities:{toolCalls:true,incrementalText:false},async complete(messages,tools,options){
+  const input=options.currentUserInput;seen.push({input,mode:profile.toolMode,messages:structuredClone(messages),tools:structuredClone(tools)});
+  const after=messages.slice(messages.findLastIndex(m=>m.role==='user')+1),results=after.filter(m=>m.role==='tool');
+  if(input==='Unrelated'||input==='No extended grant')return {role:'assistant',content:'Other work'};
+  if(input==='Wrong scope')return results.length?{role:'assistant',content:'Unexpected result'}:{role:'assistant',content:null,tool_calls:[{id:'bad',type:'function',function:{name:'gmail_read',arguments:'{"messageId":"m1"}'}}]};
+  if(results.length===1 && profile.toolMode==='direct')return {role:'assistant',content:null,tool_calls:[{id:'read',type:'function',function:{name:'gmail_read',arguments:'{"messageId":"m1"}'}}]};
+  if(results.length)return {role:'assistant',content:'Fixture summary SYNTHETIC PRIVATE MAIL'};
+  if(profile.toolMode==='direct')return {role:'assistant',content:null,tool_calls:[{id:'search',type:'function',function:{name:'gmail_search',arguments:'{"query":"in:inbox"}'}}]};
+  const source='const found = await capabilities.gmail_search({query:"in:inbox"}); const mail = await capabilities.gmail_read({messageId:found.value.messageIds[0]}); let blocked = false; try { await capabilities.memory_remember({scope:{kind:"agent"},text:mail.value.text,classification:"ordinary"}); } catch (_) { blocked = true; } return {mail:mail.value,blocked};';
+  return {role:'assistant',content:null,tool_calls:[{id:'guest',type:'function',function:{name:'code_mode',arguments:JSON.stringify({source})}}]};
+ }});
+ let app=startInstance(path,0,{env:{},gmailRequest,providerFactory,slackTransport,gmailPollIntervalMs:3600000}),port=await app.listen();
+ const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body===undefined?'GET':'POST',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body===undefined?{}:{'Content-Type':'application/json'})},...(body===undefined?{}:{body:JSON.stringify(body)})});return [r.status,await r.json()];};
+ const finished=async (route)=>until(async()=>{const result=(await call(route,token))[1];return !['pending','queued','running','stopping'].includes(result.state)&&result;});
+ let token;
+ try{
+  token=(await call('/api/pair','',{code:app.code}))[1].token;
+  const bots=[];for(const mode of ['direct','hybrid','code'])bots.push((await call('/api/bots',token,{name:`${mode} reader`,provider:'live',model:'fixture',toolMode:mode}))[1]);
+  const attempt=(await call('/api/plugins/gmail/start',token,{email:'owner@example.test',clientId:'synthetic.apps.googleusercontent.com',clientSecret:'synthetic-secret'}))[1],u=new URL(attempt.url),cb=new URL(u.searchParams.get('redirect_uri'));cb.searchParams.set('state',u.searchParams.get('state'));cb.searchParams.set('code','code');assert.equal((await fetch(cb)).status,200);
+  for(const bot of bots)await call('/api/plugins/gmail/access',token,{botId:bot.id,enabled:true});await call('/api/plugins/gmail/enable',token,{});for(const bot of bots)await call('/api/plugins/gmail/model-access',token,{botId:bot.id,provider:'live',model:'fixture',enabled:true});
+  await call('/api/plugins/slack/connect',token,{appToken:'xapp-synthetic',botToken:'xoxb-synthetic',teamId:'T123',userId:'U123',channelId:'D123',botId:bots[1].id});await call('/api/plugins/slack/access',token,{botId:bots[1].id,enabled:true});await call('/api/plugins/slack/enable',token,{});await until(()=>receive);
+  await receive({eventId:'EvNoGrant',teamId:'T123',userId:'U123',channelId:'D123',text:'No extended grant',threadTs:'1.0'});await until(()=>posts.some(p=>p.threadTs==='1.0'));assert.doesNotMatch(JSON.stringify(seen.find(x=>x.input==='No extended grant').tools),/gmail_search|gmail_read/);
+  for(const bot of bots)assert.equal((await call('/api/plugins/gmail/work-model-access',token,{botId:bot.id,provider:'live',model:'fixture',enabled:true}))[0],200);
+  for(const [i,bot] of bots.entries()){
+   await call('/api/commands',token,{id:`mode-${i}`,botId:bot.id,content:'Find email'});const work=await finished(`/api/commands/mode-${i}`);assert.equal(work.state,'completed');assert.ok(work.workActions.some(action=>action.summary==='Search Gmail'));
+   if(i>0){const replay=seen.find(x=>x.input==='Find email'&&x.mode===bot.toolMode&&x.messages.some(m=>m.role==='tool'));assert.match(JSON.stringify(replay.messages),/SYNTHETIC PRIVATE MAIL/);assert.match(JSON.stringify(replay.messages),/blocked/);assert.ok(replay.tools.every(t=>t.function.name==='code_mode'||t.function.name.startsWith('gmail_')));}
+  }
+  for(const [i,bot] of bots.entries()){await call('/api/tasks',token,{id:`scoped-${i}`,botId:bot.id,objective:'Scoped Gmail',gmailQuery:'in:inbox'});const task=await finished(`/api/tasks/scoped-${i}`);assert.equal(task.state,'completed');assert.match(task.outcome,/SYNTHETIC PRIVATE MAIL/);assert.ok(task.workActions.some(action=>action.summary==='Read Gmail message'));}
+  const bot=bots[1];
+  const before=requests.length;await call('/api/tasks',token,{id:'unscoped',botId:bot.id,objective:'Wrong scope'});const unscoped=await finished('/api/tasks/unscoped');assert.equal(unscoped.state,'completed');assert.equal(requests.length,before);assert.doesNotMatch(JSON.stringify(seen.filter(x=>x.input==='Wrong scope')),/SYNTHETIC PRIVATE MAIL/);
+  await call('/api/commands',token,{id:'other',botId:bot.id,content:'Unrelated'});await finished('/api/commands/other');assert.doesNotMatch(JSON.stringify(seen.findLast(x=>x.input==='Unrelated').messages),/SYNTHETIC PRIVATE MAIL/);
+  const beforeInvalid=requests.length;await receive({eventId:'EvInvalid',teamId:'T123',userId:'U123',channelId:'D123',text:'work gmail: ',threadTs:'1.1'});await until(()=>posts.some(p=>p.threadTs==='1.1'&&p.text.includes('No task was started')));assert.equal(requests.length,beforeInvalid);
+  await receive({eventId:'EvMail',teamId:'T123',userId:'U123',channelId:'D123',text:'Find email',threadTs:'1.2'});await until(()=>posts.some(p=>p.text.includes('Review the details in Staf')));assert.doesNotMatch(JSON.stringify(posts),/SYNTHETIC PRIVATE MAIL/);
+  await receive({eventId:'EvTaskMail',teamId:'T123',userId:'U123',channelId:'D123',text:'work gmail: in:inbox',threadTs:'1.3'});await until(()=>posts.some(p=>p.threadTs==='1.3'&&p.text.includes('Review details in Staf')));assert.doesNotMatch(JSON.stringify(posts),/SYNTHETIC PRIVATE MAIL/);
+  const slackTaskId='slack-'+createHash('sha256').update(JSON.stringify(['T123','EvTaskMail'])).digest('hex');const slackTask=await finished(`/api/tasks/${slackTaskId}`);assert.equal(slackTask.state,'completed');assert.ok(slackTask.workActions.some(action=>action.summary==='Read Gmail message'));
+  await app.close();const db=new DatabaseSync(path,{readOnly:true});try{assert.doesNotMatch(JSON.stringify(db.prepare('SELECT * FROM memories').all()),/SYNTHETIC PRIVATE MAIL/);}finally{db.close();}
+  app=startInstance(path,0,{env:{},gmailRequest,providerFactory,slackTransport,gmailPollIntervalMs:3600000});port=await app.listen();await until(()=>receive);const beforeDuplicate=requests.length;await receive({eventId:'EvTaskMail',teamId:'T123',userId:'U123',channelId:'D123',text:'work gmail: in:inbox',threadTs:'1.3'});assert.equal(requests.length,beforeDuplicate);assert.doesNotMatch(JSON.stringify(posts),/SYNTHETIC PRIVATE MAIL/);
+ }finally{await app.close();rmSync(dir,{recursive:true,force:true});}
+});
+
+test('task query and returned message IDs remain scoped, and revocation fences delayed results across restart',async()=>{
+ const dir=mkdtempSync(join(tmpdir(),'staf-gmail-task-revoke-')),path=join(dir,'db'),seen=[],requests=[];let started,release,delay=false;
+ const gate=new Promise(resolve=>{release=resolve}),waiting=new Promise(resolve=>{started=resolve});
+ const gmailRequest=async url=>{const u=new URL(url);if(u.hostname==='oauth2.googleapis.com')return Response.json({access_token:'access',refresh_token:'refresh',scope:'https://www.googleapis.com/auth/gmail.readonly',token_type:'Bearer'});if(u.pathname.endsWith('/profile'))return Response.json({emailAddress:'owner@example.test',historyId:'10'});requests.push(u.toString());if(u.pathname.endsWith('/messages')){if(delay){started();await gate;}return Response.json({messages:[{id:u.searchParams.get('q')==='in:other'?'other-id':'scoped-id'}]});}throw Error('No message read is allowed');};
+ const providerFactory=async()=>({name:'fixture',capabilities:{toolCalls:true,incrementalText:false},async complete(messages,_tools,options){seen.push({input:options.currentUserInput,messages:structuredClone(messages)});const after=messages.slice(messages.findLastIndex(m=>m.role==='user')+1),results=after.filter(m=>m.role==='tool');if(!results.length)return {role:'assistant',content:null,tool_calls:[{id:'search',type:'function',function:{name:'gmail_search',arguments:JSON.stringify({query:options.currentUserInput==='Mismatched query'?'wrong':options.currentUserInput==='Wrong message'?'in:other':'in:inbox'})}}]};if(options.currentUserInput==='Wrong message')return {role:'assistant',content:null,tool_calls:[{id:'read',type:'function',function:{name:'gmail_read',arguments:'{"messageId":"scoped-id"}'}}]};return {role:'assistant',content:'Finished'};}});
+ let app=startInstance(path,0,{env:{},gmailRequest,providerFactory,gmailPollIntervalMs:3600000}),port=await app.listen();
+ const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body===undefined?'GET':'POST',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body===undefined?{}:{'Content-Type':'application/json'})},...(body===undefined?{}:{body:JSON.stringify(body)})});return [r.status,await r.json()];};
+ let token;
+ const finished=async id=>until(async()=>{const result=(await call(`/api/tasks/${id}`,token))[1];return !['queued','running','stopping'].includes(result.state)&&result;});
+ try{
+  token=(await call('/api/pair','',{code:app.code}))[1].token;const bot=(await call('/api/bots',token,{name:'Task reader',provider:'live',model:'fixture',toolMode:'direct'}))[1];
+  const attempt=(await call('/api/plugins/gmail/start',token,{email:'owner@example.test',clientId:'synthetic.apps.googleusercontent.com',clientSecret:'secret'}))[1],u=new URL(attempt.url),cb=new URL(u.searchParams.get('redirect_uri'));cb.searchParams.set('state',u.searchParams.get('state'));cb.searchParams.set('code','code');assert.equal((await fetch(cb)).status,200);
+  await call('/api/plugins/gmail/access',token,{botId:bot.id,enabled:true});await call('/api/plugins/gmail/enable',token,{});
+  assert.notEqual((await call('/api/tasks',token,{id:'no-grant',botId:bot.id,objective:'No grant',gmailQuery:'in:inbox'}))[0],200);
+  await call('/api/plugins/gmail/model-access',token,{botId:bot.id,provider:'live',model:'fixture',enabled:true});
+  assert.notEqual((await call('/api/tasks',token,{id:'chat-grant-only',botId:bot.id,objective:'Chat grant only',gmailQuery:'in:inbox'}))[0],200);
+  assert.equal((await call('/api/plugins/gmail/work-model-access',token,{botId:bot.id,provider:'live',model:'fixture',enabled:true}))[0],200);
+  await call('/api/plugins/gmail/model-access',token,{botId:bot.id,provider:'live',model:'fixture',enabled:false});await call('/api/plugins/gmail/model-access',token,{botId:bot.id,provider:'live',model:'fixture',enabled:true});assert.notEqual((await call('/api/tasks',token,{id:'grant-cleared',botId:bot.id,objective:'Grant cleared',gmailQuery:'in:inbox'}))[0],200);await call('/api/plugins/gmail/work-model-access',token,{botId:bot.id,provider:'live',model:'fixture',enabled:true});
+  await call('/api/tasks',token,{id:'wrong-query',botId:bot.id,objective:'Mismatched query',gmailQuery:'in:inbox'});await finished('wrong-query');assert.equal(requests.length,0);
+  await call('/api/tasks',token,{id:'first-scope',botId:bot.id,objective:'First task',gmailQuery:'in:inbox'});assert.equal((await finished('first-scope')).state,'completed');
+  await call('/api/tasks',token,{id:'wrong-id',botId:bot.id,objective:'Wrong message',gmailQuery:'in:other'});await finished('wrong-id');assert.equal(requests.length,2);assert.ok(requests.every(x=>!x.endsWith('/messages/scoped-id?format=full')));
+  await call('/api/plugins/gmail/disable',token,{});assert.notEqual((await call('/api/tasks',token,{id:'disabled',botId:bot.id,objective:'Disabled',gmailQuery:'in:inbox'}))[0],200);await call('/api/plugins/gmail/enable',token,{});
+  delay=true;await call('/api/tasks',token,{id:'delayed',botId:bot.id,objective:'Delayed task',gmailQuery:'in:inbox'});await waiting;await call('/api/plugins/gmail/access',token,{botId:bot.id,enabled:false});release();const stopped=await finished('delayed');assert.notEqual(stopped.state,'completed');assert.doesNotMatch(JSON.stringify(seen.filter(x=>x.input==='Delayed task')),/scoped-id/);
+  await app.close();app=startInstance(path,0,{env:{},gmailRequest,providerFactory,gmailPollIntervalMs:3600000});port=await app.listen();assert.notEqual((await call('/api/tasks',token,{id:'after-restart',botId:bot.id,objective:'After restart',gmailQuery:'in:inbox'}))[0],200);assert.doesNotMatch(JSON.stringify(seen.filter(x=>x.input==='After restart')),/scoped-id/);
+ }finally{release();await app.close();rmSync(dir,{recursive:true,force:true});}
+});
