@@ -586,6 +586,12 @@ Gmail uses `POST /api/plugins/gmail/start` with `email`, `clientId`,
 returns an authorization URL, not a credential. Both options default to false
 and request their respective Google scopes when true. Google
 returns to the loopback `/gmail/oauth/callback` with the one-time state and code.
+
+`GET /api/plugins` includes the 30 latest Gmail history scan `runs`, with start
+and finish times and an outcome. Interrupted scans are marked on restart. These
+records cover history scans only; they do not establish agent processing or
+Slack delivery. When the separately enabled inbox assistant is active, continuing
+monitoring failures can trigger a deduplicated generic Slack notice.
 The paired owner can call `check`, `enable`, `disable`, `disconnect`, `poll`, or
 `delete-config` with an empty object, and `access` with `botId` and `enabled`.
 `model-access` takes `botId`, `provider`, `model`, and `enabled`; enabling it
@@ -595,6 +601,14 @@ it separately permits tasks and Slack-originated work for that exact agent and
 model. Setting or revoking the model grant clears the task and Slack grant.
 `read` takes a `messageId` for owner inspection. `rebaseline` requires
 `{"confirm":true}` and retains a record of the unknown interval.
+`POST /api/plugins/gmail/inbox-preferences` takes `preferences` with `enabled`,
+`attention`, `sensitiveTerms`, `digestMinutes` (1–1440), and `memoryContext`, the last observed `revision` (or `null` before setup), and `confirmModelAccess: true` with the `inboxTarget` identity, account and connection revisions as `target` when enabling (omit its display-only `name`). Opting into `memoryContext` additionally requires `confirmMemoryAccess: true` and enabled memory tools. Stale revisions and changed targets are rejected.
+It binds to the current Slack agent, Gmail account, model and connection
+revisions, and performs a baseline scan. Initial setup starts after recorded candidates; compatible edits preserve pending digests and the candidate checkpoint. Privacy changes under the same authority move pending digests to private clarification; authority changes make them stale. `inboxPreferences` and `inboxStatus`
+in the plugin status expose settings, recent item states and current failure.
+A message candidate is scoped to one service-owned task and its journaled Gmail
+read. Only the exact bound Slack thread can resolve its private clarification.
+Digest items and batches are durable. A send interrupted or with an unknown result is uncertain and is not retried. `POST /api/plugins/gmail/resolve-delivery` takes `kind` (`item` or `digest`), its `id`, `decision` (`sent`, `dismiss`, or `resend`), the exact `expectedText`, and `confirm: true`. Resending requires current monitoring authority and is an explicit owner action that may duplicate the original send. Clarifications without a confirmed thread cannot be marked sent.
 The Gmail entry in `GET /api/plugins` includes the account, connection state,
 agent access IDs, model access, task and Slack model access, `sendEnabled`,
 `modifyEnabled`, monitoring state, recent candidate IDs and gaps;
@@ -610,7 +624,7 @@ only message IDs returned by that attempt's searches can be read. The scope is
 not inherited by retries, scheduled tasks, or helpers. `work gmail: QUERY` in an
 authorized Slack DM creates a task with that exact scope. Gmail-derived Slack
 responses are generic, except for a proposal the approved user has chosen
-to reveal. `gmail_reply` requires the original message to be read in the same
+to reveal and the separately enabled inbox assistant’s scoped updates. `gmail_reply` requires the original message to be read in the same
 work, the Google send scope, an enabled Slack connection for the agent, a
 disclosure decision, and an exact approval. Slack revision requests invalidate
 the original proposal and return the owner's direction to the model. A new
@@ -630,8 +644,10 @@ ensuring sensitive-memory schema is present. Both independent schema 43
 predecessors upgrade without replacing their existing records. See
 [Gmail setup](usage.md#gmail-plugin) for OAuth requirements and limitations.
 Schema 45 adds task Gmail scopes, scoped message IDs, private-task markers, and
-the separately approved task and Slack model permission.
-Schema 46 adds exact Gmail reply proposals, Slack decisions, and send outcomes.
+the separately approved task and Slack model permission. Schema 46 had independent
+predecessors for history scans and Gmail action proposals; schema 49 merges both,
+retains inbox monitoring settings and decisions, and adds digest, feedback,
+memory opt-in, and uncertain-delivery recovery.
 
 ## Native home-network gateway
 

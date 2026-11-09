@@ -46,6 +46,8 @@ try {
  await until(()=>evaluate("[...document.querySelectorAll('[aria-label=\"Gmail plugin\"] fieldset label')].find(l=>l.innerText.includes('Gmail agent'))?.querySelector('input').checked && [...document.querySelectorAll('[aria-label=\"Gmail plugin\"] button')].some(b=>b.textContent.trim()==='Enable'&&!b.disabled)"),'agent access');
  await evaluate("[...document.querySelectorAll('[aria-label=\"Gmail plugin\"] button')].find(b=>b.textContent.trim()==='Enable').click()");
  await until(()=>evaluate("document.querySelector('[aria-label=\"Gmail plugin\"] .badge').textContent.trim()==='Enabled' && [...document.querySelectorAll('[aria-label=\"Gmail plugin\"] button')].some(b=>b.textContent.trim()==='Disable'&&!b.disabled)"),'enabled');
+ assert.equal(await evaluate("document.querySelector('[aria-label=\"Gmail plugin\"]').innerText.includes('Inbox assistant')"),true);
+ assert.equal(await evaluate("[...document.querySelectorAll('[aria-label=\"Gmail plugin\"] button')].find(b=>b.textContent.trim()==='Enable inbox monitoring').disabled"),true);
  await evaluate("[...document.querySelectorAll('[aria-label=\"Gmail plugin\"] button')].find(b=>b.textContent.trim()==='Check for new candidates').click()");
  await until(()=>evaluate("document.querySelector('[aria-label=\"Gmail arrivals\"]').innerText.includes('candidate-1')"),'candidate visible');
  assert.equal(await evaluate("document.querySelector('[aria-label=\"Gmail arrivals\"]').innerText.includes('inbox membership unknown')"),true);

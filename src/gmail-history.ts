@@ -1,6 +1,14 @@
 import type {DatabaseSync} from 'node:sqlite';
 import {z} from 'zod';
 
+export const gmailMonitorRunsSchema = `
+CREATE TABLE IF NOT EXISTS gmail_monitor_runs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, account_id TEXT NOT NULL,
+  started_at INTEGER NOT NULL, finished_at INTEGER,
+  outcome TEXT NOT NULL CHECK(outcome IN ('running','completed','failed','uncertain','interrupted'))
+);
+CREATE INDEX IF NOT EXISTS gmail_monitor_runs_account ON gmail_monitor_runs(account_id,id DESC);`;
+
 // The cursor and all arrivals from a complete history scan are committed together.
 export const gmailHistorySchema = `
 CREATE TABLE IF NOT EXISTS gmail_history (account_id TEXT PRIMARY KEY, cursor TEXT NOT NULL, state TEXT NOT NULL, detail TEXT);
@@ -8,7 +16,8 @@ CREATE TABLE IF NOT EXISTS gmail_arrivals (account_id TEXT NOT NULL, message_id 
 CREATE TABLE IF NOT EXISTS gmail_history_gaps (account_id TEXT NOT NULL, previous_cursor TEXT, new_cursor TEXT NOT NULL, reason TEXT NOT NULL, recorded_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS gmail_model_access (account_id TEXT NOT NULL, bot_id TEXT NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL, PRIMARY KEY(account_id,bot_id));
 CREATE TABLE IF NOT EXISTS gmail_private_commands (command_id TEXT PRIMARY KEY);
-CREATE TABLE IF NOT EXISTS gmail_private_messages (message_id TEXT PRIMARY KEY);`;
+CREATE TABLE IF NOT EXISTS gmail_private_messages (message_id TEXT PRIMARY KEY);
+${gmailMonitorRunsSchema}`;
 
 const profileSchema=z.object({emailAddress:z.email(),historyId:z.string().regex(/^\d+$/)});
 const pageSchema=z.object({historyId:z.string().regex(/^\d+$/),nextPageToken:z.string().min(1).optional(),messageIds:z.array(z.string().min(1).max(200)).max(10000)});
@@ -44,7 +53,8 @@ export class GmailHistory {
   snapshot(accountId:string) {
     const exists=this.db.prepare('SELECT 1 FROM gmail_history WHERE account_id=?').get(accountId);
     const gaps=this.db.prepare('SELECT previous_cursor AS previousCursor,new_cursor AS newCursor,reason,recorded_at AS recordedAt FROM gmail_history_gaps WHERE account_id=? ORDER BY rowid DESC LIMIT 20').all(accountId);
-    return {monitor:exists?this.status(accountId):null,...this.page(accountId),gaps};
+    const runs=this.db.prepare('SELECT id,started_at AS startedAt,finished_at AS finishedAt,outcome FROM gmail_monitor_runs WHERE account_id=? ORDER BY id DESC LIMIT 30').all(accountId);
+    return {monitor:exists?this.status(accountId):null,...this.page(accountId),gaps,runs};
   }
 
   rebaseline(accountId:string,cursor:string) {
@@ -71,6 +81,8 @@ export class GmailHistory {
   async poll(accountId:string) {
     if(!this.transport)throw Error('Gmail transport unavailable');
     const {cursor}=this.status(accountId),messages=new Set<string>(),tokens=new Set<string>();
+    this.assertAuthority();
+    const runId=this.db.prepare("INSERT INTO gmail_monitor_runs (account_id,started_at,outcome) VALUES (?,?,'running')").run(accountId,Date.now()).lastInsertRowid;
     let pageToken:string|undefined,latest=cursor;
     try {
       for(let page=0;;page++) {
@@ -92,12 +104,17 @@ export class GmailHistory {
         if(changed.changes!==1)throw Error('Gmail history checkpoint changed');
         const insert=this.db.prepare('INSERT OR IGNORE INTO gmail_arrivals VALUES (?,?)');
         for(const id of messages)insert.run(accountId,id);
+        this.db.prepare("UPDATE gmail_monitor_runs SET outcome='completed',finished_at=? WHERE id=? AND outcome='running'").run(Date.now(),runId);
         this.db.exec('COMMIT');
       } catch(error){this.db.exec('ROLLBACK');throw error;}
     } catch(error) {
-      this.assertAuthority();
       const expired=error instanceof GmailHistoryExpired;
+      try {this.assertAuthority();} catch {
+        this.db.prepare("UPDATE gmail_monitor_runs SET outcome='interrupted',finished_at=? WHERE id=? AND outcome='running'").run(Date.now(),runId);
+        throw error;
+      }
       this.db.prepare('UPDATE gmail_history SET state=?,detail=? WHERE account_id=? AND cursor=?').run(expired?'uncertain':'failed',expired?'History expired; arrivals during the gap are unknown':'History scan failed; retry is safe',accountId,cursor);
+      this.db.prepare("UPDATE gmail_monitor_runs SET outcome=?,finished_at=? WHERE id=? AND outcome='running'").run(expired?'uncertain':'failed',Date.now(),runId);
       throw error;
     }
     return this.status(accountId);

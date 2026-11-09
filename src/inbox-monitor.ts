@@ -1,0 +1,131 @@
+import type {DatabaseSync} from 'node:sqlite';
+import {z} from 'zod';
+
+export const inboxMonitorSchema = `
+CREATE TABLE IF NOT EXISTS inbox_monitor_settings (id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL, enabled INTEGER NOT NULL, account_id TEXT NOT NULL, bot_id TEXT NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL, agent_revision TEXT NOT NULL, gmail_revision INTEGER NOT NULL, slack_revision INTEGER NOT NULL, attention TEXT NOT NULL, sensitive_terms TEXT NOT NULL, start_seq INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS inbox_monitor_items (account_id TEXT NOT NULL, message_id TEXT NOT NULL, settings_revision INTEGER NOT NULL, attempt_id TEXT NOT NULL UNIQUE, state TEXT NOT NULL, forced_private INTEGER NOT NULL DEFAULT 0, summary TEXT, clarification_ts TEXT, PRIMARY KEY(account_id,message_id));
+CREATE TABLE IF NOT EXISTS inbox_monitor_replies (event_id TEXT PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS inbox_monitor_failure (revision INTEGER NOT NULL, code TEXT NOT NULL, notified INTEGER NOT NULL, PRIMARY KEY(revision,code));
+`;
+export const inboxPreferencesSchema=z.strictObject({enabled:z.boolean(),attention:z.string().trim().max(2000),sensitiveTerms:z.array(z.string().trim().min(1).max(100)).max(50),digestMinutes:z.number().int().min(1).max(1440).default(60),memoryContext:z.boolean().default(false)});
+export type InboxPreferences=z.infer<typeof inboxPreferencesSchema>;
+export const inboxClarification='I found an email that may need private handling. Would you like me to share its details here? Please reply in this thread.';
+export const inboxMessage=(summary:string)=>`New Gmail candidate: ${summary.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;')}\nGmail history does not establish whether this message was in the inbox when it arrived.`;
+export const inboxUncertainMessage=(from:unknown,summary:unknown)=>from==='sending_clarification'?inboxClarification:(from==='sending' || from==='sending_approved') && typeof summary==='string'?inboxMessage(summary):'The original delivery type is unknown; its exact attempted text cannot be reconstructed.';
+
+export class InboxMonitorStore {
+ constructor(private readonly db:DatabaseSync) {}
+ recover() {this.db.exec("UPDATE inbox_monitor_items SET uncertain_from=state,state='uncertain' WHERE state IN ('sending','sending_clarification','sending_approved'); UPDATE inbox_digest_batches SET state='uncertain' WHERE state='sending'");}
+ settings() {
+  const row=this.db.prepare('SELECT * FROM inbox_monitor_settings WHERE id=1').get();if(!row)return null;
+  return {revision:Number(row.revision),enabled:row.enabled===1,accountId:String(row.account_id),botId:String(row.bot_id),provider:String(row.provider),model:String(row.model),agentRevision:String(row.agent_revision),gmailRevision:Number(row.gmail_revision),slackRevision:Number(row.slack_revision),attention:String(row.attention),sensitiveTerms:z.array(z.string()).parse(JSON.parse(String(row.sensitive_terms))),startSeq:Number(row.start_seq),digestMinutes:Number(row.digest_minutes),nextDigestAt:Number(row.next_digest_at),memoryContext:row.memory_context===1};
+ }
+ status() {return {items:this.db.prepare("SELECT attempt_id AS attemptId,state,urgency,correction,CASE WHEN state='uncertain' OR (state='delivered' AND correction IS NOT NULL) THEN summary END AS summary,uncertain_from AS uncertainFrom FROM inbox_monitor_items ORDER BY CASE WHEN state='uncertain' THEN 0 ELSE 1 END,rowid DESC LIMIT 30").all().map(row=>({...row,preview:row.state==='uncertain'?inboxUncertainMessage(row.uncertainFrom,row.summary):null})),digests:this.db.prepare("SELECT id,state,CASE WHEN state='uncertain' THEN text END AS text FROM inbox_digest_batches ORDER BY CASE WHEN state='uncertain' THEN 0 ELSE 1 END,rowid DESC LIMIT 30").all(),failure:this.db.prepare('SELECT code FROM inbox_monitor_failure ORDER BY rowid DESC LIMIT 1').get()?.code ?? null};}
+ configure(input:InboxPreferences & {accountId:string;botId:string;provider:string;model:string;agentRevision:string;gmailRevision:number;slackRevision:number},now=Date.now()) {
+  const prior=this.settings();const seq=this.db.prepare('SELECT COALESCE(MAX(rowid),0) AS seq FROM gmail_arrivals WHERE account_id=?').get(input.accountId);
+  const sameAuthority=!!prior?.enabled && input.enabled && prior.accountId===input.accountId && prior.botId===input.botId && prior.provider===input.provider && prior.model===input.model && prior.agentRevision===input.agentRevision && prior.gmailRevision===input.gmailRevision && prior.slackRevision===input.slackRevision;
+  const compatible=sameAuthority && prior!.memoryContext===input.memoryContext && JSON.stringify(prior!.sensitiveTerms)===JSON.stringify(input.sensitiveTerms);
+  const revision=(prior?.revision??0)+1;
+  this.db.exec('BEGIN IMMEDIATE');try {
+   this.db.prepare("UPDATE inbox_monitor_items SET state='stale' WHERE state IN ('ready','clarify','awaiting','approved')").run();
+   if(compatible){this.db.prepare("UPDATE inbox_monitor_items SET settings_revision=? WHERE state IN ('evaluating','digest_pending','digest_batched','uncertain') AND settings_revision=?").run(revision,prior!.revision);this.db.prepare("UPDATE inbox_digest_batches SET settings_revision=? WHERE state IN ('pending','uncertain') AND settings_revision=?").run(revision,prior!.revision);}
+   else if(sameAuthority){
+    const batches=this.db.prepare("SELECT id FROM inbox_digest_batches WHERE state='pending' AND settings_revision=?").all(prior!.revision);
+    for(const batch of batches){const id=String(batch.id);this.db.prepare("UPDATE inbox_monitor_items SET state='clarify',forced_private=1,settings_revision=? WHERE state='digest_batched' AND attempt_id IN (SELECT attempt_id FROM inbox_digest_items WHERE batch_id=?)").run(revision,id);this.db.prepare('DELETE FROM inbox_digest_items WHERE batch_id=?').run(id);this.db.prepare('DELETE FROM inbox_digest_batches WHERE id=?').run(id);}
+    this.db.prepare("UPDATE inbox_monitor_items SET state='clarify',forced_private=1,settings_revision=? WHERE state='digest_pending' AND settings_revision=?").run(revision,prior!.revision);
+   } else {this.db.prepare("UPDATE inbox_monitor_items SET state='stale' WHERE state='digest_pending' OR (state='digest_batched' AND attempt_id IN (SELECT attempt_id FROM inbox_digest_items JOIN inbox_digest_batches ON id=batch_id WHERE inbox_digest_batches.state='pending'))").run();this.db.prepare("UPDATE inbox_digest_batches SET state='stale' WHERE state='pending'").run();}
+   this.db.prepare('DELETE FROM inbox_monitor_failure').run();
+   this.db.prepare("DELETE FROM slack_notices WHERE id LIKE 'inbox-failure-%' AND state='pending'").run();
+   this.db.prepare(`INSERT INTO inbox_monitor_settings (id,revision,enabled,account_id,bot_id,provider,model,agent_revision,gmail_revision,slack_revision,attention,sensitive_terms,start_seq,digest_minutes,next_digest_at,memory_context) VALUES (1,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET revision=excluded.revision,enabled=excluded.enabled,account_id=excluded.account_id,bot_id=excluded.bot_id,provider=excluded.provider,model=excluded.model,agent_revision=excluded.agent_revision,gmail_revision=excluded.gmail_revision,slack_revision=excluded.slack_revision,attention=excluded.attention,sensitive_terms=excluded.sensitive_terms,start_seq=excluded.start_seq,digest_minutes=excluded.digest_minutes,next_digest_at=excluded.next_digest_at,memory_context=excluded.memory_context`).run(revision,Number(input.enabled),input.accountId,input.botId,input.provider,input.model,input.agentRevision,input.gmailRevision,input.slackRevision,input.attention,JSON.stringify(input.sensitiveTerms),sameAuthority?prior!.startSeq:Number(seq?.seq??0),input.digestMinutes,compatible && prior!.digestMinutes===input.digestMinutes?prior!.nextDigestAt:now+input.digestMinutes*60000,Number(input.memoryContext));
+   this.db.exec('COMMIT');
+  } catch(error){this.db.exec('ROLLBACK');throw error;}
+  return this.settings()!;
+ }
+ next() {const s=this.settings();if(!s?.enabled)return null;const row=this.db.prepare('SELECT message_id FROM gmail_arrivals a WHERE account_id=? AND rowid>? AND NOT EXISTS (SELECT 1 FROM inbox_monitor_items i WHERE i.account_id=a.account_id AND i.message_id=a.message_id) ORDER BY rowid LIMIT 1').get(s.accountId,s.startSeq);return typeof row?.message_id==='string'?row.message_id:null;}
+ add(accountId:string,messageId:string,revision:number,attemptId:string) {this.db.prepare("INSERT INTO inbox_monitor_items(account_id,message_id,settings_revision,attempt_id,state) VALUES (?,?,?,?,'evaluating')").run(accountId,messageId,revision,attemptId);}
+ item(attemptId:string) {return this.db.prepare('SELECT * FROM inbox_monitor_items WHERE attempt_id=?').get(attemptId);}
+ pending() {return this.db.prepare("SELECT * FROM inbox_monitor_items WHERE state='evaluating' ORDER BY rowid").all();}
+ deliveries() {return this.db.prepare("SELECT * FROM inbox_monitor_items WHERE state IN ('ready','clarify','approved') ORDER BY rowid LIMIT 20").all();}
+ forcePrivate(attemptId:string) {this.db.prepare('UPDATE inbox_monitor_items SET forced_private=1 WHERE attempt_id=?').run(attemptId);}
+ sender(attemptId:string,key:string) {this.db.prepare('UPDATE inbox_monitor_items SET sender_key=? WHERE attempt_id=?').run(key,attemptId);}
+ feedback(attemptId:string) {return this.db.prepare("SELECT correction FROM inbox_monitor_items WHERE sender_key=(SELECT sender_key FROM inbox_monitor_items WHERE attempt_id=?) AND correction IS NOT NULL AND attempt_id<>? ORDER BY rowid DESC LIMIT 5").all(attemptId,attemptId).map(row=>String(row.correction));}
+ setResult(attemptId:string,state:'ignored'|'ready'|'clarify'|'failed'|'digest_pending',summary:string|null,urgency?:string) {this.db.prepare("UPDATE inbox_monitor_items SET state=?,summary=?,urgency=? WHERE attempt_id=? AND state='evaluating'").run(state,summary,urgency??null,attemptId);}
+ setState(attemptId:string,from:string,to:string) {return this.db.prepare('UPDATE inbox_monitor_items SET state=? WHERE attempt_id=? AND state=?').run(to,attemptId,from).changes===1;}
+ awaiting(thread:string) {return this.db.prepare("SELECT * FROM inbox_monitor_items WHERE state='awaiting' AND clarification_ts=?").get(thread);}
+ replySeen(eventId:string) {return !!this.db.prepare('SELECT 1 FROM inbox_monitor_replies WHERE event_id=?').get(eventId);}
+ markClarification(attemptId:string,ts:string) {this.db.prepare("UPDATE inbox_monitor_items SET state='awaiting',clarification_ts=? WHERE attempt_id=? AND state='sending_clarification'").run(ts,attemptId);}
+ markDelivered(attemptId:string,from:string,ts:string|null) {this.db.prepare("UPDATE inbox_monitor_items SET state='delivered',delivery_ts=? WHERE attempt_id=? AND state=?").run(ts,attemptId,from);}
+ markUncertain(attemptId:string,from:string) {this.db.prepare("UPDATE inbox_monitor_items SET state='uncertain',uncertain_from=? WHERE attempt_id=? AND state=?").run(from,attemptId,from);}
+ delivered(thread:string) {return this.db.prepare("SELECT * FROM inbox_monitor_items WHERE state='delivered' AND delivery_ts=? ORDER BY rowid").all(thread);}
+ correct(eventId:string,attemptId:string,correction:'urgent'|'less-urgent'|'sensitive'|'not-sensitive'|'clear') {
+  this.db.exec('BEGIN IMMEDIATE');try {
+   const inserted=this.db.prepare('INSERT OR IGNORE INTO inbox_monitor_replies VALUES (?)').run(eventId);
+   const changed=inserted.changes===1 && this.db.prepare("UPDATE inbox_monitor_items SET correction=? WHERE attempt_id=? AND state IN ('delivered','awaiting')").run(correction==='clear'?null:correction,attemptId).changes===1;
+   if(changed && correction==='sensitive') {
+    const key=this.db.prepare('SELECT sender_key FROM inbox_monitor_items WHERE attempt_id=?').get(attemptId)?.sender_key;
+    if(typeof key==='string') {
+     const batches=this.db.prepare("SELECT DISTINCT b.id FROM inbox_digest_batches b JOIN inbox_digest_items d ON d.batch_id=b.id JOIN inbox_monitor_items i ON i.attempt_id=d.attempt_id WHERE b.state='pending' AND i.sender_key=?").all(key);
+     for(const batch of batches){const id=String(batch.id);this.db.prepare("UPDATE inbox_monitor_items SET state='digest_pending' WHERE state='digest_batched' AND attempt_id IN (SELECT attempt_id FROM inbox_digest_items WHERE batch_id=?)").run(id);this.db.prepare('DELETE FROM inbox_digest_items WHERE batch_id=?').run(id);this.db.prepare("DELETE FROM inbox_digest_batches WHERE id=? AND state='pending'").run(id);}
+     this.db.prepare("UPDATE inbox_monitor_items SET state='clarify',forced_private=1 WHERE sender_key=? AND state IN ('ready','digest_pending')").run(key);
+    }
+   }
+   this.db.exec('COMMIT');return changed;
+  } catch(error){this.db.exec('ROLLBACK');throw error;}
+ }
+ digestBatches() {return this.db.prepare("SELECT * FROM inbox_digest_batches WHERE state='pending' ORDER BY rowid LIMIT 20").all();}
+ claimDigest(id:string,revision:number,now:number) {
+  this.db.exec('BEGIN IMMEDIATE');try {
+   const settings=this.settings();if(!settings?.enabled || settings.revision!==revision || now<settings.nextDigestAt){this.db.exec('COMMIT');return;}
+   const rows=this.db.prepare("SELECT attempt_id,summary FROM inbox_monitor_items WHERE state='digest_pending' AND settings_revision=? ORDER BY rowid LIMIT 10").all(revision);
+   if(!rows.length){this.db.prepare('UPDATE inbox_monitor_settings SET next_digest_at=? WHERE id=1 AND revision=?').run(now+settings.digestMinutes*60000,revision);this.db.exec('COMMIT');return;}
+   const escape=(value:string)=>value.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;');
+   const text=`Gmail digest:\n${rows.map((row,index)=>`${index+1}. ${escape(String(row.summary))}`).join('\n')}\nGmail history does not establish whether these messages were in the inbox when they arrived.`;
+   this.db.prepare("INSERT INTO inbox_digest_batches VALUES (?,?,'pending',?,NULL,?)").run(id,revision,text,now);
+   for(const row of rows){this.db.prepare('INSERT INTO inbox_digest_items VALUES (?,?)').run(id,String(row.attempt_id));this.db.prepare("UPDATE inbox_monitor_items SET state='digest_batched' WHERE attempt_id=? AND state='digest_pending'").run(String(row.attempt_id));}
+   this.db.exec('COMMIT');
+  }catch(error){this.db.exec('ROLLBACK');throw error;}
+ }
+ setBatchState(id:string,from:string,to:string) {return this.db.prepare('UPDATE inbox_digest_batches SET state=? WHERE id=? AND state=?').run(to,id,from).changes===1;}
+ finishDigest(id:string,ts:string|null) {this.db.exec('BEGIN IMMEDIATE');try {const changed=this.db.prepare("UPDATE inbox_digest_batches SET state='delivered',thread_ts=? WHERE id=? AND state='sending'").run(ts,id);if(changed.changes)this.db.prepare("UPDATE inbox_monitor_items SET state='delivered',delivery_ts=? WHERE attempt_id IN (SELECT attempt_id FROM inbox_digest_items WHERE batch_id=?) AND state='digest_batched'").run(ts,id);this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}}
+ uncertainItem(id:string) {return this.db.prepare("SELECT * FROM inbox_monitor_items WHERE attempt_id=? AND state='uncertain'").get(id);}
+ uncertainDigest(id:string) {return this.db.prepare("SELECT * FROM inbox_digest_batches WHERE id=? AND state='uncertain'").get(id);}
+ resolveItem(id:string,decision:'sent'|'dismiss'|'resend') {
+  const row=this.uncertainItem(id);if(!row)throw Error('Delivery is no longer uncertain');
+  const from=String(row.uncertain_from);if(decision==='sent' && from==='sending_clarification')throw Error('A clarification cannot be bound to its thread without a confirmed Slack timestamp');
+  if(decision!=='dismiss' && !['sending','sending_approved','sending_clarification'].includes(from))throw Error('The original delivery type is unknown; dismiss this record without resending');
+  const next=decision==='sent'?'delivered':decision==='dismiss'?'dismissed':from==='sending_clarification'?'clarify':from==='sending_approved'?'approved':from==='sending'?'ready':null;
+  if(!next || !this.setState(id,'uncertain',next))throw Error('Delivery is no longer uncertain');
+ }
+ resolveDigest(id:string,decision:'sent'|'dismiss'|'resend') {
+  this.db.exec('BEGIN IMMEDIATE');try {
+   const next=decision==='sent'?'delivered':decision==='dismiss'?'dismissed':'pending';
+   if(!this.setBatchState(id,'uncertain',next))throw Error('Delivery is no longer uncertain');
+   if(decision!=='resend')this.db.prepare('UPDATE inbox_monitor_items SET state=? WHERE attempt_id IN (SELECT attempt_id FROM inbox_digest_items WHERE batch_id=?) AND state=\'digest_batched\'').run(decision==='sent'?'delivered':'dismissed',id);
+   this.db.exec('COMMIT');
+  }catch(error){this.db.exec('ROLLBACK');throw error;}
+ }
+ resolveReply(eventId:string,attemptId:string,decision:'approved'|'declined') {
+  this.db.exec('BEGIN IMMEDIATE');try {
+   const inserted=this.db.prepare('INSERT OR IGNORE INTO inbox_monitor_replies VALUES (?)').run(eventId);
+   const changed=inserted.changes===1 && this.setState(attemptId,'awaiting',decision);
+   this.db.exec('COMMIT');return changed;
+  } catch(error){this.db.exec('ROLLBACK');throw error;}
+ }
+ failure(revision:number,code:string|null,notice?:{id:string;teamId:string;userId:string;channelId:string;botId:string;text:string}) {
+  if(!code){this.db.prepare('DELETE FROM inbox_monitor_failure WHERE revision=?').run(revision);return;}
+  const old=this.db.prepare('SELECT notified FROM inbox_monitor_failure WHERE revision=? AND code=?').get(revision,code);
+  if(old && (old.notified===1 || !notice))return;
+  this.db.exec('BEGIN IMMEDIATE');try {
+   this.db.prepare('INSERT INTO inbox_monitor_failure VALUES (?,?,?) ON CONFLICT(revision,code) DO UPDATE SET notified=excluded.notified').run(revision,code,Number(!!notice));
+   if(notice)this.db.prepare("INSERT OR IGNORE INTO slack_notices VALUES (?,?,?,?,NULL,?,?,'pending',0)").run(notice.id,notice.teamId,notice.userId,notice.channelId,notice.botId,notice.text);
+   this.db.exec('COMMIT');
+  } catch(error){this.db.exec('ROLLBACK');throw error;}
+ }
+ recoverFailure(revision:number,codes:string[]) {
+  this.db.exec('BEGIN IMMEDIATE');try {
+   for(const code of codes){this.db.prepare('DELETE FROM inbox_monitor_failure WHERE revision=? AND code=?').run(revision,code);this.db.prepare("DELETE FROM slack_notices WHERE id LIKE ? AND state='pending'").run(`inbox-failure-${revision}-${code}-%`);}
+   this.db.exec('COMMIT');
+  } catch(error){this.db.exec('ROLLBACK');throw error;}
+ }
+ unavailable(accountId:string) {const now=Date.now();this.db.prepare("INSERT INTO gmail_monitor_runs (account_id,started_at,finished_at,outcome) VALUES (?,?,?,'failed')").run(accountId,now,now);}
+}

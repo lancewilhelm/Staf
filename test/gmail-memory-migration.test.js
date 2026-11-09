@@ -21,7 +21,7 @@ test('both schema 43 predecessors keep their Gmail and sensitive-memory state',(
    else db.exec('DROP TABLE gmail_history; DROP TABLE gmail_arrivals; DROP TABLE gmail_history_gaps; DROP TABLE gmail_model_access; DROP TABLE gmail_private_commands; DROP TABLE gmail_private_messages');
    db.exec('PRAGMA user_version=43');db.close();
    instance=new Instance(path);assert.ok(instance.migrationBackup);instance.close();instance=undefined;
-   db=new DatabaseSync(path,{readOnly:true});assert.equal(db.prepare('PRAGMA user_version').get().user_version,INSTANCE_SCHEMA_VERSION);assert.equal(INSTANCE_SCHEMA_VERSION,46);
+   db=new DatabaseSync(path,{readOnly:true});assert.equal(db.prepare('PRAGMA user_version').get().user_version,INSTANCE_SCHEMA_VERSION);assert.equal(INSTANCE_SCHEMA_VERSION,49);
    assert.ok(db.prepare("SELECT 1 FROM sqlite_master WHERE name='gmail_history'").get());assert.ok(db.prepare("SELECT 1 FROM sqlite_master WHERE name='memory_sensitivity'").get());
    if(predecessor==='gmail'){assert.equal(db.prepare("SELECT message_id FROM gmail_arrivals").get().message_id,'retained');assert.equal(db.prepare('SELECT cursor FROM gmail_history').get().cursor,'17');}
    else {assert.equal(db.prepare('SELECT mode FROM memory_sensitivity').get().mode,'review-all');assert.equal(db.prepare('SELECT text FROM sensitive_memory_proposals').get().text,'pending detail');}
@@ -38,4 +38,40 @@ test('schema 44 chat grants do not authorize task or Slack model disclosure',()=
   let db=new DatabaseSync(path);db.prepare("INSERT INTO plugin_connections VALUES ('gmail','owner@example.test',?,1,1,1)").run(JSON.stringify({email:'owner@example.test',clientId:'fixture'}));db.prepare("INSERT INTO gmail_model_access VALUES ('owner@example.test',?,'live','fixture')").run(bot.id);db.exec('DROP TABLE gmail_task_scopes; DROP TABLE gmail_task_messages; DROP TABLE gmail_private_tasks; DROP TABLE gmail_work_model_access; PRAGMA user_version=44');db.close();
   instance=new Instance(path);assert.equal(instance.plugins.gmailModelAllowed('owner@example.test',bot.id,'live','fixture'),true);assert.equal(instance.plugins.gmailWorkModelAllowed('owner@example.test',bot.id,'live','fixture'),false);
  }finally{instance?.close();rmSync(dir,{recursive:true,force:true});}
+});
+
+test('schema 46 upgrade preserves Gmail scans and starts the inbox assistant disabled',()=>{
+ const dir=mkdtempSync(join(tmpdir(),'staf-inbox-migration-')),path=join(dir,'db');let instance;
+ try {
+  instance=new Instance(path);const bot=instance.createBot({name:'Preserved',instructions:'',provider:'live',model:'fixture'});instance.memories.create({scope:{kind:'bot',botId:bot.id},text:'Preserved memory'});instance.close();instance=undefined;
+  let db=new DatabaseSync(path);db.prepare("INSERT INTO gmail_history VALUES ('owner@example.test','42','ready',NULL)").run();db.prepare("INSERT INTO gmail_monitor_runs (account_id,started_at,finished_at,outcome) VALUES ('owner@example.test',1,2,'completed')").run();db.exec('DROP TABLE inbox_monitor_settings; DROP TABLE inbox_monitor_items; DROP TABLE inbox_monitor_replies; DROP TABLE inbox_monitor_failure; PRAGMA user_version=46');db.close();
+  instance=new Instance(path);assert.ok(instance.migrationBackup);assert.equal(instance.inboxMonitor.settings(),null);assert.equal(instance.gmailHistory().snapshot('owner@example.test').runs[0].outcome,'completed');assert.equal(instance.memories.list({kind:'bot',botId:bot.id})[0].text,'Preserved memory');
+ } finally {instance?.close();rmSync(dir,{recursive:true,force:true});}
+});
+
+test('schema 47 inbox decisions survive upgrade and legacy uncertain sends cannot be replayed',()=>{
+ const dir=mkdtempSync(join(tmpdir(),'staf-inbox-digest-migration-')),path=join(dir,'db');let instance;
+ try {
+  instance=new Instance(path);const bot=instance.createBot({name:'Existing',instructions:'',provider:'live',model:'fixture'});instance.close();instance=undefined;
+  let db=new DatabaseSync(path);db.prepare("INSERT INTO inbox_monitor_settings (id,revision,enabled,account_id,bot_id,provider,model,agent_revision,gmail_revision,slack_revision,attention,sensitive_terms,start_seq) VALUES (1,1,1,'owner@example.test',?,'live','fixture','rev',1,1,'attention','[]',0)").run(bot.id);db.prepare("INSERT INTO inbox_monitor_items (account_id,message_id,settings_revision,attempt_id,state,summary) VALUES ('owner@example.test','old',1,'old-attempt','uncertain','private summary')").run();db.exec('DROP TABLE inbox_digest_items; DROP TABLE inbox_digest_batches; ALTER TABLE inbox_monitor_settings DROP COLUMN digest_minutes; ALTER TABLE inbox_monitor_settings DROP COLUMN next_digest_at; ALTER TABLE inbox_monitor_settings DROP COLUMN memory_context; ALTER TABLE inbox_monitor_items DROP COLUMN delivery_ts; ALTER TABLE inbox_monitor_items DROP COLUMN uncertain_from; ALTER TABLE inbox_monitor_items DROP COLUMN urgency; ALTER TABLE inbox_monitor_items DROP COLUMN correction; ALTER TABLE inbox_monitor_items DROP COLUMN sender_key; PRAGMA user_version=47');db.close();
+  instance=new Instance(path);assert.ok(instance.migrationBackup);assert.equal(instance.inboxMonitor.settings().digestMinutes,60);assert.equal(instance.inboxMonitor.settings().memoryContext,false);const item=instance.inboxMonitor.status().items[0];assert.equal(item.state,'uncertain');assert.equal(item.uncertainFrom,null);assert.throws(()=>instance.inboxMonitor.resolveItem('old-attempt','resend'),/unknown/i);assert.equal(instance.inboxMonitor.status().items[0].state,'uncertain');
+ }finally{instance?.close();rmSync(dir,{recursive:true,force:true});}
+});
+
+test('schema 46 reply lineage and schema 48 inbox lineage converge without losing data',()=>{
+ for(const lineage of ['reply','inbox']) {
+  const dir=mkdtempSync(join(tmpdir(),'staf-inbox-reply-migration-')),path=join(dir,'db');let instance;
+  try {
+   instance=new Instance(path);const bot=instance.createBot({name:'Existing',instructions:'',provider:'live',model:'fixture'});instance.claim({id:'old-command',botId:bot.id,content:'Existing work'},'Existing work');instance.close();instance=undefined;
+   let db=new DatabaseSync(path);
+   if(lineage==='reply') {
+    db.prepare("INSERT INTO action_journal VALUES ('old-action','fp','identity',NULL,'old-command','uncertain','Reply',NULL)").run();
+    db.prepare("INSERT INTO gmail_reply_proposals VALUES ('old-action','fp','command','old-command',?,'owner@example.test',1,1,'T123','U123','D123','message','{}','digest','effect-digest','uncertain',NULL,'preserved')").run(bot.id);
+    db.exec('DROP TABLE inbox_digest_items; DROP TABLE inbox_digest_batches; DROP TABLE inbox_monitor_settings; DROP TABLE inbox_monitor_items; DROP TABLE inbox_monitor_replies; DROP TABLE inbox_monitor_failure; DROP TABLE gmail_monitor_runs; PRAGMA user_version=46');
+   } else {db.prepare("INSERT INTO gmail_monitor_runs (account_id,started_at,finished_at,outcome) VALUES ('owner@example.test',1,2,'completed')").run();db.exec('DROP TABLE gmail_reply_proposals; PRAGMA user_version=48');}
+   db.close();instance=new Instance(path);assert.ok(instance.migrationBackup);instance.close();instance=undefined;
+   db=new DatabaseSync(path,{readOnly:true});assert.equal(db.prepare('PRAGMA user_version').get().user_version,49);assert.ok(db.prepare("SELECT 1 FROM sqlite_master WHERE name='gmail_reply_proposals'").get());assert.ok(db.prepare("SELECT 1 FROM sqlite_master WHERE name='gmail_monitor_runs'").get());assert.ok(db.prepare("SELECT 1 FROM sqlite_master WHERE name='inbox_digest_batches'").get());
+   if(lineage==='reply')assert.equal(db.prepare("SELECT detail FROM gmail_reply_proposals WHERE action_id='old-action'").get().detail,'preserved');else assert.equal(db.prepare('SELECT outcome FROM gmail_monitor_runs').get().outcome,'completed');db.close();
+  }finally{instance?.close();rmSync(dir,{recursive:true,force:true});}
+ }
 });
