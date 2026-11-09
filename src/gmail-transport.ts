@@ -2,7 +2,7 @@ import {z} from 'zod';
 import {GmailHistoryExpired, type GmailHistoryTransport} from './gmail-history.js';
 
 const profile=z.object({emailAddress:z.email(),historyId:z.string().regex(/^\d+$/)});
-const historyPage=z.object({historyId:z.string().regex(/^\d+$/),nextPageToken:z.string().min(1).optional(),history:z.array(z.object({messagesAdded:z.array(z.object({message:z.object({id:z.string().min(1).max(200)})})).optional()})).optional()});
+const historyPage=z.object({historyId:z.string().regex(/^\d+$/),nextPageToken:z.string().min(1).optional(),history:z.array(z.object({id:z.string().regex(/^\d+$/).optional(),messagesAdded:z.array(z.object({message:z.object({id:z.string().regex(/^[A-Za-z0-9_-]{1,200}$/)})})).optional()})).optional()});
 
 async function boundedJson(response:Response):Promise<unknown> {
   if(!response.body)throw Error('Gmail response was empty');
@@ -33,7 +33,13 @@ export function gmailHistoryTransport({accessToken,request=fetch,signal,assertAu
       url.searchParams.set('startHistoryId',startHistoryId);url.searchParams.set('historyTypes','messageAdded');url.searchParams.set('maxResults','500');
       if(pageToken)url.searchParams.set('pageToken',pageToken);
       const page=historyPage.parse(await get(url,true));
-      return {historyId:page.historyId,...(page.nextPageToken?{nextPageToken:page.nextPageToken}:{}),messageIds:(page.history??[]).flatMap(item=>(item.messagesAdded??[]).map(added=>added.message.id))};
+      return {historyId:page.historyId,...(page.nextPageToken?{nextPageToken:page.nextPageToken}:{}),messageIds:(page.history??[]).flatMap(item=>(item.messagesAdded??[]).map(added=>added.message.id)),additions:(page.history??[]).flatMap(item=>(item.messagesAdded??[]).map(added=>({messageId:added.message.id,historyId:item.id??null})))};
+    },
+    async messageMetadata(messageId){
+      const id=z.string().regex(/^[A-Za-z0-9_-]{1,200}$/).parse(messageId);
+      const url=new URL('https://gmail.googleapis.com/gmail/v1/users/me/messages/'+id);
+      url.searchParams.set('format','full');url.searchParams.set('fields','id,historyId,labelIds');
+      return get(url,false);
     },
   };
 }

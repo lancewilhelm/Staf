@@ -14,7 +14,7 @@ const review=ref<{kind:'item'|'digest';id:string;text:string;from:string|null}|n
 const uncertain=ref<Awaited<ReturnType<typeof app.gmailUncertain>>>([]);
 const resolution=ref<{item:(typeof uncertain.value)[number];outcome:'sent'|'not-sent'|'applied'|'not-applied'}|null>(null);
 const inspected=ref<Awaited<ReturnType<typeof app.gmailRead>>|null>(null);let timer:ReturnType<typeof setInterval>|undefined;
-const older=ref<Array<{messageId:string;inbox:'unknown'}>>([]),olderBefore=ref<number|null>(null),loadedOlder=ref(false);
+const older=ref<Array<{messageId:string;inbox:'yes'|'no'|'unknown'}>>([]),olderBefore=ref<number|null>(null),loadedOlder=ref(false);
 async function refresh(fillForm=false){const previous=gmail.value?.accountId,[next,unknown]=await Promise.all([app.gmailPlugin(),app.gmailUncertain()]);if(previous!==next.accountId){older.value=[];olderBefore.value=null;loadedOlder.value=false;inspected.value=null;monitorLoaded.value=false;attention.value='';sensitiveTerms.value='';}gmail.value=next;uncertain.value=unknown;if(!monitorLoaded.value){attention.value=next.inboxPreferences?.attention ?? '';sensitiveTerms.value=next.inboxPreferences?.sensitiveTerms.join('\n') ?? '';monitorRevision.value=next.inboxPreferences?.revision ?? null;digestMinutes.value=next.inboxPreferences?.digestMinutes ?? 60;memoryContext.value=next.inboxPreferences?.memoryContext ?? false;monitorLoaded.value=true;}if(fillForm && next.config){form.value.email=next.config.email;form.value.clientId=next.config.clientId;}if(next.authorizationStatus==='Connected')authorizationUrl.value='';}
 async function reconcile(){const selected=resolution.value;if(!selected || busy.value)return;busy.value=true;message.value='';try{await app.gmailReconcile({actionId:selected.item.actionId,fingerprint:selected.item.fingerprint,kind:selected.item.effect.kind==='modify'?'modify':'reply',outcome:selected.outcome});message.value='Your finding was recorded. No Gmail action was sent.';await refresh();}catch(error){message.value='Could not record the finding. '+String(error);await refresh().catch(()=>{});}finally{busy.value=false;resolution.value=null;}}
 function onFocus(){void refresh().catch(()=>{message.value='Could not refresh Gmail status.';});}
@@ -89,7 +89,7 @@ async function loadOlder(){const before=loadedOlder.value?olderBefore.value:gmai
    </div>
   </fieldset>
   <fieldset v-if="gmail?.config"><legend>Inbox assistant</legend>
-   <p>Monitoring uses the agent bound to the approved Slack DM and its selected model. Gmail sender, subject, and message text are sent to that model provider for assessment. New history candidates may include sent or draft messages; historical inbox membership is unknown. Initial setup starts after the latest completed scan. Preference edits retain pending digest items. Privacy changes send them for private clarification; access changes can make them stale for review.</p>
+   <p>Monitoring uses the agent bound to the approved Slack DM and its selected model. Gmail sender, subject, and message text are sent to that model provider for assessment. Only candidates with inbox evidence are assessed; uncertain membership is held for your review. Setup includes eligible additions recorded since connecting Gmail. Preference edits retain pending digest items. Privacy changes send them for private clarification; access changes can make them stale for review.</p>
    <p v-if="gmail.inboxTarget">Slack agent: {{ gmail.inboxTarget.name }}; model provider: {{ gmail.inboxTarget.provider }} / {{ gmail.inboxTarget.model || 'not selected' }}.</p>
    <p v-else>Connect an approved Slack DM and choose its agent before enabling monitoring.</p>
    <label>What deserves attention?<textarea v-model="attention" maxlength="2000" rows="3" /></label>
@@ -123,14 +123,14 @@ async function loadOlder(){const before=loadedOlder.value?olderBefore.value:gmai
   </div>
   <div v-if="gmail?.config" aria-label="Gmail arrivals">
    <h4>New message candidates</h4>
-   <p>Gmail history does not establish whether a message was in the inbox when it arrived. These candidates may include sent or draft mail.</p>
+   <p>Candidates with uncertain inbox membership are held for your review and are not sent to the assistant or Slack. Current labels can change after arrival.</p>
    <p v-if="!gmail.monitor">A baseline is missing. Earlier arrivals cannot be established.</p>
    <p v-else>Monitoring: {{ gmail.monitor.state }}<span v-if="gmail.monitor.detail"> — {{ gmail.monitor.detail }}</span></p>
    <p v-for="(gap,index) in gmail.gaps" :key="index">History gap: {{ gap.reason }}. Arrivals in that interval are unknown.</p>
    <button v-if="gmail.connected && (!gmail.monitor || gmail.monitor.state==='uncertain' || gmail.monitor.state==='failed')" class="quiet" :disabled="busy" @click="confirm='rebaseline'">Start monitoring from now</button>
    <button v-if="gmail.enabled && gmail.monitor" class="quiet" :disabled="busy" @click="action('poll')">Check for new candidates</button>
    <p v-if="!gmail.arrivals.length">No candidates recorded.</p>
-   <ul v-else><li v-for="arrival in [...gmail.arrivals,...older.filter(item=>!gmail?.arrivals.some(current=>current.messageId===item.messageId))]" :key="arrival.messageId">{{ arrival.messageId }} — inbox membership unknown <button class="quiet" :disabled="busy || !gmail.enabled" @click="inspect(arrival.messageId)">Inspect</button></li></ul>
+   <ul v-else><li v-for="arrival in [...gmail.arrivals,...older.filter(item=>!gmail?.arrivals.some(current=>current.messageId===item.messageId))]" :key="arrival.messageId">{{ arrival.messageId }} — {{ arrival.inbox === 'yes' ? 'inbox evidence at scan' : arrival.inbox === 'no' ? 'not an inbox candidate at scan' : 'inbox membership uncertain; review in Gmail' }} <button class="quiet" :disabled="busy || !gmail.enabled" @click="inspect(arrival.messageId)">Inspect</button></li></ul>
    <button v-if="loadedOlder?olderBefore:gmail.nextBefore" class="quiet" :disabled="busy" @click="loadOlder">Load older candidates</button>
    <div v-if="inspected"><h4>{{ inspected.subject || '(No subject)' }}</h4><p>{{ inspected.from }} {{ inspected.date }}</p><pre style="white-space:pre-wrap">{{ inspected.text || inspected.snippet }}</pre><p>{{ inspected.notice }}<span v-if="inspected.truncated"> Text was truncated.</span></p><button class="quiet" @click="inspected=null">Close message</button></div>
   </div>

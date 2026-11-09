@@ -29,13 +29,13 @@ import type { ByteRedactor } from './config.js';
 import { NativeProcesses, nativeProcessSchema } from './native-processes.js';
 import { ApprovalGrants, approvalGrantSchema, type GrantBoundary } from './approval-grants.js';
 import { PluginStore, pluginSchema, slackWorkSchema, type SlackConfig } from './plugins.js';
-import {GmailHistory,gmailHistorySchema,gmailMonitorRunsSchema,type GmailHistoryTransport} from './gmail-history.js';
+import {GmailHistory,gmailHistorySchema,gmailMonitorRunsSchema,gmailArrivalEvidenceSchema,type GmailHistoryTransport} from './gmail-history.js';
 import {InboxMonitorStore,inboxMonitorSchema} from './inbox-monitor.js';
 
 const clockAction: Action = { capability:'clock', operation:'read', resource:'utc', effect:'read', limits:{}, risk:'safe' };
 const clockBoundary = { enabledCapabilities:['clock'], actions:[clockAction] };
 const modes: ApprovalMode[] = ['ask-every-time','ask-for-risky-actions','never-ask'];
-export const INSTANCE_SCHEMA_VERSION = 49;
+export const INSTANCE_SCHEMA_VERSION = 50;
 const MAINTENANCE_VERSION = 2147483647;
 
 export const starterSoul = "You are an assistant working for the owner. Be clear and candid. Distinguish observations from assumptions. Follow the owner's role instructions and work within the permissions and task scope granted to you.";
@@ -214,6 +214,7 @@ export class Instance {
     if(version < 40) this.db.exec(pluginSchema);
     this.db.exec(slackWorkSchema);
     if(version < 44) this.db.exec(gmailHistorySchema);
+    if(version < 50) this.db.exec(gmailArrivalEvidenceSchema);
     if(version < 45) this.db.exec(`CREATE TABLE IF NOT EXISTS gmail_task_scopes (attempt_id TEXT PRIMARY KEY, account_id TEXT NOT NULL, revision INTEGER NOT NULL, query TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS gmail_task_messages (attempt_id TEXT NOT NULL, message_id TEXT NOT NULL, PRIMARY KEY(attempt_id,message_id));
       CREATE TABLE IF NOT EXISTS gmail_private_tasks (attempt_id TEXT PRIMARY KEY);
@@ -226,6 +227,13 @@ export class Instance {
       this.db.exec(`CREATE TABLE IF NOT EXISTS inbox_digest_batches (id TEXT PRIMARY KEY, settings_revision INTEGER NOT NULL, state TEXT NOT NULL, text TEXT NOT NULL, thread_ts TEXT, created_at INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS inbox_digest_items (batch_id TEXT NOT NULL REFERENCES inbox_digest_batches(id),attempt_id TEXT NOT NULL UNIQUE REFERENCES inbox_monitor_items(attempt_id),PRIMARY KEY(batch_id,attempt_id));`);
     }
+    if(version < 50) this.db.exec(`
+      UPDATE inbox_monitor_items SET state='stale'
+        WHERE state IN ('evaluating','ready','clarify','awaiting','approved','digest_pending','digest_batched')
+        AND NOT EXISTS (SELECT 1 FROM gmail_arrival_evidence e WHERE e.account_id=inbox_monitor_items.account_id AND e.message_id=inbox_monitor_items.message_id AND e.inbox='yes');
+      UPDATE inbox_digest_batches SET state='stale' WHERE state='pending'
+        AND EXISTS (SELECT 1 FROM inbox_digest_items d JOIN inbox_monitor_items i ON i.attempt_id=d.attempt_id WHERE d.batch_id=inbox_digest_batches.id AND i.state='stale');
+    `);
     this.db.prepare("UPDATE gmail_monitor_runs SET outcome='interrupted',finished_at=? WHERE outcome='running'").run(Date.now());
     if(version < 49) this.db.exec(`CREATE TABLE IF NOT EXISTS gmail_reply_proposals (action_id TEXT PRIMARY KEY REFERENCES action_journal(id), fingerprint TEXT NOT NULL, work_kind TEXT NOT NULL, work_id TEXT NOT NULL, bot_id TEXT NOT NULL, account_id TEXT NOT NULL, gmail_revision INTEGER NOT NULL, slack_revision INTEGER NOT NULL, team_id TEXT NOT NULL, user_id TEXT NOT NULL, channel_id TEXT NOT NULL, message_id TEXT NOT NULL, effect TEXT NOT NULL, digest TEXT NOT NULL, effect_digest TEXT NOT NULL, state TEXT NOT NULL, prompt_ts TEXT, detail TEXT);
       CREATE INDEX IF NOT EXISTS gmail_reply_account_message ON gmail_reply_proposals(account_id,message_id);`);

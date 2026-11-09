@@ -419,9 +419,9 @@ a revision, and inspect the exact recipient, subject, and revised text before
 approving. Expect one send and a recorded outcome in Staf. Restart the service
 and check the records remain; inspect Gmail and Slack before resolving any
 uncertain outcome rather than assuming it failed or retrying it. Existing mail
-is excluded from the initial stream. History candidates can include non-inbox
-mail, and a message arriving during initial assistant enablement may be excluded
-from assessment; inspect the candidate list as explained in the Gmail guide.
+is excluded from the initial stream. History candidates can include non-inbox mail. Candidates with uncertain inbox
+membership are held for owner review; inspect the list as explained in the Gmail
+guide.
 
 For the intended Linux host, follow the [native installation guide](native-linux-installation.md)
 for the service, pairing, optional home-network gateway, and backup. Verify the

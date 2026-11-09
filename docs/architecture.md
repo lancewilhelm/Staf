@@ -469,9 +469,18 @@ The service fences an in-flight exchange against cancellation, expiry, client
 revocation and connection revision changes. The connection-time history ID and
 candidate message IDs are stored in SQLite; complete pages and the next cursor
 commit atomically. A 404 retains an uncertain gap until the owner explicitly
-rebaselines. Gmail's current labels do not establish historical inbox membership,
-so all message-added records are exposed as candidates with unknown membership.
-The history scanner itself does not send mail to a model. Separate per-agent permission binds
+rebaselines. The scanner reads field-limited current label metadata for new additions and compares
+the message's last-modified history ID with the addition record ID. Matching IDs
+and an INBOX label provide conservative inbox evidence; missing fields, a changed
+ID, or a failed metadata read leave membership uncertain. SENT, DRAFT, SPAM and
+TRASH are excluded. This inference does not prove exact historical membership;
+uncertain and non-inbox candidates remain visible for review, but cannot start
+assistant work. Evidence and cursor commit with candidate IDs. Schema 50 adds the
+evidence table; legacy candidates remain unknown and legacy pending deliveries
+without evidence are marked stale rather than sent. The assistant's initial
+checkpoint includes all recorded additions after the connection baseline, and
+claimed items cannot be processed again on re-enable. The history scanner itself
+does not send mail to a model. Separate per-agent permission binds
 read/search to an explicitly approved provider and model, with current
 connection revision and access rechecked at dispatch and result release. A separate
 owner grant is required for tasks and Slack-originated work, so existing chat-only
@@ -499,7 +508,7 @@ a non-sensitive summary or a fixed generic private question. A Slack thread ID
 binds an affirmative owner response to that candidate; uncertain sends are never
 automatically repeated. Authority is checked again at evaluation and delivery.
 A durable failure state deduplicates generic alerts while individual history
-scans remain recorded. An explicit memory-provider opt-in allows retrieval of active memories from the bound agent and user scopes; pending proposals and other agents’ private memory are excluded. Live memory availability and selected versions are checked around provider calls, and any recalled memory forces private clarification before Slack disclosure. Non-sensitive less-urgent summaries are atomically batched for interval-based delivery; an uncertain batch remains inspectable and requires an explicit exact-text owner decision. Bound corrections are retained per item and keyed sender, without storing the sender in the feedback index. Model classification can be wrong, and Gmail history does not prove inbox membership. Synthetic Google, Slack and model fixtures cover these paths; live
+scans remain recorded. An explicit memory-provider opt-in allows retrieval of active memories from the bound agent and user scopes; pending proposals and other agents’ private memory are excluded. Live memory availability and selected versions are checked around provider calls, and any recalled memory forces private clarification before Slack disclosure. Non-sensitive less-urgent summaries are atomically batched for interval-based delivery; an uncertain batch remains inspectable and requires an explicit exact-text owner decision. Bound corrections are retained per item and keyed sender, without storing the sender in the feedback index. Model classification can be wrong, and the inbox evidence is an inference rather than a historical guarantee. Synthetic Google, Slack and model fixtures cover these paths; live
 behavior remains unverified.
 
 ## Native home-network transport

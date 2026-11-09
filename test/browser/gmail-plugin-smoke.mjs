@@ -50,7 +50,7 @@ try {
  assert.equal(await evaluate("[...document.querySelectorAll('[aria-label=\"Gmail plugin\"] button')].find(b=>b.textContent.trim()==='Enable inbox monitoring').disabled"),true);
  await evaluate("[...document.querySelectorAll('[aria-label=\"Gmail plugin\"] button')].find(b=>b.textContent.trim()==='Check for new candidates').click()");
  await until(()=>evaluate("document.querySelector('[aria-label=\"Gmail arrivals\"]').innerText.includes('candidate-1')"),'candidate visible');
- assert.equal(await evaluate("document.querySelector('[aria-label=\"Gmail arrivals\"]').innerText.includes('inbox membership unknown')"),true);
+ assert.equal(await evaluate("document.querySelector('[aria-label=\"Gmail arrivals\"]').innerText.includes('inbox membership uncertain')"),true);
  await until(()=>evaluate("[...document.querySelectorAll('[aria-label=\"Gmail arrivals\"] button')].some(b=>b.textContent.trim()==='Inspect'&&!b.disabled)"),'inspection available');
  await evaluate("[...document.querySelectorAll('[aria-label=\"Gmail arrivals\"] button')].find(b=>b.textContent.trim()==='Inspect').click()");
  await until(()=>evaluate("document.querySelector('[aria-label=\"Gmail arrivals\"]').innerText.includes('Browser private fixture')"),'owner inspection');
