@@ -27,6 +27,8 @@ try {
  await until(()=>evaluate("[...document.querySelectorAll('.side button')].some(b=>b.textContent.includes('Slack agent'))"),'agent loaded');
  await evaluate(`(()=>{const section=document.querySelector('section[aria-label="Plugins"] .provider');section.querySelector('summary').click();const values=['xapp-synthetic','xoxb-synthetic','T123','U123','D123'];section.querySelectorAll('input').forEach((input,i)=>{input.value=values[i];input.dispatchEvent(new Event('input',{bubbles:true}));});const select=section.querySelector('select');select.selectedIndex=1;select.dispatchEvent(new Event('change',{bubbles:true}));section.querySelector('form').requestSubmit();})()`);
  await until(()=>evaluate("document.querySelector('section[aria-label=Plugins]').innerText.includes('Agent access: Not allowed')"),'connect');
+ await until(()=>evaluate("document.querySelector('section[aria-label=Plugins] .provider').innerText.includes('Connecting replaces these existing approvals:')"),'reconnect approval review');
+ assert.equal(await evaluate("document.querySelector('section[aria-label=Plugins] .provider').innerText.includes('Slack app token')"),true);
  assert.equal(await evaluate("[...document.querySelectorAll('section[aria-label=Plugins] .provider input[type=password]')].every(input=>input.value==='')"),true);
  await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Allow agent access').click()");
  await until(()=>evaluate("document.querySelector('section[aria-label=Plugins]').innerText.includes('Agent access: Allowed')"),'allow agent');

@@ -8,8 +8,9 @@ import GmailSettings from './GmailSettings.vue';
 const {app,state}=useWorkspace();
 type Plugin=Awaited<ReturnType<typeof app.plugins>>[number];
 const plugins=ref<Plugin[]>([]),busy=ref(false),status=ref(''),confirm=ref<'disconnect'|'delete-config'|null>(null);
+const setupReview=ref<Awaited<ReturnType<typeof app.secretSetupReview>>|null>(null);
 const form=ref({appToken:'',botToken:'',teamId:'',userId:'',channelId:'',botId:''});
-async function refresh(){plugins.value=await app.plugins();const config=plugins.value.find(plugin=>plugin.id==='slack')?.config;if(config)form.value={...form.value,...config};}
+async function refresh(){[plugins.value,setupReview.value]=await Promise.all([app.plugins(),app.secretSetupReview('slack')]);const config=plugins.value.find(plugin=>plugin.id==='slack')?.config;if(config)form.value={...form.value,...config};}
 onMounted(()=>{void refresh().catch(()=>{status.value='Could not load plugins.';});});
 async function action(name:'connect'|'enable'|'disable'|'disconnect'|'delete-config'|'access',body:object={}) {
  if(busy.value)return;busy.value=true;status.value='';
@@ -17,7 +18,7 @@ async function action(name:'connect'|'enable'|'disable'|'disconnect'|'delete-con
  catch(error){status.value='Could not update plugin. Check its current status before retrying. '+String(error);}
  finally{busy.value=false;confirm.value=null;}
 }
-function connect(){void action('connect',{...form.value,confirm:true});}
+function connect(){if(!setupReview.value)return;void action('connect',{...form.value,confirm:true,reviewedVersion:setupReview.value.version,confirmDisplacements:setupReview.value.grants.length>0});}
 </script>
 <template>
  <section class="settings-section" aria-label="Plugins">
@@ -39,7 +40,8 @@ function connect(){void action('connect',{...form.value,confirm:true});}
      <label>Direct message channel ID<input v-model.trim="form.channelId" required /></label>
      <label>Agent<select v-model="form.botId" required><option value="" disabled>Choose an agent</option><option v-for="bot in state.bots.filter(item=>!item.archived)" :key="bot.id" :value="bot.id">{{ bot.name }}</option></select></label>
      <p>Connecting approves these tokens for https://slack.com/api and the selected workspace, user, and DM. Socket Mode connects to a Slack-provided address at wss://slack.com or a slack.com subdomain. Agent access is a separate decision.</p>
-     <button :disabled="busy">Connect and approve</button>
+     <p v-if="setupReview?.grants.length">Connecting replaces these existing approvals: {{ setupReview.grants.map(grant=>grant.name+' ('+grant.integration+')').join(', ') }}.</p>
+     <button :disabled="busy || !setupReview">{{ setupReview?.grants.length?'Connect and replace approvals':'Connect and approve' }}</button>
     </form>
    </details>
    <div v-if="plugin.connected && plugin.config" class="row">
