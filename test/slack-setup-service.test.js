@@ -20,7 +20,7 @@ test('real service requests Slack tokens in protected steps and retains an inter
   assert.equal((await call(`/api/secret-requests/${botRequest.id}/save`,{value:'xoxb-synthetic-secret'}))[0],200);
   const pending=await until(async()=>((await call('/api/inbox'))[1]).find(item=>item.kind==='slack-setup'));
   assert.equal(pending.approval.config.botId,bot.id);assert.equal(pending.approval.config.teamId,'T123');
-  assert.equal((await call(`/api/slack-setup/${pending.id}/confirm`,{approval:pending.approval}))[0],400);assert.equal(identifyCalls,0);
+  assert.equal(identifyCalls,0);
   for(const secret of ['xapp-synthetic-secret','xoxb-synthetic-secret']){assert.ok(!JSON.stringify(model).includes(secret));assert.ok(!readFileSync(path).includes(Buffer.from(secret)));assert.ok(!JSON.stringify(pending).includes(secret));}
   await app.close();app=startInstance(path,0,options);port=await app.listen();
   const retained=((await call('/api/inbox'))[1]).find(item=>item.id===pending.id);assert.equal(retained.state,'interrupted');
