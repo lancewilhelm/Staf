@@ -37,8 +37,8 @@ that cannot establish the required settings fail closed.
 
 The repository includes an **uninstalled, incomplete candidate**, not a usable
 host-work backend. `deploy/native-linux/staf-exec-launch.example` sketches a
-fixed launcher for a distinct `staf-exec` account and one operator-approved
-workspace. `staf-exec-guard.c` checks the in-sandbox identity, capabilities,
+fixed launcher for distinct `staf-service` and `staf-exec` accounts and one
+operator-approved workspace. `staf-exec-guard.c` checks the in-sandbox identity, capabilities,
 no-new-privileges and mount layout; it attempts to apply Landlock ABI 9 and a
 seccomp filter before requesting a command. The filter permits only Unix socket
 families, so even networking mechanisms outside a network namespace, such as

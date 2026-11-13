@@ -10,6 +10,10 @@ gid=$(/usr/bin/id -g)
 [ "$gid" -ne 0 ] && [ "$gid" -ne 65534 ] || exit 125
 [ "$uid" = "$(/usr/bin/id -u staf-exec)" ] || exit 125
 [ "$gid" = "$(/usr/bin/id -g staf-exec)" ] || exit 125
+[ "$uid" != "$(/usr/bin/id -u staf-service)" ] || exit 125
+for service_group in $(/usr/bin/id -G staf-service); do
+  [ "$gid" != "$service_group" ] || exit 125
+done
 # Check before entering the user namespace, where unmapped groups can all look
 # like the same overflow group. The account must have no supplementary groups.
 [ "$(/usr/bin/id -G)" = "$gid" ] || exit 125
