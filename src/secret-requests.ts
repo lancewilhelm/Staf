@@ -5,6 +5,7 @@ import {z} from 'zod';
 import type {WorkRef} from './action-journal.js';
 import {containsUnsafeWebUrl} from './web-reader.js';
 import {randomUUID} from 'node:crypto';
+import {slackSetupApprovalSchema,type SlackSetupApproval} from './slack-setup-types.js';
 
 export const secretRequestInput=z.strictObject({name:z.string().trim().min(1).max(120),purpose:z.string().trim().min(1).max(500),destination:z.string().trim().min(1).max(300).optional()}).refine(input=>Object.values(input).every(value=>!containsUnsafeWebUrl(value)));
 type Input=z.infer<typeof secretRequestInput>;
@@ -17,6 +18,7 @@ const valueSchema=z.string().min(1).max(16000).refine(value=>!value.includes('\0
 export class SecretRequests {
  private db?:DatabaseSync;
  private readonly waiters=new Map<string,(outcome:Outcome|'interrupted')=>void>();
+ private readonly slackSetupWaiters=new Map<string,(outcome:string)=>void>();
  constructor(private readonly root:string,private readonly memory:boolean) {
   if(!memory)try{lstatSync(join(root,'secrets','credentials.sqlite'));this.open(false);}catch(error){if(!(error instanceof Error && 'code' in error && error.code==='ENOENT'))throw Error('Secret store unavailable');}
  }
@@ -39,6 +41,8 @@ export class SecretRequests {
    CREATE TABLE IF NOT EXISTS secret_selections(request_id TEXT PRIMARY KEY,secret_name TEXT NOT NULL,secret_revision TEXT NOT NULL);
    CREATE TABLE IF NOT EXISTS secret_grants(name TEXT NOT NULL,revision TEXT NOT NULL,integration TEXT NOT NULL,destination TEXT NOT NULL,PRIMARY KEY(integration,destination));
    CREATE TABLE IF NOT EXISTS secret_integration_config(integration TEXT NOT NULL,destination TEXT NOT NULL,config TEXT NOT NULL,PRIMARY KEY(integration,destination));
+   CREATE TABLE IF NOT EXISTS slack_setup_approvals(id TEXT PRIMARY KEY,bot_id TEXT NOT NULL,work_kind TEXT NOT NULL,work_id TEXT NOT NULL,approval TEXT NOT NULL,state TEXT NOT NULL,result TEXT);
+   UPDATE slack_setup_approvals SET state='interrupted' WHERE state IN ('pending','connecting');
    UPDATE secret_requests SET state='interrupted' WHERE state='pending';`);
   for(const row of db.prepare('SELECT name FROM secrets WHERE name NOT IN (SELECT name FROM secret_metadata)').all())db.prepare("INSERT INTO secret_metadata VALUES (?,(SELECT purpose FROM secret_requests WHERE name=? AND state='saved' ORDER BY rowid DESC LIMIT 1),?)").run(String(row.name),String(row.name),randomUUID());
   this.db=db;return db;
@@ -57,6 +61,16 @@ export class SecretRequests {
  getConfig(integration:string,destination:string):string|undefined {const row=this.db?.prepare('SELECT config FROM secret_integration_config WHERE integration=? AND destination=?').get(integration,destination);return typeof row?.config==='string'?row.config:undefined;}
  resolve(input:{integration:SecretIntegration;destination:string}):string|undefined {const row=this.db?.prepare('SELECT s.value FROM secret_grants g JOIN secret_metadata m ON m.name=g.name AND m.revision=g.revision JOIN secrets s ON s.name=g.name WHERE g.integration=? AND g.destination=?').get(input.integration,input.destination);return typeof row?.value==='string'?row.value:undefined;}
  lookup(name:string,revision:string):string|undefined {const row=this.db?.prepare('SELECT s.value FROM secrets s JOIN secret_metadata m ON m.name=s.name WHERE s.name=? AND m.revision=?').get(name,revision);return typeof row?.value==='string'?row.value:undefined;}
+ selection(id:string):{name:string;revision:string}|undefined {const row=this.db?.prepare("SELECT m.name,m.revision FROM secret_selections s JOIN secret_metadata m ON m.name=s.secret_name AND m.revision=s.secret_revision JOIN secret_requests r ON r.id=s.request_id AND r.state='saved' WHERE s.request_id=?").get(id);return typeof row?.name==='string' && typeof row.revision==='string'?{name:row.name,revision:row.revision}:undefined;}
+ createSlackSetup(id:string,botId:string,work:WorkRef,approval:SlackSetupApproval):void {this.open(true).prepare("INSERT INTO slack_setup_approvals VALUES (?,?,?,?,?,'pending',NULL)").run(id,botId,work.kind,work.id,JSON.stringify(approval));}
+ slackSetups() {return (this.db?.prepare("SELECT id,bot_id AS botId,work_kind AS workKind,work_id AS workId,approval,state FROM slack_setup_approvals WHERE state IN ('pending','connecting','interrupted') ORDER BY rowid").all()??[]).map(row=>({id:String(row.id),botId:String(row.botId),work:{kind:row.workKind==='task'?'task' as const:'command' as const,id:String(row.workId)},approval:slackSetupApprovalSchema.parse(JSON.parse(String(row.approval))),state:z.enum(['pending','connecting','interrupted']).parse(row.state)}));}
+ beginSlackSetup(id:string,approval:SlackSetupApproval):boolean {return !!this.db?.prepare("UPDATE slack_setup_approvals SET state='connecting' WHERE id=? AND state='pending' AND approval=?").run(id,JSON.stringify(approval)).changes;}
+ finishSlackSetup(id:string,state:'completed'|'dismissed'|'failed',result:string):boolean {const changed=!!this.db?.prepare("UPDATE slack_setup_approvals SET state=?,result=? WHERE id=? AND (state IN ('pending','connecting') OR (state='interrupted' AND ?='dismissed'))").run(state,result,id,state).changes;if(changed)this.slackSetupWaiters.get(id)?.(result);return changed;}
+ waitSlackSetup(id:string,signal:AbortSignal):Promise<string> {return new Promise((resolve,reject)=>{
+  const finish=(result:string)=>{signal.removeEventListener('abort',abort);this.slackSetupWaiters.delete(id);resolve(result);};
+  const abort=()=>{this.db?.prepare("UPDATE slack_setup_approvals SET state='interrupted' WHERE id=? AND state IN ('pending','connecting')").run(id);this.slackSetupWaiters.delete(id);reject(Error('Slack setup interrupted'));};
+  this.slackSetupWaiters.set(id,finish);signal.addEventListener('abort',abort,{once:true});if(signal.aborted)abort();
+ });}
  select(id:string,name:string,revision:string):Outcome {const db=this.db;if(!db)throw Error('Secret request unavailable');db.exec('BEGIN IMMEDIATE');try{const row=db.prepare("SELECT state FROM secret_requests WHERE id=?").get(id),secret=db.prepare('SELECT revision FROM secret_metadata WHERE name=? AND revision=?').get(name,revision);if(row?.state!=='pending' || !secret)throw Error('Secret request unavailable');db.prepare('INSERT INTO secret_selections VALUES (?,?,?)').run(id,name,revision);db.prepare("UPDATE secret_requests SET state='saved' WHERE id=?").run(id);db.exec('COMMIT');}catch(error){db.exec('ROLLBACK');throw error;}this.waiters.get(id)?.('saved');return 'saved';}
  list() {if(!this.db)return [];return this.db.prepare("SELECT id,bot_id AS botId,work_kind AS workKind,work_id AS workId,name,purpose,destination,state FROM secret_requests WHERE state IN ('pending','interrupted') ORDER BY rowid").all().map(row=>({kind:'secret' as const,id:String(row.id),botId:String(row.botId),work:{kind:row.workKind==='task'?'task' as const:'command' as const,id:String(row.workId)},name:String(row.name),purpose:String(row.purpose),destination:row.destination===null?null:String(row.destination),state:String(row.state)}));}
  create(id:string,botId:string,work:WorkRef,input:Input):void {this.open(true).prepare("INSERT INTO secret_requests VALUES (?,?,?,?,?,?,?,'pending')").run(id,botId,work.kind,work.id,input.name,input.purpose,input.destination??null);}
@@ -69,7 +83,7 @@ export class SecretRequests {
   const db=this.db;if(!db)throw Error('Secret request unavailable');
   db.exec('BEGIN IMMEDIATE');
   try {const row=db.prepare("SELECT name,state FROM secret_requests WHERE id=?").get(id);if(!row || (row.state!=='pending' && !(row.state==='interrupted' && decision==='dismissed')))throw Error('Secret request unavailable');
-   if(decision==='saved'){const secret=valueSchema.safeParse(value);if(!secret.success)throw Error('Invalid secret');if(db.prepare('SELECT 1 FROM secrets WHERE name=?').get(String(row.name)))throw Error('A secret with this name already exists');db.prepare('INSERT INTO secrets VALUES (?,?)').run(String(row.name),secret.data);db.prepare("INSERT INTO secret_metadata VALUES (?,(SELECT purpose FROM secret_requests WHERE id=?),?)").run(String(row.name),id,randomUUID());}
+   if(decision==='saved'){const secret=valueSchema.safeParse(value);if(!secret.success)throw Error('Invalid secret');if(db.prepare('SELECT 1 FROM secrets WHERE name=?').get(String(row.name)))throw Error('A secret with this name already exists');const revision=randomUUID();db.prepare('INSERT INTO secrets VALUES (?,?)').run(String(row.name),secret.data);db.prepare("INSERT INTO secret_metadata VALUES (?,(SELECT purpose FROM secret_requests WHERE id=?),?)").run(String(row.name),id,revision);db.prepare('INSERT INTO secret_selections VALUES (?,?,?)').run(id,String(row.name),revision);}
    db.prepare('UPDATE secret_requests SET state=? WHERE id=?').run(decision,id);db.exec('COMMIT');
   } catch(error){db.exec('ROLLBACK');throw error;}
   this.waiters.get(id)?.(decision);return decision;

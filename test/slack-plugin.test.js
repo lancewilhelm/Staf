@@ -7,6 +7,23 @@ import {startInstance} from '../dist/instance-service.js';
 
 const until=async fn=>{for(let i=0;i<200;i++){const result=await fn();if(result)return result;await new Promise(resolve=>setTimeout(resolve,10));}throw Error('Timed out');};
 
+test('credential-like Slack messages are not sent to the model or stored in ordinary records',async()=>{
+ const dir=mkdtempSync(join(tmpdir(),'staf-slack-credential-')),path=join(dir,'db'),seen=[],posts=[];let receive;
+ const slackTransport={identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async(_tokens,handler)=>{receive=handler;return ()=>{};},post:async(_tokens,message)=>{posts.push(message);}};
+ const providerFactory=async()=>({name:'fixture',capabilities:{toolCalls:false},complete:async messages=>{seen.push(JSON.stringify(messages));return {role:'assistant',content:'reply'};}});
+ const app=startInstance(path,0,{env:{},slackTransport,providerFactory});
+ try {
+  const port=await app.listen();let token;
+  const call=async(route,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});return r.json();};
+  token=(await call('/api/pair',{code:app.code})).token;const bot=await call('/api/bots',{name:'Agent',provider:'live',model:'fixture'});
+  await call('/api/plugins/slack/connect',{confirm:true,appToken:'xapp-connection',botToken:'xoxb-connection',teamId:'T123',userId:'U123',channelId:'D123',botId:bot.id});await call('/api/plugins/slack/access',{botId:bot.id,enabled:true});await call('/api/plugins/slack/enable',{});
+  const secrets=['xapp-synthetic-secret-12345','xoxb-synthetic-secret-12345'];
+  for(const [i,secret] of secrets.entries())await receive({eventId:`secret${i}`,teamId:'T123',userId:'U123',channelId:'D123',text:`Please use ${secret}`,threadTs:'123.1'});
+  await until(()=>posts.length===2);assert.equal(seen.length,0);assert.ok(posts.every(post=>post.text.includes('protected secret entry')));
+  for(const secret of secrets){assert.ok(!JSON.stringify(posts).includes(secret));assert.ok(!readFileSync(path).includes(Buffer.from(secret)));}
+ } finally {await app.close();rmSync(dir,{recursive:true,force:true});}
+});
+
 test('Slack DM is approved, durable and delivered once, while plugin controls retain configuration',async()=>{
  const dir=mkdtempSync(join(tmpdir(),'staf-slack-')),path=join(dir,'db'),modelInputs=[];let receive,connections=0,posts=[];
  const slackTransport={identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async(_tokens,handler)=>{connections++;receive=handler;return ()=>{receive=undefined}},post:async(_tokens,message)=>{posts.push(message)}};

@@ -5,6 +5,7 @@ import {responseEvents} from './response-stream';
 import {z} from 'zod';
 import type { Memory, MemoryScope } from '../src/memory-types';
 import {containsCredential} from './credential-warning';
+import type {SlackSetupApproval} from '../src/slack-setup-types';
 
 export type ModelCatalog={models:Array<{id:string;label:string;reasoning:string[]|null;reasoningStatus:string}>;defaultModel?:string};
 export type Bot={revision?:string;id:string;name:string;provider:string;model:string|null;archived:boolean;image?:AgentImage};
@@ -30,7 +31,7 @@ export type ChatWork={id:string;processes:Array<{id:string;state:string;mode:str
 export type Question={kind:'single'|'multiple';prompt:string;choices:string[]}|{kind:'text';prompt:string};
 export type QuestionAnswer={choices:string[];writeIn:string}|null;
 export type QuestionSet={id:string;botId:string;workKind:'command'|'task';workId:string;questions:Question[];draft:QuestionAnswer[];state:'open'|'submitted'|'dismissed';result:unknown;originState:string;continuationId:string|null;continuationState:string|null;continuationError:string|null;deliveryError:string|null};
-export type InboxItem={kind:'question';id:string;botId:string|null;attemptId:string;text:string}|{kind:'approval';approvalKind:'clock'|'web'|'search'|'shell'|'disclosure';id:string;botId:string|null;work:{kind:'task'|'command';id:string};detail:unknown}|{kind:'secret';id:string;botId:string;work:{kind:'task'|'command';id:string};name:string;purpose:string;destination:string|null;state:'pending'|'interrupted'};
+export type InboxItem={kind:'question';id:string;botId:string|null;attemptId:string;text:string}|{kind:'approval';approvalKind:'clock'|'web'|'search'|'shell'|'disclosure';id:string;botId:string|null;work:{kind:'task'|'command';id:string};detail:unknown}|{kind:'secret';id:string;botId:string;work:{kind:'task'|'command';id:string};name:string;purpose:string;destination:string|null;state:'pending'|'interrupted'}|{kind:'slack-setup';id:string;botId:string;work:{kind:'task'|'command';id:string};approval:SlackSetupApproval;state:'pending'|'connecting'|'interrupted'};
 type SubmissionIdentity={id:string;text:string};
 export type Submission=SubmissionIdentity & (
   | {kind:'submitting'|'submitting-uncertain'|'pending'}
@@ -441,6 +442,7 @@ export class Controller {
   async decide(item:Extract<InboxItem,{kind:'approval'}>,decision:'approve'|'deny'){const route={clock:'approvals',web:'web-approvals',search:'search-approvals',shell:'shell-approvals',disclosure:'disclosures'}[item.approvalKind];try{await this.api('/api/'+route+'/'+item.id+'/'+decision,{});this.update({notice:'Decision recorded.'});await this.refresh()}catch(e){this.update({actionError:'Decision failed or is uncertain. Refresh before trying again.'});this.notify('Decision failed or is uncertain. Refresh before trying again.','error');await this.refresh()}}
   async secretDecision(id:string,decision:'save'|'skip'|'dismiss',value?:string){await this.api('/api/secret-requests/'+encodeURIComponent(id)+'/'+decision,decision==='save'?{value}:{});await this.refresh();}
   async selectSecret(id:string,name:string,revision:string){await this.api('/api/secret-requests/'+encodeURIComponent(id)+'/select',{name,revision});await this.refresh();}
+  async slackSetupDecision(id:string,decision:'confirm'|'dismiss',approval:SlackSetupApproval){await this.api('/api/slack-setup/'+encodeURIComponent(id)+'/'+decision,{approval});await this.refresh();}
   async secrets(){return this.api<Array<{name:string;purpose:string|null;destination:string|null;revision:string}>>('/api/secrets');}
   async secretGrants(){return this.api<Array<{name:string;revision:string;integration:'gmail.client'|'gmail.refresh'|'slack.app'|'slack.bot';destination:string}>>('/api/secret-grants');}
   async secretGrantTargets(){return this.api<Array<{integration:'gmail.client'|'gmail.refresh'|'slack.app'|'slack.bot';destination:string}>>('/api/secret-grant-targets');}

@@ -392,6 +392,9 @@ results before release to callers or normal records. The paired browser checks
 recognizable formats locally before chat and question submission; flagged
 question text is omitted from draft saves. Unknown and transformed values may
 escape filtering, and historical records are not rewritten.
+Incoming Slack messages matching recognized credential patterns or known values
+are rejected before work or model dispatch, with only a generic notice retained.
+This cannot remove the message from Slack or detect every credential.
 
 ### Native process slice
 

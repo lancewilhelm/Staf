@@ -598,7 +598,9 @@ the selected role. The supported roles are `gmail.client`, `gmail.refresh`,
 approvals. Existing agent and client checks still apply at their respective
 boundaries. The grant APIs never return a saved value.
 The browser's recognizable-pattern warning is client-side; it is not an API
-validation guarantee. It blocks flagged chat and question submissions and omits
+validation guarantee. Incoming Slack messages also receive a service-side check
+for recognized patterns and known values before model dispatch. Neither check
+detects every secret or removes a message already sent to Slack. The browser blocks flagged chat and question submissions and omits
 flagged written answers from draft saves. Action results are filtered for known
 values before normal retention and model delivery; this does not cover arbitrary
 encodings, unknown values, historical records, or messages already sent.
