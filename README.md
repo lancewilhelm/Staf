@@ -50,6 +50,8 @@ Clock, memory, web research and file tools are enabled for availability in **Set
 terminal to issue a fresh one-time code for another client. This preview binds
 only to loopback. The optional native Linux HTTPS gateway provides paired home-network browser access; see [native Linux installation](docs/native-linux-installation.md). See [usage](docs/usage.md#local-shared-instance-offline-preview) for CLI commands and limitations.
 
+A tool-capable agent can present optional [question sets in main chat](docs/usage.md#answer-a-question-set). Your drafts survive a restart, and submitted answers or dismissal arrive as a separate follow-up without replaying the original work.
+
 Explicit background tasks and their outcomes appear in the shared conversation, with a task Stop control; separate Activity management remains deferred. It is an offline-tested preview with important permission and recovery limitations; see [usage](docs/usage.md#background-task-preview).
 
 

@@ -59,7 +59,7 @@ test('direct, hybrid and code offers are captured and unoffered calls cannot dis
     for(const mode of ['direct','hybrid','code']){
       const bot=await f.call('/api/bots',{provider:'live',model:'fixture-offline',name:mode,toolMode:mode});const index=f.seen.length;
       await f.submit(mode,bot.id,mode);const command=await f.wait(mode);assert.equal(command.state,'completed');
-      assert.deepEqual(f.seen[index].offers,mode==='direct'?['terminal_run','terminal_read','terminal_stop','terminal_write','terminal_eof','terminal_resize','clock','file_read','file_write','file_edit','file_search',...memoryOffers]:mode==='hybrid'?['terminal_run','terminal_read','terminal_stop','terminal_write','terminal_eof','terminal_resize','clock','file_read','file_write','file_edit','file_search',...memoryOffers,'code_mode']:['code_mode']);
+      assert.deepEqual(f.seen[index].offers,mode==='direct'?['terminal_run','terminal_read','terminal_stop','terminal_write','terminal_eof','terminal_resize','clock','file_read','file_write','file_edit','file_search',...memoryOffers,'ask_questions']:mode==='hybrid'?['terminal_run','terminal_read','terminal_stop','terminal_write','terminal_eof','terminal_resize','clock','file_read','file_write','file_edit','file_search',...memoryOffers,'ask_questions','code_mode']:['code_mode']);
       assert.equal(command.workActions.length,1);assert.equal(command.workActions[0].state,'succeeded');
       assert.equal(command.codeExecutions.length,mode==='direct'?0:1);
       if(mode!=='direct')assert.match(command.codeExecutions[0].result.value,/^\d{4}-/);
@@ -88,7 +88,7 @@ test('Code Mode offers skill guidance while rejecting forged individual calls',a
       const index=f.seen.length;
       await f.submit('skill-'+mode,bot.id);const command=await f.wait('skill-'+mode);
       assert.equal(command.state,'completed',command.error);
-      assert.deepEqual(f.seen[index].offers,mode==='direct'?['terminal_run','terminal_read','terminal_stop','terminal_write','terminal_eof','terminal_resize','clock','file_read','file_write','file_edit','file_search',...memoryOffers,'select_skill']:mode==='hybrid'?['terminal_run','terminal_read','terminal_stop','terminal_write','terminal_eof','terminal_resize','clock','file_read','file_write','file_edit','file_search',...memoryOffers,'code_mode','select_skill']:['code_mode']);
+      assert.deepEqual(f.seen[index].offers,mode==='direct'?['terminal_run','terminal_read','terminal_stop','terminal_write','terminal_eof','terminal_resize','clock','file_read','file_write','file_edit','file_search',...memoryOffers,'ask_questions','select_skill']:mode==='hybrid'?['terminal_run','terminal_read','terminal_stop','terminal_write','terminal_eof','terminal_resize','clock','file_read','file_write','file_edit','file_search',...memoryOffers,'ask_questions','code_mode','select_skill']:['code_mode']);
       assert.equal(f.seen[index].messages.some(message=>typeof message.content==='string' && message.content.includes('Available skill catalog')),true);
       assert.equal(command.skillActivity.length,mode==='code'?0:1);
       const result=command.runtimeEvents.find(event=>event.type==='tool_result' && event.name==='select_skill');

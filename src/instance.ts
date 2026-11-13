@@ -1,4 +1,5 @@
 import {isProviderId} from './provider-ids.js';
+import {QuestionSets,questionSetSchema} from './question-sets.js';
 import {parseToolMode,type ToolMode} from './tool-mode.js';
 import {InstanceCore} from './instance-core.js';
 import {ProviderDefaultsStore} from './provider-choices.js';
@@ -35,7 +36,7 @@ import {InboxMonitorStore,inboxMonitorSchema} from './inbox-monitor.js';
 const clockAction: Action = { capability:'clock', operation:'read', resource:'utc', effect:'read', limits:{}, risk:'safe' };
 const clockBoundary = { enabledCapabilities:['clock'], actions:[clockAction] };
 const modes: ApprovalMode[] = ['ask-every-time','ask-for-risky-actions','never-ask'];
-export const INSTANCE_SCHEMA_VERSION = 52;
+export const INSTANCE_SCHEMA_VERSION = 53;
 const MAINTENANCE_VERSION = 2147483647;
 
 export const starterSoul = "You are an assistant working for the owner. Be clear and candid. Distinguish observations from assumptions. Follow the owner's role instructions and work within the permissions and task scope granted to you.";
@@ -93,6 +94,7 @@ export class Instance {
   private actionService: WorkActionService | undefined;
   private readonly grantControllers = new Map<string,Set<AbortController>>();
   readonly migrationBackup: string | undefined;
+  readonly questionSets: QuestionSets;
   readonly plugins: PluginStore;
   readonly inboxMonitor: InboxMonitorStore;
   constructor(path: string, private readonly redactSkill: (text:string) => string = text => text, maintenanceToken?:string) {
@@ -251,6 +253,8 @@ export class Instance {
     if(version < 49) this.db.exec(`CREATE TABLE IF NOT EXISTS gmail_reply_proposals (action_id TEXT PRIMARY KEY REFERENCES action_journal(id), fingerprint TEXT NOT NULL, work_kind TEXT NOT NULL, work_id TEXT NOT NULL, bot_id TEXT NOT NULL, account_id TEXT NOT NULL, gmail_revision INTEGER NOT NULL, slack_revision INTEGER NOT NULL, team_id TEXT NOT NULL, user_id TEXT NOT NULL, channel_id TEXT NOT NULL, message_id TEXT NOT NULL, effect TEXT NOT NULL, digest TEXT NOT NULL, effect_digest TEXT NOT NULL, state TEXT NOT NULL, prompt_ts TEXT, detail TEXT);
       CREATE INDEX IF NOT EXISTS gmail_reply_account_message ON gmail_reply_proposals(account_id,message_id);`);
     this.db.exec("INSERT OR IGNORE INTO slack_notices SELECT action_id||':send-outcome',team_id,user_id,channel_id,NULL,bot_id,CASE WHEN json_extract(effect,'$.kind')='modify' THEN 'The Gmail inbox change outcome is unknown after restart. Inspect the message before trying again.' ELSE 'The Gmail send outcome is unknown after restart. Check Sent mail before trying again.' END, 'pending',0 FROM gmail_reply_proposals WHERE state='dispatching'; UPDATE gmail_reply_proposals SET state='interrupted',detail='Instance restarted before dispatch' WHERE state IN ('disclosure','review','revision','approved'); UPDATE gmail_reply_proposals SET state='uncertain',detail='Instance restarted during Gmail dispatch; inspect the account before taking further action' WHERE state='dispatching'");
+    if(version < 53) this.db.exec(questionSetSchema);
+    this.questionSets = new QuestionSets(this.db);
     this.plugins = new PluginStore(this.db);
     this.inboxMonitor = new InboxMonitorStore(this.db);
     this.inboxMonitor.recover();

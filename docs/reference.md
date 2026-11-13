@@ -446,6 +446,26 @@ on disable, but an already dispatched effect may have reached its destination.
 Clock permission, web/search permissions, task scope and approvals remain
 independent and authoritative. Search still needs a configured backend.
 
+## Main-chat question sets
+
+Schema 53 stores question definitions, ordinary drafts, resolution, the originating
+command and a service-generated continuation ID. `ask_questions` accepts up to
+12 optional single-choice, multiple-select or text questions. Choice questions
+include a list of choices; every question accepts a write-in. Paired clients can
+inspect `GET /api/question-sets`, save an entire draft with
+`POST /api/question-sets/ID/draft`, and resolve it through `submit` or `dismiss`.
+The service validates choices and retains explicit skipped results. The same
+resolution is idempotent; a different resolution cannot replace it.
+
+A completed origin permits a new, correlated continuation. A reserved command
+identity makes repeated delivery converge on one command. Interrupted origins
+and interrupted continuations are not automatically replayed. The automatic
+continuation has no tool offers; subsequent owner-directed turns use normal tool
+permissions. Ordinary Slack chat continues as conversation; this structured
+main-chat capability is not offered to Slack commands. This is not secret storage.
+Known credentials and recognized OpenRouter key patterns are rejected from drafts,
+but detection is incomplete.
+
 ## Saved tool mode contract
 
 `src/tool-mode.ts` exports `ToolMode` (`direct`, `hybrid`, or `code`) and

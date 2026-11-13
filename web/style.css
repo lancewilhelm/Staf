@@ -2726,3 +2726,11 @@ details[open] > .disclosure-summary > .disclosure-chevron { transform: rotate(90
 .select-control:has(select:disabled) > .select-chevron { opacity: .5; }
 .toast-dismiss { display: grid; place-items: center; }
 .reasoning-help { display: inline-flex; vertical-align: middle; }
+.question-set { margin: 1rem 0; padding: 1rem; border: 1px solid var(--line); border-radius: .75rem; }
+.question-set nav { display: flex; flex-wrap: wrap; gap: .4rem; margin-bottom: .8rem; }
+.question-set fieldset { border: 0; padding: 0; }
+.question-set label { display: block; margin: .5rem 0; }
+.question-set textarea { display: block; width: 100%; min-height: 4rem; }
+.question-set button { margin: .25rem; }
+
+.question-set nav button[aria-current="step"] { outline: 2px solid var(--primary); outline-offset: 1px; }
