@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync,rmSync,statSync} from 'node:fs';
+import {mkdtempSync,rmSync,statSync,readFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {startInstance} from '../dist/instance-service.js';
@@ -8,9 +8,9 @@ import {startInstance} from '../dist/instance-service.js';
 const until=async fn=>{for(let i=0;i<200;i++){const result=await fn();if(result)return result;await new Promise(resolve=>setTimeout(resolve,10));}throw Error('Timed out');};
 
 test('Slack DM is approved, durable and delivered once, while plugin controls retain configuration',async()=>{
- const dir=mkdtempSync(join(tmpdir(),'staf-slack-')),path=join(dir,'db');let receive,connections=0,posts=[];
+ const dir=mkdtempSync(join(tmpdir(),'staf-slack-')),path=join(dir,'db'),modelInputs=[];let receive,connections=0,posts=[];
  const slackTransport={identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async(_tokens,handler)=>{connections++;receive=handler;return ()=>{receive=undefined}},post:async(_tokens,message)=>{posts.push(message)}};
- const providerFactory=async()=>({name:'fixture',capabilities:{toolCalls:false,incrementalText:false},complete:async()=>({role:'assistant',content:'Fixture reply'})});
+ const providerFactory=async()=>({name:'fixture',capabilities:{toolCalls:false,incrementalText:false},complete:async messages=>{modelInputs.push(JSON.stringify(messages));return {role:'assistant',content:'Fixture reply'};}});
  let app=startInstance(path,0,{env:{},slackTransport,providerFactory}),port=await app.listen();
  const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body===undefined?'GET':'POST',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body===undefined?{}:{'Content-Type':'application/json'})},...(body===undefined?{}:{body:JSON.stringify(body)})});return [r.status,await r.json()]};
  try {
@@ -28,6 +28,7 @@ test('Slack DM is approved, durable and delivered once, while plugin controls re
   await receive({...event,userId:'U999'});await receive({...event,teamId:'T999'});await receive({...event,channelId:'D999'});assert.equal(posts.length,0);
   await receive(event);await receive(event);
   await until(()=>posts.length===1);assert.deepEqual(posts[0],{channel:'D123',threadTs:'123.1',text:'Fixture reply'});
+  assert.doesNotMatch(JSON.stringify(modelInputs),/xapp-synthetic|xoxb-synthetic/);assert.ok(!readFileSync(path).includes(Buffer.from('xapp-synthetic')));assert.ok(!readFileSync(path).includes(Buffer.from('xoxb-synthetic')));
   await call('/api/plugins/slack/disable',token,{});assert.equal(receive,undefined);
   let status=(await call('/api/plugins',token))[1][0];assert.equal(status.enabled,false);assert.equal(status.connected,true);
   await app.close();app=startInstance(path,0,{env:{},slackTransport,providerFactory});port=await app.listen();

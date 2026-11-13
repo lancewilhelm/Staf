@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync,rmSync,statSync} from 'node:fs';
+import {mkdtempSync,rmSync,statSync,readFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createHash} from 'node:crypto';
@@ -29,6 +29,7 @@ test('paired owner connects Gmail with PKCE, manages agent access, and retains s
   assert.equal((await call('/api/secret-grants',token))[1].filter(item=>item.integration.startsWith('gmail.')).length,2);
   gmail=(await call('/api/plugins',token))[1].find(x=>x.id==='gmail');assert.equal(gmail.connected,true);assert.equal(gmail.enabled,false);assert.equal(gmail.accountId,'owner@example.test');assert.deepEqual(gmail.agentAccessIds,[]);
   assert.doesNotMatch(JSON.stringify(gmail),/synthetic-secret|synthetic-refresh|synthetic-access/);
+  assert.ok(!readFileSync(path).includes(Buffer.from('synthetic-secret')));assert.ok(!readFileSync(path).includes(Buffer.from('synthetic-refresh')));
   assert.equal((await call('/api/plugins/gmail/access',token,{botId:bot.id,enabled:true}))[0],200);
   rejectRefresh=true;assert.equal((await call('/api/plugins/gmail/enable',token,{}))[0],400);gmail=(await call('/api/plugins',token))[1].find(x=>x.id==='gmail');assert.equal(gmail.enabled,false);assert.equal(gmail.status,'Connection check failed');rejectRefresh=false;
   assert.equal((await call('/api/plugins/gmail/enable',token,{}))[0],200);
