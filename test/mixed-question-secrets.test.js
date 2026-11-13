@@ -4,6 +4,7 @@ import {mkdtempSync,rmSync,readFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {startInstance} from './fixtures/controlled-instance.mjs';
+import {SecretRequests} from '../dist/secret-requests.js';
 
 const wait=async fn=>{for(let i=0;i<400;i++){const value=await fn();if(value)return value;await new Promise(resolve=>setTimeout(resolve,20));}throw Error('Timed out');};
 
@@ -62,4 +63,9 @@ test('interrupted background mixed request cannot accept a protected value after
  const call=async(route,body)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});return {status:response.status,value:await response.json()};};
  try{app=startInstance(path,0,options);port=await app.listen();token=(await call('/api/pair',{code:app.code})).value.token;const bot=(await call('/api/bots',{name:'Restart',provider:'live',model:'fixture',toolMode:'direct'})).value;await call('/api/tasks',{id:'restart-task',botId:bot.id,objective:'Ask'});const q=await wait(async()=>(await call('/api/question-sets')).value.find(item=>item.workId==='restart-task'));await call(`/api/question-sets/${q.id}/draft`,{answers:[{choices:[],writeIn:'owner@example.test'},null]});await app.close();app=startInstance(path,0,options);port=await app.listen();const restored=(await call('/api/question-sets')).value.find(item=>item.id===q.id);assert.equal(restored.originState,'interrupted');assert.equal(restored.draft[0].writeIn,'owner@example.test');assert.equal((await call(`/api/question-sets/${q.id}/secret/1/save`,{value:'never-saved'})).status,400);assert.equal((await call(`/api/question-sets/${q.id}/submit`,{})).value.result.answers[1].status,'skipped');assert.equal((await call('/api/tasks/restart-task')).value.state,'interrupted');assert.equal(requests,1);}
  finally{if(app)await app.close();rmSync(dir,{recursive:true,force:true});}
+});
+
+
+test('a protected question selection resolves only its current secret revision',()=>{
+ const store=new SecretRequests('.',true);try{store.add({name:'Existing',purpose:'Fixture',value:'synthetic-first'});const first=store.names()[0];store.saveQuestionStep({questionId:'request',step:1,name:first.name,revision:first.revision});assert.deepEqual(store.questionStepSelection('request',1),{name:first.name,revision:first.revision});store.replace({name:first.name,revision:first.revision,value:'synthetic-replacement'});assert.equal(store.questionStepSelection('request',1),undefined);assert.equal(store.questionStepStatus('request',1),'unavailable');const second=store.names()[0];store.saveQuestionStep({questionId:'request',step:1,name:second.name,revision:second.revision});assert.deepEqual(store.questionStepSelection('request',1),{name:second.name,revision:second.revision});store.delete(second.name,second.revision);assert.equal(store.questionStepSelection('request',1),undefined);}finally{store.close();}
 });
