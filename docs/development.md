@@ -323,26 +323,13 @@ For an offline basic-tool review, use the controlled fixture agent and repeat th
 1. Send `Scripted clock fixture`. Expect the time and an action record. Hybrid
    and Code Mode also expose source, result and linked action IDs under
    **Code execution**.
-2. Send `Basic tools fixture direct`, then `Revise basic tools fixture direct`
-   (replace `direct` with the selected mode). The first request creates
-   `work/basic-acceptance.txt` containing `before` and an agent memory. The
-   second reads, edits and searches the file, updates the memory and forgets it.
-   Expect the file to contain `after` and no `browser acceptance` memory to remain.
-3. Send `Interactive process fixture`. Open its **Process** detail after the
-   response finishes. Expect a retained PTY and `interactive ready`. Send a line;
-   **Refresh output** shows `answer:` followed by that line. Change Columns/Rows
-   and select **Resize terminal**. Select **Stop process** before its 30-second
-   fixture sleep ends; expect an observed exit.
-4. Open a private window or another browser at the same address. Enter `pair`
-   in the fixture terminal for a new code, then pair this client and inspect
-   or stop the same process. For CLI controls, use the
-   [process reference](reference.md#native-process-api) with that instance and a separate paired
-   credential file. Both clients should show the same process ID and outcome.
+2. Send `Interactive process fixture`. Expect host isolation to be unavailable
+   and no process to start. Host file and native terminal actions are currently
+   blocked on every platform; see [credential isolation](credential-isolation.md).
 
-These prompts execute actual local commands and modify only this fixture's
-agent work files and memory. They exercise controlled responses; they are not
-prompts for a live provider. General project management and automatic
-self-improvement remain outside this feature.
+These prompts use controlled responses, not a live provider. The previous
+file, retained PTY and cross-client process walkthroughs require the missing
+host-work boundary and cannot currently be used as acceptance checks.
 
 To finish a held response normally, enter `stream-next` twice in the fixture
 terminal. Stop the fixture with Ctrl+C when finished.
@@ -531,11 +518,9 @@ contexts, a real service restart, and blocked external networking. It proves
 cropping, saved identity, and supported UI interactions without a live provider.
 The broader workspace and memory browser journeys remain relevant regressions.
 
-The native process fixture uses disposable paired instances, a controlled
-provider and real host commands. Run `node --test test/native-process.test.js test/native-process-lifecycle.test.js`
-after building. In the controlled chat fixture above, send `Native process fixture`;
-open its process detail to see `native browser output`, then select **Stop process**
-and expect the process to reach an observed exited state. This is a controlled provider with a real host command; it does not establish live-provider behavior.
+The older native process integration tests expect real host commands. They fail
+while agent host execution is blocked. The controlled `Native process fixture`
+currently reports isolation unavailable and starts no process.
 
 ### Task action verification
 
@@ -545,9 +530,11 @@ For a manual CLI check, start the controlled fixture as described in [Review cha
 
 ### Interactive terminal verification
 
-After one build, run `node --test test/native-interactive.test.js` for the paired real pipe/PTY, retained-work, EOF/resize, cross-client/CLI, Stop, privacy and input-recovery checks. Reuse these disposable fixtures for focused development; run the required check/full suite at completed integration and the combined GUI/CLI journey at final feature acceptance. No extra test environment or live provider is needed. The distribution test packs Staf, installs production dependencies, and executes a real PTY command using the installed native binding. Linux runtime is separate from macOS arm64 evidence.
-
-For a manual offline check, use the existing controlled instance above, create a Hybrid fixture agent and send `Interactive process fixture`. Its process should remain running after the response. Open process details, set a size and select Resize terminal, type `hello` and select Send line, then refresh output. Expect `answer:hello` in the terminal stream. Select Stop process and expect an observed exit. The same resource is inspectable and controllable from the paired CLI.
+`test/native-interactive.test.js` retains the intended pipe/PTY, retained-work,
+EOF/resize, cross-client/CLI, Stop, privacy and input-recovery coverage, but its
+host-execution tests fail until a supported isolation backend exists. The
+distribution test instead verifies that a fresh package rejects host execution
+before starting a process. Linux runtime evidence is separate from macOS tests.
 
 ## Creation defaults and legacy Demo data
 
