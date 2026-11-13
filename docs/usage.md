@@ -796,11 +796,13 @@ dismiss the request. The input is masked by default and can be revealed before
 saving; a saved value is never returned to the browser or model. The model gets
 only the outcome. A pending request survives a restart as interrupted: dismiss
 it and start a new attempt rather than replaying work. Saving neither enables a
-plugin nor authorizes a destination, and there is not yet a supported path to
-use, select, or replace a named secret through this feature. Settings lists
-nonsecret metadata and can delete a named secret after confirmation. Deletion
-does not revoke a provider credential or erase backups. Existing
-Gmail and Slack credential files are unchanged.
+plugin nor authorizes a destination. You can select an existing named secret in
+a request. Settings lists nonsecret metadata and lets you add, replace, or delete
+a named secret without a model. Replacement and deletion require confirmation;
+a stale confirmation fails if the secret changed. There is not yet a supported
+path for a plugin or tool to use a named secret, and no usage grants are stored.
+Deletion does not revoke a provider credential, recall an in-flight request, or
+erase backups. Existing Gmail and Slack credential files and their use are unchanged.
 
 Named values are unencrypted in `secrets/credentials.sqlite` under the instance
 data directory, with owner-only directory and file permissions. The service

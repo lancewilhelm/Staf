@@ -216,6 +216,8 @@ Stop the gateway too before backup or replacement. The archive command runs only
 Each run creates a new owner-only directory, so simultaneous backups do not
 overwrite one another. A full data-directory backup includes the unencrypted named
 secret store at `secrets/credentials.sqlite`; protect the archive accordingly.
+Preserve its owner-only directory and file permissions on restore. The service
+rejects a secrets directory or database accessible to group or other users.
 The store has no implemented secret-use grants. Restoring an old backup can
 restore secrets that were deleted later. Review and revoke provider credentials
 as needed after recovery. Verify the archive exists and is

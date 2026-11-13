@@ -375,8 +375,10 @@ action arguments and results. A separate SQLite database under the data director
 stores named values in plaintext and request metadata; the main action journal
 contains the nonsecret request and outcome. The store restores pending requests
 as interrupted, and work is not replayed. Paired-client and work authority are
-checked before a save. The current store does not implement use grants or connect
-plugins. Known saved values join the existing output filter, which remains a
+checked before a save or selection. Settings can add a value or confirm a
+replacement or deletion using the current opaque revision. Metadata for existing
+stores is added when the store opens. The current store does not implement use
+grants or connect plugins. Known saved values join the existing output filter, which remains a
 secondary safeguard rather than isolation.
 
 ### Native process slice

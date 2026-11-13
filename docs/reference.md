@@ -568,10 +568,15 @@ re-executing it. A new read can fetch current data.
 `GET /api/inbox` exposes pending or interrupted request metadata to paired
 clients. `POST /api/secret-requests/ID/save` accepts `{ "value": "..." }`
 directly; `/skip` and `/dismiss` accept `{}`. Responses contain status only.
-Saving checks the current client and originating work. Interrupted requests can
+`POST /api/secret-requests/ID/select` accepts a saved secret name and current
+revision. Saving or
+selecting checks the current client and originating work. Interrupted requests can
 be dismissed, but cannot accept a value or resume work. Duplicate names are
-rejected. `GET /api/secrets` returns metadata only; `POST /api/secrets/delete`
-accepts a name and explicit confirmation. No API returns values or grants a plugin permission to use them.
+rejected. `GET /api/secrets` returns metadata and an opaque revision only.
+`POST /api/secrets/add` accepts a name, purpose, and value; `/replace` accepts a
+name, current revision, value, and explicit confirmation; `/delete` accepts a
+name, current revision, and explicit confirmation. Stale revisions fail. No API
+returns values or grants a plugin permission to use them.
 See [secret requests](usage.md#secret-requests) for storage and backup limits.
 
 

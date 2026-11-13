@@ -32,6 +32,8 @@ docker compose run --rm -T --no-deps --user 0 --entrypoint tar staf -C /data -cf
 docker compose start staf
 ```
 
+The stopped volume includes the unencrypted named-secret database. Protect the archive like the data volume. An older backup can restore secrets deleted later; review access and provider credentials after restoring it. Secret-use grants are not implemented. Preserve the owner-only permissions on the `secrets` directory and its database.
+
 To restore the archive into a separate Compose project, use the same source checkout and build its image first. The separate project has its own named volume. Do not start both projects on port 3210 at the same time. This command restores into the destination volume and overwrites matching files there; choose a new project with an empty volume.
 
 ```sh
