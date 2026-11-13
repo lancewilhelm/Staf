@@ -25,7 +25,7 @@ const chatEventSchema=z.object({id:z.number().int(),type:z.enum(['tool_start','t
 export type ChatEvent=z.infer<typeof chatEventSchema>;
 export type ResponseProgress={id:string;botId:string;state:'accepted'|'running'|'stopping'|'stopped'|'completed'|'failed'|'interrupted';text:string;error:string|null;events?:ChatEvent[]};
 export type ChatWork={id:string;processes:Array<{id:string;state:string;mode:string;retained:boolean;inputClosed:boolean;cols:number|null;rows:number|null;exitCode:number|null;exitSignal:string|null}>;progress:ResponseProgress;codeExecutions:Array<{id:string;source:string;sourceHash:string;outcome:string;result:unknown;actions:string[]}>;events:ChatEvent[]};
-export type InboxItem={kind:'question';id:string;botId:string|null;attemptId:string;text:string}|{kind:'approval';approvalKind:'clock'|'web'|'search'|'shell'|'disclosure';id:string;botId:string|null;work:{kind:'task'|'command';id:string};detail:unknown};
+export type InboxItem={kind:'question';id:string;botId:string|null;attemptId:string;text:string}|{kind:'approval';approvalKind:'clock'|'web'|'search'|'shell'|'disclosure';id:string;botId:string|null;work:{kind:'task'|'command';id:string};detail:unknown}|{kind:'secret';id:string;botId:string;work:{kind:'task'|'command';id:string};name:string;purpose:string;destination:string|null;state:'pending'|'interrupted'};
 type SubmissionIdentity={id:string;text:string};
 export type Submission=SubmissionIdentity & (
   | {kind:'submitting'|'submitting-uncertain'|'pending'}
@@ -429,4 +429,7 @@ export class Controller {
   async setArchived(profile:BotProfile,archived:boolean){await this.api('/api/bots/'+profile.id+'/'+(archived?'archive':'restore'),{revision:profile.revision});await this.refresh()}
   async stopTask(id:string){try{await this.api('/api/tasks/'+id+'/stop',{});await this.refresh()}catch{this.notify('Could not stop task. Refresh and retry.','error');await this.refresh()}}
   async decide(item:Extract<InboxItem,{kind:'approval'}>,decision:'approve'|'deny'){const route={clock:'approvals',web:'web-approvals',search:'search-approvals',shell:'shell-approvals',disclosure:'disclosures'}[item.approvalKind];try{await this.api('/api/'+route+'/'+item.id+'/'+decision,{});this.update({notice:'Decision recorded.'});await this.refresh()}catch(e){this.update({actionError:'Decision failed or is uncertain. Refresh before trying again.'});this.notify('Decision failed or is uncertain. Refresh before trying again.','error');await this.refresh()}}
+  async secretDecision(id:string,decision:'save'|'skip'|'dismiss',value?:string){await this.api('/api/secret-requests/'+encodeURIComponent(id)+'/'+decision,decision==='save'?{value}:{});await this.refresh();}
+  async secrets(){return this.api<Array<{name:string;purpose:string|null;destination:string|null}>>('/api/secrets');}
+  async deleteSecret(name:string){return this.api('/api/secrets/delete',{name,confirm:true});}
 }

@@ -118,6 +118,9 @@ Staf writes a backup under the development data directory before reset and befor
 a supported schema upgrade. It includes SQLite, authoritative agent files, and the
 complete core revision tree,
 but not provider credentials. Protect the backup like the original conversations.
+Named secrets in `secrets/credentials.sqlite` are also outside these development
+snapshots and stay in the current data directory during reset or restore. Back up
+the stopped data directory separately when those values must be recoverable.
 If startup reports interrupted maintenance, stop all instances and run:
 
 ```sh
@@ -398,6 +401,13 @@ behavior they control. Prefer normal development commands and existing setup
 over temporary directories or test-specific IDs in the user's manual steps.
 Separate checks already run from steps the user can perform. Report skips and
 distinguish synthetic coverage from live provider, VM, or Docker acceptance.
+
+For a disposable offline secret-request UI check, build and run
+`node test/fixtures/secret-request-ui.mjs`. It prints a local address and pairing
+code, uses a synthetic model, and removes its temporary dataset when stopped.
+Create an agent using provider `live` and model `fixture-offline`, then send a
+message to trigger a request. Use synthetic values only. This specialized
+fixture does not exercise a Linux isolation boundary or a live provider.
 For docs-only changes, report the relevant documentation checks instead of
 requiring an application launch.
 

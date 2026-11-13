@@ -9,6 +9,7 @@ import { redactValue } from './config.js';
 import { providerEvents } from './provider-events.js';
 import { appendTaskInputs } from './task-inbox.js';
 import { checkedOwnerWebUrl, containsUnsafeWebUrl } from './web-reader.js';
+import {secretRequestInput} from './secret-requests.js';
 import type { Provider, RuntimeEvent, Session, SessionWriter, ToolDefinition } from './types.js';
 import { errorMessage, isAssistantMessage, isRecord, validSession } from './validation.js';
 
@@ -123,6 +124,13 @@ export async function runTurn({ session, store, provider, text, emit = () => {},
       if (raw === undefined) throw new Error('Provider returned no final message');
       if(actions?.isPrivate()) {signal?.throwIfAborted();beforeProvider?.();}
       if (isAssistantMessage(raw)) {
+        for(const call of raw.tool_calls ?? []) if(call.function.name==='request_secret') {
+          let input:unknown;try{input=JSON.parse(call.function.arguments);}catch{throw Error('Invalid secret request metadata');}
+          if(!isRecord(input))throw Error('Invalid secret request metadata');
+          const {_staf,...metadata}=input;
+          const parsed=secretRequestInput.safeParse(metadata);
+          if(!parsed.success || (_staf!==undefined && !actionIntent.safeParse(_staf).success))throw Error('Invalid secret request metadata');
+        }
         const unsafe=(value:unknown):boolean => typeof value === 'string' ? containsUnsafeWebUrl(value) : Array.isArray(value) ? value.some(unsafe) : value !== null && typeof value === 'object' ? Object.values(value).some(unsafe) : false;
         if(unsafe(raw.content)) throw Error('Web URLs with credentials or query strings are not supported');
         for(const call of raw.tool_calls ?? []) if(call.function.name === 'read_web') {let input:unknown;try{input=JSON.parse(call.function.arguments);}catch{throw Error('Invalid web URL');}if(!isRecord(input) || typeof input.url !== 'string' || Object.keys(input).some(key=>key!=='url' && !(actions && key==='_staf')))throw Error('Invalid web URL');checkedOwnerWebUrl(input.url);}

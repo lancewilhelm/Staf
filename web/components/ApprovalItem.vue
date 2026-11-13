@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { InboxItem } from '../controller';
 import { useWorkspace } from '../workspace';
-defineProps<{item: InboxItem}>();
+defineProps<{item: Exclude<InboxItem,{kind:'secret'}>}>();
 const { app } = useWorkspace();
 const descriptions = {
   shell: 'Commands, output, and unknown secrets may be retained in chat and backups. The Docker daemon and image must be trusted.',

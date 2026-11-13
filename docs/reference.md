@@ -309,6 +309,10 @@ The shared instance schedule preview exposes `schedule-create`, `schedule-list`,
 
 ### Shared-instance scratch shell
 
+Scratch-shell calls are currently blocked while credential isolation is
+unverified. Configuration and recovery controls remain available for existing
+records.
+
 `GET` and `POST /api/shell-config` inspect and revision-safely set the owner-selected Docker binary, Unix socket and pinned image ID. `GET` and `POST /api/shell-permissions/{instance|bot:ID|task:ID}` inspect or set an explicit boolean `enabled`; shell requires instance and bot permission, and tasks require task permission. Helpers are blocked; scheduled tasks may use only their captured exact command and Docker configuration, subject to explicit task disable. Task readback includes override, inherited scope, current effective access and command. `GET /api/shell-approvals` shows exact pending commands to paired clients; `POST /api/shell-approvals/ID/approve|deny` decides one. The runtime always supplies the fixed bounded scratch workspace; a model cannot select a host path or daemon. `GET /api/shell-uncertain` lists unresolved actions and recorded endpoint configurations. Endpoint string equality does not prove the binary or socket still identifies the same daemon; the owner must verify daemon identity independently. `POST /api/shell-actions/ID/review` requires acknowledgment `verified-daemon-identity-and-accepted-late-create-risk`; review does not perform cleanup or prove that a late create cannot materialize. Version 20 adds the scratch configuration, permissions, decision snapshots, durable serialization lock and review journal. See [usage](usage.md#scratch-only-shell) for process visibility, swap and retention limits.
 
 ### Scheduled exact web authorization
@@ -485,6 +489,10 @@ where persistence succeeds.
 
 ## Host file actions
 
+Agent host-file calls are currently blocked while credential isolation is
+unverified. The following describes the retained implementation and recovery
+contract, not available agent access.
+
 `file_read({path, offset?, limit?})` returns at most 32,768 bytes (default 8,192) and returns base64 data, byte offset, size, next offset and, for files up to 1 MiB, a SHA-256. `file_write({path, content})` writes UTF-8. `file_edit({path, expectedHash, oldText, newText})` requires valid UTF-8, a file at most 1 MiB, the current hash and one exact match. `file_search({path, query, offset?, limit?})` returns byte offsets in a file, scanning up to 65,536 bytes per page, or matching names in a single directory. A page has at most 100 matches; a directory over 10,000 entries is rejected. Paths are at most 4,096 characters; write content is at most 131,072 UTF-16 code units, each edit string at most 65,536, and search queries at most 1,024. The shared 256 KiB serialized invocation limit also applies. Follow `nextOffset` until null. Concurrent host changes can invalidate a page or race an edit; the hash check is not an atomic compare-and-swap.
 
 Paths resolve against the captured working directory unless absolute and use ordinary host permissions. Inputs changed by redaction are rejected before journal preparation. Shared action admission, Stop, recovery, and uncertain-effect handling apply. Helper and scheduled task restrictions remain in force; task mode applies to eligible actions.
@@ -531,7 +539,27 @@ invocation rows have no private payload; selected output and conversation histor
 remain retained. An expired read resume reports its completed status without
 re-executing it. A new read can fetch current data.
 
+### Secret request API
+
+`request_secret` accepts only `name`, `purpose`, and optional `destination`.
+`GET /api/inbox` exposes pending or interrupted request metadata to paired
+clients. `POST /api/secret-requests/ID/save` accepts `{ "value": "..." }`
+directly; `/skip` and `/dismiss` accept `{}`. Responses contain status only.
+Saving checks the current client and originating work. Interrupted requests can
+be dismissed, but cannot accept a value or resume work. Duplicate names are
+rejected. `GET /api/secrets` returns metadata only; `POST /api/secrets/delete`
+accepts a name and explicit confirmation. No API returns values or grants a plugin permission to use them.
+See [secret requests](usage.md#secret-requests) for storage and backup limits.
+
+
 ### Native process API
+
+Agent native-process, host-file, and scratch-shell calls currently fail closed
+before execution because no credential-isolation backend has been verified.
+The resource APIs below remain available to paired owners for existing records;
+the process execution contract describes retained implementation, not a
+currently available agent capability.
+
 
 Pipe and PTY supervisors omit `OPENROUTER_API_KEY`, `STAF_API_KEY`,
 `OPENAI_API_KEY`, `CODEX_API_KEY`, and `LMSTUDIO_API_KEY` from the inherited

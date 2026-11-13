@@ -214,7 +214,11 @@ fi
 
 Stop the gateway too before backup or replacement. The archive command runs only when the user manager reports `inactive` or `failed`.
 Each run creates a new owner-only directory, so simultaneous backups do not
-overwrite one another. Verify the archive exists and is
+overwrite one another. A full data-directory backup includes the unencrypted named
+secret store at `secrets/credentials.sqlite`; protect the archive accordingly.
+The store has no implemented secret-use grants. Restoring an old backup can
+restore secrets that were deleted later. Review and revoke provider credentials
+as needed after recovery. Verify the archive exists and is
 readable, then retain it independently of the host. Inspect the archive with
 `tar -tzf BACKUP_FILE`. Do not proceed with an update if backup creation or
 inspection fails.

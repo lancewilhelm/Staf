@@ -615,6 +615,10 @@ The backend and its upstream search engines may retain queries. Queries, results
 
 ### Scratch-only shell
 
+Scratch-shell calls are currently blocked while credential isolation is
+unverified. The configuration and recovery controls described below remain
+available to the owner for existing records.
+
 Scratch shell is disabled by default. A paired owner must configure an absolute Docker CLI path, an absolute Unix daemon socket path and a pinned `sha256:` image ID, then enable instance and bot permission. Ordinary background tasks also require their own shell permission. Helpers cannot use it. A scheduled task may use only its captured exact command and Docker configuration, subject to an explicit task disable. Task permission readback distinguishes the owner override, inherited scope and effective access. The commands `instance shell-config URL CREDENTIAL_FILE`, `shell-config-set URL CREDENTIAL_FILE REVISION DOCKER_BINARY DOCKER_SOCKET IMAGE_ID`, `shell-permission URL CREDENTIAL_FILE SCOPE`, and `shell-permission-set URL CREDENTIAL_FILE SCOPE true|false` manage configuration and permissions. Use `- - -` to clear the configuration. Existing bot permissions and approval settings remain independent.
 
 Each exact command requires owner approval in the browser or through `shell-approvals`, `shell-approve`, and `shell-deny`. The integration passes only a fixed 16 MiB, 1,024-inode scratch tmpfs to the sandbox, with a 30-second execution limit and 64 KiB output limit. It does not mount a host workspace. The Docker binary, daemon and pinned image must be trusted. The exact command is visible to host process observers and Docker container configuration until removal. Scratch tmpfs may use swap, and Docker can provide runtime-managed mounts. Commands, output and unknown secrets may persist in provider replay, conversations, Activity and backups. Known configured secrets are redacted where supported; arbitrary output may contain secrets that cannot be reliably detected.
@@ -700,10 +704,10 @@ The terminal supports `staf settings set toolMode hybrid` and
 set `toolMode` in the existing agent profile JSON, or pass `--tool-mode` at
 creation. The paired defaults command accepts a final mode argument.
 
-In chat and eligible tasks, Direct offers the eligible clock, memory, configured search, web reading, scratch shell, skill selection, host file, and native process tools, Hybrid offers those individual tools and `code_mode`, and Code Mode offers `code_mode` with the same registered capabilities inside it. The code tool description lists eligible registered capability names and input schemas. Fabricated individual calls are rejected. Web reads require approval for each redirect target. Scratch commands continue to use the owner-configured Docker sandbox and its existing limits.
+In chat and eligible tasks, Direct offers eligible individual tools, Hybrid offers those tools and `code_mode`, and Code Mode offers `code_mode` with the same registered capabilities inside it. The code tool description lists eligible registered capability names and input schemas. Fabricated individual calls are rejected. Web reads require approval for each redirect target. Agent host file, native process, and scratch shell calls fail closed until a credential-isolation backend is established and verified; changing tool availability or approval settings cannot bypass this restriction.
 Background tasks use their captured mode for eligible registered capabilities, including clock and task questions, discovery and helper exchanges. A helper uses its own captured mode; helper and scheduled-work restrictions still apply. Pending owner input defers queued actions until the task drains its inbox. Plain text does not start a guest. Settings edits apply to new work; an accepted task and its retries retain their captured profile and task context. Clock permissions and applicable approvals remain live.
 
-File actions use the agent's stable `work` directory for relative paths. Absolute paths use the Staf service account's normal host access; the working directory is not a sandbox. `file_write` creates or replaces a UTF-8 file, and `file_read` returns base64 bytes, their offset, the file size, a `nextOffset` when more remains, and a SHA-256 for files up to 1 MiB. Use that hash with `file_edit` to replace exactly one matching UTF-8 string; changed hashes, missing matches and multiple matches fail. `file_search` finds literal UTF-8 bytes in a file or matching names in one directory. Follow `nextOffset` to continue. Directory search is not recursive. These actions do not create parent directories.
+The host file implementations remain in the codebase, but agent calls are blocked before execution while isolation is unavailable. The working directory alone is not a sandbox.
 
 An external writer can still race the hash check and write; it is not an atomic filesystem compare-and-swap. Failed effects that cannot be determined are recorded as uncertain and require reconciliation, not automatic replay. The paired action records and CLI status expose outcomes. Inputs that cannot be retained under the instance redaction rules are rejected rather than substituted. File reads check surrounding bytes for complete known credentials, including credentials split across page boundaries; a page near a credential may also be rejected. Pattern-recognized tokens are checked back to their boundary; a read fails if the boundary cannot be established within the bounded lookback, including for very long benign tokens. Unknown or deliberately transformed secrets may still appear in output or retained history.
 
@@ -741,20 +745,55 @@ and use a tool-capable provider to exercise the respective offer. This fixture
 uses synthetic provider responses and does not establish live-provider behavior.
 The broader basic-tools feature remains incomplete.
 
-### Native process slice
+## Secret requests
 
-Agents can call `terminal_run` with shell text and an optional `cwd`, and
-`terminal_read` with a process ID and optional output cursor. `terminal_stop`
-requests termination of an owned process. These operations run on the Staf
-host with the service account's access. Their launch environment omits
+A tool-capable agent may request a name, purpose, and intended destination in
+main chat or background work. Any currently paired browser can save, skip, or
+dismiss the request. The input is masked by default and can be revealed before
+saving; a saved value is never returned to the browser or model. The model gets
+only the outcome. A pending request survives a restart as interrupted: dismiss
+it and start a new attempt rather than replaying work. Saving neither enables a
+plugin nor authorizes a destination, and there is not yet a supported path to
+use, select, or replace a named secret through this feature. Settings lists
+nonsecret metadata and can delete a named secret after confirmation. Deletion
+does not revoke a provider credential or erase backups. Existing
+Gmail and Slack credential files are unchanged.
+
+Named values are unencrypted in `secrets/credentials.sqlite` under the instance
+data directory, with owner-only directory and file permissions. The service
+account, host administrator, and anyone with a copy of the store can read them.
+Agent-accessible host execution and file tools are blocked on every platform;
+this does not protect against pre-existing detached processes, other programs
+running as the service user, host administrators, or host compromise. Stop old
+agent processes before using the store. No Linux isolation or live provider
+acceptance has been demonstrated. Do not paste secrets into ordinary chat.
+
+A stopped full data-directory backup includes the secret store. Protect it like
+the original. Development reset/restore snapshots do not include or restore this
+store; retain it separately when moving development data. Backup copies may
+retain values after any later removal. No master password is required at restart.
+
+
+## Native process slice
+
+Agent calls to native processes and scratch shell currently fail closed on all
+platforms. No Linux isolation backend is implemented or verified. Paired owners
+can still inspect or stop previously recorded resources, but old detached
+processes may survive an upgrade and must be stopped separately before storing
+secrets. The following describes the retained process implementation, not
+currently available agent execution.
+
+The retained implementation accepts shell text and an optional `cwd` through
+`terminal_run`, reads output with `terminal_read`, and requests termination with
+`terminal_stop`. It runs on the Staf host with the service account's access,
+which is why agent access is blocked. Its launch environment omits
 `OPENROUTER_API_KEY`, `STAF_API_KEY`, `OPENAI_API_KEY`, `CODEX_API_KEY`, and
 `LMSTUDIO_API_KEY`; other variables remain available. This omission is not a
 security boundary: commands and file tools can still reach files and other
 resources accessible to the service account, including credential files, and
-unknown credentials or aliases in the environment are not removed. The captured agent work
-folder is the default; relative and absolute working paths are supported. They
-are offered directly in Direct and Hybrid and through Code Mode in Hybrid and
-Code. Existing scheduled and helper restrictions remain in force. Use `mode: "pty"` for a real terminal or the default `mode: "pipe"` for separate stdout/stderr. Set `retain: true` to keep a process after its accepted work completes; otherwise unfinished processes are stopped at work completion.
+unknown credentials or aliases in the environment are not removed. A future
+backend must provide a verified boundary before restoring agent access.
+
 
 A paired owner can use `instance processes URL CREDENTIAL_FILE`,
 `instance process URL CREDENTIAL_FILE PROCESS_ID`,
@@ -773,9 +812,12 @@ A live supervisor retains control of the owned process group after the shell exi
 
 ### Interactive and retained processes
 
-`terminal_run({command, mode: "pty", retain: true, cols: 80, rows: 24})` starts an interactive process with a real terminal. PTY output merges stdout/stderr into the `terminal` stream. Pipe mode preserves separate streams. Use `terminal_write({processId, data})` to submit exact UTF-8 input, `terminal_eof({processId})` to close a pipe or send terminal Ctrl-D, and `terminal_resize({processId, cols, rows})` for a PTY. Ctrl-D is an input character whose meaning depends on the program; it does not permanently close a PTY. Dimensions must be 1–1000. Input submission does not prove the application consumed it.
+The retained implementation supports interactive PTY and pipe resources, but
+agent access to these actions is blocked as described above. PTY output merges
+stdout/stderr into the `terminal` stream. Pipe mode preserves separate streams.
+Input submission does not prove the application consumed it.
 
-Retained processes remain usable by later accepted work for the same agent, regardless of its selected calling style. Guest return, ordinary error and guest limits do not stop them. Active-work Stop terminates every process started by that work, including retained ones. Explicit process Stop, agent archive and instance shutdown also request termination. Restart retains records and output but cannot recover a lost live handle.
+Previously retained processes may still be visible to paired clients. Explicit process Stop, agent archive and instance shutdown request termination. Restart retains records and output but cannot recover a lost live handle.
 
 Paired clients use the process `/input`, `/eof` and `/resize` endpoints. CLI commands are `instance process-input URL CREDENTIAL_FILE PROCESS_ID TEXT`, `instance process-eof URL CREDENTIAL_FILE PROCESS_ID`, and `instance process-resize URL CREDENTIAL_FILE PROCESS_ID COLS ROWS`. Input is exact: include a newline when the program expects Enter. Chat process details provide Send line, Close input/Send Ctrl-D, resize, output and Stop controls.
 

@@ -5,6 +5,7 @@ import { ActionDenied, ActionRevision, ActionFailed, type Capability, type Actio
 import {registerTaskCapabilities, type TaskActionHooks} from './task-actions.js';
 import {clockCapability} from './clock-action.js';
 import {fileCapabilities} from './file-actions.js';
+import {SecretRequests,secretRequestInput} from './secret-requests.js';
 
 import {nativeCommandCapability,nativeOutputCapability,nativeStopCapability,nativeInteractionCapabilities,checkedInteraction} from './native-processes.js';
 import {registerMemoryCapabilities} from './memory-actions.js';
@@ -78,6 +79,8 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
   const redact = (text:string) => [...knownKeys].reduce((result,key)=>redactor({OPENROUTER_API_KEY:key})(result),redactEnv(text));
   const providerEnv = (provider:string) => ({...env,STAF_MODEL:undefined,...(provider==='openrouter'?{OPENROUTER_API_KEY:loadOpenRouterKey(dataDir)}:{})});
   const instance = new Instance(path,redact,options.maintenanceToken);
+  let secretRequests:SecretRequests;
+  try {secretRequests=new SecretRequests(resolve(dirname(path)),path===':memory:');for(const value of secretRequests.values())knownKeys.add(value);}catch(error){instance.close();throw error;}
   let gmailHealth='Not checked';
   const gmailChecks=new Set<AbortController>();
   const stopGmailChecks=()=>{for(const controller of gmailChecks)controller.abort();};
@@ -496,13 +499,21 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
     return true;
   });
   const nativeAllowed=(work:import('./work-actions.js').WorkContext)=>instance.nativeProcessAllowed(work.work);
-  workActions.register(nativeCommandCapability(processes,nativeAllowed,redact));
-  workActions.register(nativeOutputCapability(processes,nativeAllowed));
-  workActions.register(nativeStopCapability(processes,nativeAllowed));
-  const interactions=nativeInteractionCapabilities(processes,nativeAllowed,redact);workActions.register(interactions.write);workActions.register(interactions.eof);workActions.register(interactions.resize);
+  function isolationRequired<I,O>(capability:Capability<I,O>):Capability<I,O> {return {...capability,definition:{...capability.definition,function:{...capability.definition.function,description:'Unavailable: credential isolation is not established on this host.'}},parseInput:()=>{throw new ActionFailed('Unavailable: credential isolation is not established on this host.');}};}
+  workActions.register(isolationRequired(nativeCommandCapability(processes,nativeAllowed,redact)));
+  workActions.register(isolationRequired(nativeOutputCapability(processes,nativeAllowed)));
+  workActions.register(isolationRequired(nativeStopCapability(processes,nativeAllowed)));
+  const interactions=nativeInteractionCapabilities(processes,nativeAllowed,redact);workActions.register(isolationRequired(interactions.write));workActions.register(isolationRequired(interactions.eof));workActions.register(isolationRequired(interactions.resize));
   workActions.register(clockCapability(instance, work=>{const timer=work.work.kind==='task'?taskTimers.get(work.work.id):undefined;return authorizeClock(work.botId,work.work.kind,work.work.id,work.signal,timer?.pause,timer?.resume);}));
   const files=fileCapabilities(redact,work=>instance.fileActionsAllowed(work.work),()=>credentialRedactionOverlap(env,[...knownKeys]));
-  workActions.register(files.read);workActions.register(files.write);workActions.register(files.edit);workActions.register(files.search);
+  workActions.register(isolationRequired(files.read));workActions.register(isolationRequired(files.write));workActions.register(isolationRequired(files.edit));workActions.register(isolationRequired(files.search));
+  const requestSecret:Capability<z.infer<typeof secretRequestInput>,string>={
+    name:'request_secret',definition:{type:'function',function:{name:'request_secret',description:'Ask the owner to enter a named secret in the official Staf UI. Supply only its name, purpose, and known destination; never supply the value. Saving does not enable or authorize an integration.',parameters:{type:'object',properties:{name:{type:'string'},purpose:{type:'string'},destination:{type:'string'}},required:['name','purpose'],additionalProperties:false}}},
+    parseInput:value=>secretRequestInput.parse(value),parseResult:value=>z.enum(['saved','skipped','dismissed']).parse(value),
+    describe:()=>({summary:'Request a secret',resource:'paired owner',effect:'change'}),eligible:()=>true,check:(_input,work)=>instance.assertActionWork(work.work),authorize:async()=>{},
+    execute:async(input,work,action)=>{secretRequests.create(action.id,work.botId,work.work,input);const timer=work.work.kind==='task'?taskTimers.get(work.work.id):undefined;timer?.pause();try{return await secretRequests.wait(action.id,work.signal);}finally{if(!work.signal.aborted)timer?.resume();}},visibleResult:value=>`Secret request ${value}`,
+  };
+  workActions.register(requestSecret);
   registerMemoryCapabilities(instance,workActions,redact);
   registerTaskCapabilities(workActions,taskActionHooks,redact);
   const slackContext=(work:WorkContext)=>work.work.kind==='command' ? slackCommands.get(work.work.id) : undefined;
@@ -559,7 +570,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
   registerSkillCapability(workActions,skillTrackers);
   workActions.setWorkCheck(work=>skillTrackers.get(skillWorkKey(work))?.ensure());
   workActions.register(searchCapability);
-  workActions.register(shellCapability);
+  workActions.register(isolationRequired(shellCapability));
   workActions.register(webCapability);
   workActions.register(webHopCapability);
 
@@ -1149,12 +1160,26 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
       }
       if(req.method==='POST' && req.url==='/api/openrouter-connection/disconnect') {disconnectOpenRouter(dataDir);return json(200,{saved:false});}
       if(req.method==='GET' && req.url==='/api/task-updates') return json(200,instance.bots().flatMap(bot=>typeof bot.id==='string' ? instance.taskAttempts(bot.id).slice(0,30) : []));
+      if(req.method==='GET' && req.url==='/api/secrets')return json(200,secretRequests.names());
+      if(req.method==='POST' && req.url==='/api/secrets/delete') {const input=z.strictObject({name:z.string().min(1).max(120),confirm:z.literal(true)}).parse(value);if(!instance.authorized(token))return json(401,{error:'Unauthorized'});if(!secretRequests.delete(input.name))throw Error('Secret not found');return json(200,{deleted:true});}
+      const secretDecision=req.url?.match(/^\/api\/secret-requests\/([\w-]+)\/(save|skip|dismiss)$/);
+      if(req.method==='POST' && secretDecision?.[1] && secretDecision[2]) {
+        const request=secretRequests.list().find(item=>item.id===secretDecision[1]);if(!request)throw Error('Secret request unavailable');
+        if(!instance.authorized(token))return json(401,{error:'Unauthorized'});
+        if(request.state==='pending' && secretDecision[2]!=='dismiss')instance.assertActionWork(request.work);
+        if(secretDecision[2]==='save') {
+          if(request.state!=='pending')throw Error('Interrupted work cannot accept a secret; start a new attempt');
+          const parsed=z.strictObject({value:z.string().min(1).max(16000).refine(text=>!text.includes('\0'))}).safeParse(value);if(!parsed.success)throw Error('Invalid secret');
+          const result=secretRequests.decide(request.id,'saved',parsed.data.value);knownKeys.add(parsed.data.value);return json(200,{status:result});
+        }
+        z.strictObject({}).parse(value);return json(200,{status:secretRequests.decide(request.id,secretDecision[2]==='skip'?'skipped':'dismissed')});
+      }
       if(req.method==='GET' && req.url==='/api/inbox') {
         const questions=instance.openQuestions().map(q=>({kind:'question',id:q.id,botId:q.botId,attemptId:q.attemptId,text:q.text}));
         const clock=instance.approvalRequests().filter(a=>a.state==='pending').map(a=>({kind:'approval',approvalKind:'clock',id:a.id,botId:a.botId,work:{kind:a.workKind,id:a.workId},detail:a.action}));
         const disclosure=instance.disclosureRequests().filter(a=>a.state==='pending').map(a=>({kind:'approval',approvalKind:'disclosure',id:a.id,botId:instance.taskAttempt(String(a.parentAttemptId))?.botId ?? null,work:{kind:'task',id:a.parentAttemptId},detail:a}));
         const action=(kind:'web'|'search'|'shell',entries:Iterable<[string,{work:WorkRef}]>)=>[...entries].map(([id,item])=>({kind:'approval',approvalKind:kind,id,botId:instance.webWorkBotId(item.work) ?? null,work:item.work,detail:kind==='web' ? {url:webApprovals.get(id)?.url} : kind==='search' ? {query:searchApprovals.get(id)?.query,origin:searchApprovals.get(id)?.origin} : {command:shellApprovals.get(id)?.command,dockerBinary:shellApprovals.get(id)?.dockerBinary,dockerSocket:shellApprovals.get(id)?.dockerSocket,imageId:shellApprovals.get(id)?.imageId,limits:scratchLimits}}));
-        return json(200,[...questions,...clock,...disclosure,...action('web',webApprovals),...action('search',searchApprovals),...action('shell',shellApprovals)]);
+        return json(200,[...secretRequests.list(),...questions,...clock,...disclosure,...action('web',webApprovals),...action('search',searchApprovals),...action('shell',shellApprovals)]);
       }
       if (req.method === 'GET' && req.url === '/api/codex-auth/current') return json(200,{attempt:instanceAuth?.currentStatus(token) ?? null});
       if (req.method === 'GET' && req.url === '/api/codex-auth/credential') {try{const credential=await loadDirectCredential(dataDir);return json(200,{signedIn:true,expiresAt:credential.expiresAt});}catch{return json(200,{signedIn:false});}}
@@ -1448,7 +1473,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
         return json(200,submitCommand({id:value.id,botId:value.botId,content:value.content}));
       }
       return json(404,{error:'Not found'});
-    } catch (error) { if(error instanceof ActionFailed)return json(400,{error:error.safeResult});if(error instanceof CoreInvalid)return json(422,{error:error.message,code:'invalid_core_configuration'});if(error instanceof AgentConfigInvalid)return json(422,{error:error.message,code:'invalid_agent_configuration'});if(error instanceof AgentConfigUncertain)return json(503,{error:error.message,code:'configuration_save_uncertain'});return json((error instanceof BotConflict || error instanceof AgentConfigConflict || error instanceof MemoryConflict || error instanceof SkillConflict || error instanceof ScheduleConflict) ? 409 : 400,{error:error instanceof Error ? error.message : 'Request failed'}); }
+    } catch (error) { if((req.url??'').startsWith('/api/secret-requests/'))return json(400,{error:'Secret request could not be completed'});if(error instanceof ActionFailed)return json(400,{error:error.safeResult});if(error instanceof CoreInvalid)return json(422,{error:error.message,code:'invalid_core_configuration'});if(error instanceof AgentConfigInvalid)return json(422,{error:error.message,code:'invalid_agent_configuration'});if(error instanceof AgentConfigUncertain)return json(503,{error:error.message,code:'configuration_save_uncertain'});return json((error instanceof BotConflict || error instanceof AgentConfigConflict || error instanceof MemoryConflict || error instanceof SkillConflict || error instanceof ScheduleConflict) ? 409 : 400,{error:error instanceof Error ? error.message : 'Request failed'}); }
   });
-  return { server, code, migrationBackup: instance.migrationBackup, finishUpgrade: (token:string)=>instance.finishUpgrade(token), issueCode: () => (code = randomBytes(18).toString('base64url')), close: () => new Promise<void>((resolve,reject)=>{closing=true; stopSlackConnection(); gmailAuth.cancel(); stopGmailChecks(); instanceAuth?.shutdown(); if(scheduleTimer) clearInterval(scheduleTimer); if(gmailMonitorTimer)clearInterval(gmailMonitorTimer); if(inboxTimer)clearInterval(inboxTimer); if(slackWorkTimer)clearInterval(slackWorkTimer); for(const subscriber of responseSubscribers)subscriber.response.end();for(const controller of active) controller.abort(); server.close(error=>{void processes.shutdown().then(()=>{instance.close(); if(error)reject(error);else resolve();},reject);});}), listen: () => new Promise<number>((resolve,reject)=>{server.once('error',reject);server.listen(port,'127.0.0.1',()=>{const a=server.address();if(a && typeof a !== 'string') { tickSchedules(); scheduleTimer=setInterval(tickSchedules,30000); gmailMonitorTimer=setInterval(()=>{void scheduledGmailPoll().catch(()=>{});},options.gmailPollIntervalMs??30000); inboxTimer=setInterval(()=>{void tickInbox();},250); void startSlackConnection(); slackWorkTimer=setInterval(()=>{void deliverSlackWork().catch(()=>{});},250); void deliverSlackWork().catch(()=>{}); resolve(a.port); }else reject(Error('Listen failed'));});}) };
+  return { server, code, migrationBackup: instance.migrationBackup, finishUpgrade: (token:string)=>instance.finishUpgrade(token), issueCode: () => (code = randomBytes(18).toString('base64url')), close: () => new Promise<void>((resolve,reject)=>{closing=true; stopSlackConnection(); gmailAuth.cancel(); stopGmailChecks(); instanceAuth?.shutdown(); if(scheduleTimer) clearInterval(scheduleTimer); if(gmailMonitorTimer)clearInterval(gmailMonitorTimer); if(inboxTimer)clearInterval(inboxTimer); if(slackWorkTimer)clearInterval(slackWorkTimer); for(const subscriber of responseSubscribers)subscriber.response.end();for(const controller of active) controller.abort(); server.close(error=>{void processes.shutdown().then(()=>{secretRequests.close();instance.close(); if(error)reject(error);else resolve();},reject);});}), listen: () => new Promise<number>((resolve,reject)=>{server.once('error',reject);server.listen(port,'127.0.0.1',()=>{const a=server.address();if(a && typeof a !== 'string') { tickSchedules(); scheduleTimer=setInterval(tickSchedules,30000); gmailMonitorTimer=setInterval(()=>{void scheduledGmailPoll().catch(()=>{});},options.gmailPollIntervalMs??30000); inboxTimer=setInterval(()=>{void tickInbox();},250); void startSlackConnection(); slackWorkTimer=setInterval(()=>{void deliverSlackWork().catch(()=>{});},250); void deliverSlackWork().catch(()=>{}); resolve(a.port); }else reject(Error('Listen failed'));});}) };
 }

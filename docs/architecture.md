@@ -352,7 +352,26 @@ The service installs a tracker keyed by the actual command or task attempt while
 
 ### Registered host files
 
-The host file capability registration supplies read, write, exact-match edit and bounded search to the existing work-action coordinator. Both chat calling styles use the accepted working directory and the same invocation identity and journal. Hash checks run within the edit effect so a completed-action resume returns its recorded result. An external writer may still race the check and the filesystem write; Staf does not claim atomic compare-and-swap. Effects with unknown outcomes remain uncertain rather than being automatically retried. File data uses service-account filesystem access, not QuickJS isolation.
+Agent host file, native process, and scratch shell actions are blocked at
+capability input parsing on all platforms until an isolation backend is verified.
+This applies to Direct, Hybrid, Code Mode, tasks and helpers. Previously detached
+processes and unrelated same-user software are outside that gate.
+The unimplemented [Linux isolation design](credential-isolation.md) records
+the proposed trust boundary and verification requirements.
+
+The retained host file implementations provide read, write, exact-match edit and bounded search, but are not dispatched while the isolation gate is closed. Their filesystem operations use service-account access, not QuickJS isolation. An external writer can race their hash check and write; Staf does not claim atomic compare-and-swap.
+
+### Secret requests
+
+The registered request action accepts descriptive metadata only. A separate
+paired-client endpoint sends a value directly to the service, outside generic
+action arguments and results. A separate SQLite database under the data directory
+stores named values in plaintext and request metadata; the main action journal
+contains the nonsecret request and outcome. The store restores pending requests
+as interrupted, and work is not replayed. Paired-client and work authority are
+checked before a save. The current store does not implement use grants or connect
+plugins. Known saved values join the existing output filter, which remains a
+secondary safeguard rather than isolation.
 
 ### Native process slice
 

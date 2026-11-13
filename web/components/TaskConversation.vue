@@ -3,6 +3,7 @@ import { computed } from 'vue';
 import type { ConversationTask, InboxItem } from '../controller';
 import { useWorkspace } from '../workspace';
 import ApprovalItem from './ApprovalItem.vue';
+import SecretRequest from './SecretRequest.vue';
 import DisclosureSummary from './DisclosureSummary.vue';
 import ResponseText from './ResponseText.vue';
 const props=defineProps<{task:ConversationTask;inbox:InboxItem[]}>();
@@ -19,7 +20,7 @@ const observations=computed(()=>props.task.activity.filter(event=>event.type==='
     <template v-if="task.state==='completed' && task.outcome"><ResponseText :text="task.outcome" /></template>
     <p v-else-if="task.outcome" class="meta">{{ task.outcome }}</p>
     <div v-for="event in observations" :key="event.seq"><p class="meta">Observed output{{ event.late ? ' after Stop' : ' (not a completed result)' }}</p><ResponseText :text="event.text ?? ''" /></div>
-    <ApprovalItem v-for="item in relevant" :key="item.id" :item="item" />
+    <template v-for="item in relevant" :key="item.id"><SecretRequest v-if="item.kind==='secret'" :item="item" /><ApprovalItem v-else :item="item" /></template>
     <details v-if="task.activity.length"><DisclosureSummary>Task activity</DisclosureSummary>
       <div v-for="event in task.activity" :key="event.seq" class="task-event"><strong>{{ event.type }}</strong><pre v-if="event.message || event.content">{{ event.message || event.content }}</pre></div>
     </details>

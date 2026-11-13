@@ -14,7 +14,7 @@ const { state: s } = useWorkspace();
 const selected = computed(() => s.value.bots.find(agent => agent.id === s.value.selected));
 const relevant = computed(() => s.value.inbox.filter(item => item.botId === s.value.selected));
 const submission = computed(() => s.value.draft.submission);
-const unmatched = computed(() => s.value.work.filter(work => submission.value?.id !== work.id && !s.value.messages.some(message => message.id === 'command-user-' + work.id) && (work.events.length || relevant.value.some(item => item.kind === 'approval' && item.work.kind === 'command' && item.work.id === work.id))));
+const unmatched = computed(() => s.value.work.filter(work => submission.value?.id !== work.id && !s.value.messages.some(message => message.id === 'command-user-' + work.id) && (work.events.length || relevant.value.some(item => item.kind !== 'question' && item.work.kind === 'command' && item.work.id === work.id))));
 type Row = {kind:'task';key:string;task:ConversationTask} | {kind:'user';key:string;text:string;commandId:string|null} | {kind:'response';key:string;commandId:string|null;message:Message|null;work:ChatWork|undefined;progress:ResponseProgress|null;optimistic:boolean};
 type ResponseRow=Extract<Row,{kind:'response'}>;
 function responseWork(row:ResponseRow):ChatWork|undefined {
