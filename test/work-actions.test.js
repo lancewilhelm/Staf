@@ -136,7 +136,26 @@ test('question continuation blocks an equivalent isolated terminal command',asyn
  try {const manager=new NativeProcesses(instance.db);instance.workActions().register(nativeCommandCapability(manager,()=>true,value=>value,async()=>{starts++;return {started:true};},cwd=>'/workspace/'+isolatedWorkingDirectory('/srv/staf-workspace',cwd)));
   const first=await invoke(actions,source('original'),'terminal_run',{command:'printf safe',cwd:'/srv/staf-workspace/project'});assert.equal(first.kind,'completed');instance.db.prepare('INSERT INTO work_action_resolutions VALUES (?)').run(first.actionId);
   instance.questionSets.create('question',bot.id,'c',{questions:[{kind:'text',prompt:'Continue?'}]});const request=instance.questionSets.list()[0];instance.complete('c','waiting for answer');actions.dispose();instance.claim({id:request.continuationId,botId:bot.id,content:'Answer'});continuation=instance.workActions().open({kind:'command',id:request.continuationId},controller.signal);
-  const repeated=await invoke(continuation,source('continuation'),'terminal_run',{command:'printf safe',cwd:'/workspace/project'});assert.equal(repeated.kind,'blocked');assert.match(repeated.reason,/originating work cannot be repeated/);assert.equal(starts,1);
+  const repeated=await invoke(continuation,source('continuation'),'terminal_run',{command:'printf safe',cwd:'/workspace/project',retain:true,mode:'pty'});assert.equal(repeated.kind,'blocked');assert.match(repeated.reason,/originating work cannot be repeated/);assert.equal(starts,1);
+ }finally{continuation?.dispose();actions.dispose();instance.close();}
+});
+
+test('terminal resume requires the original options and rejects an invalid cwd before journaling',async()=>{
+ const {nativeCommandCapability,NativeProcesses}=await import('../dist/native-processes.js');const {isolatedWorkingDirectory}=await import('../dist/linux-host-boundary.js');const {instance,actions}=fixture();let starts=0;
+ try {const manager=new NativeProcesses(instance.db);instance.workActions().register(nativeCommandCapability(manager,()=>true,value=>value,async()=>{starts++;return {started:true};},cwd=>'/workspace/'+isolatedWorkingDirectory('/srv/staf-workspace',cwd)));
+  const invalid=await invoke(actions,source('invalid'),'terminal_run',{command:'printf safe',cwd:'/outside'});assert.equal(invalid.kind,'blocked');assert.equal(instance.db.prepare('SELECT count(*) AS n FROM action_journal').get().n,0);
+  const first=await invoke(actions,source('original'),'terminal_run',{command:'printf safe',cwd:'/srv/staf-workspace/project'});assert.equal(first.kind,'completed');
+  await assert.rejects(invoke(actions,source('resume'),'terminal_run',{command:'printf safe',cwd:'/workspace/project',retain:true},{kind:'resume',actionId:first.actionId}),/Resume does not match/);
+  const resumed=await invoke(actions,source('resume-exact'),'terminal_run',{command:'printf safe',cwd:'/workspace/project'},{kind:'resume',actionId:first.actionId});assert.equal(resumed.kind,'completed');assert.equal(starts,1);
+ }finally{actions.dispose();instance.close();}
+});
+
+test('an invalid historical terminal cwd does not block a later valid command',async()=>{
+ const {nativeCommandCapability,NativeProcesses}=await import('../dist/native-processes.js');const {isolatedWorkingDirectory}=await import('../dist/linux-host-boundary.js');const {instance,bot,actions,controller}=fixture();let starts=0,continuation;
+ try {const manager=new NativeProcesses(instance.db);instance.workActions().register(nativeCommandCapability(manager,()=>true,value=>value,async()=>{starts++;return {started:true};},cwd=>'/workspace/'+isolatedWorkingDirectory('/srv/staf-workspace',cwd)));
+  const first=await invoke(actions,source('original'),'terminal_run',{command:'printf old',cwd:'/workspace/project'});assert.equal(first.kind,'completed');instance.db.prepare('UPDATE work_action_invocations SET input=? WHERE action_id=?').run(JSON.stringify({command:'printf old',cwd:'/outside'}),first.actionId);instance.db.prepare('INSERT INTO work_action_resolutions VALUES (?)').run(first.actionId);
+  instance.questionSets.create('question',bot.id,'c',{questions:[{kind:'text',prompt:'Continue?'}]});const request=instance.questionSets.list()[0];instance.complete('c','waiting for answer');actions.dispose();instance.claim({id:request.continuationId,botId:bot.id,content:'Answer'});continuation=instance.workActions().open({kind:'command',id:request.continuationId},controller.signal);
+  const result=await invoke(continuation,source('continuation'),'terminal_run',{command:'printf new',cwd:'/workspace/project'});assert.equal(result.kind,'completed');assert.equal(starts,2);
  }finally{continuation?.dispose();actions.dispose();instance.close();}
 });
 
