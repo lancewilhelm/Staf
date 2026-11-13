@@ -9,7 +9,7 @@ const secret=z.string().min(1).max(4096).regex(/^[\x21-\x7e]+$/);
 export const gmailStartSchema=z.strictObject({email:z.email().max(320).transform(value=>value.toLowerCase()),clientId:secret,clientSecret:secret,sendEnabled:z.boolean().optional(),modifyEnabled:z.boolean().optional()});
 const tokenResponse=z.object({access_token:secret,refresh_token:secret.optional(),scope:z.string().optional(),token_type:z.string()});
 const profileSchema=z.object({emailAddress:z.email().max(320),historyId:z.string().regex(/^\d+$/)});
-type Attempt={state:string;verifier:string;initiator:string;input:z.infer<typeof gmailStartSchema>;revision:number|null;expires:number;phase:'waiting'|'exchanging';controller:AbortController;timer?:ReturnType<typeof setTimeout>};
+type Attempt={state:string;verifier:string;initiator:string;input:z.infer<typeof gmailStartSchema>;originalEmail:string;revision:string;expires:number;phase:'waiting'|'exchanging';controller:AbortController;timer?:ReturnType<typeof setTimeout>};
 async function responseJson(response:Response):Promise<unknown> {
  if(!response.body)throw Error('Empty Google response');const reader=response.body.getReader(),chunks:Uint8Array[]=[];let bytes=0;
  try {while(true){const {done,value}=await reader.read();if(done)break;bytes+=value.byteLength;if(bytes>131072){await reader.cancel();throw Error('Google response too large');}chunks.push(value);}}finally{reader.releaseLock();}
@@ -19,15 +19,15 @@ async function responseJson(response:Response):Promise<unknown> {
 export class GmailAuth {
  private attempt:Attempt|undefined;
  private result='Not connected';
- constructor(private readonly request:typeof fetch,private readonly authorized:(token:string)=>boolean,private readonly revision:()=>number|null,private readonly commit:(credential:GmailCredential,historyId:string)=>void) {}
+ constructor(private readonly request:typeof fetch,private readonly authorized:(token:string)=>boolean,private readonly revision:()=>string,private readonly commit:(credential:GmailCredential,historyId:string)=>void,private readonly checkMetadata:(email:string,clientId:string)=>void,private readonly recordCredential:(value:string)=>void) {}
  status(){return this.attempt ? (this.attempt.phase==='waiting'?'Waiting for Google authorization':'Checking Gmail account') : this.result;}
  cancel(){const a=this.attempt;if(a){if(a.timer)clearTimeout(a.timer);a.controller.abort();this.attempt=undefined;this.result='Authorization cancelled';}}
  reset(){this.cancel();this.result='Not connected';}
- private assertAttempt(a:Attempt){a.controller.signal.throwIfAborted();if(this.attempt!==a || Date.now()>=a.expires || !this.authorized(a.initiator) || this.revision()!==a.revision)throw Error('Authorization expired or settings changed');}
+ private assertAttempt(a:Attempt){a.controller.signal.throwIfAborted();if(this.attempt!==a || Date.now()>=a.expires || !this.authorized(a.initiator) || this.revision()!==a.revision)throw Error('Authorization expired or settings changed');this.checkMetadata(a.originalEmail,a.input.clientId);this.checkMetadata(a.input.email,a.input.clientId);}
  start(initiator:string,origin:string,input:unknown) {
   const uri=new URL(origin);if(uri.protocol!=='http:'||uri.hostname!=='127.0.0.1'||!uri.port||uri.origin!==origin)throw Error('Gmail authorization requires the loopback Staf address');
-  const parsed=gmailStartSchema.parse(input);this.cancel();
-  const a:Attempt={state:randomBytes(32).toString('base64url'),verifier:randomBytes(48).toString('base64url'),initiator,input:parsed,revision:this.revision(),expires:Date.now()+600000,phase:'waiting',controller:new AbortController()};this.attempt=a;
+  const parsed=gmailStartSchema.parse(input),originalEmail=z.object({email:z.string()}).parse(input).email;this.checkMetadata(originalEmail,parsed.clientId);this.checkMetadata(parsed.email,parsed.clientId);this.cancel();
+  const a:Attempt={state:randomBytes(32).toString('base64url'),verifier:randomBytes(48).toString('base64url'),initiator,input:parsed,originalEmail,revision:this.revision(),expires:Date.now()+600000,phase:'waiting',controller:new AbortController()};this.attempt=a;
   a.timer=setTimeout(()=>{if(this.attempt===a){this.cancel();this.result='Authorization expired';}},600000);a.timer.unref();
   const url=new URL('https://accounts.google.com/o/oauth2/v2/auth');
   for(const [key,value] of Object.entries({client_id:parsed.clientId,redirect_uri:origin+'/gmail/oauth/callback',response_type:'code',scope:[gmailScope,...(parsed.sendEnabled?[gmailSendScope]:[]),...(parsed.modifyEnabled?[gmailModifyScope]:[])].join(' '),access_type:'offline',prompt:'consent',state:a.state,code_challenge:createHash('sha256').update(a.verifier).digest('base64url'),code_challenge_method:'S256',login_hint:parsed.email}))url.searchParams.set(key,value);
@@ -36,7 +36,7 @@ export class GmailAuth {
  async accept(method:string,target:string,origin:string):Promise<boolean> {
   const a=this.attempt;if(!a || a.phase!=='waiting'||method!=='GET')return false;
   const url=new URL(target,origin);if(url.pathname!=='/gmail/oauth/callback'||url.searchParams.getAll('state').length!==1||url.searchParams.get('state')!==a.state)return false;
-  if(Date.now()>=a.expires || !this.authorized(a.initiator) || this.revision()!==a.revision){this.cancel();this.result='Authorization expired or settings changed';return false;}
+  try {this.assertAttempt(a);}catch{this.cancel();this.result='Authorization expired or settings changed';return false;}
   const codes=url.searchParams.getAll('code');if(codes.length!==1 || !codes[0] || codes[0].length>4096 || url.searchParams.has('error')){this.cancel();this.result='Google authorization was not completed';return false;}
   a.phase='exchanging';
   try {
@@ -44,6 +44,7 @@ export class GmailAuth {
    const response=await this.request('https://oauth2.googleapis.com/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body.toString(),redirect:'error',signal:AbortSignal.any([a.controller.signal,AbortSignal.timeout(15000)])});
    if(!response.ok)throw Error('Token exchange failed');const tokens=tokenResponse.parse(await responseJson(response));
    if(!tokens.refresh_token || tokens.token_type.toLowerCase()!=='bearer' || !tokens.scope?.split(/\s+/).includes(gmailScope) || (a.input.sendEnabled && !tokens.scope.split(/\s+/).includes(gmailSendScope)) || (a.input.modifyEnabled && !tokens.scope.split(/\s+/).includes(gmailModifyScope)))throw Error('Gmail permission or refresh token missing');
+   this.recordCredential(tokens.access_token);this.recordCredential(tokens.refresh_token);
    this.assertAttempt(a);const profile=await this.profile(tokens.access_token,a.controller.signal);
    if(profile.emailAddress.toLowerCase()!==a.input.email)throw Error('Google account did not match');
    this.assertAttempt(a);

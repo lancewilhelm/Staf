@@ -42,6 +42,7 @@ try {
  assert.equal(await evaluate(`(async()=>{const href=document.querySelector('[aria-label="Gmail plugin"] a[href^="https://accounts.google.com/"]').href;const u=new URL(href),callback=new URL(u.searchParams.get('redirect_uri'));callback.searchParams.set('state',u.searchParams.get('state'));callback.searchParams.set('code','synthetic-code');return (await fetch(callback)).status;})()`),200);
  await evaluate("[...document.querySelectorAll('[aria-label=\"Gmail plugin\"] button')].find(b=>b.textContent.trim()==='Refresh Gmail status').click()");
  await until(()=>evaluate("document.querySelector('[aria-label=\"Gmail plugin\"]').innerText.includes('Account owner@example.test')"),'connected account');
+ await until(()=>evaluate("document.querySelector('[aria-label=\"Gmail plugin\"]').innerText.includes('Connecting replaces these existing approvals:')"),'Gmail reconnect approval review');
  await evaluate("[...document.querySelectorAll('[aria-label=\"Gmail plugin\"] fieldset label')].find(l=>l.innerText.includes('Gmail agent')).querySelector('input').click()");
  await until(()=>evaluate("[...document.querySelectorAll('[aria-label=\"Gmail plugin\"] fieldset label')].find(l=>l.innerText.includes('Gmail agent'))?.querySelector('input').checked && [...document.querySelectorAll('[aria-label=\"Gmail plugin\"] button')].some(b=>b.textContent.trim()==='Enable'&&!b.disabled)"),'agent access');
  await evaluate("[...document.querySelectorAll('[aria-label=\"Gmail plugin\"] button')].find(b=>b.textContent.trim()==='Enable').click()");

@@ -87,7 +87,7 @@ test('an in-flight reconnect cannot undo a later owner disconnect',async()=>{
   const token=(await call('/api/pair','',{code:app.code}))[1].token,bot=(await call('/api/bots',token,{name:'Test agent',provider:'live',model:'fixture'}))[1];
   const config={confirm:true,appToken:'xapp-synthetic',botToken:'xoxb-synthetic',teamId:'T123',userId:'U123',channelId:'D123',botId:bot.id};
   await call('/api/plugins/slack/connect',token,config);hold=true;
-  const connecting=call('/api/plugins/slack/connect',token,config);await waiting;
+  const review=(await call('/api/secret-setup-review?integration=slack',token))[1];const connecting=call('/api/plugins/slack/connect',token,{...config,reviewedVersion:review.version,confirmDisplacements:true});await waiting;
   await call('/api/plugins/slack/disconnect',token,{});release();assert.equal((await connecting)[0],400);
   assert.equal((await call('/api/plugins',token))[1][0].connected,false);
  }finally{release();await app.close();rmSync(dir,{recursive:true,force:true});}
