@@ -520,6 +520,9 @@ explicitly configured, unverified host boundary described in
 
 With the Linux boundary, paths resolve against the approved workspace unless absolute. The file helper rejects paths outside it, symlinks, and nested mounts. The isolated execution account and its workspace permissions apply. Inputs changed by redaction are rejected before journal preparation. Shared action admission, Stop, recovery, and uncertain-effect handling apply. Helper and scheduled task restrictions remain in force; task mode applies to eligible actions.
 
+File tools return paths under `/workspace`, matching terminal commands. They also
+accept the equivalent paths under `/srv/staf-workspace`.
+
 Random file pages check the complete known-credential overlap and up to 64 KiB
 of preceding token context (or the larger known-credential overlap). Recognized
 token patterns cannot be exposed by selecting their middle. If an unbroken token

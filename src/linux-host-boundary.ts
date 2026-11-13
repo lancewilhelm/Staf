@@ -37,7 +37,9 @@ function nearestExisting(path:string):string {
 }
 
 export function isolatedWorkingDirectory(root:string,path:string):string {
- const base=resolve(root),target=resolve(path),part=relative(base,target);
+ const base=resolve(root),target=resolve(path),visibleRoot='/workspace';
+ const visiblePart=relative(visibleRoot,target);
+ const part=visiblePart!=='..' && !visiblePart.startsWith('..'+sep) && !isAbsolute(visiblePart)?visiblePart:relative(base,target);
  if(part==='..' || part.startsWith('..'+sep) || isAbsolute(part))throw new ActionFailed('Working directory is outside the approved workspace');
  return part || '.';
 }

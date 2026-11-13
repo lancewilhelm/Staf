@@ -358,6 +358,8 @@ launcher supplies pipe, PTY and file work, including write reconciliation;
 unsupported and failed configurations never fall back to service-account host
 execution. The launcher requests private namespaces, and the guard checks the
 mount layout and capabilities and applies Landlock and seccomp before delivery.
+File and terminal paths share the `/workspace` namespace. A scratch container
+rejected before start is removed; failed removal remains uncertain for review.
 Neither this path nor the separate Docker scratch boundary has been verified on
 Linux. See [credential isolation](credential-isolation.md) for prerequisites,
 trust assumptions and remaining tests. Helpers and scheduled tasks retain their

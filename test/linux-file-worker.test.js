@@ -41,6 +41,9 @@ test('file action identity recognizes equivalent normalized workspace paths',()=
  assert.equal(write.sameAction({path:'sample',content:'one'},{path:'sample',content:'two'},work),false);
  const isolated=isolatedFileCapabilities({workspace:'/workspace',recheck(){}},value=>value,()=>true,()=>16);
  assert.equal(isolated.write.sameAction({path:'./sample',content:'one'},{path:'/workspace/sample',content:'one'},{workingDirectory:'/private-data'}),true);
+ const mapped=isolatedFileCapabilities({workspace:'/srv/staf-workspace',recheck(){}},value=>value,()=>true,()=>16);
+ assert.equal(mapped.write.sameAction({path:'/srv/staf-workspace/sample',content:'one'},{path:'/workspace/sample',content:'one'},{workingDirectory:'/private-data'}),true);
+ assert.equal(mapped.write.describe({path:'/srv/staf-workspace/sample',content:'one'},{workingDirectory:'/private-data'}).resource,'/workspace/sample');
 });
 
 test('service checks worker read context before releasing a random page',()=>{
