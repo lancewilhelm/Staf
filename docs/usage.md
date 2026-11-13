@@ -803,7 +803,10 @@ plugin nor authorizes a destination. You can select an existing named secret in
 a request. Settings lists nonsecret metadata and lets you add, replace, or delete
 a named secret without a model. The owner can approve an existing secret for a
 configured Gmail or Slack use and its displayed destination, or revoke that use.
-Agent permissions remain separate. Replacement and deletion require confirmation
+If that destination already uses another secret, review its name and explicitly
+confirm the replacement. Each approval or revocation uses the state shown during
+review. If another client changes it first, refresh and review again. Agent
+permissions remain separate. Replacement and deletion require confirmation
 and revoke the secret's use approvals. Settings lists affected integrations before
 the decision. A stale confirmation fails if the secret changed. Deletion does not
 revoke a provider credential, recall an in-flight request, or erase backups.
@@ -820,6 +823,8 @@ Other provider environment settings retain the precedence in the
 [configuration reference](reference.md#terminal-commands-and-environment). The
 shared instance's OpenRouter connection remains separate from named secrets and
 continues to ignore the host `OPENROUTER_API_KEY`.
+Gmail account and OAuth client ID fields must not contain known credential values.
+Staf checks them when authorization begins and again before saving the connection.
 
 The paired browser checks ordinary chat and written question answers for a few
 recognizable credential formats. It warns and blocks submission when one is

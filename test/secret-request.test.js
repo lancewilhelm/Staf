@@ -123,15 +123,26 @@ test('secret grants bind a revision, integration and destination and are revoked
  try {
   store=new SecretRequests(dir,false);store.add({name:'Token',purpose:'Synthetic provider',value:'synthetic-token'});
   const first=store.names()[0].revision;
-  store.grant({name:'Token',revision:first,integration:'slack.bot',destination:'https://slack.com/api|T1|U1|D1'});
+  const destination='https://slack.com/api|T1|U1|D1';const approve=revision=>{const target=store.target('slack.bot',destination);store.grant({name:'Token',revision,integration:'slack.bot',destination,version:target.version,previous:target.current,confirmDisplacement:false});};
+  approve(first);
   assert.equal(store.resolve({integration:'slack.bot',destination:'https://slack.com/api|T1|U1|D1'}),'synthetic-token');
   assert.equal(store.resolve({integration:'slack.bot',destination:'https://slack.com/api|T1|U1|D2'}),undefined);
   assert.equal(store.resolve({integration:'gmail.client',destination:'https://slack.com/api|T1|U1|D1'}),undefined);
   store.close();store=new SecretRequests(dir,false);assert.equal(store.grants().length,1);
   store.replace({name:'Token',revision:first,value:'synthetic-new'});assert.equal(store.grants().length,0);
-  const second=store.names()[0].revision;store.grant({name:'Token',revision:second,integration:'slack.bot',destination:'https://slack.com/api|T1|U1|D1'});
-  store.revoke({name:'Token',revision:second,integration:'slack.bot',destination:'https://slack.com/api|T1|U1|D1'});assert.equal(store.grants().length,0);
-  store.grant({name:'Token',revision:second,integration:'slack.bot',destination:'https://slack.com/api|T1|U1|D1'});store.delete('Token',second);assert.equal(store.grants().length,0);
+  const second=store.names()[0].revision;approve(second);
+  const current=store.target('slack.bot',destination);store.revoke({name:'Token',revision:second,integration:'slack.bot',destination,version:current.version});assert.equal(store.grants().length,0);
+  approve(second);store.delete('Token',second);assert.equal(store.grants().length,0);
+ } finally {store?.close();rmSync(dir,{recursive:true,force:true});}
+});
+
+test('an existing grant gains a stable decision version when the old store is opened',async()=>{
+ const {DatabaseSync}=await import('node:sqlite');const dir=mkdtempSync(join(tmpdir(),'staf-grant-migration-'));let store;
+ try {
+  store=new SecretRequests(dir,false);store.provision([{name:'Old grant',purpose:'Test',value:'synthetic-old-grant',integration:'slack.bot',destination:'old-destination'}]);store.close();store=undefined;
+  const db=new DatabaseSync(join(dir,'secrets','credentials.sqlite'));db.exec('DROP TABLE secret_grant_states');db.close();
+  store=new SecretRequests(dir,false);const migrated=store.grants()[0];assert.ok(migrated.version);assert.equal(store.resolve({integration:'slack.bot',destination:'old-destination'}),'synthetic-old-grant');store.close();
+  store=new SecretRequests(dir,false);assert.equal(store.grants()[0].version,migrated.version);
  } finally {store?.close();rmSync(dir,{recursive:true,force:true});}
 });
 

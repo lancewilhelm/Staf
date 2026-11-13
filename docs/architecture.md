@@ -381,8 +381,12 @@ checked before a save or selection. Settings can add a value or confirm a
 replacement or deletion using the current opaque revision. Metadata for existing
 stores is added when the store opens. The secret database also stores grants bound
 to the named secret revision, registered plugin role, and exact provider and
-account or conversation destination. Replacement and deletion remove the grants
-in the same transaction. Gmail and Slack recheck grants at use alongside their
+account or conversation destination. Each destination has a durable version even
+when no grant exists. Decisions compare the reviewed version and prior grant in
+the same transaction as the update. Replacement and deletion remove the grants
+and advance their versions in the same transaction. Plugin setup reviews existing
+grants, requires confirmation to replace them, and checks for changes before
+connection. Gmail and Slack recheck grants at use alongside their
 existing connection and agent permissions. Owner confirmation is required for
 setup and grant changes. Interrupted and in-flight external requests are not
 automatically replayed. Known saved values join the existing output filter, which remains a

@@ -589,11 +589,16 @@ name, current revision, value, and explicit confirmation; `/delete` accepts a
 name, current revision, and explicit confirmation. Stale revisions fail. No API
 returns saved values.
 `GET /api/secret-grants` lists approved secret names, revisions, integration roles,
-and destinations. `GET /api/secret-grant-targets` lists roles for the current
-connected Gmail and Slack destinations. `POST /api/secret-grants/grant` and
-`/revoke` accept `name`, `revision`, `integration`, `destination`, and
-`confirm: true`. Granting requires the current destination and a value valid for
-the selected role. The supported roles are `gmail.client`, `gmail.refresh`,
+destinations, and grant-state versions. `GET /api/secret-grant-targets` lists the
+current version and existing approval, or `null`, for each connected Gmail and
+Slack destination. `POST /api/secret-grants/grant` and `/revoke` accept `name`,
+`revision`, `integration`, `destination`, `version`, and `confirm: true`.
+Approval also requires the reviewed `previous` approval or `null` and a boolean
+`confirmDisplacement`. Replacing another secret requires that boolean to be true.
+Each decision checks and changes the durable grant state atomically. Revoked and
+never-approved destinations retain state versions; stale decisions fail. Granting
+requires the current destination and a value valid for the selected role. The
+supported roles are `gmail.client`, `gmail.refresh`,
 `slack.app`, and `slack.bot`. Replacement and deletion revoke the secret's
 approvals. Existing agent and client checks still apply at their respective
 boundaries. The grant APIs never return a saved value.
@@ -666,6 +671,13 @@ this slice exposes one Slack account. Tokens remain host-local and are never
 returned. Slack-originated model turns can use the service-owned `start_slack_task`
 and `manage_slack_task` capabilities; thread and owner message identity are
 captured by the service, not supplied as tool arguments. See [Slack setup](usage.md#slack-plugin) for limits and recovery.
+
+Before reconnecting Gmail or Slack, `GET /api/secret-setup-review?integration=gmail`
+or `?integration=slack` returns a version and the existing approvals that setup
+would replace. If a prior grant state exists, the connection request must include
+the reviewed `reviewedVersion`. If an approval exists, it also requires
+`confirmDisplacements: true`. Setup rechecks the reviewed state before committing
+the connection. An older backup restores the grant state recorded in that backup.
 
 Gmail uses `POST /api/plugins/gmail/start` with `email`, `clientId`,
 `clientSecret`, `confirm: true`, and optional booleans `sendEnabled` and `modifyEnabled`; it

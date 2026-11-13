@@ -96,6 +96,8 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
   const gmailDestination=(email:string)=>JSON.stringify(['https://oauth2.googleapis.com/token','https://gmail.googleapis.com',email]);
   const slackDestination=(config:SlackConfig)=>JSON.stringify(['https://slack.com/api','wss://slack.com or *.slack.com',config.teamId,config.userId,config.channelId]);
   const gmailRoles=['gmail.client','gmail.refresh'] as const,slackRoles=['slack.app','slack.bot'] as const;
+  function setupReview(kind:'gmail'|'slack') {const gmail=instance.plugins.gmailConnection(),slack=instance.plugins.connection();if(kind==='gmail' && gmail?.connected)for(const role of gmailRoles)secretRequests.target(role,gmailDestination(gmail.accountId));if(kind==='slack' && slack?.connected)for(const role of slackRoles)secretRequests.target(role,slackDestination(slack.config));return secretRequests.setupReview(kind==='gmail'?gmailRoles:slackRoles);}
+  function assertSetupReview(kind:'gmail'|'slack',body:Record<string,unknown>) {const review=setupReview(kind);const version=z.string().regex(/^[a-f0-9]{64}$/).optional().parse(body.reviewedVersion);if((review.hasHistory && version!==review.version) || (version!==undefined && version!==review.version) || (review.grants.length>0 && body.confirmDisplacements!==true))throw Error('Review the current credential approvals before connecting');return review;}
   function loadGmailCredential(_root:string):GmailCredential|undefined {
     const c=instance.plugins.gmailConnection();if(!c)return undefined;const destination=gmailDestination(c.accountId);
     const clientSecret=secretRequests.resolve({integration:'gmail.client',destination}),refreshToken=secretRequests.resolve({integration:'gmail.refresh',destination});
@@ -111,16 +113,17 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
   let gmailHealth='Not checked';
   const gmailChecks=new Set<AbortController>();
   const stopGmailChecks=()=>{for(const controller of gmailChecks)controller.abort();};
-  const gmailAuth=new GmailAuth(options.gmailRequest ?? fetch,token=>instance.authorized(token),()=>instance.plugins.gmailConnection()?.revision??null,(credential,historyId)=>{
+  const gmailAuth=new GmailAuth(options.gmailRequest ?? fetch,token=>instance.authorized(token),()=>JSON.stringify([instance.plugins.gmailConnection()?.revision??null,setupReview('gmail').version]),(credential,historyId)=>{
     const existing=instance.plugins.gmailConnection();
     if(existing && existing.accountId!==credential.email)throw Error('Delete the existing Gmail configuration before changing accounts');
     knownKeys.add(credential.clientSecret);knownKeys.add(credential.refreshToken);
+    if(redact(credential.email)!==credential.email || redact(credential.clientId)!==credential.clientId)throw Error('Gmail account and client ID cannot contain credentials');
     const destination=gmailDestination(credential.email);secretRequests.revokeIntegrations([...gmailRoles]);
     instance.plugins.gmailConnect({email:credential.email,clientId:credential.clientId},historyId);
     secretRequests.setConfig('gmail',destination,JSON.stringify({sendEnabled:credential.sendEnabled===true,modifyEnabled:credential.modifyEnabled===true}));
     secretRequests.provision([{integration:'gmail.client',destination,name:`Gmail client secret ${randomUUID()}`,purpose:`Gmail OAuth client for ${credential.email}`,value:credential.clientSecret},{integration:'gmail.refresh',destination,name:`Gmail refresh token ${randomUUID()}`,purpose:`Gmail account ${credential.email}`,value:credential.refreshToken}]);
     gmailHealth='Connected';
-  });
+  },(email,clientId)=>{if(redact(email)!==email || redact(clientId)!==clientId)throw Error('Gmail account and client ID cannot contain credentials');},value=>knownKeys.add(value));
   async function checkGmailConnection(client:string) {
     const c=instance.plugins.gmailConnection(),credential=loadGmailCredential(dataDir);if(!c?.connected||!credential||credential.email!==c.accountId||credential.clientId!==c.config.clientId)throw Error('Gmail credentials unavailable; reconnect Gmail');
     const controller=new AbortController();gmailChecks.add(controller);
@@ -1135,9 +1138,9 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
       if(req.method==='GET' && req.url==='/api/plugins')return json(200,pluginStatus());
       if(req.method==='POST' && req.url==='/api/plugins/gmail/start') {
         if(value.confirm!==true)throw Error('Confirm credential use for this Gmail account and Google endpoints');
-        const {confirm:_,...credentials}=value;const input=gmailStartSchema.parse(credentials),existing=instance.plugins.gmailConnection();
+        assertSetupReview('gmail',value);const {confirm:_,reviewedVersion:__,confirmDisplacements:___,...credentials}=value;const input=gmailStartSchema.parse(credentials),existing=instance.plugins.gmailConnection();
         if(existing && existing.accountId!==input.email)throw Error('Delete the existing Gmail configuration before changing accounts');
-        knownKeys.add(input.clientSecret);stopGmailChecks();return json(200,gmailAuth.start(token,origin,input));
+        knownKeys.add(input.clientSecret);if(redact(input.email)!==input.email || redact(input.clientId)!==input.clientId)throw Error('Gmail account and client ID cannot contain credentials');stopGmailChecks();return json(200,gmailAuth.start(token,origin,credentials));
       }
       if(req.method==='POST' && req.url==='/api/plugins/gmail/check') {await checkGmailConnection(token);return json(200,pluginStatus()[1]);}
       if(req.method==='GET' && req.url==='/api/plugins/gmail/uncertain')return json(200,instance.gmailUncertain());
@@ -1223,13 +1226,14 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
       if(req.method==='POST' && req.url==='/api/plugins/gmail/delete-config') {gmailAuth.reset();stopGmailChecks();stopGmailWork();disableInbox();secretRequests.revokeIntegrations([...gmailRoles]);instance.plugins.gmailDisconnect();instance.plugins.gmailDeleteConfig();gmailHealth='Not checked';return json(200,pluginStatus()[1]);}
       if(req.method==='POST' && req.url==='/api/plugins/slack/connect') {
         if(value.confirm!==true)throw Error('Confirm credential use for this Slack destination');
+        const reviewed=assertSetupReview('slack',value);
         const config=slackConfigSchema.parse({teamId:value.teamId,userId:value.userId,channelId:value.channelId,botId:value.botId});
         if(typeof value.appToken!=='string' || !/^xapp-[A-Za-z0-9-]+$/.test(value.appToken) || typeof value.botToken!=='string' || !/^xoxb-[A-Za-z0-9-]+$/.test(value.botToken))throw Error('Enter valid Slack app and bot tokens');
         if(instance.bot(config.botId)?.archived!==false)throw Error('Choose an active agent');
         const generation=slackGeneration,existing=instance.plugins.connection();if(existing && existing.accountId!==config.teamId)throw Error('Delete the existing Slack configuration before changing workspace');
         const tokens={appToken:value.appToken,botToken:value.botToken};
         const identity=await slack.identify(tokens);if(identity.teamId!==config.teamId)throw Error('Bot token belongs to a different workspace');if(identity.botUserId===config.userId)throw Error('The approved Slack user must not be the app bot');
-        if(!instance.authorized(token) || generation!==slackGeneration || instance.plugins.connection()?.revision!==existing?.revision || instance.bot(config.botId)?.archived!==false)throw Error('Slack settings changed during connection. Review and try again');
+        if(!instance.authorized(token) || generation!==slackGeneration || instance.plugins.connection()?.revision!==existing?.revision || instance.bot(config.botId)?.archived!==false || setupReview('slack').version!==reviewed.version)throw Error('Slack settings changed during connection. Review and try again');
         stopSlackConnection();secretRequests.revokeIntegrations([...slackRoles]);instance.plugins.connect(config);const destination=slackDestination(config);
         secretRequests.provision([{integration:'slack.app',destination,name:`Slack app token ${randomUUID()}`,purpose:`Slack workspace ${config.teamId}`,value:tokens.appToken},{integration:'slack.bot',destination,name:`Slack bot token ${randomUUID()}`,purpose:`Slack workspace ${config.teamId}`,value:tokens.botToken}]);knownKeys.add(tokens.appToken);knownKeys.add(tokens.botToken);
         return json(200,pluginStatus()[0]);
@@ -1257,10 +1261,12 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
       if(req.method==='POST' && req.url==='/api/openrouter-connection/disconnect') {disconnectOpenRouter(dataDir);return json(200,{saved:false});}
       if(req.method==='GET' && req.url==='/api/task-updates') return json(200,instance.bots().flatMap(bot=>typeof bot.id==='string' ? instance.taskAttempts(bot.id).slice(0,30) : []));
       if(req.method==='GET' && req.url==='/api/secrets')return json(200,secretRequests.names());
+      if(req.method==='GET' && (req.url==='/api/secret-setup-review?integration=gmail' || req.url==='/api/secret-setup-review?integration=slack'))return json(200,setupReview(req.url.endsWith('gmail')?'gmail':'slack'));
       if(req.method==='GET' && req.url==='/api/secret-grants')return json(200,secretRequests.grants());
-      if(req.method==='GET' && req.url==='/api/secret-grant-targets') {const gmail=instance.plugins.gmailConnection(),slack=instance.plugins.connection();return json(200,[...(gmail?.connected?gmailRoles.map(integration=>({integration,destination:gmailDestination(gmail.accountId)})):[]),...(slack?.connected?slackRoles.map(integration=>({integration,destination:slackDestination(slack.config)})):[])]);}
+      if(req.method==='GET' && req.url==='/api/secret-grant-targets') {const gmail=instance.plugins.gmailConnection(),slack=instance.plugins.connection();return json(200,[...(gmail?.connected?gmailRoles.map(integration=>secretRequests.target(integration,gmailDestination(gmail.accountId))):[]),...(slack?.connected?slackRoles.map(integration=>secretRequests.target(integration,slackDestination(slack.config))):[])]);}
       if(req.method==='POST' && (req.url==='/api/secret-grants/grant' || req.url==='/api/secret-grants/revoke')) {
-        const input=z.strictObject({name:z.string().min(1).max(120),revision:z.string().uuid(),integration:z.enum(['gmail.client','gmail.refresh','slack.app','slack.bot']),destination:z.string().min(1).max(1000),confirm:z.literal(true)}).parse(value);
+        const common={name:z.string().min(1).max(120),revision:z.string().uuid(),integration:z.enum(['gmail.client','gmail.refresh','slack.app','slack.bot']),destination:z.string().min(1).max(1000),version:z.string().uuid(),confirm:z.literal(true)};
+        const input=z.object(common).parse(value);
         if(!instance.authorized(token))return json(401,{error:'Unauthorized'});
         const gmail=instance.plugins.gmailConnection(),slack=instance.plugins.connection();
         const target=input.integration.startsWith('gmail.')?(gmail?.connected?gmailDestination(gmail.accountId):null):(slack?.connected?slackDestination(slack.config):null);
@@ -1268,8 +1274,8 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
           if(target!==input.destination)throw Error('Integration destination changed');
           const secret=secretRequests.lookup(input.name,input.revision);if(!secret || (input.integration==='slack.app'?!/^xapp-[A-Za-z0-9-]+$/.test(secret):input.integration==='slack.bot'?!/^xoxb-[A-Za-z0-9-]+$/.test(secret):!(/^[\x21-\x7e]{1,4096}$/.test(secret))))throw Error('Secret is not valid for this integration');
         }
+        if(req.url.endsWith('/grant'))secretRequests.grant(z.strictObject({...common,previous:z.strictObject({name:z.string().min(1).max(120),revision:z.string().uuid()}).nullable(),confirmDisplacement:z.boolean()}).parse(value));else if(!secretRequests.revoke(z.strictObject(common).parse(value)))throw Error('Grant changed');
         if(input.integration.startsWith('gmail.')){gmailAuth.cancel();stopGmailChecks();stopGmailWork();}else stopSlackConnection();
-        if(req.url.endsWith('/grant'))secretRequests.grant(input);else if(!secretRequests.revoke(input))throw Error('Grant changed');
         if(input.integration.startsWith('slack.'))await startSlackConnection();
         return json(200,{updated:true});
       }
