@@ -29,14 +29,14 @@ import { WorkActionService, workActionsSchema, type ActionIdentity } from './wor
 import type { ByteRedactor } from './config.js';
 import { NativeProcesses, nativeProcessSchema } from './native-processes.js';
 import { ApprovalGrants, approvalGrantSchema, type GrantBoundary } from './approval-grants.js';
-import { PluginStore, pluginSchema, slackWorkSchema, type SlackConfig } from './plugins.js';
+import { PluginStore, pluginSchema, slackWorkSchema, slackOutcomeReviewSchema, type SlackConfig } from './plugins.js';
 import {GmailHistory,gmailHistorySchema,gmailMonitorRunsSchema,gmailArrivalEvidenceSchema,type GmailHistoryTransport} from './gmail-history.js';
 import {InboxMonitorStore,inboxMonitorSchema} from './inbox-monitor.js';
 
 const clockAction: Action = { capability:'clock', operation:'read', resource:'utc', effect:'read', limits:{}, risk:'safe' };
 const clockBoundary = { enabledCapabilities:['clock'], actions:[clockAction] };
 const modes: ApprovalMode[] = ['ask-every-time','ask-for-risky-actions','never-ask'];
-export const INSTANCE_SCHEMA_VERSION = 54;
+export const INSTANCE_SCHEMA_VERSION = 55;
 const MAINTENANCE_VERSION = 2147483647;
 
 export const starterSoul = "You are an assistant working for the owner. Be clear and candid. Distinguish observations from assumptions. Follow the owner's role instructions and work within the permissions and task scope granted to you.";
@@ -255,6 +255,7 @@ export class Instance {
     this.db.exec("INSERT OR IGNORE INTO slack_notices SELECT action_id||':send-outcome',team_id,user_id,channel_id,NULL,bot_id,CASE WHEN json_extract(effect,'$.kind')='modify' THEN 'The Gmail inbox change outcome is unknown after restart. Inspect the message before trying again.' ELSE 'The Gmail send outcome is unknown after restart. Check Sent mail before trying again.' END, 'pending',0 FROM gmail_reply_proposals WHERE state='dispatching'; UPDATE gmail_reply_proposals SET state='interrupted',detail='Instance restarted before dispatch' WHERE state IN ('disclosure','review','revision','approved'); UPDATE gmail_reply_proposals SET state='uncertain',detail='Instance restarted during Gmail dispatch; inspect the account before taking further action' WHERE state='dispatching'");
     if(version < 53) this.db.exec(questionSetSchema);
     if(version < 54) this.db.exec(taskQuestionSetSchema);
+    if(version < 55) this.db.exec(slackOutcomeReviewSchema);
     this.questionSets = new QuestionSets(this.db);
     this.plugins = new PluginStore(this.db);
     this.inboxMonitor = new InboxMonitorStore(this.db);
@@ -308,6 +309,12 @@ export class Instance {
   gmailPrivateWork(work:WorkRef) {return work.kind==='command'?this.gmailPrivateCommand(work.id):!!this.db.prepare('SELECT 1 FROM gmail_private_tasks WHERE attempt_id=?').get(work.id);}
   markGmailPrivateWork(work:WorkRef) {if(work.kind==='command')this.markGmailPrivate(work.id);else this.db.prepare('INSERT OR IGNORE INTO gmail_private_tasks VALUES (?)').run(work.id);}
   gmailTaskScope(id:string) {return this.db.prepare('SELECT account_id AS accountId,revision,query FROM gmail_task_scopes WHERE attempt_id=?').get(id);}
+  gmailOutcomeAuthority(id:string) {
+    const row=this.db.prepare("SELECT bot_id,profile FROM task_attempts WHERE id=? AND state IN ('completed','failed','stopped','interrupted')").get(id),scope=this.gmailTaskScope(id),connection=this.plugins.gmailConnection();
+    if(typeof row?.bot_id!=='string' || typeof row.profile!=='string' || !scope || !connection?.connected || !connection.enabled || scope.accountId!==connection.accountId || scope.revision!==connection.revision || !connection.agentAccessIds.includes(row.bot_id))return false;
+    const profile=parseCapturedProfile(JSON.parse(row.profile)),bot=this.bot(row.bot_id);
+    return !!bot && !bot.archived && !!profile.model && bot.provider===profile.provider && bot.model===profile.model && this.plugins.gmailModelAllowed(connection.accountId,row.bot_id,profile.provider,profile.model) && this.plugins.gmailWorkModelAllowed(connection.accountId,row.bot_id,profile.provider,profile.model);
+  }
   gmailTaskMessageAllowed(id:string,messageId:string) {return !!this.db.prepare('SELECT 1 FROM gmail_task_messages WHERE attempt_id=? AND message_id=?').get(id,messageId);}
   rememberGmailTaskMessages(id:string,ids:string[]) {for(const messageId of ids)this.db.prepare('INSERT OR IGNORE INTO gmail_task_messages VALUES (?,?)').run(id,messageId);}
   createGmailReply(input:{actionId:string;fingerprint:string;work:WorkRef;botId:string;accountId:string;gmailRevision:number;slackRevision:number;teamId:string;userId:string;channelId:string;messageId:string;effect:string}) {
@@ -1012,6 +1019,31 @@ export class Instance {
       a.state, a.outcome, a.limit_ms AS limitMs, a.delegation_clock AS delegationClock, json_extract(a.profile,'$.revision') AS profileRevision, a.profile AS capturedProfile
       FROM task_attempts a JOIN tasks t ON t.id=a.task_id WHERE a.bot_id=? ORDER BY a.rowid DESC`).all(botId).map(({capturedProfile,...row})=>({...row,state:row.state,toolMode:parseToolModeFromProfile(capturedProfile)}));
   }
+  slackOutcomeReview(id:string) {
+    const task=this.db.prepare('SELECT bot_id,state,outcome FROM task_attempts WHERE id=?').get(id);
+    const binding=this.plugins.workBinding(id);
+    if(!task || !binding || !['completed','failed','stopped','interrupted'].includes(String(task.state)) || !this.questionSets.hasTask(id))return null;
+    const connection=this.plugins.connection(),bot=this.bot(String(task.bot_id));
+    const gmailAvailable=!this.gmailPrivateWork({kind:'task',id}) || this.gmailOutcomeAuthority(id);
+    const available=gmailAvailable && !!connection && connection.connected && connection.enabled && connection.agentAccess && bot?.archived===false && typeof binding.thread_ts==='string' && /^\d+\.\d+$/.test(binding.thread_ts) && connection.config.botId===task.bot_id && connection.config.teamId===binding.team_id && connection.config.userId===binding.user_id && connection.config.channelId===binding.channel_id;
+    let review=this.plugins.outcomeReview(id);
+    if(review?.state==='pending' && (!available || review.slackRevision!==connection?.revision || review.botRevision!==bot?.revision)) {this.plugins.blockOutcome(String(review.id));review=this.plugins.outcomeReview(id);}
+    return {state:review ? String(review.state) : 'review',outcome:typeof task.outcome==='string'?task.outcome:'',text:typeof review?.text==='string'?review.text:null,revision:available?connection.revision:null,available,gmailAvailable,teamId:String(binding.team_id),userId:String(binding.user_id),channelId:String(binding.channel_id),threadTs:typeof binding.thread_ts==='string'?binding.thread_ts:null};
+  }
+  approveSlackOutcome(id:string,text:string,revision:number) {
+    const review=this.slackOutcomeReview(id),binding=this.plugins.workBinding(id),connection=this.plugins.connection();
+    if(!review || !binding || !review.available || !connection || review.revision!==revision)throw new BotConflict('Slack destination or authority changed. Review the current destination before sending.');
+    const bot=this.bot(String(binding.bot_id));if(!bot || bot.archived || typeof bot.revision!=='string')throw new BotConflict('Agent unavailable');
+    const disclosureId='outcome-review-'+createHash('sha256').update(JSON.stringify([id,revision,bot.revision,text])).digest('hex');
+    this.plugins.approveOutcome({id:disclosureId,attemptId:id,text,slackRevision:revision,botRevision:bot.revision});
+    return this.slackOutcomeReview(id);
+  }
+  slackOutcomeAuthority(id:string) {
+    const approval=this.plugins.outcomeApproval(id);if(!approval)return true;
+    const row=this.db.prepare('SELECT attempt_id FROM slack_outcome_reviews WHERE id=?').get(id);if(typeof row?.attempt_id!=='string')return false;
+    const review=this.slackOutcomeReview(row.attempt_id),binding=this.plugins.workBinding(row.attempt_id),bot=binding?this.bot(String(binding.bot_id)):null;
+    return !!review && review.available && review.revision===approval.slackRevision && bot?.revision===approval.botRevision;
+  }
   taskAttempt(id: string) {
     const row = this.db.prepare(`SELECT a.id, a.task_id AS taskId, a.bot_id AS botId, t.objective, a.predecessor,
       a.state, a.outcome, a.limit_ms AS limitMs, a.delegation_clock AS delegationClock, json_extract(a.profile,'$.revision') AS profileRevision, a.profile AS capturedProfile
@@ -1023,7 +1055,7 @@ export class Instance {
     const inbox = new TaskInbox(this.db).inspect({botId:attempt.botId,attemptId:id});
     const waitReason=attempt.state === 'waiting' ? 'replacement' : (inbox.questions.some(question=>question.state === 'open') || this.questionSets.hasOpenTask(id)) ? 'owner-input' : this.db.prepare("SELECT 1 FROM approval_requests WHERE work_kind='task' AND work_id=? AND state='pending'").get(id) ? 'approval' : null;
     const {capturedProfile,...visible}=row as typeof attempt & {capturedProfile:unknown};
-    return {...visible,toolMode:parseToolModeFromProfile(capturedProfile), workActions:this.workActions().inspectActions({kind:'task',id}),codeExecutions:this.workActions().inspect({kind:'task',id}), waitReason, inbox, usage:session?.usage ?? [], activity: this.db.prepare('SELECT seq,event FROM task_activity WHERE attempt_id=? ORDER BY seq').all(id).map(event => { const value = JSON.parse(String(event.event)); if (value.type === 'tool_result' && value.name === 'select_skill' && typeof value.content === 'string') { value.content = this.redactSkill(value.content); if (value.success) { try { const detail=JSON.parse(value.content); if (typeof detail.digest === 'string' && detail.sourceDigest === undefined) { detail.sourceDigest=detail.digest; delete detail.digest; value.content=JSON.stringify(detail); } } catch { /* Historical error text is not structured selection evidence. */ } } } return {seq:event.seq, ...value}; })};
+    return {...visible,toolMode:parseToolModeFromProfile(capturedProfile), slackOutcomeReview:this.slackOutcomeReview(id),workActions:this.workActions().inspectActions({kind:'task',id}),codeExecutions:this.workActions().inspect({kind:'task',id}), waitReason, inbox, usage:session?.usage ?? [], activity: this.db.prepare('SELECT seq,event FROM task_activity WHERE attempt_id=? ORDER BY seq').all(id).map(event => { const value = JSON.parse(String(event.event)); if (value.type === 'tool_result' && value.name === 'select_skill' && typeof value.content === 'string') { value.content = this.redactSkill(value.content); if (value.success) { try { const detail=JSON.parse(value.content); if (typeof detail.digest === 'string' && detail.sourceDigest === undefined) { detail.sourceDigest=detail.digest; delete detail.digest; value.content=JSON.stringify(detail); } } catch { /* Historical error text is not structured selection evidence. */ } } } return {seq:event.seq, ...value}; })};
   }
   acceptTask(input: {id:string; botId:string; objective:string; limitMs:number; predecessor?:string; delegateClock?:boolean; gmailQuery?:string}, visibleObjective=input.objective) {
     this.db.exec('BEGIN IMMEDIATE');

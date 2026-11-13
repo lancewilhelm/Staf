@@ -1086,9 +1086,20 @@ cannot call tools cannot use the natural-language task capabilities. Existing
 `work:` and ID-based controls remain available for diagnostics and older threads.
 
 Receipt, tool progress, and the terminal outcome are sent to the request's
-thread. Background questions and answers stay in Staf. If a task asked
-questions, Slack receives the outcome state and directs you to Staf for the
-full outcome. A result does not require another DM. If Slack is disabled,
+thread. Background questions and answers stay in Staf. If a task or its helper
+asked questions, Slack receives only the outcome state until you review the
+text in Staf. Open the task, edit the proposed outcome, check the displayed
+workspace, user, channel, and original thread, and select **Send reviewed
+outcome**. Remove questions and answers, including paraphrases and encoded
+details. Staf rejects some direct matches but cannot detect every disclosure.
+It sends only the exact text you confirm. A Gmail task also requires its
+current Gmail task authorization; Gmail clarification and action approvals
+remain separate.
+
+If access or the destination changes before dispatch, review again. If the
+original thread is unavailable, Staf cannot send the reviewed outcome. If a
+send has an uncertain result, check the thread; Staf will not resend it
+automatically. A result does not require another DM. If Slack is disabled,
 disconnected or rate limited, pending delivery is retained for the same
 workspace, user, channel and agent; reconnect and enable that same binding to
 resume. A confirmed Slack acceptance is not proof that a person read the message.

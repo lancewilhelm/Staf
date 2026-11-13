@@ -53,6 +53,15 @@ export class QuestionSets {
  }
  deliveryError(id:string,value:string|null) {this.db.prepare('UPDATE question_sets SET delivery_error=? WHERE id=?').run(value,id);}
  hasOpenTask(attemptId:string) {return !!this.db.prepare("SELECT 1 FROM task_question_sets WHERE attempt_id=? AND state='open'").get(attemptId);}
+ private taskTree(attemptId:string) {return this.db.prepare(`WITH RECURSIVE work(id) AS (SELECT ? UNION SELECT c.helper_attempt_id FROM collaboration_assignments c JOIN work w ON c.parent_attempt_id=w.id) SELECT id FROM work`).all(attemptId).map(row=>String(row.id));}
+ hasTask(attemptId:string) {return this.taskTree(attemptId).some(id=>!!this.db.prepare('SELECT 1 FROM task_question_sets WHERE attempt_id=?').get(id));}
+ hasOpenTaskTree(attemptId:string) {return this.taskTree(attemptId).some(id=>this.hasOpenTask(id));}
+ containsTaskQuestionOrAnswer(attemptId:string,text:string) {
+  const normalize=(value:string)=>value.normalize('NFKC').replace(/\s+/gu,' ').trim().toLocaleLowerCase();
+  const output=normalize(text);
+  const attempts=new Set(this.taskTree(attemptId));
+  return this.list().filter(q=>q.workKind==='task' && attempts.has(q.workId)).some(q=>[...q.questions.map(item=>item.prompt),...q.draft.flatMap(answer=>answer?[...answer.choices,answer.writeIn]:[])].some(value=>{const item=normalize(value);return item.length>=4 && output.includes(item);}));
+ }
  ancestors(id:string):string[] {return this.db.prepare(`WITH RECURSIVE lineage(id) AS (SELECT command_id FROM question_sets WHERE continuation_id=? UNION SELECT q.command_id FROM question_sets q JOIN lineage l ON q.continuation_id=l.id) SELECT id FROM lineage`).all(id).map(row=>String(row.id));}
  continuationState(id:string) {const row=this.db.prepare('SELECT state FROM question_sets WHERE continuation_id=?').get(id);return row?.state;}
  isContinuation(id:string) {return !!this.db.prepare('SELECT 1 FROM question_sets WHERE continuation_id=?').get(id);}

@@ -351,6 +351,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
     const monitor=work.work.kind==='task'?instance.inboxMonitor.item(work.work.id):undefined;
     return (!monitor || inboxAuthority(Number(monitor.settings_revision))) && !!who && who.botId===work.botId && !!c?.connected && c.enabled && c.agentAccessIds.includes(who.botId) && instance.plugins.gmailModelAllowed(c.accountId,who.botId,who.provider,who.model) && slackOk && ((work.work.kind==='command' && !instance.plugins.isPluginCommand(work.work.id)) || instance.plugins.gmailWorkModelAllowed(c.accountId,who.botId,who.provider,who.model)) && (work.work.kind==='command' || (!!scope && scope.accountId===c.accountId && scope.revision===c.revision));
   };
+  const gmailOutcomeAllowed=(id:string)=>{const monitor=instance.inboxMonitor.item(id);return instance.gmailOutcomeAuthority(id) && (!monitor || inboxAuthority(Number(monitor.settings_revision)));};
   const gmailKey=(work:WorkContext)=>`${work.work.kind}:${work.work.id}`;
   const gmailReadMessages=new Map<string,Map<string,{threadId:string;messageId:string;subject:string;from:string}>>();
   const gmailActionFlows=new Map<string,{controller:AbortController;signal:AbortSignal;revision:number;accountId:string;assertAuthority:()=>void;api:GmailApi}>();
@@ -559,9 +560,9 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
       if(input.action==='status' && instance.gmailPrivateWork({kind:'task',id:task.id})) {reply=`This work is ${task.state}. Review Gmail details in Staf.`;}
       else if(input.action==='status') {
         const recent=task.activity.filter(event=>(event.type==='tool_start' || event.type==='tool_result') && !['ask_questions','ask_owner'].includes(event.name)).slice(-3).map(event=>`${event.name}: ${event.type==='tool_start'?'started':event.success?'completed':'failed'}`);
-        reply=`This work is ${task.state}${task.outcome && !instance.questionSets.list().some(q=>q.workKind==='task' && q.workId===task.id) ? `: ${task.outcome}` : ''}${task.waitReason && task.waitReason!=='owner-input' ? `; waiting for ${task.waitReason}` : ''}${recent.length ? `\nRecent work: ${recent.join('; ')}` : ''}`;
+        reply=`This work is ${task.state}${task.slackOutcomeReview?.state==='sent' && task.slackOutcomeReview.text ? `: ${task.slackOutcomeReview.text}` : task.outcome && !instance.questionSets.hasTask(task.id) ? `: ${task.outcome}` : ''}${task.waitReason && task.waitReason!=='owner-input' ? `; waiting for ${task.waitReason}` : ''}${recent.length ? `\nRecent work: ${recent.join('; ')}` : ''}`;
       } else if(!['queued','running'].includes(task.state)) reply='This work is no longer active. No changes were made.';
-      else if((input.action==='answer' || input.action==='direction') && instance.questionSets.list().some(q=>q.workKind==='task' && q.workId===task.id && q.state==='open')) {reply='Manage this work in Staf. No changes were made.';}
+      else if((input.action==='answer' || input.action==='direction') && instance.questionSets.hasOpenTaskTree(task.id)) {reply='Manage this work in Staf. No changes were made.';}
       else if(input.action==='stop'){instance.taskStop(task.id,'Stop requested in Slack');abortDelegatedChildren(task.id);taskControllers.get(task.id)?.abort();reply='Stop requested. I’ll report when the work has stopped.';}
       else {
         const questions=task.inbox.questions.filter(question=>question.state==='open');
@@ -848,7 +849,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
           if(event.type==='tool_result' && typeof event.name==='string' && !['ask_questions','ask_owner'].includes(event.name))text=natural?`${event.name} ${event.success ? 'completed' : 'failed'}.`:`Task ${task.id}: ${event.name} ${event.success ? 'completed' : 'failed'}.`;
           if(text)queueSlackWork(task.id,`${task.id}:activity:${event.seq}`,text);
         }
-        if(['completed','failed','stopped','interrupted'].includes(task.state)) {const privateQuestions=instance.questionSets.list().some(q=>q.workKind==='task' && q.workId===task.id);queueSlackWork(task.id,`${task.id}:outcome`,privateQuestions ? `Work ${task.state}. Review the outcome in Staf.` : natural?`Work ${task.state}: ${task.outcome ?? 'No outcome available'}`:`Task ${task.id} ${task.state}: ${task.outcome ?? 'No outcome available'}`);}
+        if(['completed','failed','stopped','interrupted'].includes(task.state)) {const privateQuestions=instance.questionSets.hasTask(task.id);queueSlackWork(task.id,`${task.id}:outcome`,privateQuestions ? `Work ${task.state}. Review the outcome in Staf.` : natural?`Work ${task.state}: ${task.outcome ?? 'No outcome available'}`:`Task ${task.id} ${task.state}: ${task.outcome ?? 'No outcome available'}`);}
       }
       const c=instance.plugins.connection();
       if(!c?.enabled || !c.connected || !c.agentAccess || slackStatus==='reconnecting')return;
@@ -859,9 +860,12 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
         if(!current?.enabled || !current.connected || !current.agentAccess || current.config.teamId!==row.team_id || current.config.userId!==row.user_id || current.config.channelId!==row.channel_id || current.config.botId!==row.bot_id || instance.bot(current.config.botId)?.archived!==false)continue;
         const tokens=loadSlackTokens(dataDir);if(!tokens)continue;
         if(typeof row.id!=='string' || typeof row.channel_id!=='string' || typeof row.text!=='string' || (row.kind!=='work' && row.kind!=='notice'))continue;
+        if(row.kind==='work' && !instance.slackOutcomeAuthority(row.id)){instance.plugins.blockOutcome(row.id);continue;}
+        const reviewedOutcome=row.kind==='work' && !!instance.plugins.outcomeApproval(row.id);
+        if(reviewedOutcome && typeof row.attempt_id==='string' && instance.gmailPrivateWork({kind:'task',id:row.attempt_id}) && !gmailOutcomeAllowed(row.attempt_id)){instance.plugins.blockOutcome(row.id);continue;}
         if(!instance.plugins.beginWorkDelivery(row.id,row.kind))continue;
         try {
-          await slack.post(tokens,{channel:row.channel_id,...(typeof row.thread_ts==='string'?{threadTs:row.thread_ts}:{}),text:row.kind==='work' && typeof row.attempt_id==='string' && instance.gmailPrivateWork({kind:'task',id:row.attempt_id})?'Gmail work update. Review details in Staf.':row.text});
+          await slack.post(tokens,{channel:row.channel_id,...(typeof row.thread_ts==='string'?{threadTs:row.thread_ts}:{}),text:row.kind==='work' && !reviewedOutcome && typeof row.attempt_id==='string' && instance.gmailPrivateWork({kind:'task',id:row.attempt_id})?'Gmail work update. Review details in Staf.':row.text});
           if(!closing)instance.plugins.finishWorkDelivery(row.id,row.kind,'sent');
         } catch(error) {
           if(!closing) {
@@ -941,10 +945,10 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
         if(action==='status' && instance.gmailPrivateWork({kind:'task',id:attemptId})) {reply=`Task ${attemptId} ${task.state}. Review Gmail details in Staf.`;}
         else if(action==='status') {
           const recent=task.activity.filter(event=>(event.type==='tool_start' || event.type==='tool_result') && !['ask_questions','ask_owner'].includes(event.name)).slice(-3).map(event=>`${event.name}: ${event.type==='tool_start'?'started':event.success?'completed':'failed'}`);
-          reply=`Task ${attemptId} ${task.state}${task.outcome && !instance.questionSets.list().some(q=>q.workKind==='task' && q.workId===task.id) ? `: ${task.outcome}` : ''}${task.waitReason && task.waitReason!=='owner-input' ? `; waiting for ${task.waitReason}` : ''}${recent.length ? `\nRecent work: ${recent.join('; ')}` : ''}`;
+          reply=`Task ${attemptId} ${task.state}${task.slackOutcomeReview?.state==='sent' && task.slackOutcomeReview.text ? `: ${task.slackOutcomeReview.text}` : task.outcome && !instance.questionSets.hasTask(task.id) ? `: ${task.outcome}` : ''}${task.waitReason && task.waitReason!=='owner-input' ? `; waiting for ${task.waitReason}` : ''}${recent.length ? `\nRecent work: ${recent.join('; ')}` : ''}`;
         }
         else if(!['queued','running'].includes(task.state))reply=`Task ${attemptId} is not active. No changes were made.`;
-        else if((action==='answer' || action==='direct') && instance.questionSets.list().some(q=>q.workKind==='task' && q.workId===task.id && q.state==='open'))reply='Manage this work in Staf. No changes were made.';
+        else if((action==='answer' || action==='direct') && instance.questionSets.hasOpenTaskTree(task.id))reply='Manage this work in Staf. No changes were made.';
         else if(action==='stop') {instance.taskStop(attemptId,'Stop requested in Slack');abortDelegatedChildren(attemptId);taskControllers.get(attemptId)?.abort();reply=`Stop requested for task ${attemptId}.`;}
         else if((action==='direct' || action==='answer') && control[4]?.trim() && (action!=='answer' || control[3])) {
           const input={attemptId,commandId:id,text:control[4].trim()};
@@ -1417,10 +1421,16 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
       if (req.method === 'GET' && botSkillsMatch?.[1]) { if (!instance.bot(botSkillsMatch[1])) return json(404,{error:'Agent not found'}); return json(200,instance.skills.availableToBot(botSkillsMatch[1])); }
       const taskListMatch = req.url?.match(/^\/api\/bots\/([\w-]+)\/tasks$/);
       if (req.method === 'GET' && taskListMatch?.[1]) return json(200,instance.taskAttempts(taskListMatch[1]));
-      const taskMatch = req.url?.match(/^\/api\/tasks\/([\w-]+)(?:\/(stop|replace|input))?$/);
+      const taskMatch = req.url?.match(/^\/api\/tasks\/([\w-]+)(?:\/(stop|replace|input|slack-outcome))?$/);
       if (taskMatch?.[1]) {
         const id=taskMatch[1];
         if(req.method === 'GET' && !taskMatch[2]) { const attempt=instance.taskAttempt(id); return attempt ? json(200,{...attempt,collaborations:instance.taskCollaborations(id),webActions:instance.webActions({kind:'task',id}),searchActions:instance.searchActions({kind:'task',id}),shellActions:instance.shellActions({kind:'task',id}),gmailReplies:instance.gmailReplies({kind:'task',id})}) : json(404,{error:'Task not found'}); }
+        if(req.method === 'POST' && taskMatch[2]==='slack-outcome') {
+          if(value.confirm!==true || typeof value.text!=='string' || !value.text.trim() || Buffer.byteLength(value.text,'utf8')>39000 || redact(value.text)!==value.text || containsUnsafeWebUrl(value.text) || typeof value.revision!=='number' || !Number.isSafeInteger(value.revision))return json(400,{error:'Review the exact text and destination before sending.'});
+          if(instance.questionSets.containsTaskQuestionOrAnswer(id,value.text))return json(400,{error:'Remove the task question or answer from the text. This check cannot detect every paraphrase or encoding.'});
+          if(instance.gmailPrivateWork({kind:'task',id}) && !gmailOutcomeAllowed(id))return json(403,{error:'Gmail authority changed. Restore the task access before reviewing an outcome.'});
+          const result=instance.approveSlackOutcome(id,value.text,value.revision);void deliverSlackWork().catch(()=>{});return json(200,result);
+        }
         if(req.method === 'POST' && taskMatch[2] === 'input') {
           if(typeof value.id !== 'string' || !/^[\w-]{1,100}$/.test(value.id) || typeof value.text !== 'string' || !value.text.trim() || Buffer.byteLength(value.text,'utf8') > 16384 || (value.kind !== 'direction' && value.kind !== 'answer') || (value.kind === 'answer' && (typeof value.questionId !== 'string' || !/^[\w-]{1,100}$/.test(value.questionId)))) return json(400,{error:'Invalid task input'});
           if(containsUnsafeWebUrl(value.text))return json(400,{error:'URLs with credentials or query strings are not supported'});

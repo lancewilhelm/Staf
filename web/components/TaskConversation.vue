@@ -6,6 +6,7 @@ import ApprovalItem from './ApprovalItem.vue';
 import DisclosureSummary from './DisclosureSummary.vue';
 import ResponseText from './ResponseText.vue';
 import QuestionSet from './QuestionSet.vue';
+import SlackOutcomeReview from './SlackOutcomeReview.vue';
 const props=defineProps<{task:ConversationTask;inbox:InboxItem[]}>();
 const {app,state}=useWorkspace();
 const relevant=computed(()=>props.inbox.filter(item=>item.kind==='question'?item.attemptId===props.task.id:item.work.kind==='task' && item.work.id===props.task.id));
@@ -25,6 +26,7 @@ const observations=computed(()=>props.task.activity.filter(event=>event.type==='
     <p v-if="questions.some(q=>q.state==='open')" role="status">This task has questions in Staf.</p>
     <QuestionSet v-for="request in questions" :key="request.id" :request="request" />
     <div v-if="['failed','stopped','interrupted'].includes(task.state) && questions.length && questions.every(q=>q.state!=='open')"><p>Review the prior work and any uncertain effects before starting a new attempt.</p><button class="quiet" type="button" @click="app.retryTask(task,questions)">Start a new attempt</button></div>
+    <SlackOutcomeReview v-if="task.slackOutcomeReview" :task-id="task.id" :review="task.slackOutcomeReview" />
     <details v-if="task.activity.length"><DisclosureSummary>Task activity</DisclosureSummary>
       <div v-for="event in task.activity" :key="event.seq" class="task-event"><strong>{{ event.type }}</strong><pre v-if="event.message || event.content">{{ event.message || event.content }}</pre></div>
     </details>
