@@ -106,6 +106,25 @@ test('recovery resumes completed changes and requires a single-use repeat challe
   }finally{instance.close();}
 });
 
+test('recovery challenges equivalent isolated workspace paths',async()=>{
+ const {isolatedFileCapabilities}=await import('../dist/linux-file-actions.js');const {instance,actions}=fixture();let effects=0;
+ try {const files=isolatedFileCapabilities({workspace:'/srv/staf-workspace',recheck(){}},value=>value,()=>true,()=>16);instance.workActions().register({...files.write,execute:async()=>{effects++;return {bytes:3,sha256:'a'.repeat(64)};}});
+  const first=await invoke(actions,source('host-path'),'file_write',{path:'/srv/staf-workspace/a',content:'one'});assert.equal(first.kind,'completed');actions.beginRecovery();
+  const repeat=await invoke(actions,source('visible-path'),'file_write',{path:'/workspace/a',content:'one'});assert.equal(repeat.kind,'repeat-required');assert.equal(effects,1);
+  const same=await invoke(actions,source('visible-path'),'file_write',{path:'/workspace/a',content:'one'});assert.equal(same.kind,'repeat-required');assert.equal(same.challenge,repeat.challenge);assert.equal(effects,1);
+  const confirmed=await invoke(actions,source('confirmed'),'file_write',{path:'/workspace/a',content:'one'},{kind:'repeat',challenge:repeat.challenge});assert.equal(confirmed.kind,'completed');assert.equal(effects,2);
+ }finally{actions.dispose();instance.close();}
+});
+
+test('question continuation blocks an equivalent isolated terminal command',async()=>{
+ const {nativeCommandCapability,NativeProcesses}=await import('../dist/native-processes.js');const {isolatedWorkingDirectory}=await import('../dist/linux-host-boundary.js');const {instance,bot,actions,controller}=fixture();let starts=0,continuation;
+ try {const manager=new NativeProcesses(instance.db);instance.workActions().register(nativeCommandCapability(manager,()=>true,value=>value,async()=>{starts++;return {started:true};},cwd=>'/workspace/'+isolatedWorkingDirectory('/srv/staf-workspace',cwd)));
+  const first=await invoke(actions,source('original'),'terminal_run',{command:'printf safe',cwd:'/srv/staf-workspace/project'});assert.equal(first.kind,'completed');instance.db.prepare('INSERT INTO work_action_resolutions VALUES (?)').run(first.actionId);
+  instance.questionSets.create('question',bot.id,'c',{questions:[{kind:'text',prompt:'Continue?'}]});const request=instance.questionSets.list()[0];instance.complete('c','waiting for answer');actions.dispose();instance.claim({id:request.continuationId,botId:bot.id,content:'Answer'});continuation=instance.workActions().open({kind:'command',id:request.continuationId},controller.signal);
+  const repeated=await invoke(continuation,source('continuation'),'terminal_run',{command:'printf safe',cwd:'/workspace/project'});assert.equal(repeated.kind,'blocked');assert.match(repeated.reason,/originating work cannot be repeated/);assert.equal(starts,1);
+ }finally{continuation?.dispose();actions.dispose();instance.close();}
+});
+
 test('stop during authorization prevents the effect and closes queued admission',async()=>{
   const {instance,controller,actions}=fixture();try {
     let release;let entered;const waiting=new Promise(resolve=>{entered=resolve;});const gate=new Promise(resolve=>{release=resolve;});let effects=0;

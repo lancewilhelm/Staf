@@ -11,7 +11,7 @@ import {SecretRequests,secretRequestInput} from './secret-requests.js';
 
 import {nativeCommandCapability,nativeOutputCapability,nativeStopCapability,nativeInteractionCapabilities,checkedInteraction} from './native-processes.js';
 import type {NativeProcesses} from './native-processes.js';
-import {selectLinuxHostBoundary} from './linux-host-boundary.js';
+import {isolatedVisiblePath,selectLinuxHostBoundary} from './linux-host-boundary.js';
 import {linuxHostProcessBackend} from './linux-host-process.js';
 import {registerMemoryCapabilities} from './memory-actions.js';
 import {parseToolMode} from './tool-mode.js';
@@ -512,6 +512,8 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
   const nativeAllowed=(work:import('./work-actions.js').WorkContext)=>instance.nativeProcessAllowed(work.work);
   function isolationRequired<I,O>(capability:Capability<I,O>):Capability<I,O> {return {...capability,definition:{...capability.definition,function:{...capability.definition.function,description:'Unavailable: credential isolation is not established on this host.'}},parseInput:()=>{throw new ActionFailed('Unavailable: credential isolation is not established on this host.');}};}
   const hostBoundary=dependencies.hostWork ?? selectLinuxHostBoundary({enabled:env.STAF_LINUX_HOST_EXECUTION==='1',dataDir,secretDir:resolve(dirname(path))});
+  const isolatedBoundary=hostBoundary && 'workspace' in hostBoundary?hostBoundary:undefined;
+  const isolatedCwd=isolatedBoundary?(cwd:string|undefined)=>isolatedVisiblePath(isolatedBoundary.workspace,resolve(isolatedBoundary.workspace,cwd??'.')):undefined;
   const hostCapability=<I,O>(capability:Capability<I,O>,revalidate=true):Capability<I,O>=>{
     if(!hostBoundary)return isolationRequired(capability);
     if(!revalidate)return capability;
@@ -522,8 +524,8 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
     if(dependencies.hostWork)return dependencies.hostWork.start(processes,work,action,input);
     if(!('workspace' in hostBoundary))throw new ActionFailed('Unavailable: credential isolation is not established on this host.');
     const mode=input.mode??'pipe',cols=input.cols??80,rows=input.rows??24;
-    return processes.startBackend(work,action,{baseCwd:hostBoundary.workspace,cwd:input.cwd,mode,retain:input.retain,cols:mode==='pty'?cols:undefined,rows:mode==='pty'?rows:undefined,backend:linuxHostProcessBackend(hostBoundary,input.command,mode,cols,rows)});
-  })));
+    return processes.startBackend(work,action,{baseCwd:'/workspace',cwd:isolatedVisiblePath(hostBoundary.workspace,resolve(hostBoundary.workspace,input.cwd??'.')),mode,retain:input.retain,cols:mode==='pty'?cols:undefined,rows:mode==='pty'?rows:undefined,backend:linuxHostProcessBackend(hostBoundary,input.command,mode,cols,rows)});
+  },isolatedCwd)));
   workActions.register(hostCapability(nativeOutputCapability(processes,nativeAllowed),false));
   workActions.register(hostCapability(nativeStopCapability(processes,nativeAllowed),false));
   const interactions=nativeInteractionCapabilities(processes,nativeAllowed,redact);workActions.register(hostCapability(interactions.write));workActions.register(hostCapability(interactions.eof));workActions.register(hostCapability(interactions.resize));

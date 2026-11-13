@@ -256,7 +256,7 @@ export class WorkActionService {
     if(Buffer.byteLength(canonical)>256*1024)throw Error('Parsed input exceeds the limit');
     if(this.inputRedactor(canonical)!==canonical)return {kind:'blocked',reason:'Tool input cannot be retained faithfully under the instance redaction rules.'};
     const journalInput=cap.journalInput ? encoded(cap.journalInput(input,context,value=>this.digest(value))) : canonical;
-    const matchesInput=(previous:Json)=>encoded(previous)===journalInput || (!!cap.journalInput && encoded(previous)===canonical);
+    const matchesInput=(previous:Json)=>encoded(previous)===journalInput || (!!cap.journalInput && encoded(previous)===canonical) || (!cap.journalInput && !!cap.sameAction?.(previous,input,context));
     const digest=this.digest(encoded([request.name,rawInput,request.intent]));
     const pending=this.db.prepare('SELECT digest,challenge,reason FROM work_action_requests WHERE kind=? AND work_id=? AND source=?').get(context.work.kind,context.work.id,source);
     if(pending) {
@@ -291,7 +291,7 @@ export class WorkActionService {
     const records=this.records(context);
     const priorRecords=records.filter(item=>item.action.work.kind==='command' && context.work.kind==='command' && item.action.work.id!==context.work.id);
     if(request.intent.kind==='resume') {const actionId=request.intent.actionId;if(priorRecords.some(item=>item.action.id===actionId))throw new ActionConflict('The originating action cannot be resumed in a question continuation');}
-    if(priorRecords.some(item=>item.capability===request.name && (matchesInput(item.input) || (!cap.journalInput && cap.sameAction?.(item.input,input,context))))) {
+    if(priorRecords.some(item=>item.capability===request.name && matchesInput(item.input))) {
       const reason='An action from the originating work cannot be repeated by this continuation';
       this.db.prepare('INSERT INTO work_action_requests VALUES (?,?,?,?,NULL,?)').run(context.work.kind,context.work.id,source,digest,reason);return {kind:'blocked',reason};
     }

@@ -443,7 +443,9 @@ file-write bytes or scoped memory state before recording a resolution and a new
 recovery epoch. Task retries can resolve eligible predecessor actions. Original
 outcomes remain unchanged, closed work stays closed, and a matching resolved
 uncertain change still requires a repeat challenge. There is no generic force
-resolution or model reconciliation tool. See [the contract](work-actions.md).
+resolution or model reconciliation tool. Capability-defined action equivalence
+is used for both new recovery challenges and challenge refresh. See [the
+contract](work-actions.md).
 
 ## Creation defaults and Demo migration
 
