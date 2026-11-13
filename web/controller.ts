@@ -4,6 +4,7 @@ import type {ToastNotice} from './toast-notice';
 import {responseEvents} from './response-stream';
 import {z} from 'zod';
 import type { Memory, MemoryScope } from '../src/memory-types';
+import {containsCredential} from './credential-warning';
 
 export type ModelCatalog={models:Array<{id:string;label:string;reasoning:string[]|null;reasoningStatus:string}>;defaultModel?:string};
 export type Bot={revision?:string;id:string;name:string;provider:string;model:string|null;archived:boolean;image?:AgentImage};
@@ -208,7 +209,7 @@ export class Controller {
     }catch{this.update({actionError:'Could not recover another saved draft.'});this.notify('Could not recover another saved draft.','error')}finally{this.recovering=false}
   }
   private save(draft:Draft):boolean{try{if(!this.currentKey)return false;localStorage.setItem(this.currentKey,JSON.stringify(draft));this.update({draft});if(!draft.text&&!draft.submission)void this.recoverNext();return true}catch{this.update({actionError:'Browser storage is unavailable. Sending is blocked; copy your text before leaving.'});this.notify('Browser storage is unavailable. Sending is blocked; copy your text before leaving.','error');return false}}
-  edit(text:string){this.save({...this.state.draft,text})}
+  edit(text:string){this.save({...this.state.draft,text});if(this.state.actionError.includes('looks like a credential'))this.update({actionError:''});}
   private async removeObsoleteRecords(){
     // These pre-journal keys are obsolete. The v1 journal also contains live
     // tabs and closed-tab drafts, so it must never be swept as legacy data.
@@ -272,6 +273,7 @@ export class Controller {
   async send(retry=false){
     const botId=this.state.selected,draft=this.state.draft;
     if(!botId||(!retry&&!draft.text.trim()))return;
+    if(containsCredential(retry ? draft.submission?.text ?? '' : draft.text)){this.update({actionError:'This text looks like a credential. Remove it and use protected secret entry.'});return;}
     if(this.state.response&&['accepted','running','stopping'].includes(this.state.response.state))return;
     let submission=draft.submission;
     if(!retry){if(submission)return;submission={kind:'submitting',id:crypto.randomUUID(),text:draft.text}}

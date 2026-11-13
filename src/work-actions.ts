@@ -101,6 +101,12 @@ export class WorkActionService {
   private readonly closures=new Map<string,{controller:AbortController;refs:number}>();
   private readonly completedHopParents=new Set<string>();
   private readonly readReceipts=new Map<string,{work:string;value:Json}>();
+  private safeResult(value:Json):Json {
+    if(typeof value==='string')return this.inputRedactor(value);
+    if(Array.isArray(value))return value.map(item=>this.safeResult(item));
+    if(value && typeof value==='object')return Object.fromEntries(Object.entries(value).map(([key,item])=>[this.inputRedactor(key),this.safeResult(item)]));
+    return value;
+  }
   constructor(private readonly db:DatabaseSync, private readonly key:Uint8Array,
     private readonly context:(work:WorkRef,signal:AbortSignal)=>WorkContext,
     private readonly active:(work:WorkRef)=>void, private readonly budget=32, private readonly deferred:(work:WorkRef)=>boolean=()=>false,private readonly inputRedactor:(value:string)=>string=value=>value,private readonly precedingCommands:(work:WorkRef)=>string[]=()=>[]) {
@@ -226,7 +232,7 @@ export class WorkActionService {
     const queueKey=encoded(context.work),prior=this.queues.get(queueKey)??Promise.resolve();
     const depth=this.queueDepth.get(queueKey)??0;if(depth>=8){this.close(context,'pending action limit');throw Error('Too many pending actions');}this.queueDepth.set(queueKey,depth+1);
     let release!:()=>void;const next=new Promise<void>(resolve=>{release=resolve;});this.queues.set(queueKey,next);
-    try {await prior;try{return await this.dispatch(context,snapshot);}catch(error){if(error instanceof ActionDeferred)return {kind:'blocked',reason:error.message};throw error;}} finally {release();const remaining=(this.queueDepth.get(queueKey)??1)-1;if(remaining)this.queueDepth.set(queueKey,remaining);else this.queueDepth.delete(queueKey);if(this.queues.get(queueKey)===next)this.queues.delete(queueKey);}
+    try {await prior;try{return await this.dispatch(context,snapshot);}catch(error){if(error instanceof ActionDeferred)return {kind:'blocked',reason:this.inputRedactor(error.message)};throw error;}} finally {release();const remaining=(this.queueDepth.get(queueKey)??1)-1;if(remaining)this.queueDepth.set(queueKey,remaining);else this.queueDepth.delete(queueKey);if(this.queues.get(queueKey)===next)this.queues.delete(queueKey);}
   }
   completeWebRedirect(context:WorkContext,action:ActionIdentity):void {
     const record=this.journal.get(action.id),invocation=this.db.prepare("SELECT capability FROM work_action_invocations WHERE action_id=? LIMIT 1").get(action.id);
@@ -251,7 +257,7 @@ export class WorkActionService {
     if(this.inputRedactor(raw)!==raw)return {kind:'blocked',reason:'Tool input cannot be retained faithfully under the instance redaction rules.'};
     let input:Json;
     try {input=cap.parse(rawInput);}
-    catch(error){if(error instanceof ActionFailed)return {kind:'blocked',reason:error.safeResult.slice(0,16000)};throw error;}
+    catch(error){if(error instanceof ActionFailed)return {kind:'blocked',reason:this.inputRedactor(error.safeResult).slice(0,16000)};throw error;}
     const canonical=encoded(input);
     if(Buffer.byteLength(canonical)>256*1024)throw Error('Parsed input exceeds the limit');
     if(this.inputRedactor(canonical)!==canonical)return {kind:'blocked',reason:'Tool input cannot be retained faithfully under the instance redaction rules.'};
@@ -341,19 +347,20 @@ export class WorkActionService {
     if(prepared.kind!=='created')throw Error('New action already exists');
     const action=Object.freeze({id:actionId,fingerprint});let claim:void|AuthorityClaim=undefined;
     try {cap.check(input,context);claim=await cap.authorize(input,context,action);this.admit(context);cap.check(input,context,action);}
-    catch(error){claim?.release();this.journal.cancel(actionId);if(error instanceof ActionRevision)return {kind:'revision-requested',direction:error.direction};if(error instanceof ActionDeferred)return {kind:'blocked',reason:error.message};const reason=context.signal.aborted?'Work stopped':error instanceof ActionDenied?'Action denied':'Action authorization failed';this.close(context,'authority');return {kind:'blocked',reason};}
+    catch(error){claim?.release();this.journal.cancel(actionId);if(error instanceof ActionRevision)return {kind:'revision-requested',direction:this.inputRedactor(error.direction)};if(error instanceof ActionDeferred)return {kind:'blocked',reason:this.inputRedactor(error.message)};const reason=context.signal.aborted?'Work stopped':error instanceof ActionDenied?'Action denied':'Action authorization failed';this.close(context,'authority');return {kind:'blocked',reason};}
     try {
     this.db.exec('BEGIN IMMEDIATE');
     try {this.admit(context);cap.check(input,context,action);claim?.start();this.journal.startInInstanceTransaction(prepared.permit,this.db,{id:actionId,fingerprint,work:context.work});this.db.exec('COMMIT');this.journal.finalizeInstanceStart(prepared.permit);}
-    catch(error){this.db.exec('ROLLBACK');this.journal.cancel(actionId);if(error instanceof ActionDeferred)return {kind:'blocked',reason:error.message};this.close(context,'authority');return {kind:'blocked',reason:context.signal.aborted?'Work stopped':'Action could not start'};}
+    catch(error){this.db.exec('ROLLBACK');this.journal.cancel(actionId);if(error instanceof ActionDeferred)return {kind:'blocked',reason:this.inputRedactor(error.message)};this.close(context,'authority');return {kind:'blocked',reason:context.signal.aborted?'Work stopped':'Action could not start'};}
     let output:Json;let visible:string;
-    try {output=await cap.execute(input,context,action);if(Buffer.byteLength(encoded(output))>cap.maxResultBytes)throw Error('Result exceeds the limit');visible=route!=='direct' && description.effect==='read'?'Read completed':cap.visible(output).slice(0,16000);} catch(error) {if(!this.completedHopParents.has(actionId))this.journal.finish(actionId,error instanceof ActionFailed || error instanceof ActionDenied?'failed':'uncertain',error instanceof ActionFailed?error.safeResult.slice(0,16000):error instanceof ActionDenied?'Action denied':'Outcome unknown');if(error instanceof ActionDenied){this.close(context,'denied');return {kind:'blocked',reason:'Action denied'};}this.admit(context,true);cap.check(input,context,action);return {kind:'status',action:this.journal.get(actionId)!};}
-    if(description.effect==='read')this.readReceipts.set(actionId,{work:encoded(context.work),value:structuredClone(output)});
-    else this.db.prepare('UPDATE work_action_invocations SET private_result=? WHERE action_id=?').run(encoded(output),actionId);
+    try {output=await cap.execute(input,context,action);if(Buffer.byteLength(encoded(output))>cap.maxResultBytes)throw Error('Result exceeds the limit');visible=route!=='direct' && description.effect==='read'?'Read completed':this.inputRedactor(cap.visible(output)).slice(0,16000);} catch(error) {if(!this.completedHopParents.has(actionId))this.journal.finish(actionId,error instanceof ActionFailed || error instanceof ActionDenied?'failed':'uncertain',error instanceof ActionFailed?this.inputRedactor(error.safeResult).slice(0,16000):error instanceof ActionDenied?'Action denied':'Outcome unknown');if(error instanceof ActionDenied){this.close(context,'denied');return {kind:'blocked',reason:'Action denied'};}this.admit(context,true);cap.check(input,context,action);return {kind:'status',action:this.journal.get(actionId)!};}
+    const safeOutput=this.safeResult(output);
+    if(description.effect==='read')this.readReceipts.set(actionId,{work:encoded(context.work),value:structuredClone(safeOutput)});
+    else this.db.prepare('UPDATE work_action_invocations SET private_result=? WHERE action_id=?').run(encoded(safeOutput),actionId);
     if(!this.completedHopParents.has(actionId))this.journal.finish(actionId,'succeeded',visible);
     this.admit(context,true);cap.check(input,context,action);
     cap.releaseResult?.(output,context);
-    return {kind:'completed',actionId,value:output};
+    return {kind:'completed',actionId,value:safeOutput};
     } finally {this.completedHopParents.delete(actionId);claim?.release();}
   }
 }

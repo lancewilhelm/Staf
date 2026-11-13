@@ -248,6 +248,7 @@ export async function runTurn({ session, store, provider, text, emit = () => {},
           content = redact(clock());
           }
         } catch (error) { success = false; content = `${signal?.aborted ? 'Tool not executed' : 'Tool error'}: ${redact(errorMessage(error))}`; }
+        content=redact(content);
         if(fatalAction) {messages.push({role:'tool',tool_call_id:call.id,content});report({type:'tool_result',id:call.id,name,success:false,content});throw Error(fatalAction);}
         messages.push({ role: 'tool', tool_call_id: call.id, content });
         const eventContent = name === 'select_skill' && success && skillEvidence ? JSON.stringify(skillEvidence) : content;

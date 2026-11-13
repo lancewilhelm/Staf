@@ -379,7 +379,12 @@ contains the nonsecret request and outcome. The store restores pending requests
 as interrupted, and work is not replayed. Paired-client and work authority are
 checked before a save. The current store does not implement use grants or connect
 plugins. Known saved values join the existing output filter, which remains a
-secondary safeguard rather than isolation.
+secondary safeguard rather than isolation. The shared action coordinator filters
+known values from result strings, keys, visible outcomes, and retained change
+results before release to callers or normal records. The paired browser checks
+recognizable formats locally before chat and question submission; flagged
+question text is omitted from draft saves. Unknown and transformed values may
+escape filtering, and historical records are not rewritten.
 
 ### Native process slice
 
