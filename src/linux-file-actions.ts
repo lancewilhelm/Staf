@@ -14,12 +14,13 @@ const searchResult=z.union([z.strictObject({kind:z.literal('names'),matches:z.ar
 
 export function isolatedFileCapabilities(boundary:LinuxHostBoundary,redact:(value:string)=>string,allowed:(work:WorkContext)=>boolean,readOverlap:()=>number) {
  const base=fileCapabilities(redact,allowed,readOverlap);
- const mapped=(work:WorkContext):WorkContext=>Object.freeze({...work,workingDirectory:boundary.workspace});
- function adapt<I,O>(capability:Capability<I,O>):Capability<I,O> {
-  return {...capability,describe:(input,work)=>capability.describe(input,mapped(work)),...(capability.sameAction?{sameAction:(a:I,b:I,work:WorkContext)=>capability.sameAction!(a,b,mapped(work))}:{})};
- }
+ const mapped=(work:WorkContext):WorkContext=>Object.freeze({...work,workingDirectory:'/workspace'});
  const path=(input:string)=>isolatedWorkingDirectory(boundary.workspace,resolve(boundary.workspace,input));
- const target=(input:string)=>resolve(boundary.workspace,input);
+ const target=(input:string)=>resolve('/workspace',path(input));
+ function adapt<I extends {path:string},O>(capability:Capability<I,O>):Capability<I,O> {
+  const canonical=(input:I):I=>({...input,path:target(input.path)});
+  return {...capability,describe:(input,work)=>capability.describe(canonical(input),mapped(work)),...(capability.sameAction?{sameAction:(a:I,b:I,work:WorkContext)=>capability.sameAction!(canonical(a),canonical(b),mapped(work))}:{})};
+ }
  const request=(input:unknown,work:WorkContext)=>isolatedFileRequest(boundary,jsonValue.parse(input),work.signal);
  const read=adapt(base.read);
  read.execute=async(input,work)=>{

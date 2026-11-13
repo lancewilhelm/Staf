@@ -22,7 +22,8 @@ test('launcher handshake never submits a command before the exact ready message'
 test('approved workspace mapping rejects sibling and traversal paths',()=>{
  assert.equal(isolatedWorkingDirectory('/srv/staf-workspace','/srv/staf-workspace'),'.');
  assert.equal(isolatedWorkingDirectory('/srv/staf-workspace','/srv/staf-workspace/project'),'project');
- for(const path of ['/srv/staf-workspace-other','/srv/staf-workspace/../private','/tmp'])assert.throws(()=>isolatedWorkingDirectory('/srv/staf-workspace',path));
+ assert.equal(isolatedWorkingDirectory('/srv/staf-workspace','/workspace/project'),'project');
+ for(const path of ['/workspace-other','/workspace/../private','/srv/staf-workspace-other','/srv/staf-workspace/../private','/tmp'])assert.throws(()=>isolatedWorkingDirectory('/srv/staf-workspace',path));
 });
 
 if(process.platform!=='linux')test('explicit Linux host configuration stays unavailable on this host',()=>{
