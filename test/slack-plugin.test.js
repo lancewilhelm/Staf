@@ -90,3 +90,12 @@ test('an in-flight reconnect cannot undo a later owner disconnect',async()=>{
   assert.equal((await call('/api/plugins',token))[1][0].connected,false);
  }finally{release();await app.close();rmSync(dir,{recursive:true,force:true});}
 });
+
+test('ordinary Slack conversation can ask and answer in the same thread',async()=>{
+ const dir=mkdtempSync(join(tmpdir(),'staf-slack-questions-'));let receive;const posts=[];const requests=[];
+ const slackTransport={identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async(_tokens,handler)=>{receive=handler;return ()=>{}},post:async(_tokens,message)=>{posts.push(message)}};
+ const providerFactory=async()=>({name:'synthetic',capabilities:{toolCalls:true},async complete(messages,offers,opts){requests.push({messages,offers,input:opts.currentUserInput});return {role:'assistant',content:opts.currentUserInput==='Start'?'Which color do you prefer?':'I will use blue.'};}});
+ const app=startInstance(join(dir,'db'),0,{env:{},slackTransport,providerFactory}),port=await app.listen();
+ const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});return [r.status,await r.json()]};
+ try{const token=(await call('/api/pair','',{code:app.code}))[1].token,bot=(await call('/api/bots',token,{name:'Slack question',provider:'live',model:'fixture'}))[1];await call('/api/plugins/slack/connect',token,{appToken:'xapp-synthetic',botToken:'xoxb-synthetic',teamId:'T123',userId:'U123',channelId:'D123',botId:bot.id});await call('/api/plugins/slack/access',token,{botId:bot.id,enabled:true});await call('/api/plugins/slack/enable',token,{});const event={teamId:'T123',userId:'U123',channelId:'D123',threadTs:'123.1'};await receive({...event,eventId:'question',text:'Start'});await until(()=>posts.some(p=>p.text==='Which color do you prefer?'));await receive({...event,eventId:'answer',text:'Blue'});await until(()=>posts.some(p=>p.text==='I will use blue.'));assert.ok(posts.every(p=>p.threadTs==='123.1'));assert.ok(requests.some(r=>r.messages.some(m=>m.content==='Blue')));assert.deepEqual((await call('/api/question-sets',token))[1],[]);}finally{await app.close();rmSync(dir,{recursive:true,force:true});}
+});

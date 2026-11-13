@@ -457,6 +457,21 @@ Capability definitions and service enforcement remain separate. Custom and empty
 core overrides keep their existing upgrade and reset behavior.
 
 
+## Main-chat question requests
+
+A journaled `ask_questions` action creates a durable request keyed by its
+service-owned action identity and bound to the originating command. The action
+returns immediately so the original turn can finish and the owner can continue
+chatting. Drafts and the submitted or dismissed outcome live in the instance
+database. A service-owned continuation ID is reserved at creation; a queued outcome
+is claimed as a new command only after the original command completed. A crash
+after claim leaves that command interrupted rather than automatically replaying
+it. An interrupted or failed origin retains the request and outcome without
+starting a continuation. Automatic continuations have no eligible tools, fencing
+unverified repeat effects; subsequent owner input is new work. Structured sets
+are not offered to Slack-originated commands, which retain ordinary conversational
+questions and answers. Tests use synthetic providers and disposable data.
+
 ## Bundled plugins and Slack
 
 Bundled plugin definitions describe identity, configuration, lifecycle, tools,

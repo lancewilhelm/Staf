@@ -3,6 +3,41 @@
 For the persistent, hot-reloading local browser workspace and a terminal paired
 to the same development instance, see [Run the development workspace](development.md#run-the-development-workspace). For a synthetic seed and explicit reset or recovery, see [Reset and recover development data](development.md#reset-and-recover-development-data).
 
+## Answer a question set
+
+A tool-capable agent can present a set of questions in its main chat. Choose an
+answer, enter your own, or leave any question unanswered. For multiple-select
+questions, you can combine choices and a write-in. Use **Next**, **Back**, or a
+numbered question to move around. **Skip this question** clears its draft.
+Submit at any time, including with no answers; unanswered questions are sent as
+skipped. **Dismiss** declines the set. The chat remains available while it is
+open, and ordinary drafts are saved on the instance across browser refresh and
+service restart. Drafts may briefly be unsaved while a network request is in
+progress; errors appear beside the controls.
+
+The submitted set is retained as a new chat input, separate from later corrections.
+If the original response completed, Staf sends one correlated follow-up to the
+agent. That automatic follow-up has no tools: it can acknowledge your answers,
+but further action requires a new message from you. If the original response
+was interrupted, stopped, or failed, Staf retains the answers without resuming
+it; inspect the prior work before giving new direction. A follow-up interrupted
+by restart is not automatically replayed. Simple questions in an ordinary Slack
+conversation can still be asked and answered in that conversation. Structured
+question sets here are for main chat, not protected secret entry. Avoid putting
+credentials in ordinary answers; detection is incomplete.
+
+This behavior has controlled synthetic service and browser coverage, not live
+model or Slack acceptance. Availability depends on the selected model supporting
+tool calls; Direct, Hybrid, and Code Mode are supported.
+
+For a disposable manual check with no provider account or network model call,
+run `corepack pnpm run build` and then `node scripts/question-set-demo.mjs`.
+Open the printed local address, pair with its printed code, and send **Ask a
+set** to the synthetic agent. Type `r` and press Enter in the fixture terminal
+to restart the service with the same disposable data, then refresh the browser.
+Press Ctrl-C to stop it and remove that data. The fixture is separate from the
+normal persistent development workspace.
+
 ## Start the shared terminal
 
 Build and link the CLI once, then start it from your working directory:
