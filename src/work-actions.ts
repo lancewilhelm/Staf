@@ -44,6 +44,8 @@ export type Capability<I,O> = {
   maxResultBytes?:number;
   releaseResult?(output:O,work:WorkContext):void;
   validateInput?(input:I,work:WorkContext):void;
+  /** Parse recorded input without applying today’s admission policy. */
+  parseHistoricalInput?(input:unknown):I;
   sameAction?(previous:I,next:I,work:WorkContext):boolean;
   sameEffect?(previous:I,next:I,work:WorkContext):boolean;
   recovery?: {overlaps?(previous:I,next:I,work:WorkContext):boolean; reconcile?(input:I,evidence:unknown,work:WorkContext,action:ActionIdentity):boolean|Promise<boolean>};
@@ -120,6 +122,7 @@ export class WorkActionService {
   register<I,O>(capability:Capability<I,O>):void {
     if (!capability.name || capability.name==='code_mode' || this.capabilities.has(capability.name) || capability.definition.function.name!==capability.name) throw Error('Invalid or duplicate capability');
     const parse=(input:unknown)=>capability.parseInput(input);
+    const historical=(input:unknown)=>capability.parseHistoricalInput ? capability.parseHistoricalInput(input) : parse(input);
     this.capabilities.set(capability.name,{
       name:capability.name,internal:capability.internal===true,directOnly:capability.directOnly===true,definition:structuredClone(capability.definition),eligible:work=>this.availability(capability.name) && capability.eligible(work),maxResultBytes:capability.maxResultBytes ?? 256*1024,
       parse:input=>jsonValue.parse(parse(input)),
@@ -132,8 +135,8 @@ export class WorkActionService {
       ...(capability.restoreJournalInput ? {restoreJournalInput:(input:Json,work:WorkContext,action:ActionIdentity)=>jsonValue.parse(parse(capability.restoreJournalInput!(input,work,action)))} : {}),
       ...(capability.releaseResult ? {releaseResult:(output:Json,work:WorkContext)=>{try{capability.releaseResult!(capability.parseResult(output),work);}catch(error){if(!(error instanceof ActionDeferred))this.close(work,'authority');throw error;}}} : {}),
       ...(capability.validateInput ? {validateInput:(input:Json,work:WorkContext)=>capability.validateInput!(parse(input),work)} : {}),
-      ...(capability.sameEffect ? {sameEffect:(a:Json,b:Json,work:WorkContext)=>capability.sameEffect!(parse(a),parse(b),work)} : {}),
-      ...(capability.sameAction ? {sameAction:(a:Json,b:Json,work:WorkContext)=>capability.sameAction!(parse(a),parse(b),work)} : {}),
+      ...(capability.sameEffect ? {sameEffect:(a:Json,b:Json,work:WorkContext)=>{let previous:I;try{previous=historical(a);}catch(error){if(!capability.parseHistoricalInput)throw error;return true;}return capability.sameEffect!(previous,parse(b),work);}} : {}),
+      ...(capability.sameAction ? {sameAction:(a:Json,b:Json,work:WorkContext)=>{let previous:I;try{previous=historical(a);}catch(error){if(!capability.parseHistoricalInput)throw error;return false;}return capability.sameAction!(previous,parse(b),work);}} : {}),
       ...(capability.recovery?.overlaps ? {overlaps:(a:Json,b:Json,work:WorkContext)=>capability.recovery!.overlaps!(parse(a),parse(b),work)} : {}),
       ...(capability.recovery?.reconcile ? {reconcile:(input:Json,evidence:unknown,work:WorkContext,action:ActionIdentity)=>capability.recovery!.reconcile!(parse(input),evidence,work,action)} : {}),
     });

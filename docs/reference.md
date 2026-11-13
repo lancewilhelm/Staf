@@ -527,7 +527,9 @@ continuations treat equivalent file and terminal working-directory paths as the
 same action. For terminal replay protection, the same command and directory
 are treated as the same effect even when process options change. Resuming a
 particular terminal invocation still requires its original options. Invalid
-working directories are rejected before a new action is recorded.
+working directories are rejected before a new action is recorded. Historical
+terminal inputs are compared by their recorded structure even if a value later
+becomes a known secret; an unrecognizable historical input requires review.
 
 Random file pages check the complete known-credential overlap and up to 64 KiB
 of preceding token context (or the larger known-credential overlap). Recognized

@@ -140,6 +140,28 @@ test('question continuation blocks an equivalent isolated terminal command',asyn
  }finally{continuation?.dispose();actions.dispose();instance.close();}
 });
 
+test('a newly saved secret does not break comparison with historical terminal input',async()=>{
+ const {nativeCommandCapability,NativeProcesses}=await import('../dist/native-processes.js');const {instance,actions}=fixture();let secret='',starts=0;
+ const redact=value=>secret?value.replaceAll(secret,'[REDACTED]'):value;
+ try {const manager=new NativeProcesses(instance.db);instance.workActions().register(nativeCommandCapability(manager,()=>true,redact,async()=>{starts++;return {started:true};}));
+  const first=await invoke(actions,source('original'),'terminal_run',{command:'echo syntheticvalue'});assert.equal(first.kind,'completed');instance.db.prepare('INSERT INTO work_action_resolutions VALUES (?)').run(first.actionId);actions.beginRecovery();secret='syntheticvalue';
+  const safe=await invoke(actions,source('safe'),'terminal_run',{command:'echo safe'});assert.equal(safe.kind,'completed');assert.equal(starts,2);
+  const exposed=await invoke(actions,source('exposed'),'terminal_run',{command:'echo syntheticvalue'});assert.equal(exposed.kind,'blocked');assert.equal(starts,2);
+  instance.db.prepare('UPDATE work_action_invocations SET input=? WHERE action_id=?').run(JSON.stringify({malformed:true}),first.actionId);instance.db.prepare('INSERT INTO work_action_resolutions VALUES (?)').run(safe.actionId);
+  const unknown=await invoke(actions,source('unknown'),'terminal_run',{command:'echo another'});assert.equal(unknown.kind,'repeat-required');assert.equal(starts,2);
+ }finally{actions.dispose();instance.close();}
+});
+
+test('question continuations can compare actions after a secret is saved',async()=>{
+ const {nativeCommandCapability,NativeProcesses}=await import('../dist/native-processes.js');const {instance,bot,actions,controller}=fixture();let secret='',starts=0,continuation;
+ const redact=value=>secret?value.replaceAll(secret,'[REDACTED]'):value;
+ try {const manager=new NativeProcesses(instance.db);instance.workActions().register(nativeCommandCapability(manager,()=>true,redact,async()=>{starts++;return {started:true};}));
+  const first=await invoke(actions,source('original'),'terminal_run',{command:'echo syntheticvalue'});assert.equal(first.kind,'completed');instance.db.prepare('INSERT INTO work_action_resolutions VALUES (?)').run(first.actionId);
+  instance.questionSets.create('question',bot.id,'c',{questions:[{kind:'text',prompt:'Continue?'}]});const request=instance.questionSets.list()[0];instance.complete('c','waiting for answer');actions.dispose();instance.claim({id:request.continuationId,botId:bot.id,content:'Answer'});continuation=instance.workActions().open({kind:'command',id:request.continuationId},controller.signal);secret='syntheticvalue';
+  const safe=await invoke(continuation,source('safe'),'terminal_run',{command:'echo safe'});assert.equal(safe.kind,'completed');assert.equal(starts,2);
+ }finally{continuation?.dispose();actions.dispose();instance.close();}
+});
+
 test('terminal resume requires the original options and rejects an invalid cwd before journaling',async()=>{
  const {nativeCommandCapability,NativeProcesses}=await import('../dist/native-processes.js');const {isolatedWorkingDirectory}=await import('../dist/linux-host-boundary.js');const {instance,actions}=fixture();let starts=0;
  try {const manager=new NativeProcesses(instance.db);instance.workActions().register(nativeCommandCapability(manager,()=>true,value=>value,async()=>{starts++;return {started:true};},cwd=>'/workspace/'+isolatedWorkingDirectory('/srv/staf-workspace',cwd)));
