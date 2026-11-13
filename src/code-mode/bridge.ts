@@ -22,7 +22,7 @@ export async function runCode(input:{actions:WorkActions;responseId:string;callI
   const keep=(value:Json):Json=>{const result=safe(value);outputBytes+=Buffer.byteLength(JSON.stringify(result));if(outputBytes>limits.outputBytes){fatal='Guest output limit reached';actions.close(fatal);throw Error(fatal);}return result;};
   let guest:ReturnType<typeof startQuickJSGuest>;
   try {guest=startQuickJSGuest({source,names:actions.offers('guest').map(tool=>tool.function.name),guestMs:limits.guestMs,phase:()=>{},request:message=>{
-    const isQuestion=actions.context.work.kind==='task' && message.type==='call' && (message.name==='ask_questions' || message.name==='ask_owner');
+    const isQuestion=actions.context.work.kind==='task' && message.type==='call' && (message.name==='ask_questions' || message.name==='ask_owner' || message.name==='guide_gmail_setup');
     if(taskQuestionPending && message.type==='call')return Promise.resolve({ok:false as const,error:'Owner input is pending'});
     if(isQuestion)taskQuestionPending=true;
     const operation=(async()=>{

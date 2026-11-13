@@ -1,5 +1,6 @@
 import {isProviderId} from './provider-ids.js';
 import {questionSetInput} from './question-sets.js';
+import {gmailSetupQuestions,parseGmailSetupDraft} from './gmail-setup.js';
 import {registerSkillCapability, skillTracker, skillWorkKey, type SkillTracker} from './skill-actions.js';
 import { z } from 'zod';
 import { ActionDenied, ActionRevision, ActionFailed, type Capability, type ActionIdentity, type WorkContext } from './work-actions.js';
@@ -561,11 +562,23 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
   registerMemoryCapabilities(instance,workActions,redact);
   registerTaskCapabilities(workActions,taskActionHooks,redact);
   const slackContext=(work:WorkContext)=>work.work.kind==='command' ? slackCommands.get(work.work.id) : undefined;
+  function guidedGmailInput(id:string) {
+    const request=instance.questionSets.list().find(item=>item.id===id),bot=request && instance.bot(request.botId);
+    if(!request || !request.gmailSetup || request.state!=='open' || !bot || bot.archived || bot.revision!==instance.questionSets.gmailSetupRevision(id))throw Error('Gmail setup authority changed');
+    if(request.workKind==='task')instance.assertWorkAuthority({kind:'task',id:request.workId});
+    else if(request.workKind==='command' && request.originState==='pending')instance.assertWorkAuthority({kind:'command',id:request.workId});
+    else if(request.workKind!=='command' || request.originState!=='completed')throw Error('Gmail setup work was interrupted');
+    const input=parseGmailSetupDraft(request.draft),selection=secretRequests.questionStepSelection(id,2);
+    if(!selection)throw Error('Save or select the client secret first');
+    if(redact(input.email)!==input.email || redact(input.clientId)!==input.clientId)throw Error('Gmail account and client ID cannot contain a known secret');
+    const current=instance.plugins.gmailConnection();if(current && (current.connected || current.accountId!==input.email))throw Error('Gmail is already connected or a different account is configured');
+    return {request,input,selection};
+  }
   const slackAllowed=(work:WorkContext)=>{const context=slackContext(work);return !!context && instance.plugins.authority(work.work.id) && work.botId===context.config.botId;};
-  async function waitForTaskQuestions(id:string,botId:string,requestId:string,input:z.infer<typeof questionSetInput>,signal:AbortSignal) {
+  async function waitForTaskQuestions(id:string,botId:string,requestId:string,input:z.infer<typeof questionSetInput>,signal:AbortSignal,gmailSetup=false) {
     instance.assertWorkAuthority({kind:'task',id});
     workActions.assertPrivateDisclosure(instance.workContext({kind:'task',id},signal));
-    instance.questionSets.createTask(requestId,botId,id,input);
+    instance.questionSets.createTask(requestId,botId,id,input);if(gmailSetup){const bot=instance.bot(botId);if(!bot || bot.archived)throw Error('Agent unavailable');instance.questionSets.createGmailSetup(requestId,bot.revision);}
     const timer=taskTimers.get(id);timer?.pause();
     try {for(;;){signal.throwIfAborted();instance.assertWorkAuthority({kind:'task',id});workActions.assertPrivateDisclosure(instance.workContext({kind:'task',id},signal));const request=instance.questionSets.list().find(item=>item.id===requestId && item.workKind==='task' && item.workId===id);if(!request)throw new ActionFailed('Question request unavailable');if(request.state!=='open')return JSON.stringify(request.result);await new Promise<void>(resolve=>setTimeout(resolve,100));}}
     finally {if(!signal.aborted)timer?.resume();}
@@ -581,6 +594,14 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
     },visibleResult:value=>value,
   };
   workActions.register(questionCapability);
+  const guidedGmail:Capability<Record<string,never>,string>={
+    name:'guide_gmail_setup',definition:{type:'function',function:{name:'guide_gmail_setup',description:'Guide the owner through Gmail setup in Staf. This creates a protected question set; it does not itself connect Gmail. Never ask the owner to paste a secret into chat.',parameters:{type:'object',properties:{},additionalProperties:false}}},
+    parseInput:value=>z.strictObject({}).parse(value),parseResult:value=>z.string().parse(value),
+    describe:()=>({summary:'Guide Gmail setup',resource:'paired owner',effect:'change'}),
+    eligible:work=>work.work.kind==='task' ? taskActionHooks.has(work.work.id) : !slackContext(work),check:(_input,work)=>{instance.assertWorkAuthority(work.work);if(slackContext(work))throw Error('Gmail setup is available in Staf');},authorize:async()=>{},
+    execute:async(_input,work,identity)=>{if(work.work.kind==='command'){instance.questionSets.create(identity.id,work.botId,work.work.id,gmailSetupQuestions);const bot=instance.bot(work.botId);if(!bot || bot.archived)throw Error('Agent unavailable');instance.questionSets.createGmailSetup(identity.id,bot.revision);return 'Gmail setup questions are pending. The account is not connected yet.';}return waitForTaskQuestions(work.work.id,work.botId,identity.id,gmailSetupQuestions,work.signal,true);},visibleResult:value=>value,
+  };
+  workActions.register(guidedGmail);
   const startSlackTask:Capability<Record<string,never>,string>={
     name:'start_slack_task',definition:{type:'function',function:{name:'start_slack_task',description:'Start substantive owner-requested work that benefits from continuing independently. The exact current owner message becomes its objective. Do not use for ordinary conversation; ask if the request is ambiguous. The work remains bound to this Slack thread.',parameters:{type:'object',properties:{},additionalProperties:false}}},
     parseInput:value=>z.strictObject({}).parse(value),parseResult:value=>z.string().parse(value),describe:()=>({summary:'Start the owner’s requested background work',resource:'Slack task',effect:'change'}),eligible:slackAllowed,check:(_input,work)=>{if(!slackAllowed(work))throw Error('Slack task authority changed');},authorize:async()=>{},
@@ -612,7 +633,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
       let reply:string;
       if(input.action==='status' && instance.gmailPrivateWork({kind:'task',id:task.id})) {reply=`This work is ${task.state}. Review Gmail details in Staf.`;}
       else if(input.action==='status') {
-        const recent=task.activity.filter(event=>(event.type==='tool_start' || event.type==='tool_result') && !['ask_questions','ask_owner'].includes(event.name)).slice(-3).map(event=>`${event.name}: ${event.type==='tool_start'?'started':event.success?'completed':'failed'}`);
+        const recent=task.activity.filter(event=>(event.type==='tool_start' || event.type==='tool_result') && !['ask_questions','ask_owner','guide_gmail_setup'].includes(event.name)).slice(-3).map(event=>`${event.name}: ${event.type==='tool_start'?'started':event.success?'completed':'failed'}`);
         reply=`This work is ${task.state}${task.slackOutcomeReview?.state==='sent' && task.slackOutcomeReview.text ? `: ${task.slackOutcomeReview.text}` : task.outcome && !instance.questionSets.hasTask(task.id) ? `: ${task.outcome}` : ''}${task.waitReason && task.waitReason!=='owner-input' ? `; waiting for ${task.waitReason}` : ''}${recent.length ? `\nRecent work: ${recent.join('; ')}` : ''}`;
       } else if(!['queued','running'].includes(task.state)) reply='This work is no longer active. No changes were made.';
       else if((input.action==='answer' || input.action==='direction') && instance.questionSets.hasOpenTaskTree(task.id)) {reply='Manage this work in Staf. No changes were made.';}
@@ -898,8 +919,8 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
         for(const event of task.activity) {
           if(typeof event.seq!=='number')continue;
           let text:string|undefined;
-          if(event.type==='tool_start' && typeof event.name==='string' && !['ask_questions','ask_owner'].includes(event.name))text=natural?`Started ${event.name}.`:`Task ${task.id}: started ${event.name}.`;
-          if(event.type==='tool_result' && typeof event.name==='string' && !['ask_questions','ask_owner'].includes(event.name))text=natural?`${event.name} ${event.success ? 'completed' : 'failed'}.`:`Task ${task.id}: ${event.name} ${event.success ? 'completed' : 'failed'}.`;
+          if(event.type==='tool_start' && typeof event.name==='string' && !['ask_questions','ask_owner','guide_gmail_setup'].includes(event.name))text=natural?`Started ${event.name}.`:`Task ${task.id}: started ${event.name}.`;
+          if(event.type==='tool_result' && typeof event.name==='string' && !['ask_questions','ask_owner','guide_gmail_setup'].includes(event.name))text=natural?`${event.name} ${event.success ? 'completed' : 'failed'}.`:`Task ${task.id}: ${event.name} ${event.success ? 'completed' : 'failed'}.`;
           if(text)queueSlackWork(task.id,`${task.id}:activity:${event.seq}`,text);
         }
         if(['completed','failed','stopped','interrupted'].includes(task.state)) {const privateQuestions=instance.questionSets.hasTask(task.id);queueSlackWork(task.id,`${task.id}:outcome`,privateQuestions ? `Work ${task.state}. Review the outcome in Staf.` : natural?`Work ${task.state}: ${task.outcome ?? 'No outcome available'}`:`Task ${task.id} ${task.state}: ${task.outcome ?? 'No outcome available'}`);}
@@ -997,7 +1018,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
         const action=control[1].toLowerCase();
         if(action==='status' && instance.gmailPrivateWork({kind:'task',id:attemptId})) {reply=`Task ${attemptId} ${task.state}. Review Gmail details in Staf.`;}
         else if(action==='status') {
-          const recent=task.activity.filter(event=>(event.type==='tool_start' || event.type==='tool_result') && !['ask_questions','ask_owner'].includes(event.name)).slice(-3).map(event=>`${event.name}: ${event.type==='tool_start'?'started':event.success?'completed':'failed'}`);
+          const recent=task.activity.filter(event=>(event.type==='tool_start' || event.type==='tool_result') && !['ask_questions','ask_owner','guide_gmail_setup'].includes(event.name)).slice(-3).map(event=>`${event.name}: ${event.type==='tool_start'?'started':event.success?'completed':'failed'}`);
           reply=`Task ${attemptId} ${task.state}${task.slackOutcomeReview?.state==='sent' && task.slackOutcomeReview.text ? `: ${task.slackOutcomeReview.text}` : task.outcome && !instance.questionSets.hasTask(task.id) ? `: ${task.outcome}` : ''}${task.waitReason && task.waitReason!=='owner-input' ? `; waiting for ${task.waitReason}` : ''}${recent.length ? `\nRecent work: ${recent.join('; ')}` : ''}`;
         }
         else if(!['queued','running'].includes(task.state))reply=`Task ${attemptId} is not active. No changes were made.`;
@@ -1275,7 +1296,12 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
         }
         z.strictObject({}).parse(value);return json(200,{status:secretRequests.decide(request.id,secretDecision[2]==='skip'?'skipped':'dismissed')});
       }
-      if(req.method==='GET' && req.url==='/api/question-sets')return json(200,instance.questionSets.list().map(request=>({...request,secretStatuses:request.questions.map((question,index)=>question.kind==='secret'?secretRequests.questionStepStatus(request.id,index):null)})));
+      const guidedPreview=req.url?.match(/^\/api\/question-sets\/([\w-]+)\/gmail-preview$/);
+      if(req.method==='GET' && guidedPreview?.[1]) {
+        const setup=guidedGmailInput(guidedPreview[1]),destination=gmailDestination(setup.input.email),current=secretRequests.grants().find(item=>item.integration==='gmail.client' && item.destination===destination)??null;
+        return json(200,{...setup.input,secret:setup.selection,destination,currentGrant:current});
+      }
+      if(req.method==='GET' && req.url==='/api/question-sets')return json(200,instance.questionSets.list().map(request=>({...request,secretStatuses:request.questions.map((question,index)=>question.kind==='secret'?secretRequests.questionStepStatus(request.id,index):null),secretSelections:request.questions.map((question,index)=>question.kind==='secret'?secretRequests.questionStepSelection(request.id,index)??null:null)})));
       const questionSecret=req.url?.match(/^\/api\/question-sets\/([\w-]+)\/secret\/(\d+)\/(save|select)$/);
       if(req.method==='POST' && questionSecret?.[1] && questionSecret[2] && questionSecret[3]) {
         const request=instance.questionSets.list().find(item=>item.id===questionSecret[1]),index=Number(questionSecret[2]),question=request?.questions[index];
