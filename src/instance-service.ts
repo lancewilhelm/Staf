@@ -869,7 +869,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
       if(!request.continuationId)continue;
       const instruction=request.state==='dismissed' ? 'The owner dismissed this request. Acknowledge the dismissal without further action.' : 'This is new, owner-authorized direction. Continue the work using currently available tools and permissions. Do not repeat actions from the originating work.';
       const content=`Owner response to question set ${request.id}, requested in earlier chat ${request.workId}:\n${JSON.stringify(request.result)}\n${instruction}`;
-      const visible=request.state==='dismissed'?'Dismissed question set.':`Submitted answers:\n${request.questions.map((q,i)=>{const a=request.draft[i];const answer=a ? [...a.choices,...(a.writeIn.trim()?[a.writeIn]:[])].join(', ') : '';return `${i+1}. ${q.prompt} ${q.kind==='secret' ? secretRequests.questionStepStatus(request.id,i) : answer || 'Skipped'}`;}).join('\n')}`;
+      const visible=request.state==='dismissed'?'Dismissed question set.':`Submitted answers:\n${request.questions.map((q,i)=>{const a=request.draft[i];const answer=a ? [...a.choices,...(a.writeIn.trim()?[a.writeIn]:[])].join(', ') : '';return `${i+1}. ${q.prompt} ${q.kind==='secret' ? String(request.result?.answers?.[i]?.status ?? 'skipped') : answer || 'Skipped'}`;}).join('\n')}`;
       try {const result=submitCommand({id:request.continuationId,botId:request.botId,content,visibleContent:visible,continuation:true});if(result.kind!=='busy')instance.questionSets.deliveryError(request.id,null);} catch {instance.questionSets.deliveryError(request.id,'The follow-up could not start. Check that the agent is active and its settings are valid.');}
     }
   }
