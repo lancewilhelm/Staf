@@ -18,6 +18,8 @@ privileges, and Docker's built-in seccomp profile. It checks the daemon's Linux
 and seccomp reports and inspects the resulting container settings before start.
 An entry wrapper checks seccomp, no-new-privileges, and zero effective, permitted
 and bounding capabilities in `/proc/self/status` before executing the command.
+The observed configuration must also disable daemon logging and restart, so
+Docker does not retain output in its normal log driver or replay the command.
 Any failed or unavailable check blocks execution. This is isolated scratch, not
 access to existing host files or an interactive terminal. Previously launched
 detached processes and unrelated same-user software remain outside this gate.
@@ -57,7 +59,7 @@ inspection, setuid programs, privileged sockets, and access to service APIs must
 not restore the lost authority. A separate UID alone is insufficient if a secret
 is readable through another path or privileged service.
 
-Before enabling the backend, tests must use real disposable Linux processes and
+Before claiming Linux acceptance, tests must use real disposable Linux processes and
 synthetic credentials. They must try direct and transformed reads, environment
 inheritance, process inspection, symlink and alternate paths, privilege changes,
 socket access, and attempts from pipe, PTY, file, background and helper paths.

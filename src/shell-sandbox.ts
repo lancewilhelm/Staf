@@ -204,7 +204,7 @@ export async function executeShellSandbox(request: ShellSandboxRequest): Promise
       '--label', `staf.shell.execution=${executionId}`, '--pull=never', '--network=none', '--ipc=private', '--cgroupns=private', '--read-only', '--cap-drop=ALL', '--security-opt=no-new-privileges', '--security-opt=seccomp=builtin',
       '--user=65534:65534', '--pids-limit=64', '--memory=128m', '--cpus=0.5', '--init',
       '--hostname=staf-sandbox', '--env=PATH=/usr/bin:/bin', '--env=HOME=/nonexistent',
-      '--log-driver=none', '--no-healthcheck',
+      '--log-driver=none', '--restart=no', '--no-healthcheck',
       ...workspaceArgs, '--workdir=/workspace',
       '--entrypoint=/bin/sh', imageId, '-c', ...(protectedScratch?[scratchEntryScript,'staf-scratch',command]:[command])]);
     if (create.code !== 0 || create.overflow) {

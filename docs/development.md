@@ -407,7 +407,9 @@ For a disposable offline secret-request UI check, build and run
 code, uses a synthetic model, and removes its temporary dataset when stopped.
 Create an agent using provider `live` and model `fixture-offline`, then send a
 message to trigger a request. Use synthetic values only. This specialized
-fixture does not exercise a Linux isolation boundary or a live provider.
+fixture can also receive `try terminal` to demonstrate the current fail-closed
+host-terminal result. It does not exercise a Linux isolation boundary or a live
+provider.
 For docs-only changes, report the relevant documentation checks instead of
 requiring an application launch.
 

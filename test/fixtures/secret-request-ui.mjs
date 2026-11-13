@@ -7,7 +7,9 @@ import {startInstance} from '../../dist/instance-service.js';
 const directory=mkdtempSync(join(tmpdir(),'staf-secret-ui-'));
 const app=startInstance(join(directory,'instance.sqlite'),3211,{dataDir:directory,env:{},providerFactory:async()=>({
  name:'offline-fixture',capabilities:{toolCalls:true},async complete(messages){
-  if(messages.at(-1)?.role==='tool')return {role:'assistant',content:'The secret request has finished. Saving does not connect a service.'};
+  if(messages.at(-1)?.role==='tool')return {role:'assistant',content:'The fixture action finished. Check the activity for its result.'};
+  const text=messages.findLast(message=>message.role==='user')?.content;
+  if(typeof text==='string' && text.includes('try terminal'))return {role:'assistant',content:null,tool_calls:[{id:'terminal-check',type:'function',function:{name:'terminal_run',arguments:JSON.stringify({command:'printf ordinary'})}}]};
   return {role:'assistant',content:null,tool_calls:[{id:'secret-request',type:'function',function:{name:'request_secret',arguments:JSON.stringify({name:'Example credential',purpose:'Demonstrate protected entry',destination:'example.test'})}}]};
  }
 })});
