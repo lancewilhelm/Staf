@@ -446,10 +446,9 @@ on disable, but an already dispatched effect may have reached its destination.
 Clock permission, web/search permissions, task scope and approvals remain
 independent and authoritative. Search still needs a configured backend.
 
-## Main-chat question sets
+## Question sets
 
-Schema 53 stores question definitions, ordinary drafts, resolution, the originating
-command and a service-generated continuation ID. `ask_questions` accepts up to
+Schema 53 stores main-chat question definitions, drafts, resolution, the originating command, and a continuation ID. Schema 54 adds task-bound question sets and drafts. `ask_questions` accepts up to
 12 optional single-choice, multiple-select or text questions. Choice questions
 include a list of choices; every question accepts a write-in. Paired clients can
 inspect `GET /api/question-sets`, save an entire draft with
@@ -464,7 +463,7 @@ starts new work with the current tool mode, permissions, approvals, and scope.
 The action journal checks the originating question-work lineage before dispatch.
 It blocks matching prior actions and fences unresolved effects. A dismissal
 follow-up has no tool offers. Ordinary Slack chat continues as conversation.
-The structured main-chat capability is not offered to Slack commands. This is not secret storage.
+The structured main-chat capability is not offered to Slack commands. A task waits for its own question outcome without spending its execution limit. A restart or stop retains the request and draft without resuming the attempt. A paired client can resolve the retained request and initiate a new attempt after review. Current task authority is checked while waiting and before accepting an answer to an active attempt. Task questions and answers are excluded from Slack updates. This is not secret storage.
 Known credentials and recognized OpenRouter key patterns are rejected from drafts,
 but detection is incomplete.
 

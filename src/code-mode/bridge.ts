@@ -16,10 +16,14 @@ export async function runCode(input:{actions:WorkActions;responseId:string;callI
   const persist=()=>actions.updateExecution(id,JSON.stringify({emitted}));
   let outputBytes=0, cachedBytes=0, fatal:string|undefined,ownerRevision:string|undefined;
   const pending=new Set<Promise<unknown>>();
+  let taskQuestionPending=false;
   const safe=(value:Json):Json=>{if(typeof value==='string')return redact(value);if(Array.isArray(value))return value.map(safe);if(value && typeof value==='object')return Object.fromEntries(Object.entries(value).map(([key,item])=>[redact(key),safe(item)]));return value;};
   const keep=(value:Json):Json=>{const result=safe(value);outputBytes+=Buffer.byteLength(JSON.stringify(result));if(outputBytes>limits.outputBytes){fatal='Guest output limit reached';actions.close(fatal);throw Error(fatal);}return result;};
   let guest:ReturnType<typeof startQuickJSGuest>;
   try {guest=startQuickJSGuest({source,names:actions.offers('guest').map(tool=>tool.function.name),guestMs:limits.guestMs,phase:()=>{},request:message=>{
+    const isQuestion=actions.context.work.kind==='task' && message.type==='call' && (message.name==='ask_questions' || message.name==='ask_owner');
+    if(taskQuestionPending && message.type==='call')return Promise.resolve({ok:false as const,error:'Owner input is pending'});
+    if(isQuestion)taskQuestionPending=true;
     const operation=(async()=>{
     if(fatal || actions.context.signal.aborted) return {ok:false as const,error:'Work stopped or closed'};
     try {
@@ -44,7 +48,7 @@ export async function runCode(input:{actions:WorkActions;responseId:string;callI
       return {ok:false as const,error:fatal ?? 'Capability call failed'};
     }
     })();
-    pending.add(operation);void operation.finally(()=>pending.delete(operation));return operation;
+    pending.add(operation);void operation.finally(()=>{pending.delete(operation);if(isQuestion)taskQuestionPending=false;});return operation;
   }});} catch {actions.close('guest worker unavailable');actions.finishExecution(id,'worker-failed',JSON.stringify({emitted}));throw Error('Guest worker could not start');}
   const stop=()=>guest.stop();actions.context.signal.addEventListener('abort',stop,{once:true});
   if(actions.context.signal.aborted) stop();

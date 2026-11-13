@@ -194,7 +194,7 @@ remain service-controlled. Live provider execution remains unverified.
 The shared chat-completions adapter passes caller cancellation and its timeout
 to the HTTP transport.
 
-The background-task preview stores tasks, linked attempts, captured profiles and context, ordered Activity, and private sessions in SQLite. A partial unique index enforces one queued, running, or stopping attempt per bot. Startup marks unfinished attempts interrupted. Stop intent is saved before requesting transport cancellation; observed terminal output and usage can still arrive. Clock permissions and approval modes are implemented. Explicit task inputs are stored in an ordered inbox and incorporated at provider boundaries; completion and input acceptance are serialized. Structured `ask_owner` calls wait for an answer to the recorded question ID, without consuming the execution timer. Main chat does not implicitly direct a task. Explicit replacement is captured while waiting and becomes queued in the same transaction that records the original attempt settling. The shared chat snapshot places task attempts at their existing acceptance notices, with unanchored older attempts shown separately. It exposes the service-owned state and activity; the workspace can request Stop and decide task approvals. Task question answers remain API/CLI operations. Stop settles as stopped even if the provider returns text later; observed text and usage remain evidence. Explicit task API/CLI operations remain available. Offline tests do not establish live provider behavior.
+The background-task preview stores tasks, linked attempts, captured profiles and context, ordered Activity, and private sessions in SQLite. A partial unique index enforces one queued, running, or stopping attempt per bot. Startup marks unfinished attempts interrupted. Stop intent is saved before requesting transport cancellation; observed terminal output and usage can still arrive. Clock permissions and approval modes are implemented. Explicit task inputs are stored in an ordered inbox and incorporated at provider boundaries; completion and input acceptance are serialized. Structured `ask_owner` and `ask_questions` calls wait for an answer without consuming the execution timer. Main chat does not implicitly direct a task. Explicit replacement is captured while waiting and becomes queued in the same transaction that records the original attempt settling. The shared chat snapshot places task attempts at their existing acceptance notices, with unanchored older attempts shown separately. It exposes the service-owned state and activity; the workspace can request Stop and decide task approvals. The workspace shows and resolves task question sets. Stop settles as stopped even if the provider returns text later; observed text and usage remain evidence. Explicit task API/CLI operations remain available. Offline tests do not establish live provider behavior.
 
 
 ### Shared-instance skills
@@ -434,7 +434,7 @@ Capability definitions and service enforcement remain separate. Custom and empty
 core overrides keep their existing upgrade and reset behavior.
 
 
-## Main-chat question requests
+## Question requests
 
 A journaled `ask_questions` action creates a durable request keyed by its
 service-owned action identity and bound to the originating command. The action
@@ -451,7 +451,9 @@ blocks matching prior actions and fences unresolved or opaque effects. File
 action comparisons resolve path aliases. Arbitrary commands can have equivalent
 effects that the service cannot infer from their text. A dismissal continuation
 has no tool offers. Structured sets are not offered to Slack-originated
-commands, which retain ordinary conversational questions and answers. Tests use synthetic providers and disposable data.
+commands, which retain ordinary conversational questions and answers.
+
+Task question sets are bound to an attempt and retained independently of chat continuations. The action waits for its outcome while the task timer is paused. Other work can proceed, but further actions in that task are deferred. The service checks task authority before accepting an active answer and before returning it to the model. Restart interrupts the attempt and leaves the request and draft for review. A new owner-initiated attempt uses the existing task action lineage and checks for prior or uncertain effects. Background questions and their answers do not enter Slack updates; after a task uses questions, Slack receives its outcome state and the full outcome remains in Staf. Gmail clarifications and action approvals remain separate. Tests use synthetic providers and disposable data.
 
 ## Bundled plugins and Slack
 

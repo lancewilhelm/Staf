@@ -93,7 +93,7 @@ function scroll(event: Event) {
                 <div class="who"><AgentImage :image="selected.image" :name="selected.name" />{{ selected.name }}{{ part.live && (row.message?.role === 'assistant_stopped' || row.progress?.state === 'stopped') ? ' · stopped' : '' }}<span v-if="part.live && ((!row.progress && row.optimistic) || (row.progress && ['accepted','running','stopping'].includes(row.progress.state)))" class="working-indicator" role="status" aria-label="Response in progress" /></div>
                 <ResponseText v-if="part.text" :text="part.text" />
               </div>
-              <QuestionSet v-for="request in s.questionSets.filter(item => item.workId === row.commandId)" :key="request.id" :request="request" />
+              <QuestionSet v-for="request in s.questionSets.filter(item => item.workKind === 'command' && item.workId === row.commandId)" :key="request.id" :request="request" />
               <div v-if="row.progress && ['failed','interrupted'].includes(row.progress.state)" class="meta">Response {{ row.progress.state }}. {{ row.progress.error }}</div>
             </template>
           </div>

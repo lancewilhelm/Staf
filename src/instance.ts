@@ -1,5 +1,5 @@
 import {isProviderId} from './provider-ids.js';
-import {QuestionSets,questionSetSchema} from './question-sets.js';
+import {QuestionSets,questionSetSchema,taskQuestionSetSchema} from './question-sets.js';
 import {parseToolMode,type ToolMode} from './tool-mode.js';
 import {InstanceCore} from './instance-core.js';
 import {ProviderDefaultsStore} from './provider-choices.js';
@@ -36,7 +36,7 @@ import {InboxMonitorStore,inboxMonitorSchema} from './inbox-monitor.js';
 const clockAction: Action = { capability:'clock', operation:'read', resource:'utc', effect:'read', limits:{}, risk:'safe' };
 const clockBoundary = { enabledCapabilities:['clock'], actions:[clockAction] };
 const modes: ApprovalMode[] = ['ask-every-time','ask-for-risky-actions','never-ask'];
-export const INSTANCE_SCHEMA_VERSION = 53;
+export const INSTANCE_SCHEMA_VERSION = 54;
 const MAINTENANCE_VERSION = 2147483647;
 
 export const starterSoul = "You are an assistant working for the owner. Be clear and candid. Distinguish observations from assumptions. Follow the owner's role instructions and work within the permissions and task scope granted to you.";
@@ -254,6 +254,7 @@ export class Instance {
       CREATE INDEX IF NOT EXISTS gmail_reply_account_message ON gmail_reply_proposals(account_id,message_id);`);
     this.db.exec("INSERT OR IGNORE INTO slack_notices SELECT action_id||':send-outcome',team_id,user_id,channel_id,NULL,bot_id,CASE WHEN json_extract(effect,'$.kind')='modify' THEN 'The Gmail inbox change outcome is unknown after restart. Inspect the message before trying again.' ELSE 'The Gmail send outcome is unknown after restart. Check Sent mail before trying again.' END, 'pending',0 FROM gmail_reply_proposals WHERE state='dispatching'; UPDATE gmail_reply_proposals SET state='interrupted',detail='Instance restarted before dispatch' WHERE state IN ('disclosure','review','revision','approved'); UPDATE gmail_reply_proposals SET state='uncertain',detail='Instance restarted during Gmail dispatch; inspect the account before taking further action' WHERE state='dispatching'");
     if(version < 53) this.db.exec(questionSetSchema);
+    if(version < 54) this.db.exec(taskQuestionSetSchema);
     this.questionSets = new QuestionSets(this.db);
     this.plugins = new PluginStore(this.db);
     this.inboxMonitor = new InboxMonitorStore(this.db);
@@ -358,13 +359,14 @@ export class Instance {
   }
   private processService?:NativeProcesses;
   processes(outputFilter?:()=>ByteRedactor):NativeProcesses { return this.processService ??= new NativeProcesses(this.db,outputFilter); }
+  assertWorkAuthority(work:WorkRef) {
+    const record=work.kind==='command' ? this.command(work.id) : this.taskAttempt(work.id);
+    if (!record || typeof record.botId !== 'string' || record.state!==(work.kind==='command' ? 'pending' : 'running') || this.botIdentity(record.botId)?.archived !== false || (work.kind==='command' && this.responseStopping(work.id)) || (work.kind==='task' && this.scheduleOrigin(work.id)?.revoked === 1) || (this.plugins.isPluginCommand(work.id) && !(work.kind==='command' ? this.plugins.authority(work.id) : this.plugins.currentAuthority(work.id)))) throw Error('Work is no longer active or authorized');
+  }
   workActions():WorkActionService {
     if (!this.actionService) this.actionService=new WorkActionService(this.db,this.fingerprintKey,
       (work,signal)=>this.workContext(work,signal),
-      work=>{
-        const record=work.kind==='command' ? this.command(work.id) : this.taskAttempt(work.id);
-        if (!record || typeof record.botId !== 'string' || record.state!==(work.kind==='command' ? 'pending' : 'running') || this.botIdentity(record.botId)?.archived !== false || (work.kind==='command' && this.responseStopping(work.id)) || (work.kind==='task' && this.scheduleOrigin(work.id)?.revoked === 1) || (this.plugins.isPluginCommand(work.id) && !(work.kind==='command' ? this.plugins.authority(work.id) : this.plugins.currentAuthority(work.id)))) throw Error('Work is no longer active or authorized');
-      },32,work=>work.kind==='task' && this.taskHasPending(work.id),this.redactSkill,work=>work.kind==='command' ? this.questionSets.ancestors(work.id) : []);
+      work=>this.assertWorkAuthority(work),32,work=>work.kind==='task' && this.taskHasPending(work.id),this.redactSkill,work=>work.kind==='command' ? this.questionSets.ancestors(work.id) : []);
     return this.actionService;
   }
   private scheduleOrigin(attemptId:string) {
@@ -1019,7 +1021,7 @@ export class Instance {
     const saved=this.db.prepare('SELECT session FROM task_attempts WHERE id=?').get(id);
     const session: Session | undefined=typeof saved?.session === 'string' ? JSON.parse(saved.session) : undefined;
     const inbox = new TaskInbox(this.db).inspect({botId:attempt.botId,attemptId:id});
-    const waitReason=attempt.state === 'waiting' ? 'replacement' : inbox.questions.some(question=>question.state === 'open') ? 'owner-input' : this.db.prepare("SELECT 1 FROM approval_requests WHERE work_kind='task' AND work_id=? AND state='pending'").get(id) ? 'approval' : null;
+    const waitReason=attempt.state === 'waiting' ? 'replacement' : (inbox.questions.some(question=>question.state === 'open') || this.questionSets.hasOpenTask(id)) ? 'owner-input' : this.db.prepare("SELECT 1 FROM approval_requests WHERE work_kind='task' AND work_id=? AND state='pending'").get(id) ? 'approval' : null;
     const {capturedProfile,...visible}=row as typeof attempt & {capturedProfile:unknown};
     return {...visible,toolMode:parseToolModeFromProfile(capturedProfile), workActions:this.workActions().inspectActions({kind:'task',id}),codeExecutions:this.workActions().inspect({kind:'task',id}), waitReason, inbox, usage:session?.usage ?? [], activity: this.db.prepare('SELECT seq,event FROM task_activity WHERE attempt_id=? ORDER BY seq').all(id).map(event => { const value = JSON.parse(String(event.event)); if (value.type === 'tool_result' && value.name === 'select_skill' && typeof value.content === 'string') { value.content = this.redactSkill(value.content); if (value.success) { try { const detail=JSON.parse(value.content); if (typeof detail.digest === 'string' && detail.sourceDigest === undefined) { detail.sourceDigest=detail.digest; delete detail.digest; value.content=JSON.stringify(detail); } } catch { /* Historical error text is not structured selection evidence. */ } } } return {seq:event.seq, ...value}; })};
   }
@@ -1273,7 +1275,7 @@ export class Instance {
       this.db.exec('COMMIT');return inputs;
     } catch(error){this.db.exec('ROLLBACK');throw error;}
   }
-  taskHasPending(id:string) {const attempt=this.taskAttempt(id);if(!attempt) throw Error('Task not found');return new TaskInbox(this.db).hasPending({botId:attempt.botId,attemptId:id});}
+  taskHasPending(id:string) {const attempt=this.taskAttempt(id);if(!attempt) throw Error('Task not found');return this.questionSets.hasOpenTask(id) || new TaskInbox(this.db).hasPending({botId:attempt.botId,attemptId:id});}
   taskQuestion(id:string, question:string) {
     const attempt=this.taskAttempt(id); if(!attempt) throw Error('Task not found'); const questionId=randomUUID();
     this.db.exec('BEGIN IMMEDIATE');
