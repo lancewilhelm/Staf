@@ -19,6 +19,7 @@ async function decide(decision:'confirm'|'dismiss') {
   <p>Workspace {{ item.approval.config.teamId }} · User {{ item.approval.config.userId }} · DM {{ item.approval.config.channelId }}</p>
   <p>App token: {{ item.approval.app.name }} (version {{ item.approval.app.revision }})<br>Bot token: {{ item.approval.bot.name }} (version {{ item.approval.bot.revision }})</p>
   <p v-if="item.approval.authority.agentAccess!==null">Current access for this agent: {{ item.approval.authority.agentAccess ? 'allowed' : 'not allowed' }}.</p>
+  <p v-if="item.approval.authority.existingConfig">Current binding: workspace {{ item.approval.authority.existingConfig.teamId }}, user {{ item.approval.authority.existingConfig.userId }}, DM {{ item.approval.authority.existingConfig.channelId }}, agent {{ item.approval.authority.existingConfig.botId }} ({{ item.approval.authority.existingEnabled ? 'enabled' : 'disabled' }}).</p>
   <p>Approval permits these exact saved secret versions to be used for this destination at https://slack.com/api and the Slack-provided Socket Mode address at wss://slack.com or a slack.com subdomain, and permits this agent to use Slack.</p>
   <template v-if="item.state==='interrupted'"><p>Setup was interrupted. Review its status and start a new attempt; it will not reconnect automatically.</p><button type="button" class="quiet" :disabled="busy" @click="decide('dismiss')">Dismiss</button></template>
   <p v-else-if="item.state==='connecting'">Checking Slack connection…</p>

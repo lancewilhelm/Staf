@@ -39,7 +39,7 @@ test('skipping a token or replacing a selected token prevents Slack confirmation
 
 test('Slack confirmation requires the exact pending proposal and survives restart as interrupted',async()=>{
  const dir=mkdtempSync(join(tmpdir(),'staf-slack-approval-'));let secrets=new SecretRequests(dir,false);
- const work={kind:'command',id:'work'},approval={config:{teamId:'T123',userId:'U123',channelId:'D123',botId:'agent'},app:{name:'app',revision:'11111111-1111-4111-8111-111111111111'},bot:{name:'bot',revision:'22222222-2222-4222-8222-222222222222'},authority:{agentRevision:'agent-revision',slackGeneration:0,connectionRevision:null,agentAccess:null}};
+ const work={kind:'command',id:'work'},approval={config:{teamId:'T123',userId:'U123',channelId:'D123',botId:'agent'},app:{name:'app',revision:'11111111-1111-4111-8111-111111111111'},bot:{name:'bot',revision:'22222222-2222-4222-8222-222222222222'},authority:{agentRevision:'agent-revision',slackGeneration:0,connectionRevision:null,agentAccess:null,existingConfig:null,existingEnabled:null}};
  try {
   secrets.createSlackSetup('one','agent',work,approval);const waiting=secrets.waitSlackSetup('one',new AbortController().signal);
   assert.equal(secrets.beginSlackSetup('one',{...approval,config:{...approval.config,channelId:'D456'}}),false);

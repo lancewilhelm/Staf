@@ -10,5 +10,6 @@ export type SlackSetupInput=z.infer<typeof slackSetupInput>;
 const selectionSchema=z.strictObject({name:z.string().min(1).max(120),revision:z.uuid()});
 export const slackSetupSelectionSchema=z.strictObject({config:slackSetupInput.extend({botId:z.string().regex(/^[\w-]+$/)}),app:selectionSchema,bot:selectionSchema});
 export type SlackSetupSelection=z.infer<typeof slackSetupSelectionSchema>;
-export const slackSetupApprovalSchema=slackSetupSelectionSchema.extend({authority:z.strictObject({agentRevision:z.string().min(1),slackGeneration:z.number().int().nonnegative(),connectionRevision:z.number().int().positive().nullable(),agentAccess:z.boolean().nullable()})});
+const existingConfigSchema=z.strictObject({teamId:z.string(),userId:z.string(),channelId:z.string(),botId:z.string()});
+export const slackSetupApprovalSchema=slackSetupSelectionSchema.extend({authority:z.strictObject({agentRevision:z.string().min(1),slackGeneration:z.number().int().nonnegative(),connectionRevision:z.number().int().positive().nullable(),agentAccess:z.boolean().nullable(),existingConfig:existingConfigSchema.nullable(),existingEnabled:z.boolean().nullable()})});
 export type SlackSetupApproval=z.infer<typeof slackSetupApprovalSchema>;
