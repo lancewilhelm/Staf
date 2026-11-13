@@ -118,6 +118,8 @@ test('plugin reconnection names and fences displaced approvals',async()=>{
   const config={confirm:true,appToken:'xapp-first-synthetic',botToken:'xoxb-first-synthetic',teamId:'T123',userId:'U123',channelId:'D123',botId:bot.id};
   assert.equal((await call('/api/plugins/slack/connect',first,config))[0],200);
   const review=(await call('/api/secret-setup-review?integration=slack',first))[1];assert.equal(review.grants.length,2);assert.ok(review.grants.every(grant=>grant.name));
+  const beforePlugin=(await call('/api/plugins',first))[1].find(item=>item.id==='slack');
+  for(const field of ['appToken','botToken']) {const bad={...config,channelId:'D999',reviewedVersion:review.version,confirmDisplacements:true,[field]:(field==='appToken'?'xapp-':'xoxb-')+'x'.repeat(16000)};assert.equal((await call('/api/plugins/slack/connect',first,bad))[0],400);assert.deepEqual((await call('/api/secret-grants',first))[1],review.grants);assert.deepEqual((await call('/api/plugins',first))[1].find(item=>item.id==='slack').config,beforePlugin.config);assert.equal(identifications,1);}
   assert.equal((await call('/api/plugins/slack/connect',first,{...config,reviewedVersion:review.version,confirmDisplacements:false}))[0],400);assert.equal(identifications,1);
   const old=review.grants.find(grant=>grant.integration==='slack.app');assert.equal((await call('/api/secret-grants/revoke',second,{...old,confirm:true}))[0],200);
   assert.equal((await call('/api/plugins/slack/connect',first,{...config,reviewedVersion:review.version,confirmDisplacements:true}))[0],400);assert.equal(identifications,1);
