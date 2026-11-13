@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
-import {mkdtempSync,writeFileSync,existsSync,rmSync} from 'node:fs';
+import {mkdtempSync,writeFileSync,readFileSync,chmodSync,existsSync,rmSync} from 'node:fs';
+import {createServer} from 'node:net';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {inspectDockerInfo,inspectScratchContainer,scratchEntryScript, scratchPlatformAvailable} from '../dist/isolation-boundary.js';
@@ -38,6 +39,21 @@ test('unsupported hosts reject scratch before approval and before an executor is
  let executions=0,seen='';const app=startInstance(':memory:',0,{shellExecutor:async()=>{executions++;throw Error('unexpected');},providerFactory:async()=>({name:'fixture',capabilities:{toolCalls:true},async complete(messages){if(messages.at(-1)?.role==='tool'){seen=messages.at(-1).content;return {role:'assistant',content:'done'};}return {role:'assistant',content:null,tool_calls:[{id:'scratch',type:'function',function:{name:'run_scratch_shell',arguments:JSON.stringify({command:'echo safe'})}}]};}})});
  try{const port=await app.listen();let token;const call=async(path,body)=>{const r=await fetch(`http://127.0.0.1:${port}${path}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});assert.ok(r.ok);return r.json();};token=(await call('/api/pair',{code:app.code})).token;const bot=await call('/api/bots',{name:'Unsupported',provider:'live',model:'fixture-offline',toolMode:'direct'});const cfg=await call('/api/shell-config');await call('/api/shell-config',{revision:cfg.revision,dockerBinary:'/usr/bin/docker',dockerSocket:'/tmp/staf-nonexistent-docker.sock',imageId:id});await call('/api/shell-permissions/instance',{enabled:true});await call('/api/shell-permissions/bot:'+bot.id,{enabled:true});await call('/api/commands',{id:'unsupported-scratch',botId:bot.id,content:'Try scratch'});for(let i=0;i<500;i++){if((await call('/api/commands/unsupported-scratch')).state!=='pending')break;await new Promise(resolve=>setTimeout(resolve,10));}assert.equal(executions,0);assert.deepEqual(await call('/api/shell-approvals'),[]);assert.match(seen,/unavailable on this platform/);
  }finally{await app.close();}
+});
+
+test('failed scratch inspection removes the unstarted container or reports uncertain cleanup',async()=>{
+ const dir=mkdtempSync('/tmp/staf-docker-inspection-'),socket=join(dir,'docker.sock'),binary=join(dir,'docker'),log=join(dir,'calls'),fail=join(dir,'fail-removal');
+ const server=createServer();await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(socket,resolve);});
+ const platform=Object.getOwnPropertyDescriptor(process,'platform');
+ try {
+  writeFileSync(binary,`#!/bin/sh\nprintf '%s\\n' "$3 $4" >> '${log}'\ncase "$3 $4" in\n  'info --format') printf '%s\\n' '{"OSType":"linux","SecurityOptions":["name=seccomp"]}';;\n  'image inspect') printf '%s\\n' '{"Env":null}';;\n  'container create') printf '%s\\n' 'synthetic';;\n  'container inspect') exit 1;;\n  'container rm') if [ -e '${fail}' ]; then exit 1; fi;;\n  *) exit 1;;\nesac\n`);chmodSync(binary,0o700);
+  Object.defineProperty(process,'platform',{value:'linux'});
+  const request={executionId:randomUUID(),dockerBinary:binary,dockerSocket:socket,imageId:id,workspace:{kind:'scratch',...limits},command,timeoutMs:1000,maxOutputBytes:1024,signal:new AbortController().signal};
+  await assert.rejects(executeShellSandbox(request),error=>error.constructor.name==='ShellSandboxRejectedError');
+  assert.match(readFileSync(log,'utf8'),/container rm/);assert.doesNotMatch(readFileSync(log,'utf8'),/container start/);
+  writeFileSync(fail,'fail');
+  await assert.rejects(executeShellSandbox({...request,executionId:randomUUID()}),error=>error.constructor.name==='ShellSandboxUncertainError');
+ } finally {if(platform)Object.defineProperty(process,'platform',platform);await new Promise(resolve=>server.close(resolve));rmSync(dir,{recursive:true,force:true});}
 });
 
 const dockerBinary=process.env.STAF_TEST_DOCKER_BINARY,dockerSocket=process.env.STAF_TEST_DOCKER_SOCKET,imageId=process.env.STAF_TEST_DOCKER_IMAGE;

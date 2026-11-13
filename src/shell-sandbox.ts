@@ -32,6 +32,8 @@ export interface ShellSandboxResult {
 export class ShellSandboxUncertainError extends Error {
   constructor(message: string, readonly containerName?: string) { super(message); }
 }
+/** The container was rejected before start and its removal was confirmed. */
+export class ShellSandboxRejectedError extends Error {}
 
 function sandboxName(executionId: string): string {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(executionId)) {
@@ -213,10 +215,15 @@ export async function executeShellSandbox(request: ShellSandboxRequest): Promise
     }
     created = true;
     if(protectedScratch) {
-      const inspected=await invoke(['container','inspect','--format','{{json .}}',name],65536);
-      if(inspected.code!==0 || inspected.overflow)throw new ShellSandboxUncertainError(`Cannot inspect sandbox ${name}`,name);
-      let details:unknown;try{details=JSON.parse(inspected.output);}catch{throw new ShellSandboxUncertainError(`Invalid sandbox inspection ${name}`,name);}
-      try {inspectScratchContainer(details,imageId,configuredWorkspace,command);}catch{throw new ShellSandboxUncertainError(`Sandbox isolation check failed ${name}`,name);}
+      try {
+        const inspected=await invoke(['container','inspect','--format','{{json .}}',name],65536);
+        if(inspected.code!==0 || inspected.overflow)throw Error('Cannot inspect sandbox');
+        const details:unknown=JSON.parse(inspected.output);
+        inspectScratchContainer(details,imageId,configuredWorkspace,command);
+      } catch {
+        stop('aborted');await stopping;
+        throw new ShellSandboxRejectedError('Scratch isolation checks failed before execution');
+      }
     }
     if (signal.aborted) { stopReason = 'aborted'; terminal = true; return { output: '', exitCode: null, outputComplete: false, stopped: stopReason }; }
     signal.addEventListener('abort', abort, { once: true });
@@ -246,6 +253,7 @@ export async function executeShellSandbox(request: ShellSandboxRequest): Promise
       }
     }
   } catch (error) {
+    if (error instanceof ShellSandboxRejectedError) throw error;
     if (error instanceof ShellSandboxUncertainError && error.containerName) throw error;
     throw new ShellSandboxUncertainError(`Sandbox outcome requires reconciliation: ${name}`, name);
   } finally {

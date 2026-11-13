@@ -61,7 +61,10 @@ mount view, dropped capabilities, `no_new_privs`, Landlock ABI 9 and a seccomp
 filter are required by the launcher and guard. The filter allows Unix socket
 families only. Network access, including localhost services and vsock, is not
 available. Existing host files must be deliberately placed in the workspace;
-normal file and terminal work uses the workspace as its default directory. All
+normal file and terminal work uses the workspace as its default directory. The
+terminal and file tools use `/workspace` for visible paths. They also accept the
+equivalent `/srv/staf-workspace` host path. Both forms remain confined to the
+approved workspace. All
 agents using this boundary share that workspace; it is not per-agent isolation.
 Scheduled and helper work retain their existing tool restrictions.
 
