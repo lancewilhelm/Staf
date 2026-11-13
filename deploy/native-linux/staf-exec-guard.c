@@ -20,6 +20,7 @@ int main(void) { fputs("Linux execution guard unavailable\n", stderr); return 12
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
+#include <sys/wait.h>
 #include <termios.h>
 #include <unistd.h>
 #include "staf-exec-mountinfo.h"
@@ -112,6 +113,9 @@ int main(int argc,char **argv) {
   (void)argv;require(argc==1);check_identity();check_mounts();
   require(syscall(SYS_close_range,3U,~0U,0)==0);
   apply_landlock();apply_seccomp();
+  /* Keep the namespace alive until orphaned background work has exited. */
+  int subreaper=0;require(prctl(PR_SET_CHILD_SUBREAPER,1,0,0,0)==0);
+  require(prctl(PR_GET_CHILD_SUBREAPER,&subreaper,0,0,0)==0 && subreaper==1);
   struct termios saved,quiet; int tty=isatty(STDIN_FILENO);
   if(tty){require(tcgetattr(STDIN_FILENO,&saved)==0);quiet=saved;quiet.c_lflag&=(tcflag_t)~(ECHO|ICANON);quiet.c_iflag&=(tcflag_t)~(ICRNL|INLCR|IGNCR|IXON);quiet.c_cc[VMIN]=1;quiet.c_cc[VTIME]=0;require(tcsetattr(STDIN_FILENO,TCSANOW,&quiet)==0);}
   const char ready[]="STAF-EXEC-READY-1\n";require(write(STDOUT_FILENO,ready,sizeof(ready)-1)==(ssize_t)(sizeof(ready)-1));
@@ -121,6 +125,22 @@ int main(int argc,char **argv) {
   int root=open("/workspace",O_PATH|O_DIRECTORY|O_CLOEXEC);require(root>=0);
   struct open_how how={.flags=O_PATH|O_DIRECTORY|O_CLOEXEC,.resolve=RESOLVE_BENEATH|RESOLVE_NO_MAGICLINKS|RESOLVE_NO_XDEV};
   int dir=(int)syscall(SYS_openat2,root,cwd,&how,sizeof(how));require(dir>=0 && fchdir(dir)==0);close(dir);close(root);free(cwd);
-  char *const args[]={"/bin/sh","-c",command,NULL};execv(args[0],args);fail();
+  pid_t main_child=fork();require(main_child>=0);
+  if(main_child==0){char *const args[]={"/bin/sh","-c",command,NULL};execv(args[0],args);fail();}
+  free(command);
+  /* Only the actual work keeps the terminal or output pipes open. */
+  close(STDIN_FILENO);close(STDOUT_FILENO);close(STDERR_FILENO);
+  int status,main_status=0,seen_main=0;
+  for(;;){
+    pid_t child=waitpid(-1,&status,0);
+    if(child<0 && errno==EINTR)continue;
+    if(child<0 && errno==ECHILD)break;
+    if(child<0)_exit(125);
+    if(child==main_child){main_status=status;seen_main=1;}
+  }
+  if(!seen_main)_exit(125);
+  if(WIFEXITED(main_status))_exit(WEXITSTATUS(main_status));
+  if(WIFSIGNALED(main_status))_exit(128+WTERMSIG(main_status));
+  _exit(125);
 }
 #endif

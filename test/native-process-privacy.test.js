@@ -4,7 +4,7 @@ import {mkdtempSync,rmSync,existsSync} from 'node:fs';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {DatabaseSync} from 'node:sqlite';
-import {startInstance} from './fixtures/controlled-instance.mjs';
+import {startControlledInstance as startInstance} from './fixtures/controlled-instance.mjs';
 import {byteStreamRedactor} from '../dist/config.js';
 
 const tool=(name,args)=>({role:'assistant',content:null,tool_calls:[{id:'privacy',type:'function',function:{name,arguments:JSON.stringify(args)}}]});

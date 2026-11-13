@@ -20,9 +20,9 @@ export type ProcessHandle = {terminate:(signal:NodeJS.Signals)=>void;detach:()=>
 export type ProcessBackend = {launch:(cwd:string,observers:ProcessObservers)=>ProcessHandle};
 type Live = {handle:ProcessHandle; signal:AbortSignal; abort:()=>void; timer?:ReturnType<typeof setTimeout>; finished:Promise<void>; done:()=>void;flush:()=>void};
 
-function pipeBackend(command:string):ProcessBackend {
+function pipeBackend(command:string,environment=agentProcessEnvironment(process.env)):ProcessBackend {
   return {launch:(cwd,observers)=>{
-    const child=spawn(process.execPath,[fileURLToPath(new URL('./native-process-supervisor.js',import.meta.url)),command],{cwd,env:agentProcessEnvironment(process.env),detached:true,stdio:['pipe','pipe','pipe','ipc']});
+    const child=spawn(process.execPath,[fileURLToPath(new URL('./native-process-supervisor.js',import.meta.url)),command],{cwd,env:environment,detached:true,stdio:['pipe','pipe','pipe','ipc']});
     const stdin=child.stdin;if(!stdin)throw Error('Process input pipe was not created');stdin.on('error',()=>{});
     let code:number|null=null,signal:string|null=null,completed=false,failed=false;
     child.stdout?.on('data',(data:Buffer)=>observers.output('stdout',data));child.stderr?.on('data',(data:Buffer)=>observers.output('stderr',data));
@@ -90,9 +90,9 @@ export class NativeProcesses {
       }
     }
   }
-  start(work:WorkContext,action:ActionIdentity,input:{command:string;cwd?:string;mode?:'pipe'|'pty';retain?:boolean;cols?:number;rows?:number}) {
+  start(work:WorkContext,action:ActionIdentity,input:{command:string;cwd?:string;mode?:'pipe'|'pty';retain?:boolean;cols?:number;rows?:number},environment=agentProcessEnvironment(process.env)) {
     const mode=input.mode??'pipe',cols=input.cols??80,rows=input.rows??24;
-    return this.startBackend(work,action,{cwd:input.cwd,mode,retain:input.retain,cols:mode==='pty'?cols:undefined,rows:mode==='pty'?rows:undefined,backend:mode==='pty'?ptyBackend(input.command,cols,rows):pipeBackend(input.command)});
+    return this.startBackend(work,action,{cwd:input.cwd,mode,retain:input.retain,cols:mode==='pty'?cols:undefined,rows:mode==='pty'?rows:undefined,backend:mode==='pty'?ptyBackend(input.command,cols,rows,environment):pipeBackend(input.command,environment)});
   }
   /** Register ownership before launch; #85 can supply a PTY backend through this seam. */
   async startBackend(work:WorkContext,action:ActionIdentity,input:{cwd?:string;baseCwd?:string;mode:string;retain?:boolean;cols?:number;rows?:number;backend:ProcessBackend}) {

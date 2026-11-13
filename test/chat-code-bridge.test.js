@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {startInstance} from './fixtures/controlled-instance.mjs';
+import {startInstance,startControlledInstance} from './fixtures/controlled-instance.mjs';
 
 test('paired chat offers each captured mode and runs the real guest clock', async () => {
   const seen=[];
@@ -29,7 +29,7 @@ const memoryOffers=['memory_search','memory_read','memory_remember','memory_upda
 const tool=(name,args={},id='call')=>({role:'assistant',content:null,tool_calls:[{id,type:'function',function:{name,arguments:JSON.stringify(args)}}]});
 async function fixture(respond,env={},options={}) {
   const seen=[];
-  const app=startInstance(options.path ?? ':memory:',0,{...options,env,providerFactory:async profile=>({name:'controlled',capabilities:{toolCalls:true},async complete(messages,tools){seen.push({profile,messages:structuredClone(messages),offers:tools.map(x=>x.function.name)});return respond(messages,tools,profile);}})});
+  const app=(options.shellExecutor?startControlledInstance:startInstance)(options.path ?? ':memory:',0,{...options,env,providerFactory:async profile=>({name:'controlled',capabilities:{toolCalls:true},async complete(messages,tools){seen.push({profile,messages:structuredClone(messages),offers:tools.map(x=>x.function.name)});return respond(messages,tools,profile);}})});
   const port=await app.listen();let token;
   const call=async(path,body)=>{const r=await fetch(`http://127.0.0.1:${port}${path}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});const v=await r.json();assert.ok(r.ok,`${path} ${r.status}: ${JSON.stringify(v)}`);return v;};
   token=(await call('/api/pair',{code:app.code})).token;

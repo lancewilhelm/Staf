@@ -62,6 +62,18 @@ test('candidate Linux launcher confines a disposable process and its descendants
     await ready(background,"(sleep 1; printf escaped > late) & printf BACKGROUND_READY; wait");
     await backgroundStarted;background.kill('SIGKILL');await once(background,'close');await delay(1500);
     assert.equal(existsSync(late),false,'a descendant survived the launcher');
+    const retained=launch();
+    const retainedStarted=new Promise((resolve,reject)=>{
+      let output='';const timer=setTimeout(()=>reject(Error('retained child did not start')),5000);
+      retained.stdout.on('data',data=>{output+=data.toString();if(output.includes('RETAINED_READY')){clearTimeout(timer);resolve();}});
+      retained.once('exit',()=>{clearTimeout(timer);reject(Error('launcher exited before retained child started'));});
+    });
+    await ready(retained,"(sleep 2; printf escaped > late) >/dev/null 2>&1 & printf RETAINED_READY");
+    await retainedStarted;await delay(200);
+    assert.equal(retained.exitCode,null,'launcher stopped tracking the descendant after the shell exited');
+    assert.equal(retained.signalCode,null,'launcher was signalled while the descendant was running');
+    const retainedClosed=once(retained,'close');retained.kill('SIGKILL');await retainedClosed;await delay(2200);
+    assert.equal(existsSync(late),false,'a retained descendant survived the launcher');
   } finally {
     for(const child of children)child.kill('SIGKILL');closeSync(fd);
     await new Promise(resolve=>server.close(resolve));rmSync(inside,{recursive:true,force:true});rmSync(outside,{recursive:true,force:true});

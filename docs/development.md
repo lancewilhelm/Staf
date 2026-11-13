@@ -519,10 +519,15 @@ contexts, a real service restart, and blocked external networking. It proves
 cropping, saved identity, and supported UI interactions without a live provider.
 The broader workspace and memory browser journeys remain relevant regressions.
 
-The older native process integration tests expect real host commands. They fail
-with the default closed configuration. The controlled `Native process fixture`
-reports isolation unavailable and starts no process unless the experimental
-Linux boundary is explicitly configured and passes its checks.
+Service and protocol tests that need file or process actions explicitly inject
+`startControlledInstance` from `test/fixtures/controlled-instance.mjs`. It runs
+the tests' trusted synthetic commands and temporary-file operations locally,
+with a restricted child environment, through the real Staf action and process
+lifecycle. This fixture is not an operating-system isolation boundary and is
+not selectable by service configuration, environment, HTTP, or the UI. Separate
+tests exercise the production default and require it to reject host work when
+isolation is unavailable. The opt-in Linux tests are the only tests here that
+attempt to exercise the experimental kernel boundary.
 
 ### Task action verification
 
@@ -532,11 +537,11 @@ For a manual CLI check, start the controlled fixture as described in [Review cha
 
 ### Interactive terminal verification
 
-`test/native-interactive.test.js` retains the intended pipe/PTY, retained-work,
-EOF/resize, cross-client/CLI, Stop, privacy and input-recovery coverage, but its
-host-execution tests fail with the default closed configuration. The
-distribution test instead verifies that a fresh package rejects host execution
-before starting a process. Linux runtime evidence is separate from macOS tests.
+`test/native-interactive.test.js` exercises pipe/PTY, retained-work,
+EOF/resize, cross-client/CLI, Stop, privacy and input-recovery behavior using
+the injected fixture. The distribution and isolation tests verify that a fresh
+service rejects host execution when its boundary is unavailable. Linux kernel
+isolation and launcher behavior require separate controlled Linux tests.
 
 ## Creation defaults and legacy Demo data
 

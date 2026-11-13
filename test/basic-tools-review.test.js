@@ -4,7 +4,7 @@ import {mkdtempSync,readFileSync,writeFileSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {DatabaseSync} from 'node:sqlite';
-import {startInstance} from './fixtures/controlled-instance.mjs';
+import {startControlledInstance as startInstance} from './fixtures/controlled-instance.mjs';
 import {Instance} from '../dist/instance.js';
 
 const tool=(name,args)=>({role:'assistant',content:null,tool_calls:[{id:'review',type:'function',function:{name,arguments:JSON.stringify(args)}}]});

@@ -65,6 +65,13 @@ normal file and terminal work uses the workspace as its default directory. All
 agents using this boundary share that workspace; it is not per-agent isolation.
 Scheduled and helper work retain their existing tool restrictions.
 
+The guard requests and checks Linux child-subreaper status before accepting a
+command, then waits for the command and its orphaned descendants. This is meant
+to keep retained background work under the launcher's lifetime after its shell
+exits. Signal and terminal behavior, including cancellation of those descendants,
+still require the controlled Linux tests below; cross-compiling the guard does
+not demonstrate them.
+
 ### Disposable Linux setup
 
 Only an administrator of a disposable test system should prepare this
@@ -145,7 +152,8 @@ arbitrary operator changes safe. Root and system binaries remain trusted. See
 ### Required Linux verification
 
 `test/linux-host-guard.integration.test.js` exercises the candidate guard using
-synthetic files, sockets, descriptors, pipe, PTY and a background descendant.
+synthetic files, sockets, descriptors, pipe, PTY and background descendants,
+including one whose shell has already exited.
 On an operator-prepared disposable machine, set `STAF_TEST_LINUX_WORKSPACE` to
 `/srv/staf-workspace` and run that test. Run
 `test/linux-host-service.integration.test.js` as `staf-service` with

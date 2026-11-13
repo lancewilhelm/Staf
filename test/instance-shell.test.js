@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {startInstance} from './fixtures/controlled-instance.mjs';
+import {startControlledInstance as startInstance} from './fixtures/controlled-instance.mjs';
 const image='sha256:'+'a'.repeat(64);
 const setup=async options=>{const app=startInstance(':memory:',0,options),port=await app.listen();const call=async(route,token,body)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return [response.status,await response.json()];};const wait=async fn=>{for(let i=0;i<200;i++){const result=await fn();if(result)return result;await new Promise(resolve=>setTimeout(resolve,5));}throw Error('timed out');};return {app,call,wait};};
 const configure=async(call,token,botId)=>{const config=(await call('/api/shell-config',token))[1];await call('/api/shell-config',token,{revision:config.revision,dockerBinary:'/usr/bin/docker',dockerSocket:'/tmp/synthetic-docker.sock',imageId:image});await call('/api/shell-permissions/instance',token,{enabled:true});await call(`/api/shell-permissions/bot:${botId}`,token,{enabled:true});};
