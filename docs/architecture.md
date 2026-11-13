@@ -389,6 +389,10 @@ output, failed, exited, closed and lost observations, including a combined
 owns output, Stop, shutdown and restart accounting. Handles also implement input,
 EOF and optional PTY resize. `native-pty.ts` uses pinned node-pty with byte output,
 a live supervisor and a private control socket; it never signals a stored group ID.
+Both launch paths remove the supported credential environment variable names
+before starting the supervisor. This limits direct inheritance, but the
+supervisor and agent commands still run with the service account's host access;
+it is not an isolation boundary for credential files or process inspection.
 Interactions share a bounded per-process queue. Pipe writes await backpressure;
 PTY submission has a cumulative byte budget because node-pty exposes no write
 receipt or drain callback. A submitted receipt does not prove application consumption.

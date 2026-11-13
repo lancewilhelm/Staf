@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
-import { byteStreamRedactor, type ByteRedactor } from './config.js';
+import { agentProcessEnvironment, byteStreamRedactor, type ByteRedactor } from './config.js';
 import { ActionFailed } from './work-actions.js';
 import {ptyBackend} from './native-pty.js';
 import type { Capability, WorkContext, ActionIdentity } from './work-actions.js';
@@ -22,7 +22,7 @@ type Live = {handle:ProcessHandle; signal:AbortSignal; abort:()=>void; timer?:Re
 
 function pipeBackend(command:string):ProcessBackend {
   return {launch:(cwd,observers)=>{
-    const child=spawn(process.execPath,[fileURLToPath(new URL('./native-process-supervisor.js',import.meta.url)),command],{cwd,env:process.env,detached:true,stdio:['pipe','pipe','pipe','ipc']});
+    const child=spawn(process.execPath,[fileURLToPath(new URL('./native-process-supervisor.js',import.meta.url)),command],{cwd,env:agentProcessEnvironment(process.env),detached:true,stdio:['pipe','pipe','pipe','ipc']});
     const stdin=child.stdin;if(!stdin)throw Error('Process input pipe was not created');stdin.on('error',()=>{});
     let code:number|null=null,signal:string|null=null,completed=false,failed=false;
     child.stdout?.on('data',(data:Buffer)=>observers.output('stdout',data));child.stderr?.on('data',(data:Buffer)=>observers.output('stderr',data));

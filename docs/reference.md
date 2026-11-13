@@ -533,6 +533,11 @@ re-executing it. A new read can fetch current data.
 
 ### Native process API
 
+Pipe and PTY supervisors omit `OPENROUTER_API_KEY`, `STAF_API_KEY`,
+`OPENAI_API_KEY`, `CODEX_API_KEY`, and `LMSTUDIO_API_KEY` from the inherited
+environment. Other environment variables are inherited. This does not isolate
+the service account's files, processes, or unknown credentials from agent work.
+
 Paired clients can list `GET /api/processes`, inspect `GET /api/processes/ID`,
 read `GET /api/processes/ID/output?cursor=N`, and request termination with
 `POST /api/processes/ID/stop`. Cursors count output chunks. Chunks contain

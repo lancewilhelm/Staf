@@ -746,7 +746,12 @@ The broader basic-tools feature remains incomplete.
 Agents can call `terminal_run` with shell text and an optional `cwd`, and
 `terminal_read` with a process ID and optional output cursor. `terminal_stop`
 requests termination of an owned process. These operations run on the Staf
-host with the service account's environment and access. The captured agent work
+host with the service account's access. Their launch environment omits
+`OPENROUTER_API_KEY`, `STAF_API_KEY`, `OPENAI_API_KEY`, `CODEX_API_KEY`, and
+`LMSTUDIO_API_KEY`; other variables remain available. This omission is not a
+security boundary: commands and file tools can still reach files and other
+resources accessible to the service account, including credential files, and
+unknown credentials or aliases in the environment are not removed. The captured agent work
 folder is the default; relative and absolute working paths are supported. They
 are offered directly in Direct and Hybrid and through Code Mode in Hybrid and
 Code. Existing scheduled and helper restrictions remain in force. Use `mode: "pty"` for a real terminal or the default `mode: "pipe"` for separate stdout/stderr. Set `retain: true` to keep a process after its accepted work completes; otherwise unfinished processes are stopped at work completion.
