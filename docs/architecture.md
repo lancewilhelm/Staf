@@ -379,7 +379,13 @@ contains the nonsecret request and outcome. The store restores pending requests
 as interrupted, and work is not replayed. Paired-client and work authority are
 checked before a save or selection. Settings can add a value or confirm a
 replacement or deletion using the current opaque revision. Metadata for existing
-stores is added when the store opens. Known saved values join the existing output filter, which remains a
+stores is added when the store opens. The secret database also stores grants bound
+to the named secret revision, registered plugin role, and exact provider and
+account or conversation destination. Replacement and deletion remove the grants
+in the same transaction. Gmail and Slack recheck grants at use alongside their
+existing connection and agent permissions. Owner confirmation is required for
+setup and grant changes. Interrupted and in-flight external requests are not
+automatically replayed. Known saved values join the existing output filter, which remains a
 secondary safeguard rather than isolation. The shared action coordinator filters
 known values from result strings, keys, visible outcomes, and retained change
 results before release to callers or normal records. The paired browser checks
@@ -517,14 +523,15 @@ retries a known rate limit, and marks ambiguous in-flight dispatches uncertain.
 Current plugin access and the exact captured destination are checked before each
 send. Disable pauses delivery but does not cancel accepted background tasks.
 A restart interrupts unfinished tasks rather than replaying their effects.
-Tokens live separately in the host credential directory. A reconnecting socket
+Tokens live in the separate managed secret store. A reconnecting socket
 can miss events during an outage; this slice has no Slack history backfill.
 These paths are exercised with controlled providers, not live Slack.
 
 Gmail uses the same account-keyed connection and agent-access tables. A paired
 client starts an in-memory desktop OAuth attempt with PKCE and a loopback
 callback; the service exchanges the code, verifies the Gmail profile identity,
-and saves the client secret and refresh token in a separate host credential file.
+and saves the client secret and refresh token as separate managed secrets with
+destination-scoped approvals.
 The service fences an in-flight exchange against cancellation, expiry, client
 revocation and connection revision changes. The connection-time history ID and
 candidate message IDs are stored in SQLite; complete pages and the next cursor

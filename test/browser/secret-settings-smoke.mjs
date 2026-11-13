@@ -36,5 +36,18 @@ try {
  await until(()=>evaluate("!document.querySelector('[aria-label=\"Named secrets\"] form')"),'replacement');
  await click('Delete');assert.equal(await evaluate("document.querySelector('[aria-label=\"Named secrets\"]').innerText.includes('does not revoke')"),true);await click('Confirm delete');
  await until(()=>evaluate("document.querySelector('[aria-label=\"Named secrets\"]').innerText.includes('No named secrets saved')"),'deletion');
+ await click('Add secret');
+ await evaluate(`(()=>{const form=document.querySelector('[aria-label="Named secrets"] form');['Reusable app token','Slack test','xapp-browser-reuse'].forEach((value,i)=>{const input=form.querySelectorAll('input')[i];input.value=value;input.dispatchEvent(new Event('input',{bubbles:true}));});form.requestSubmit();})()`);
+ await until(()=>evaluate("document.querySelector('[aria-label=\"Named secrets\"]').innerText.includes('Reusable app token')"),'reusable secret');
+ await evaluate(`(async()=>{const token=localStorage.getItem('staf-token'),headers={Authorization:'Bearer '+token,'Content-Type':'application/json'},bots=await(await fetch('/api/bots',{headers})).json();const response=await fetch('/api/plugins/slack/connect',{method:'POST',headers,body:JSON.stringify({confirm:true,appToken:'xapp-browser-initial',botToken:'xoxb-browser-initial',teamId:'T123',userId:'U123',channelId:'D123',botId:bots[0].id})});if(!response.ok)throw Error(await response.text());})()`);
+ await click('Refresh');await until(()=>evaluate("document.querySelector('[aria-label=\"Named secrets\"]').innerText.includes('slack.app')"),'integration grants');
+ await evaluate(`(()=>{const item=[...document.querySelectorAll('[aria-label="Named secrets"] strong')].find(el=>el.textContent==='Reusable app token').parentElement;[...item.querySelectorAll('button')].find(b=>b.textContent.trim()==='Approve use').click();})()`);
+ await evaluate(`(()=>{const select=document.querySelector('[aria-label="Named secrets"] select');const option=[...select.options].find(item=>item.textContent.includes('slack.app'));select.value=option.value;select.dispatchEvent(new Event('change',{bubbles:true}));})()`);
+ await click('Confirm approval');await until(()=>evaluate("document.querySelector('[aria-label=\"Named secrets\"]').innerText.includes('Use approved.')"),'grant approved');
+ await evaluate(`(()=>{const item=[...document.querySelectorAll('[aria-label="Named secrets"] strong')].find(el=>el.textContent==='Reusable app token').parentElement;[...item.querySelectorAll('button')].find(b=>b.textContent.trim()==='Replace').click();})()`);
+ assert.equal(await evaluate("document.querySelector('[aria-label=\"Named secrets\"]').innerText.includes('Affected integrations: slack.app')"),true);
+ await evaluate(`(()=>{const input=document.querySelector('[aria-label="Named secrets"] form input');input.value='xapp-browser-replaced';input.dispatchEvent(new Event('input',{bubbles:true}));})()`);await click('Confirm replacement');
+ await until(()=>evaluate("!document.querySelector('[aria-label=\"Named secrets\"] form')"),'replacement revokes grant');
+ assert.equal(await evaluate(`(async()=>{const headers={Authorization:'Bearer '+localStorage.getItem('staf-token')},grants=await(await fetch('/api/secret-grants',{headers})).json();return grants.some(item=>item.integration==='slack.app');})()`),false);
  console.log('PASS synthetic owner secret settings');
 }finally{socket?.close();browser?.kill();if(service && service.exitCode===null && service.signalCode===null){service.kill('SIGTERM');await new Promise(resolve=>service.once('exit',resolve));}await rm(temp,{recursive:true,force:true});}

@@ -586,6 +586,15 @@ rejected. `GET /api/secrets` returns metadata and an opaque revision only.
 name, current revision, value, and explicit confirmation; `/delete` accepts a
 name, current revision, and explicit confirmation. Stale revisions fail. No API
 returns saved values.
+`GET /api/secret-grants` lists approved secret names, revisions, integration roles,
+and destinations. `GET /api/secret-grant-targets` lists roles for the current
+connected Gmail and Slack destinations. `POST /api/secret-grants/grant` and
+`/revoke` accept `name`, `revision`, `integration`, `destination`, and
+`confirm: true`. Granting requires the current destination and a value valid for
+the selected role. The supported roles are `gmail.client`, `gmail.refresh`,
+`slack.app`, and `slack.bot`. Replacement and deletion revoke the secret's
+approvals. Existing agent and client checks still apply at their respective
+boundaries. The grant APIs never return a saved value.
 The browser's recognizable-pattern warning is client-side; it is not an API
 validation guarantee. It blocks flagged chat and question submissions and omits
 flagged written answers from draft saves. Action results are filtered for known
@@ -645,7 +654,7 @@ Paired clients use `GET /api/plugins` to inspect bundled definitions, Slack
 configuration without tokens, connection state, agent access, recent event
 outcomes, and recent task delivery states (`pending`, `sending`, `sent`, or
 `uncertain`). `sent` records Slack acceptance, not a human read. `POST /api/plugins/slack/connect` accepts `appToken`, `botToken`,
-`teamId`, `userId`, `channelId`, and `botId`; it validates the bot token against
+`teamId`, `userId`, `channelId`, `botId`, and `confirm: true`; it validates the bot token against
 the workspace. `POST /api/plugins/slack/access` takes `botId` and `enabled`.
 The `enable`, `disable`, `disconnect`, and `delete-config` endpoints take empty
 objects. Connections are instance-owned and keyed by service account identity;
@@ -655,7 +664,7 @@ and `manage_slack_task` capabilities; thread and owner message identity are
 captured by the service, not supplied as tool arguments. See [Slack setup](usage.md#slack-plugin) for limits and recovery.
 
 Gmail uses `POST /api/plugins/gmail/start` with `email`, `clientId`,
-`clientSecret`, and optional booleans `sendEnabled` and `modifyEnabled`; it
+`clientSecret`, `confirm: true`, and optional booleans `sendEnabled` and `modifyEnabled`; it
 returns an authorization URL, not a credential. Both options default to false
 and request their respective Google scopes when true. Google
 returns to the loopback `/gmail/oauth/callback` with the one-time state and code.
@@ -688,8 +697,8 @@ agent access IDs, model access, task and Slack model access, `sendEnabled`,
 it never returns the client secret or refresh token. Older candidates are paged
 through `GET /api/plugins/gmail/arrivals?before=CURSOR` using `nextBefore`.
 There is one Gmail account in this implementation. The shared database keys
-connections and access by plugin and account. The local credential file is
-separate from SQLite. `gmail_search` and `gmail_read` are journaled read actions
+connections and access by plugin and account. Plugin secrets and approvals use a
+separate SQLite store. `gmail_search` and `gmail_read` are journaled read actions
 for explicitly permitted chat and task work in all three tool modes. A paired
 `POST /api/tasks` may include `gmailQuery`, a nonempty query of at most 500
 characters. The captured account, revision and exact query scope the attempt;

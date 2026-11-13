@@ -61,7 +61,7 @@ async function loadOlder(){const before=loadedOlder.value?olderBefore.value:gmai
   </section>
   <details class="saved-settings"><DisclosureSummary>{{ gmail?.config ? 'Reconnect Gmail' : 'Set up Gmail' }}</DisclosureSummary>
    <p>Create a Google desktop OAuth client and enable the Gmail API first. The Gmail read-only scope is restricted. Google's modify permission also permits sending; Staf still requires the separate send option and approval for replies. See the Gmail setup documentation for requirements and limitations.</p>
-   <form @submit.prevent="action('start',{...form})">
+   <form @submit.prevent="action('start',{...form,confirm:true})">
     <label>Gmail account email<input v-model.trim="form.email" type="email" autocomplete="off" required /></label>
     <label>Google OAuth client ID<input v-model.trim="form.clientId" autocomplete="off" required /></label>
     <label>Google OAuth client secret<input v-model="form.clientSecret" type="password" autocomplete="off" required /></label>

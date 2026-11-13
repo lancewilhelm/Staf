@@ -218,8 +218,8 @@ overwrite one another. A full data-directory backup includes the unencrypted nam
 secret store at `secrets/credentials.sqlite`; protect the archive accordingly.
 Preserve its owner-only directory and file permissions on restore. The service
 rejects a secrets directory or database accessible to group or other users.
-The store has no implemented secret-use grants. Restoring an old backup can
-restore secrets that were deleted later. Review and revoke provider credentials
+Restoring an old backup can restore secrets and use approvals deleted or revoked
+later. Review secret approvals and revoke provider credentials
 as needed after recovery. Verify the archive exists and is
 readable, then retain it independently of the host. Inspect the archive with
 `tar -tzf BACKUP_FILE`. Do not proceed with an update if backup creation or

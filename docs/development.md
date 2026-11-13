@@ -118,7 +118,7 @@ Staf writes a backup under the development data directory before reset and befor
 a supported schema upgrade. It includes SQLite, authoritative agent files, and the
 complete core revision tree,
 but not provider credentials. Protect the backup like the original conversations.
-Named secrets in `secrets/credentials.sqlite` are also outside these development
+Named secrets and their use approvals in `secrets/credentials.sqlite` are also outside these development
 snapshots and stay in the current data directory during reset or restore. Back up
 the stopped data directory separately when those values must be recoverable.
 If startup reports interrupted maintenance, stop all instances and run:

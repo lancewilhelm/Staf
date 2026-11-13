@@ -17,7 +17,7 @@ test('Slack DM is approved, durable and delivered once, while plugin controls re
   const token=(await call('/api/pair','',{code:app.code}))[1].token;
   assert.equal((await call('/api/plugins',token))[1][0].id,'slack');
   const bot=(await call('/api/bots',token,{name:'Slack agent',provider:'live',model:'fixture'}))[1];
-  assert.equal((await call('/api/plugins/slack/connect',token,{appToken:'xapp-synthetic',botToken:'xoxb-synthetic',teamId:'T123',userId:'U123',channelId:'D123',botId:bot.id}))[0],200);
+  assert.equal((await call('/api/plugins/slack/connect',token,{confirm:true,appToken:'xapp-synthetic',botToken:'xoxb-synthetic',teamId:'T123',userId:'U123',channelId:'D123',botId:bot.id}))[0],200);
   assert.equal(connections,0);
   assert.equal(statSync(join(dir,'secrets','credentials.sqlite')).mode & 0o777,0o600);
   assert.equal((await call('/api/secret-grants',token))[1].filter(item=>item.integration.startsWith('slack.')).length,2);
@@ -47,7 +47,7 @@ test('revoking agent access cancels pending work and an uncertain send is never 
  const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body===undefined?'GET':'POST',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body===undefined?{}:{'Content-Type':'application/json'})},...(body===undefined?{}:{body:JSON.stringify(body)})});return [r.status,await r.json()]};
  try{
   const token=(await call('/api/pair','',{code:app.code}))[1].token,bot=(await call('/api/bots',token,{name:'Test agent',provider:'live',model:'fixture'}))[1];
-  await call('/api/plugins/slack/connect',token,{appToken:'xapp-synthetic',botToken:'xoxb-synthetic',teamId:'T123',userId:'U123',channelId:'D123',botId:bot.id});
+  await call('/api/plugins/slack/connect',token,{confirm:true,appToken:'xapp-synthetic',botToken:'xoxb-synthetic',teamId:'T123',userId:'U123',channelId:'D123',botId:bot.id});
   await call('/api/plugins/slack/access',token,{botId:bot.id,enabled:true});await call('/api/plugins/slack/enable',token,{});
   const event={eventId:'EvRevoke',teamId:'T123',userId:'U123',channelId:'D123',text:'first'};
   await receive(event);await waitForModel;await call('/api/plugins/slack/access',token,{botId:bot.id,enabled:false});release();
@@ -68,7 +68,7 @@ test('restart fences a reply whose Slack dispatch was still in flight',async()=>
  const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body===undefined?'GET':'POST',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body===undefined?{}:{'Content-Type':'application/json'})},...(body===undefined?{}:{body:JSON.stringify(body)})});return [r.status,await r.json()]};
  try {
   const token=(await call('/api/pair','',{code:app.code}))[1].token,bot=(await call('/api/bots',token,{name:'Test agent',provider:'live',model:'fixture'}))[1];
-  await call('/api/plugins/slack/connect',token,{appToken:'xapp-synthetic',botToken:'xoxb-synthetic',teamId:'T123',userId:'U123',channelId:'D123',botId:bot.id});await call('/api/plugins/slack/access',token,{botId:bot.id,enabled:true});await call('/api/plugins/slack/enable',token,{});
+  await call('/api/plugins/slack/connect',token,{confirm:true,appToken:'xapp-synthetic',botToken:'xoxb-synthetic',teamId:'T123',userId:'U123',channelId:'D123',botId:bot.id});await call('/api/plugins/slack/access',token,{botId:bot.id,enabled:true});await call('/api/plugins/slack/enable',token,{});
   const event={eventId:'EvInFlight',teamId:'T123',userId:'U123',channelId:'D123',text:'hello'};await receive(event);await until(()=>posts===1);
   await app.close();app=startInstance(path,0,{env:{},slackTransport,providerFactory});port=await app.listen();await until(()=>receive);
   const result=(await call('/api/plugins',token))[1][0].events.find(event=>event.eventId==='EvInFlight');assert.equal(result.state,'uncertain');
@@ -84,7 +84,7 @@ test('an in-flight reconnect cannot undo a later owner disconnect',async()=>{
  const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body===undefined?'GET':'POST',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body===undefined?{}:{'Content-Type':'application/json'})},...(body===undefined?{}:{body:JSON.stringify(body)})});return [r.status,await r.json()]};
  try{
   const token=(await call('/api/pair','',{code:app.code}))[1].token,bot=(await call('/api/bots',token,{name:'Test agent',provider:'live',model:'fixture'}))[1];
-  const config={appToken:'xapp-synthetic',botToken:'xoxb-synthetic',teamId:'T123',userId:'U123',channelId:'D123',botId:bot.id};
+  const config={confirm:true,appToken:'xapp-synthetic',botToken:'xoxb-synthetic',teamId:'T123',userId:'U123',channelId:'D123',botId:bot.id};
   await call('/api/plugins/slack/connect',token,config);hold=true;
   const connecting=call('/api/plugins/slack/connect',token,config);await waiting;
   await call('/api/plugins/slack/disconnect',token,{});release();assert.equal((await connecting)[0],400);
@@ -98,5 +98,5 @@ test('ordinary Slack conversation can ask and answer in the same thread',async()
  const providerFactory=async()=>({name:'synthetic',capabilities:{toolCalls:true},async complete(messages,offers,opts){requests.push({messages,offers,input:opts.currentUserInput});return {role:'assistant',content:opts.currentUserInput==='Start'?'Which color do you prefer?':'I will use blue.'};}});
  const app=startInstance(join(dir,'db'),0,{env:{},slackTransport,providerFactory}),port=await app.listen();
  const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});return [r.status,await r.json()]};
- try{const token=(await call('/api/pair','',{code:app.code}))[1].token,bot=(await call('/api/bots',token,{name:'Slack question',provider:'live',model:'fixture'}))[1];await call('/api/plugins/slack/connect',token,{appToken:'xapp-synthetic',botToken:'xoxb-synthetic',teamId:'T123',userId:'U123',channelId:'D123',botId:bot.id});await call('/api/plugins/slack/access',token,{botId:bot.id,enabled:true});await call('/api/plugins/slack/enable',token,{});const event={teamId:'T123',userId:'U123',channelId:'D123',threadTs:'123.1'};await receive({...event,eventId:'question',text:'Start'});await until(()=>posts.some(p=>p.text==='Which color do you prefer?'));await receive({...event,eventId:'answer',text:'Blue'});await until(()=>posts.some(p=>p.text==='I will use blue.'));assert.ok(posts.every(p=>p.threadTs==='123.1'));assert.ok(requests.some(r=>r.messages.some(m=>m.content==='Blue')));assert.deepEqual((await call('/api/question-sets',token))[1],[]);}finally{await app.close();rmSync(dir,{recursive:true,force:true});}
+ try{const token=(await call('/api/pair','',{code:app.code}))[1].token,bot=(await call('/api/bots',token,{name:'Slack question',provider:'live',model:'fixture'}))[1];await call('/api/plugins/slack/connect',token,{confirm:true,appToken:'xapp-synthetic',botToken:'xoxb-synthetic',teamId:'T123',userId:'U123',channelId:'D123',botId:bot.id});await call('/api/plugins/slack/access',token,{botId:bot.id,enabled:true});await call('/api/plugins/slack/enable',token,{});const event={teamId:'T123',userId:'U123',channelId:'D123',threadTs:'123.1'};await receive({...event,eventId:'question',text:'Start'});await until(()=>posts.some(p=>p.text==='Which color do you prefer?'));await receive({...event,eventId:'answer',text:'Blue'});await until(()=>posts.some(p=>p.text==='I will use blue.'));assert.ok(posts.every(p=>p.threadTs==='123.1'));assert.ok(requests.some(r=>r.messages.some(m=>m.content==='Blue')));assert.deepEqual((await call('/api/question-sets',token))[1],[]);}finally{await app.close();rmSync(dir,{recursive:true,force:true});}
 });

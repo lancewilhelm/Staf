@@ -15,7 +15,7 @@ export interface SlackTransport {
 }
 const apiResult=z.object({ok:z.boolean(),team_id:z.string().optional(),user_id:z.string().optional(),url:z.string().optional(),ts:z.string().optional()});
 async function api(method:string,token:string,body:object) {
- const response=await fetch('https://slack.com/api/'+method,{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(body),signal:AbortSignal.timeout(15000)});
+ const response=await fetch('https://slack.com/api/'+method,{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(body),redirect:'error',signal:AbortSignal.timeout(15000)});
  if(response.status===429) {const raw=response.headers.get('retry-after'),seconds=raw && /^\d+(?:\.\d+)?$/.test(raw.trim())?Number(raw):NaN,ms=Math.ceil(seconds*1000);throw new SlackRateLimited(Number.isSafeInteger(ms) && ms>=0?ms:null);}
  if(!response.ok)throw Error('Slack request failed');
  const result=apiResult.parse(await response.json());if(!result.ok)throw Error('Slack rejected the request');return result;

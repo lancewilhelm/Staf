@@ -17,7 +17,7 @@ async function action(name:'connect'|'enable'|'disable'|'disconnect'|'delete-con
  catch(error){status.value='Could not update plugin. Check its current status before retrying. '+String(error);}
  finally{busy.value=false;confirm.value=null;}
 }
-function connect(){void action('connect',{...form.value});}
+function connect(){void action('connect',{...form.value,confirm:true});}
 </script>
 <template>
  <section class="settings-section" aria-label="Plugins">
@@ -27,6 +27,7 @@ function connect(){void action('connect',{...form.value});}
    <div class="provider-title"><h3>{{ plugin.name }}</h3><span class="badge">{{ plugin.enabled ? plugin.status : plugin.connected ? 'Disabled' : 'Not connected' }}</span></div>
    <p>{{ plugin.description }}</p>
    <p v-if="plugin.config">Workspace {{ plugin.config.teamId }} · User {{ plugin.config.userId }} · DM {{ plugin.config.channelId }}</p>
+   <p v-if="plugin.connected && !plugin.credentialsAvailable">Credentials or use approvals are unavailable. Reconnect Slack or approve the missing uses in Named secrets.</p>
    <p v-if="plugin.connected">Agent access: {{ plugin.agentAccess ? 'Allowed' : 'Not allowed' }}</p>
    <details class="saved-settings"><DisclosureSummary>{{ plugin.config ? 'Change connection' : 'Set up Slack' }}</DisclosureSummary>
     <p>Use a Slack app with Socket Mode and a bot token. Enter the IDs of the one workspace, user, and direct message you approve. <a href="https://docs.slack.dev/apis/events-api/using-socket-mode/" target="_blank" rel="noreferrer">Slack Socket Mode setup</a>.</p>

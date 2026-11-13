@@ -33,9 +33,9 @@ test('Gmail follows work identity, scoped task and Slack boundaries across tool 
  try{
   token=(await call('/api/pair','',{code:app.code}))[1].token;
   const bots=[];for(const mode of ['direct','hybrid','code'])bots.push((await call('/api/bots',token,{name:`${mode} reader`,provider:'live',model:'fixture',toolMode:mode}))[1]);
-  const attempt=(await call('/api/plugins/gmail/start',token,{email:'owner@example.test',clientId:'synthetic.apps.googleusercontent.com',clientSecret:'synthetic-secret'}))[1],u=new URL(attempt.url),cb=new URL(u.searchParams.get('redirect_uri'));cb.searchParams.set('state',u.searchParams.get('state'));cb.searchParams.set('code','code');assert.equal((await fetch(cb)).status,200);
+  const attempt=(await call('/api/plugins/gmail/start',token,{confirm:true,email:'owner@example.test',clientId:'synthetic.apps.googleusercontent.com',clientSecret:'synthetic-secret'}))[1],u=new URL(attempt.url),cb=new URL(u.searchParams.get('redirect_uri'));cb.searchParams.set('state',u.searchParams.get('state'));cb.searchParams.set('code','code');assert.equal((await fetch(cb)).status,200);
   for(const bot of bots)await call('/api/plugins/gmail/access',token,{botId:bot.id,enabled:true});await call('/api/plugins/gmail/enable',token,{});for(const bot of bots)await call('/api/plugins/gmail/model-access',token,{botId:bot.id,provider:'live',model:'fixture',enabled:true});
-  await call('/api/plugins/slack/connect',token,{appToken:'xapp-synthetic',botToken:'xoxb-synthetic',teamId:'T123',userId:'U123',channelId:'D123',botId:bots[1].id});await call('/api/plugins/slack/access',token,{botId:bots[1].id,enabled:true});await call('/api/plugins/slack/enable',token,{});await until(()=>receive);
+  await call('/api/plugins/slack/connect',token,{confirm:true,appToken:'xapp-synthetic',botToken:'xoxb-synthetic',teamId:'T123',userId:'U123',channelId:'D123',botId:bots[1].id});await call('/api/plugins/slack/access',token,{botId:bots[1].id,enabled:true});await call('/api/plugins/slack/enable',token,{});await until(()=>receive);
   await receive({eventId:'EvNoGrant',teamId:'T123',userId:'U123',channelId:'D123',text:'No extended grant',threadTs:'1.0'});await until(()=>posts.some(p=>p.threadTs==='1.0'));assert.doesNotMatch(JSON.stringify(seen.find(x=>x.input==='No extended grant').tools),/gmail_search|gmail_read/);
   for(const bot of bots)assert.equal((await call('/api/plugins/gmail/work-model-access',token,{botId:bot.id,provider:'live',model:'fixture',enabled:true}))[0],200);
   for(const [i,bot] of bots.entries()){
@@ -72,7 +72,7 @@ test('task query and returned message IDs remain scoped, and revocation fences d
  const finished=async id=>until(async()=>{const result=(await call(`/api/tasks/${id}`,token))[1];return !['queued','running','stopping'].includes(result.state)&&result;});
  try{
   token=(await call('/api/pair','',{code:app.code}))[1].token;const bot=(await call('/api/bots',token,{name:'Task reader',provider:'live',model:'fixture',toolMode:'direct'}))[1];
-  const attempt=(await call('/api/plugins/gmail/start',token,{email:'owner@example.test',clientId:'synthetic.apps.googleusercontent.com',clientSecret:'secret'}))[1],u=new URL(attempt.url),cb=new URL(u.searchParams.get('redirect_uri'));cb.searchParams.set('state',u.searchParams.get('state'));cb.searchParams.set('code','code');assert.equal((await fetch(cb)).status,200);
+  const attempt=(await call('/api/plugins/gmail/start',token,{confirm:true,email:'owner@example.test',clientId:'synthetic.apps.googleusercontent.com',clientSecret:'secret'}))[1],u=new URL(attempt.url),cb=new URL(u.searchParams.get('redirect_uri'));cb.searchParams.set('state',u.searchParams.get('state'));cb.searchParams.set('code','code');assert.equal((await fetch(cb)).status,200);
   await call('/api/plugins/gmail/access',token,{botId:bot.id,enabled:true});await call('/api/plugins/gmail/enable',token,{});
   assert.notEqual((await call('/api/tasks',token,{id:'no-grant',botId:bot.id,objective:'No grant',gmailQuery:'in:inbox'}))[0],200);
   await call('/api/plugins/gmail/model-access',token,{botId:bot.id,provider:'live',model:'fixture',enabled:true});

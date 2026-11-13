@@ -801,11 +801,23 @@ only the outcome. A pending request survives a restart as interrupted: dismiss
 it and start a new attempt rather than replaying work. Saving neither enables a
 plugin nor authorizes a destination. You can select an existing named secret in
 a request. Settings lists nonsecret metadata and lets you add, replace, or delete
-a named secret without a model. Replacement and deletion require confirmation;
-a stale confirmation fails if the secret changed. There is not yet a supported
-path for a plugin or tool to use a named secret, and no usage grants are stored.
-Deletion does not revoke a provider credential, recall an in-flight request, or
-erase backups. Existing Gmail and Slack credential files and their use are unchanged.
+a named secret without a model. The owner can approve an existing secret for a
+configured Gmail or Slack use and its displayed destination, or revoke that use.
+Agent permissions remain separate. Replacement and deletion require confirmation
+and revoke the secret's use approvals. Settings lists affected integrations before
+the decision. A stale confirmation fails if the secret changed. Deletion does not
+revoke a provider credential, recall an in-flight request, or erase backups.
+
+Gmail and Slack require a fresh connection to the managed store. Staf does not
+import, use, or delete old `auth/gmail.json` or `auth/slack.json` files. They can
+still contain credentials and remain the owner's responsibility. A connection
+approval covers the displayed Google endpoints and Gmail account, or Slack's API
+and the selected workspace, user, and DM. A changed destination requires another
+approval. Gmail and Slack do not read credentials from environment variables.
+Other provider environment settings retain the precedence in the
+[configuration reference](reference.md#terminal-commands-and-environment). The
+shared instance's OpenRouter connection remains separate from named secrets and
+continues to ignore the host `OPENROUTER_API_KEY`.
 
 The paired browser checks ordinary chat and written question answers for a few
 recognizable credential formats. It warns and blocks submission when one is
@@ -833,10 +845,11 @@ running as the service user, host administrators, or host compromise. Stop old
 agent processes before using the store. No Linux isolation or live provider
 acceptance has been demonstrated. Do not paste secrets into ordinary chat.
 
-A stopped full data-directory backup includes the secret store. Protect it like
-the original. Development reset/restore snapshots do not include or restore this
-store; retain it separately when moving development data. Backup copies may
-retain values after any later removal. No master password is required at restart.
+A stopped full data-directory backup includes the secret store and its use
+approvals. Protect it like the original. Restoring an older backup can restore
+secrets and approvals later deleted or revoked. Review both after recovery.
+Development reset/restore snapshots do not include or restore this store; retain
+it separately when moving development data. No master password is required at restart.
 
 
 ## Native process slice
@@ -925,7 +938,7 @@ To prepare an owner-operated connection:
    select **Allow Gmail inbox changes after explicit approval in Slack**.
    Reconnect and select the permissions you want if the existing connection
    lacks them. Select
-   **Begin Google authorization**, then **Open Google authorization**. Sign in
+   **Begin Google authorization and approve**, then **Open Google authorization**. Sign in
    to the intended account and grant the requested access. Google redirects to
    the local Staf callback. Return to Settings and refresh Gmail status. Staf
    checks that the Google profile email matches the address entered; the
@@ -1072,16 +1085,16 @@ An agent must search again to use the mail in a later turn. This cannot recall
 content already sent to the explicitly allowed provider.
 
 Disable retains credentials, agent access and model disclosure settings.
-Disconnect disables the plugin and removes its local credentials, but retains
-account configuration and all permissions. Reconnecting the same account can
+Disconnect disables the plugin and revokes its local credential-use approvals,
+but retains the saved named secrets, account configuration, and agent permissions.
+Reconnecting the same account can
 therefore make an existing model permission usable again; revoke it separately
 if that is not wanted. Delete Gmail configuration removes all permissions.
 Neither action
 revokes the grant at Google; revoke it in Google account settings if desired.
 Reconnect requires the client secret and Google consent again. The client secret
-and refresh token are stored in host-local `auth/gmail.json` with restrictive
-permissions, outside SQLite and outside normal dataset backups. Protect the
-host and securely backed-up credentials; otherwise reconnect after restore.
+and refresh token are saved as separate named secrets in the managed store.
+Old `auth/gmail.json` files are left untouched and are not used.
 External apps in Google Testing mode with this scope generally receive refresh
 tokens that expire after seven days; Google can also revoke tokens for other
 reasons. See Google's [OAuth token expiration guidance](https://developers.google.com/identity/protocols/oauth2#expiration).
@@ -1118,8 +1131,8 @@ To set up your own Slack app:
    and [`chat.postMessage` reference](https://docs.slack.dev/reference/methods/chat.postMessage/)
    describe the transport, scopes and reply behavior.
 3. In **Settings → Plugins → Slack**, enter the app-level and bot user tokens,
-   the IDs and an existing active agent. **Connect** checks the bot token's
-   workspace with Slack. Then explicitly **Allow agent access** and **Enable**.
+   the IDs and an existing active agent. **Connect and approve** checks the bot token's
+   workspace with Slack and approves the displayed credential use. Then explicitly **Allow agent access** and **Enable**.
    A connected status means the Socket Mode WebSocket opened, not that a DM
    has been tested. An app token or Slack settings error may require correcting
    the setup and enabling again.
@@ -1130,15 +1143,12 @@ To set up your own Slack app:
 
 Disable stops the socket and cancels active Slack chat responses while retaining
 configuration, access, and history. Accepted Slack background tasks continue;
-their delivery waits until the same approved destination and agent are enabled again. Disconnect also removes the locally saved
-Slack tokens, while preserving the binding and history. Delete saved configuration
+their delivery waits until the same approved destination and agent are enabled again. Disconnect revokes the local use approvals for the
+saved Slack tokens, while preserving the tokens, binding, and history. Delete saved configuration
 removes the binding and agent access as well. These actions do not uninstall the
 Slack app or revoke tokens at Slack. Reconnect requires the tokens again. Tokens
-are stored as a host-local `auth/slack.json` file with restricted permissions;
-they are not returned to clients or included in the instance database. Protect
-host access and backups. Consult the backup instructions for which files are
-included; reconnect Slack after a restore unless the credential file was
-explicitly and securely restored.
+are separate named secrets in the managed store. Old `auth/slack.json` files are
+left untouched and are not used. Protect host access and backups.
 
 Ask the agent for work in a normal DM, for example, “Please investigate this
 and let me know what you find.” A tool-capable model can choose to start
