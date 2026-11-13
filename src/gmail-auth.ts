@@ -60,7 +60,7 @@ export class GmailAuth {
   if(!response.ok)throw Error('Gmail authorization unavailable');const tokens=tokenResponse.parse(await responseJson(response));if(tokens.token_type.toLowerCase()!=='bearer' || (credential.sendEnabled && tokens.scope && !tokens.scope.split(/\s+/).includes(gmailSendScope)) || (credential.modifyEnabled && tokens.scope && !tokens.scope.split(/\s+/).includes(gmailModifyScope)))throw Error('Gmail authorization unavailable');
   signal?.throwIfAborted();return tokens.access_token;
  }
- async check(credential:GmailCredential,signal?:AbortSignal) {
-  const token=await this.refresh(credential,signal);signal?.throwIfAborted();const profile=await this.profile(token,signal);if(profile.emailAddress.toLowerCase()!==credential.email)throw Error('Gmail account changed');return profile;
+ async check(credential:GmailCredential,signal?:AbortSignal,assertAuthority:()=>void=()=>{}) {
+  assertAuthority();const token=await this.refresh(credential,signal);signal?.throwIfAborted();assertAuthority();const profile=await this.profile(token,signal);assertAuthority();if(profile.emailAddress.toLowerCase()!==credential.email)throw Error('Gmail account changed');return profile;
  }
 }

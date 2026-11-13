@@ -97,6 +97,23 @@ test('owner management preserves a secret until a current replacement is confirm
  } finally {store?.close();rmSync(dir,{recursive:true,force:true});}
 });
 
+test('secret grants bind a revision, integration and destination and are revoked on replacement or deletion',()=>{
+ const dir=mkdtempSync(join(tmpdir(),'staf-secret-grant-'));let store;
+ try {
+  store=new SecretRequests(dir,false);store.add({name:'Token',purpose:'Synthetic provider',value:'synthetic-token'});
+  const first=store.names()[0].revision;
+  store.grant({name:'Token',revision:first,integration:'slack.bot',destination:'https://slack.com/api|T1|U1|D1'});
+  assert.equal(store.resolve({integration:'slack.bot',destination:'https://slack.com/api|T1|U1|D1'}),'synthetic-token');
+  assert.equal(store.resolve({integration:'slack.bot',destination:'https://slack.com/api|T1|U1|D2'}),undefined);
+  assert.equal(store.resolve({integration:'gmail.client',destination:'https://slack.com/api|T1|U1|D1'}),undefined);
+  store.close();store=new SecretRequests(dir,false);assert.equal(store.grants().length,1);
+  store.replace({name:'Token',revision:first,value:'synthetic-new'});assert.equal(store.grants().length,0);
+  const second=store.names()[0].revision;store.grant({name:'Token',revision:second,integration:'slack.bot',destination:'https://slack.com/api|T1|U1|D1'});
+  store.revoke({name:'Token',revision:second,integration:'slack.bot',destination:'https://slack.com/api|T1|U1|D1'});assert.equal(store.grants().length,0);
+  store.grant({name:'Token',revision:second,integration:'slack.bot',destination:'https://slack.com/api|T1|U1|D1'});store.delete('Token',second);assert.equal(store.grants().length,0);
+ } finally {store?.close();rmSync(dir,{recursive:true,force:true});}
+});
+
 test('paired owner manages secrets without a model and stale confirmations cannot mutate them',async()=>{
  const dir=mkdtempSync(join(tmpdir(),'staf-secret-api-'));const app=startInstance(join(dir,'instance.sqlite'),0,{dataDir:dir});
  try {

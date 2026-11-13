@@ -67,7 +67,8 @@ async function loadOlder(){const before=loadedOlder.value?olderBefore.value:gmai
     <label>Google OAuth client secret<input v-model="form.clientSecret" type="password" autocomplete="off" required /></label>
     <label><input v-model="form.sendEnabled" type="checkbox" /> Allow Gmail to send replies after explicit approval in Slack</label>
     <label><input v-model="form.modifyEnabled" type="checkbox" /> Allow Gmail inbox changes after explicit approval in Slack</label>
-    <button :disabled="busy">Begin Google authorization</button>
+    <p>Beginning authorization approves this client secret and the resulting refresh token for {{ form.email || 'the account above' }} at https://oauth2.googleapis.com/token and https://gmail.googleapis.com. Agent access is a separate decision.</p>
+    <button :disabled="busy">Begin Google authorization and approve</button>
    </form>
    <p v-if="authorizationUrl"><a :href="authorizationUrl" target="_blank" rel="noreferrer">Open Google authorization</a>. Return here after granting access, then refresh status.</p>
   </details>

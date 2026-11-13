@@ -19,7 +19,8 @@ test('Slack DM is approved, durable and delivered once, while plugin controls re
   const bot=(await call('/api/bots',token,{name:'Slack agent',provider:'live',model:'fixture'}))[1];
   assert.equal((await call('/api/plugins/slack/connect',token,{appToken:'xapp-synthetic',botToken:'xoxb-synthetic',teamId:'T123',userId:'U123',channelId:'D123',botId:bot.id}))[0],200);
   assert.equal(connections,0);
-  assert.equal(statSync(join(dir,'auth','slack.json')).mode & 0o777,0o600);
+  assert.equal(statSync(join(dir,'secrets','credentials.sqlite')).mode & 0o777,0o600);
+  assert.equal((await call('/api/secret-grants',token))[1].filter(item=>item.integration.startsWith('slack.')).length,2);
   assert.doesNotMatch(JSON.stringify((await call('/api/plugins',token))[1]),/xapp-synthetic|xoxb-synthetic/);
   await call('/api/plugins/slack/access',token,{botId:bot.id,enabled:true});
   await call('/api/plugins/slack/enable',token,{});assert.equal(connections,1);

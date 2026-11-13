@@ -440,6 +440,9 @@ export class Controller {
   async secretDecision(id:string,decision:'save'|'skip'|'dismiss',value?:string){await this.api('/api/secret-requests/'+encodeURIComponent(id)+'/'+decision,decision==='save'?{value}:{});await this.refresh();}
   async selectSecret(id:string,name:string,revision:string){await this.api('/api/secret-requests/'+encodeURIComponent(id)+'/select',{name,revision});await this.refresh();}
   async secrets(){return this.api<Array<{name:string;purpose:string|null;destination:string|null;revision:string}>>('/api/secrets');}
+  async secretGrants(){return this.api<Array<{name:string;revision:string;integration:'gmail.client'|'gmail.refresh'|'slack.app'|'slack.bot';destination:string}>>('/api/secret-grants');}
+  async secretGrantTargets(){return this.api<Array<{integration:'gmail.client'|'gmail.refresh'|'slack.app'|'slack.bot';destination:string}>>('/api/secret-grant-targets');}
+  async decideSecretGrant(action:'grant'|'revoke',input:Awaited<ReturnType<Controller['secretGrants']>>[number]){return this.api('/api/secret-grants/'+action,{...input,confirm:true});}
   async addSecret(name:string,purpose:string,value:string){return this.api('/api/secrets/add',{name,purpose,value});}
   async replaceSecret(name:string,revision:string,value:string){return this.api('/api/secrets/replace',{name,revision,value,confirm:true});}
   async deleteSecret(name:string,revision:string){return this.api('/api/secrets/delete',{name,revision,confirm:true});}

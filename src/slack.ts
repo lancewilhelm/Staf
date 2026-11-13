@@ -10,7 +10,7 @@ export class SlackRateLimited extends Error {
 }
 export interface SlackTransport {
  identify(tokens:SlackTokens):Promise<{teamId:string;botUserId:string}>;
- start(tokens:SlackTokens,receive:(event:SlackEvent)=>Promise<void>,status?:(status:'connected'|'reconnecting')=>void,interact?:(interaction:SlackInteraction)=>Promise<void>):Promise<()=>void>;
+ start(tokens:SlackTokens,receive:(event:SlackEvent)=>Promise<void>,status?:(status:'connected'|'reconnecting')=>void,interact?:(interaction:SlackInteraction)=>Promise<void>,assertAuthority?:()=>void):Promise<()=>void>;
  post(tokens:SlackTokens,message:{channel:string;threadTs?:string;text:string;buttons?:SlackButton[]}):Promise<void|{messageTs:string}>;
 }
 const apiResult=z.object({ok:z.boolean(),team_id:z.string().optional(),user_id:z.string().optional(),url:z.string().optional(),ts:z.string().optional()});
@@ -25,10 +25,10 @@ const eventPayload=z.object({event_id:z.string(),team_id:z.string(),event:z.obje
 const interactionPayload=z.object({type:z.literal('block_actions'),team:z.object({id:z.string().min(1).max(200)}),user:z.object({id:z.string().min(1).max(200)}),channel:z.object({id:z.string().min(1).max(200)}),container:z.object({message_ts:z.string().min(1).max(200),channel_id:z.string().min(1).max(200)}),actions:z.tuple([z.object({type:z.literal('button'),action_id:z.string().min(1).max(255),value:z.string().min(1).max(2000)})])});
 export const slackTransport:SlackTransport={
  async identify(tokens){const result=await api('auth.test',tokens.botToken,{});if(!result.team_id || !result.user_id)throw Error('Slack identity unavailable');return {teamId:result.team_id,botUserId:result.user_id};},
- async start(tokens,receive,status,interact){
+ async start(tokens,receive,status,interact,assertAuthority=()=>{}){
   let stopped=false,socket:WebSocket|undefined,timer:ReturnType<typeof setTimeout>|undefined;
   async function connect() {
-   const result=await api('apps.connections.open',tokens.appToken,{});if(!result.url)throw Error('Slack socket URL unavailable');
+   assertAuthority();const result=await api('apps.connections.open',tokens.appToken,{});assertAuthority();if(!result.url)throw Error('Slack socket URL unavailable');
    const url=new URL(result.url);if(url.protocol!=='wss:' || !(url.hostname==='slack.com' || url.hostname.endsWith('.slack.com')))throw Error('Invalid Slack socket URL');
    if(stopped)return;
    socket=new WebSocket(url);const current=socket;

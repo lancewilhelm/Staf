@@ -33,9 +33,8 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { randomBytes, randomUUID, createHash } from 'node:crypto';
 import {bundledPlugins, slackConfigSchema, type SlackConfig} from './plugins.js';
 import {slackTransport as defaultSlackTransport, SlackRateLimited, type SlackTransport, type SlackEvent, type SlackInteraction} from './slack.js';
-import {loadSlackTokens, saveSlackTokens, disconnectSlackTokens} from './slack-credential.js';
 import {GmailAuth,gmailStartSchema} from './gmail-auth.js';
-import {loadGmailCredential,saveGmailCredential,disconnectGmailCredential} from './gmail-credential.js';
+import type {GmailCredential} from './gmail-credential.js';
 import {gmailHistoryTransport} from './gmail-transport.js';
 import {GmailApi,checkedGmailId} from './gmail-api.js';
 import {inboxPreferencesSchema,inboxClarification,inboxMessage,inboxUncertainMessage} from './inbox-monitor.js';
@@ -80,8 +79,6 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
   const dataDir = options.dataDir ?? resolve(dirname(path));
   const knownKeys = new Set<string>();
   try {const initialKey=loadOpenRouterKey(dataDir);if(initialKey) knownKeys.add(initialKey);}catch {/* A damaged store can be replaced or disconnected by a paired client. */}
-  try {const slack=loadSlackTokens(dataDir);if(slack){knownKeys.add(slack.appToken);knownKeys.add(slack.botToken);}}catch {}
-  try {const gmail=loadGmailCredential(dataDir);if(gmail){knownKeys.add(gmail.clientSecret);knownKeys.add(gmail.refreshToken);}}catch {}
   const redactEnv=redactor(env);
   const redactProgress=streamingRedactor(env,()=>[...knownKeys]);
   const redact = (text:string) => [...knownKeys].reduce((result,key)=>redactor({OPENROUTER_API_KEY:key})(result),redactEnv(text));
@@ -89,22 +86,39 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
   const instance = new Instance(path,redact,options.maintenanceToken);
   let secretRequests:SecretRequests;
   try {secretRequests=new SecretRequests(resolve(dirname(path)),path===':memory:');for(const value of secretRequests.values())knownKeys.add(value);}catch(error){instance.close();throw error;}
+  const gmailDestination=(email:string)=>JSON.stringify(['https://oauth2.googleapis.com/token','https://gmail.googleapis.com',email]);
+  const slackDestination=(config:SlackConfig)=>JSON.stringify(['https://slack.com/api',config.teamId,config.userId,config.channelId]);
+  const gmailRoles=['gmail.client','gmail.refresh'] as const,slackRoles=['slack.app','slack.bot'] as const;
+  function loadGmailCredential(_root:string):GmailCredential|undefined {
+    const c=instance.plugins.gmailConnection();if(!c)return undefined;const destination=gmailDestination(c.accountId);
+    const clientSecret=secretRequests.resolve({integration:'gmail.client',destination}),refreshToken=secretRequests.resolve({integration:'gmail.refresh',destination});
+    if(!clientSecret || !refreshToken)return undefined;
+    const config=z.object({sendEnabled:z.boolean(),modifyEnabled:z.boolean()}).safeParse(JSON.parse(secretRequests.getConfig('gmail',destination)??'null'));if(!config.success)return undefined;
+    return {email:c.accountId,clientId:c.config.clientId,clientSecret,refreshToken,...config.data};
+  }
+  function loadSlackTokens(_root:string):{appToken:string;botToken:string}|undefined {
+    const c=instance.plugins.connection();if(!c || !c.agentAccess || instance.bot(c.config.botId)?.archived!==false)return undefined;const destination=slackDestination(c.config);
+    const appToken=secretRequests.resolve({integration:'slack.app',destination}),botToken=secretRequests.resolve({integration:'slack.bot',destination});
+    return appToken && botToken?{appToken,botToken}:undefined;
+  }
   let gmailHealth='Not checked';
   const gmailChecks=new Set<AbortController>();
   const stopGmailChecks=()=>{for(const controller of gmailChecks)controller.abort();};
   const gmailAuth=new GmailAuth(options.gmailRequest ?? fetch,token=>instance.authorized(token),()=>instance.plugins.gmailConnection()?.revision??null,(credential,historyId)=>{
-    const old=loadGmailCredential(dataDir),existing=instance.plugins.gmailConnection();
+    const existing=instance.plugins.gmailConnection();
     if(existing && existing.accountId!==credential.email)throw Error('Delete the existing Gmail configuration before changing accounts');
     knownKeys.add(credential.clientSecret);knownKeys.add(credential.refreshToken);
-    saveGmailCredential(dataDir,credential);
-    try {instance.plugins.gmailConnect({email:credential.email,clientId:credential.clientId},historyId);}
-    catch(error){if(old)saveGmailCredential(dataDir,old);else disconnectGmailCredential(dataDir);throw error;}
+    const destination=gmailDestination(credential.email);secretRequests.revokeIntegrations([...gmailRoles]);
+    instance.plugins.gmailConnect({email:credential.email,clientId:credential.clientId},historyId);
+    secretRequests.setConfig('gmail',destination,JSON.stringify({sendEnabled:credential.sendEnabled===true,modifyEnabled:credential.modifyEnabled===true}));
+    secretRequests.provision([{integration:'gmail.client',destination,name:`Gmail client secret ${randomUUID()}`,purpose:`Gmail OAuth client for ${credential.email}`,value:credential.clientSecret},{integration:'gmail.refresh',destination,name:`Gmail refresh token ${randomUUID()}`,purpose:`Gmail account ${credential.email}`,value:credential.refreshToken}]);
     gmailHealth='Connected';
   });
-  async function checkGmailConnection() {
+  async function checkGmailConnection(client:string) {
     const c=instance.plugins.gmailConnection(),credential=loadGmailCredential(dataDir);if(!c?.connected||!credential||credential.email!==c.accountId||credential.clientId!==c.config.clientId)throw Error('Gmail credentials unavailable; reconnect Gmail');
     const controller=new AbortController();gmailChecks.add(controller);
-    try {await gmailAuth.check(credential,controller.signal);controller.signal.throwIfAborted();if(instance.plugins.gmailConnection()?.revision!==c.revision)throw Error('Gmail settings changed');gmailHealth='Connected';}
+    const check=()=>{controller.signal.throwIfAborted();const saved=loadGmailCredential(dataDir);if(!instance.authorized(client) || instance.plugins.gmailConnection()?.revision!==c.revision || saved?.clientSecret!==credential.clientSecret || saved.refreshToken!==credential.refreshToken)throw Error('Gmail settings changed');};
+    try {await gmailAuth.check(credential,controller.signal,check);check();gmailHealth='Connected';}
     catch {if(!controller.signal.aborted && instance.plugins.gmailConnection()?.revision===c.revision)gmailHealth='Connection check failed';throw Error('Gmail connection check failed; reconnect or check Google settings');}
     finally {gmailChecks.delete(controller);}
   }
@@ -114,7 +128,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
     const c=instance.plugins.gmailConnection(),credential=loadGmailCredential(dataDir);
     if(!c?.connected||!c.enabled||!credential||credential.email!==c.accountId||credential.clientId!==c.config.clientId)throw Error('Enable and connect Gmail first');
     const controller=new AbortController();gmailChecks.add(controller);
-    const assertAuthority=()=>{controller.signal.throwIfAborted();const current=instance.plugins.gmailConnection();if(closing || !current?.enabled || !current.connected || current.accountId!==c.accountId || current.revision!==c.revision)throw Error('Gmail access changed');};
+    const assertAuthority=()=>{controller.signal.throwIfAborted();const current=instance.plugins.gmailConnection(),saved=loadGmailCredential(dataDir);if(closing || !current?.enabled || !current.connected || current.accountId!==c.accountId || current.revision!==c.revision || saved?.clientSecret!==credential.clientSecret || saved.refreshToken!==credential.refreshToken)throw Error('Gmail access changed');};
     let accessToken:string|undefined;
     const transport=gmailHistoryTransport({request:options.gmailRequest??fetch,signal:controller.signal,assertAuthority,accessToken:async()=>{assertAuthority();accessToken??=await gmailAuth.refresh(credential,controller.signal);return accessToken;}});
     const run=(async()=>{try{await instance.gmailHistory(transport,assertAuthority).poll(c.accountId);gmailHealth='Connected';}catch(error){if(!controller.signal.aborted)gmailHealth='Monitoring failed';throw error;}finally{gmailChecks.delete(controller);}})();
@@ -361,7 +375,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
     const scope=work.work.kind==='task'?instance.gmailTaskScope(work.work.id):null;
     const slackOk=!instance.plugins.isPluginCommand(work.work.id) || (work.work.kind==='command'?instance.plugins.authority(work.work.id):instance.plugins.currentAuthority(work.work.id));
     const monitor=work.work.kind==='task'?instance.inboxMonitor.item(work.work.id):undefined;
-    return (!monitor || inboxAuthority(Number(monitor.settings_revision))) && !!who && who.botId===work.botId && !!c?.connected && c.enabled && c.agentAccessIds.includes(who.botId) && instance.plugins.gmailModelAllowed(c.accountId,who.botId,who.provider,who.model) && slackOk && ((work.work.kind==='command' && !instance.plugins.isPluginCommand(work.work.id)) || instance.plugins.gmailWorkModelAllowed(c.accountId,who.botId,who.provider,who.model)) && (work.work.kind==='command' || (!!scope && scope.accountId===c.accountId && scope.revision===c.revision));
+    return (!monitor || inboxAuthority(Number(monitor.settings_revision))) && !!who && who.botId===work.botId && !!c?.connected && c.enabled && !!loadGmailCredential(dataDir) && c.agentAccessIds.includes(who.botId) && instance.plugins.gmailModelAllowed(c.accountId,who.botId,who.provider,who.model) && slackOk && ((work.work.kind==='command' && !instance.plugins.isPluginCommand(work.work.id)) || instance.plugins.gmailWorkModelAllowed(c.accountId,who.botId,who.provider,who.model)) && (work.work.kind==='command' || (!!scope && scope.accountId===c.accountId && scope.revision===c.revision));
   };
   const gmailOutcomeAllowed=(id:string)=>{const monitor=instance.inboxMonitor.item(id);return instance.gmailOutcomeAuthority(id) && (!monitor || inboxAuthority(Number(monitor.settings_revision)));};
   const gmailKey=(work:WorkContext)=>`${work.work.kind}:${work.work.id}`;
@@ -375,7 +389,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
       const c=instance.plugins.gmailConnection(),credential=loadGmailCredential(dataDir);if(!gmailAllowed(work)||!c||!credential||credential.email!==c.accountId||credential.clientId!==c.config.clientId)throw Error('Gmail unavailable');
       const controller=new AbortController(),signal=AbortSignal.any([work.signal,controller.signal]);gmailChecks.add(controller);
       gmailCommandRevisions.set(gmailKey(work),c.revision);
-      const assertAuthority=()=>{signal.throwIfAborted();const current=instance.plugins.gmailConnection();if(!gmailAllowed(work)||!current || current.accountId!==c.accountId || current.revision!==c.revision)throw Error('Gmail authority changed');};
+      const assertAuthority=()=>{signal.throwIfAborted();const current=instance.plugins.gmailConnection(),saved=loadGmailCredential(dataDir);if(!gmailAllowed(work)||!current || current.accountId!==c.accountId || current.revision!==c.revision || saved?.clientSecret!==credential.clientSecret || saved.refreshToken!==credential.refreshToken)throw Error('Gmail authority changed');};
       let token:string|undefined;const api=new GmailApi(options.gmailRequest??fetch,async()=>{assertAuthority();token??=await gmailAuth.refresh(credential,signal);return token;},assertAuthority,signal);
       gmailActionFlows.set(identity.id,{controller,signal,revision:c.revision,accountId:c.accountId,assertAuthority,api});
       return {start:assertAuthority,release:()=>{gmailActionFlows.delete(identity.id);gmailChecks.delete(controller);}};
@@ -1031,7 +1045,8 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
     let tokens:ReturnType<typeof loadSlackTokens>;try{tokens=loadSlackTokens(dataDir);}catch{slackStatus='credentials unavailable';return;}
     if(!tokens){slackStatus='credentials unavailable';return;}
     const generation=slackGeneration;slackStatus='connecting';
-    try {const stop=await slack.start(tokens,event=>generation===slackGeneration ? receiveSlack(event) : Promise.resolve(),status=>{if(!closing && generation===slackGeneration)slackStatus=status;},event=>generation===slackGeneration ? receiveSlackInteraction(event) : Promise.resolve());if(closing || generation!==slackGeneration){stop();return;}stopSlack=stop;}
+    const assertAuthority=()=>{const current=instance.plugins.connection(),saved=loadSlackTokens(dataDir);if(closing || generation!==slackGeneration || !current?.enabled || !current.connected || current.revision!==c.revision || saved?.appToken!==tokens.appToken || saved.botToken!==tokens.botToken)throw Error('Slack authority changed');};
+    try {const stop=await slack.start(tokens,event=>generation===slackGeneration ? receiveSlack(event) : Promise.resolve(),status=>{if(!closing && generation===slackGeneration)slackStatus=status;},event=>generation===slackGeneration ? receiveSlackInteraction(event) : Promise.resolve(),assertAuthority);if(closing || generation!==slackGeneration){stop();return;}stopSlack=stop;}
     catch {if(generation===slackGeneration)slackStatus='connection failed';}
   }
   function pluginStatus() {
@@ -1102,7 +1117,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
         if(existing && existing.accountId!==input.email)throw Error('Delete the existing Gmail configuration before changing accounts');
         knownKeys.add(input.clientSecret);stopGmailChecks();return json(200,gmailAuth.start(token,origin,input));
       }
-      if(req.method==='POST' && req.url==='/api/plugins/gmail/check') {await checkGmailConnection();return json(200,pluginStatus()[1]);}
+      if(req.method==='POST' && req.url==='/api/plugins/gmail/check') {await checkGmailConnection(token);return json(200,pluginStatus()[1]);}
       if(req.method==='GET' && req.url==='/api/plugins/gmail/uncertain')return json(200,instance.gmailUncertain());
       if(req.method==='POST' && req.url==='/api/plugins/gmail/reconcile') {const input=z.strictObject({actionId:z.string().uuid(),fingerprint:z.string().regex(/^[a-f0-9]{64}$/),outcome:z.enum(['sent','not-sent'])}).parse(value);instance.reconcileGmailReply(input.actionId,input.fingerprint,input.outcome);return json(200,{reconciled:true});}
       if(req.method==='POST' && req.url==='/api/plugins/gmail/reconcile-change') {const input=z.strictObject({actionId:z.string().uuid(),fingerprint:z.string().regex(/^[a-f0-9]{64}$/),outcome:z.enum(['applied','not-applied'])}).parse(value);instance.reconcileGmailChange(input.actionId,input.fingerprint,input.outcome);return json(200,{reconciled:true});}
@@ -1155,8 +1170,8 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
         if(value.confirm!==true)throw Error('Confirm that the missing interval cannot be recovered');
         const c=instance.plugins.gmailConnection(),credential=loadGmailCredential(dataDir);if(!c?.connected||!credential||credential.email!==c.accountId||credential.clientId!==c.config.clientId)throw Error('Connect Gmail first');
         stopGmailChecks();const controller=new AbortController();gmailChecks.add(controller);
-        const check=()=>{controller.signal.throwIfAborted();const current=instance.plugins.gmailConnection();if(closing||!current?.connected||current.accountId!==c.accountId||current.revision!==c.revision)throw Error('Gmail settings changed');};
-        try {const profile=await gmailAuth.check(credential,controller.signal);check();instance.gmailHistory(undefined,check).rebaseline(c.accountId,profile.historyId);}finally{gmailChecks.delete(controller);}
+        const check=()=>{controller.signal.throwIfAborted();const current=instance.plugins.gmailConnection(),saved=loadGmailCredential(dataDir);if(closing||!instance.authorized(token)||!current?.connected||current.accountId!==c.accountId||current.revision!==c.revision||saved?.clientSecret!==credential.clientSecret||saved.refreshToken!==credential.refreshToken)throw Error('Gmail settings changed');};
+        try {const profile=await gmailAuth.check(credential,controller.signal,check);check();instance.gmailHistory(undefined,check).rebaseline(c.accountId,profile.historyId);}finally{gmailChecks.delete(controller);}
         return json(200,pluginStatus()[1]);
       }
       if(req.method==='POST' && req.url==='/api/plugins/gmail/read') {
@@ -1180,10 +1195,10 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
         if(typeof value.botId!=='string'||typeof value.enabled!=='boolean')throw Error('Invalid agent access');
         gmailAuth.cancel();stopGmailChecks();stopGmailWork(value.botId);instance.plugins.gmailSetAccess(value.botId,value.enabled);return json(200,pluginStatus()[1]);
       }
-      if(req.method==='POST' && req.url==='/api/plugins/gmail/enable') {gmailAuth.cancel();await checkGmailConnection();instance.plugins.gmailSetEnabled(true);return json(200,pluginStatus()[1]);}
+      if(req.method==='POST' && req.url==='/api/plugins/gmail/enable') {gmailAuth.cancel();await checkGmailConnection(token);if(!instance.authorized(token))return json(401,{error:'Unauthorized'});instance.plugins.gmailSetEnabled(true);return json(200,pluginStatus()[1]);}
       if(req.method==='POST' && req.url==='/api/plugins/gmail/disable') {gmailAuth.cancel();stopGmailChecks();stopGmailWork();instance.plugins.gmailSetEnabled(false);return json(200,pluginStatus()[1]);}
-      if(req.method==='POST' && req.url==='/api/plugins/gmail/disconnect') {gmailAuth.reset();stopGmailChecks();stopGmailWork();instance.plugins.gmailDisconnect();disconnectGmailCredential(dataDir);gmailHealth='Not checked';return json(200,pluginStatus()[1]);}
-      if(req.method==='POST' && req.url==='/api/plugins/gmail/delete-config') {gmailAuth.reset();stopGmailChecks();stopGmailWork();disableInbox();instance.plugins.gmailDisconnect();disconnectGmailCredential(dataDir);instance.plugins.gmailDeleteConfig();gmailHealth='Not checked';return json(200,pluginStatus()[1]);}
+      if(req.method==='POST' && req.url==='/api/plugins/gmail/disconnect') {gmailAuth.reset();stopGmailChecks();stopGmailWork();secretRequests.revokeIntegrations([...gmailRoles]);instance.plugins.gmailDisconnect();gmailHealth='Not checked';return json(200,pluginStatus()[1]);}
+      if(req.method==='POST' && req.url==='/api/plugins/gmail/delete-config') {gmailAuth.reset();stopGmailChecks();stopGmailWork();disableInbox();secretRequests.revokeIntegrations([...gmailRoles]);instance.plugins.gmailDisconnect();instance.plugins.gmailDeleteConfig();gmailHealth='Not checked';return json(200,pluginStatus()[1]);}
       if(req.method==='POST' && req.url==='/api/plugins/slack/connect') {
         const config=slackConfigSchema.parse({teamId:value.teamId,userId:value.userId,channelId:value.channelId,botId:value.botId});
         if(typeof value.appToken!=='string' || !/^xapp-[A-Za-z0-9-]+$/.test(value.appToken) || typeof value.botToken!=='string' || !/^xoxb-[A-Za-z0-9-]+$/.test(value.botToken))throw Error('Enter valid Slack app and bot tokens');
@@ -1191,8 +1206,9 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
         const generation=slackGeneration,existing=instance.plugins.connection();if(existing && existing.accountId!==config.teamId)throw Error('Delete the existing Slack configuration before changing workspace');
         const tokens={appToken:value.appToken,botToken:value.botToken};
         const identity=await slack.identify(tokens);if(identity.teamId!==config.teamId)throw Error('Bot token belongs to a different workspace');if(identity.botUserId===config.userId)throw Error('The approved Slack user must not be the app bot');
-        if(generation!==slackGeneration || instance.plugins.connection()?.revision!==existing?.revision)throw Error('Slack settings changed during connection. Review and try again');
-        stopSlackConnection();saveSlackTokens({root:dataDir,...tokens});knownKeys.add(tokens.appToken);knownKeys.add(tokens.botToken);instance.plugins.connect(config);
+        if(!instance.authorized(token) || generation!==slackGeneration || instance.plugins.connection()?.revision!==existing?.revision || instance.bot(config.botId)?.archived!==false)throw Error('Slack settings changed during connection. Review and try again');
+        stopSlackConnection();secretRequests.revokeIntegrations([...slackRoles]);instance.plugins.connect(config);const destination=slackDestination(config);
+        secretRequests.provision([{integration:'slack.app',destination,name:`Slack app token ${randomUUID()}`,purpose:`Slack workspace ${config.teamId}`,value:tokens.appToken},{integration:'slack.bot',destination,name:`Slack bot token ${randomUUID()}`,purpose:`Slack workspace ${config.teamId}`,value:tokens.botToken}]);knownKeys.add(tokens.appToken);knownKeys.add(tokens.botToken);
         return json(200,pluginStatus()[0]);
       }
       if(req.method==='POST' && req.url==='/api/plugins/slack/access') {
@@ -1201,8 +1217,8 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
       }
       if(req.method==='POST' && req.url==='/api/plugins/slack/enable') {instance.plugins.setEnabled(true);await startSlackConnection();return json(200,pluginStatus()[0]);}
       if(req.method==='POST' && req.url==='/api/plugins/slack/disable') {stopSlackConnection();instance.plugins.setEnabled(false);return json(200,pluginStatus()[0]);}
-      if(req.method==='POST' && req.url==='/api/plugins/slack/disconnect') {stopSlackConnection();instance.plugins.disconnect();disconnectSlackTokens(dataDir);return json(200,pluginStatus()[0]);}
-      if(req.method==='POST' && req.url==='/api/plugins/slack/delete-config') {stopSlackConnection();disableInbox();instance.plugins.disconnect();disconnectSlackTokens(dataDir);instance.plugins.deleteConfig();return json(200,pluginStatus()[0]);}
+      if(req.method==='POST' && req.url==='/api/plugins/slack/disconnect') {stopSlackConnection();secretRequests.revokeIntegrations([...slackRoles]);instance.plugins.disconnect();return json(200,pluginStatus()[0]);}
+      if(req.method==='POST' && req.url==='/api/plugins/slack/delete-config') {stopSlackConnection();disableInbox();secretRequests.revokeIntegrations([...slackRoles]);instance.plugins.disconnect();instance.plugins.deleteConfig();return json(200,pluginStatus()[0]);}
       if(req.url==='/api/core') {
         if(req.method==='GET') return json(200,instance.core());
         if(req.method==='POST') {
@@ -1218,9 +1234,25 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
       if(req.method==='POST' && req.url==='/api/openrouter-connection/disconnect') {disconnectOpenRouter(dataDir);return json(200,{saved:false});}
       if(req.method==='GET' && req.url==='/api/task-updates') return json(200,instance.bots().flatMap(bot=>typeof bot.id==='string' ? instance.taskAttempts(bot.id).slice(0,30) : []));
       if(req.method==='GET' && req.url==='/api/secrets')return json(200,secretRequests.names());
+      if(req.method==='GET' && req.url==='/api/secret-grants')return json(200,secretRequests.grants());
+      if(req.method==='GET' && req.url==='/api/secret-grant-targets') {const gmail=instance.plugins.gmailConnection(),slack=instance.plugins.connection();return json(200,[...(gmail?.connected?gmailRoles.map(integration=>({integration,destination:gmailDestination(gmail.accountId)})):[]),...(slack?.connected?slackRoles.map(integration=>({integration,destination:slackDestination(slack.config)})):[])]);}
+      if(req.method==='POST' && (req.url==='/api/secret-grants/grant' || req.url==='/api/secret-grants/revoke')) {
+        const input=z.strictObject({name:z.string().min(1).max(120),revision:z.string().uuid(),integration:z.enum(['gmail.client','gmail.refresh','slack.app','slack.bot']),destination:z.string().min(1).max(1000),confirm:z.literal(true)}).parse(value);
+        if(!instance.authorized(token))return json(401,{error:'Unauthorized'});
+        const gmail=instance.plugins.gmailConnection(),slack=instance.plugins.connection();
+        const target=input.integration.startsWith('gmail.')?(gmail?.connected?gmailDestination(gmail.accountId):null):(slack?.connected?slackDestination(slack.config):null);
+        if(req.url.endsWith('/grant')) {
+          if(target!==input.destination)throw Error('Integration destination changed');
+          const secret=secretRequests.lookup(input.name,input.revision);if(!secret || (input.integration==='slack.app'?!/^xapp-[A-Za-z0-9-]+$/.test(secret):input.integration==='slack.bot'?!/^xoxb-[A-Za-z0-9-]+$/.test(secret):!(/^[\x21-\x7e]{1,4096}$/.test(secret))))throw Error('Secret is not valid for this integration');
+        }
+        if(input.integration.startsWith('gmail.')){gmailAuth.cancel();stopGmailChecks();stopGmailWork();}else stopSlackConnection();
+        if(req.url.endsWith('/grant'))secretRequests.grant(input);else if(!secretRequests.revoke(input))throw Error('Grant changed');
+        if(input.integration.startsWith('slack.'))await startSlackConnection();
+        return json(200,{updated:true});
+      }
       if(req.method==='POST' && req.url==='/api/secrets/add') {const parsed=z.strictObject({name:z.string().trim().min(1).max(120),purpose:z.string().trim().min(1).max(500),value:z.string().min(1).max(16000)}).parse(value);if(!instance.authorized(token))return json(401,{error:'Unauthorized'});if(redact(parsed.name)!==parsed.name || redact(parsed.purpose)!==parsed.purpose || parsed.name.includes(parsed.value) || parsed.purpose.includes(parsed.value) || containsUnsafeWebUrl(parsed.name) || containsUnsafeWebUrl(parsed.purpose))throw Error('Invalid metadata');secretRequests.add(parsed);knownKeys.add(parsed.value);return json(200,{saved:true});}
-      if(req.method==='POST' && req.url==='/api/secrets/replace') {const parsed=z.strictObject({name:z.string().min(1).max(120),revision:z.string().uuid(),value:z.string().min(1).max(16000),confirm:z.literal(true)}).parse(value);if(!instance.authorized(token))return json(401,{error:'Unauthorized'});secretRequests.replace(parsed);knownKeys.add(parsed.value);return json(200,{saved:true});}
-      if(req.method==='POST' && req.url==='/api/secrets/delete') {const input=z.strictObject({name:z.string().min(1).max(120),revision:z.string().uuid(),confirm:z.literal(true)}).parse(value);if(!instance.authorized(token))return json(401,{error:'Unauthorized'});if(!secretRequests.delete(input.name,input.revision))throw Error('Secret not found');return json(200,{deleted:true});}
+      if(req.method==='POST' && req.url==='/api/secrets/replace') {const parsed=z.strictObject({name:z.string().min(1).max(120),revision:z.string().uuid(),value:z.string().min(1).max(16000),confirm:z.literal(true)}).parse(value);if(!instance.authorized(token))return json(401,{error:'Unauthorized'});const grants=secretRequests.grants().filter(grant=>grant.name===parsed.name);if(grants.some(grant=>String(grant.integration).startsWith('gmail.'))){gmailAuth.cancel();stopGmailChecks();stopGmailWork();}if(grants.some(grant=>String(grant.integration).startsWith('slack.')))stopSlackConnection();secretRequests.replace(parsed);knownKeys.add(parsed.value);return json(200,{saved:true});}
+      if(req.method==='POST' && req.url==='/api/secrets/delete') {const input=z.strictObject({name:z.string().min(1).max(120),revision:z.string().uuid(),confirm:z.literal(true)}).parse(value);if(!instance.authorized(token))return json(401,{error:'Unauthorized'});const grants=secretRequests.grants().filter(grant=>grant.name===input.name);if(grants.some(grant=>String(grant.integration).startsWith('gmail.'))){gmailAuth.cancel();stopGmailChecks();stopGmailWork();}if(grants.some(grant=>String(grant.integration).startsWith('slack.')))stopSlackConnection();if(!secretRequests.delete(input.name,input.revision))throw Error('Secret not found');return json(200,{deleted:true});}
       const secretDecision=req.url?.match(/^\/api\/secret-requests\/([\w-]+)\/(save|select|skip|dismiss)$/);
       if(req.method==='POST' && secretDecision?.[1] && secretDecision[2]) {
         const request=secretRequests.list().find(item=>item.id===secretDecision[1]);if(!request)throw Error('Secret request unavailable');

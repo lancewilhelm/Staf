@@ -25,7 +25,8 @@ test('paired owner connects Gmail with PKCE, manages agent access, and retains s
   const redirect=new URL(authorization.searchParams.get('redirect_uri'));redirect.searchParams.set('state',authorization.searchParams.get('state'));redirect.searchParams.set('code','synthetic-code');
   assert.equal((await fetch(redirect)).status,200);
   const exchange=new URLSearchParams(requests[0].options.body);assert.equal(createHash('sha256').update(exchange.get('code_verifier')).digest('base64url'),authorization.searchParams.get('code_challenge'));assert.equal(exchange.get('client_secret'),'synthetic-secret');
-  assert.equal(statSync(join(dir,'auth','gmail.json')).mode & 0o777,0o600);
+  assert.equal(statSync(join(dir,'secrets','credentials.sqlite')).mode & 0o777,0o600);
+  assert.equal((await call('/api/secret-grants',token))[1].filter(item=>item.integration.startsWith('gmail.')).length,2);
   gmail=(await call('/api/plugins',token))[1].find(x=>x.id==='gmail');assert.equal(gmail.connected,true);assert.equal(gmail.enabled,false);assert.equal(gmail.accountId,'owner@example.test');assert.deepEqual(gmail.agentAccessIds,[]);
   assert.doesNotMatch(JSON.stringify(gmail),/synthetic-secret|synthetic-refresh|synthetic-access/);
   assert.equal((await call('/api/plugins/gmail/access',token,{botId:bot.id,enabled:true}))[0],200);

@@ -37,7 +37,8 @@ function connect(){void action('connect',{...form.value});}
      <label>Approved user ID<input v-model.trim="form.userId" required /></label>
      <label>Direct message channel ID<input v-model.trim="form.channelId" required /></label>
      <label>Agent<select v-model="form.botId" required><option value="" disabled>Choose an agent</option><option v-for="bot in state.bots.filter(item=>!item.archived)" :key="bot.id" :value="bot.id">{{ bot.name }}</option></select></label>
-     <button :disabled="busy">Connect</button>
+     <p>Connecting approves these tokens for Slack at https://slack.com/api and the workspace, user, and DM above. Agent access is a separate decision.</p>
+     <button :disabled="busy">Connect and approve</button>
     </form>
    </details>
    <div v-if="plugin.connected && plugin.config" class="row">
@@ -52,6 +53,6 @@ function connect(){void action('connect',{...form.value});}
   </div>
   <GmailSettings />
   <p role="status">{{ busy ? 'Updating plugin…' : status }}</p>
-  <ConfirmAction v-if="confirm" :title="confirm === 'disconnect' ? 'Disconnect Slack?' : 'Delete Slack configuration?'" :message="confirm === 'disconnect' ? 'This stops Slack and removes its saved tokens. The binding and history remain.' : 'This stops Slack, removes its tokens and saved binding. Message history remains.'" :action="confirm === 'disconnect' ? 'Disconnect' : 'Delete configuration'" @cancel="confirm=null" @confirm="action(confirm)" />
+  <ConfirmAction v-if="confirm" :title="confirm === 'disconnect' ? 'Disconnect Slack?' : 'Delete Slack configuration?'" :message="confirm === 'disconnect' ? 'This stops Slack and revokes use of its saved tokens. The tokens, binding, and history remain.' : 'This stops Slack and revokes use of its saved tokens and removes the binding. Tokens and message history remain.'" :action="confirm === 'disconnect' ? 'Disconnect' : 'Delete configuration'" @cancel="confirm=null" @confirm="action(confirm)" />
  </section>
 </template>
