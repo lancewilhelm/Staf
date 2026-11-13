@@ -41,6 +41,21 @@ function fixture(redact) {
   const instance=new Instance(':memory:',redact);const bot=instance.createBot({provider:'live',model:'fixture-offline',name:'Test',instructions:'',toolMode:'hybrid'});instance.claim({id:'c',botId:bot.id,content:'hello'});const controller=new AbortController();return {instance,bot,controller,actions:instance.workActions().open({kind:'command',id:'c'},controller.signal)};
 }
 
+test('action results and failure details filter known credentials before records and callers',async()=>{
+  const {redactor}=await import('../dist/config.js'),{ActionFailed}=await import('../dist/work-actions.js'),secret='synthetic-saved-credential';
+  const {instance,actions}=fixture(redactor({OPENROUTER_API_KEY:secret}));
+  try {
+    instance.workActions().register({...localChange({execute:async()=>`result ${secret}`}),visibleResult:value=>value});
+    const result=await invoke(actions,source('result'),'local_change',{value:'safe'});
+    assert.equal(result.kind,'completed');assert.equal(result.value,'result [REDACTED]');
+    assert.doesNotMatch(JSON.stringify(instance.workActions().inspectActions({kind:'command',id:'c'})),new RegExp(secret));
+    assert.doesNotMatch(JSON.stringify(instance.db.prepare('SELECT private_result FROM work_action_invocations').all()),new RegExp(secret));
+    instance.workActions().register({...localChange({execute:async()=>{throw new ActionFailed(`failed ${secret}`);}}),name:'failure',definition:{type:'function',function:{name:'failure',description:'Fail a fixture',parameters:{type:'object'}}}});
+    const failed=await invoke(actions,source('failed'),'failure',{value:'safe'});
+    assert.equal(failed.kind,'status');assert.doesNotMatch(JSON.stringify(failed),new RegExp(secret));assert.doesNotMatch(JSON.stringify(instance.workActions().inspectActions({kind:'command',id:'c'})),new RegExp(secret));
+  } finally {actions.dispose();instance.close();}
+});
+
 test('input normalization cannot introduce a credential before the shared journal boundary',async()=>{
   const {redactor}=await import('../dist/config.js'),secret='syntheticnormalizedcredential';const {instance,actions}=fixture(redactor({OPENROUTER_API_KEY:secret}));let effects=0;
   try{instance.workActions().register({...localChange({execute:async()=>{effects++;return 'changed';}}),parseInput:value=>({value:value.value.replaceAll(' ','')})});for(const src of [source('normalized'),guest(1)])assert.equal((await invoke(actions,src,'local_change',{value:[...secret].join(' ')})).kind,'blocked');assert.equal(effects,0);assert.deepEqual(instance.workActions().inspectActions({kind:'command',id:'c'}),[]);}finally{actions.dispose();instance.close();}

@@ -572,6 +572,11 @@ Saving checks the current client and originating work. Interrupted requests can
 be dismissed, but cannot accept a value or resume work. Duplicate names are
 rejected. `GET /api/secrets` returns metadata only; `POST /api/secrets/delete`
 accepts a name and explicit confirmation. No API returns values or grants a plugin permission to use them.
+The browser's recognizable-pattern warning is client-side; it is not an API
+validation guarantee. It blocks flagged chat and question submissions and omits
+flagged written answers from draft saves. Action results are filtered for known
+values before normal retention and model delivery; this does not cover arbitrary
+encodings, unknown values, historical records, or messages already sent.
 See [secret requests](usage.md#secret-requests) for storage and backup limits.
 
 
