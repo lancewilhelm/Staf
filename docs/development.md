@@ -323,9 +323,10 @@ For an offline basic-tool review, use the controlled fixture agent and repeat th
 1. Send `Scripted clock fixture`. Expect the time and an action record. Hybrid
    and Code Mode also expose source, result and linked action IDs under
    **Code execution**.
-2. Send `Interactive process fixture`. Expect host isolation to be unavailable
-   and no process to start. Host file and native terminal actions are currently
-   blocked on every platform; see [credential isolation](credential-isolation.md).
+2. Send `Interactive process fixture`. With default settings, expect host
+   isolation to be unavailable and no process to start. An explicitly selected
+   Linux boundary is available for disposable verification but remains
+   unverified; see [credential isolation](credential-isolation.md).
 
 These prompts use controlled responses, not a live provider. The previous
 file, retained PTY and cross-client process walkthroughs require the missing
@@ -519,8 +520,9 @@ cropping, saved identity, and supported UI interactions without a live provider.
 The broader workspace and memory browser journeys remain relevant regressions.
 
 The older native process integration tests expect real host commands. They fail
-while agent host execution is blocked. The controlled `Native process fixture`
-currently reports isolation unavailable and starts no process.
+with the default closed configuration. The controlled `Native process fixture`
+reports isolation unavailable and starts no process unless the experimental
+Linux boundary is explicitly configured and passes its checks.
 
 ### Task action verification
 
@@ -532,7 +534,7 @@ For a manual CLI check, start the controlled fixture as described in [Review cha
 
 `test/native-interactive.test.js` retains the intended pipe/PTY, retained-work,
 EOF/resize, cross-client/CLI, Stop, privacy and input-recovery coverage, but its
-host-execution tests fail until a supported isolation backend exists. The
+host-execution tests fail with the default closed configuration. The
 distribution test instead verifies that a fresh package rejects host execution
 before starting a process. Linux runtime evidence is separate from macOS tests.
 

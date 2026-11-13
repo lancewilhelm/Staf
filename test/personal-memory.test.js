@@ -158,7 +158,7 @@ test('a proposed update cannot be reconciled as an applied memory effect',async(
   const result=await actions.invoke({source:{kind:'provider',responseId:'fixture',callId:'one'},name:'memory_update',input:{scope:{kind:'agent'},id:item.id,version:item.version,text:'medical synthetic',classification:'sensitive'},intent:{kind:'new'}});
   assert.equal(result.kind,'completed');instance.db.prepare("UPDATE action_journal SET state='uncertain' WHERE id=?").run(result.actionId);
   instance.memories.update({id:item.id,scope,version:item.version,text:'medical synthetic'});
-  assert.throws(()=>actions.reconcile(result.actionId,{version:2}),/proposal cannot be reconciled/);actions.dispose();
+  await assert.rejects(()=>actions.reconcile(result.actionId,{version:2}),/proposal cannot be reconciled/);actions.dispose();
  }finally{instance.close();}
 });
 

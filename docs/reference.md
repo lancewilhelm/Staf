@@ -7,7 +7,9 @@ and stores development state in `~/.staf/development`. `STAF_DEV_DATA_DIR`
 explicitly selects another Staf instance directory outside the checkout;
 `STAF_DEV_CONNECTION_DIR` selects the connection store of an existing Staf
 instance without copying it; `STAF_DEV_PORT` selects another loopback port. The service inherits its launch
-environment. See [development](development.md#run-the-development-workspace)
+environment. `STAF_LINUX_HOST_EXECUTION=1` selects the experimental, unverified
+Linux host boundary only when its root-owned policy and checks succeed; see
+[credential isolation](credential-isolation.md). See [development](development.md#run-the-development-workspace)
 for ownership, pairing, reset, and schema recovery.
 
 ## Shared terminal
@@ -510,13 +512,13 @@ where persistence succeeds.
 
 ## Host file actions
 
-Agent host-file calls are currently blocked while credential isolation is
-unverified. The following describes the retained implementation and recovery
-contract, not available agent access.
+Agent host-file calls fail closed by default. On Linux they can use the
+explicitly configured, unverified host boundary described in
+[credential isolation](credential-isolation.md).
 
 `file_read({path, offset?, limit?})` returns at most 32,768 bytes (default 8,192) and returns base64 data, byte offset, size, next offset and, for files up to 1 MiB, a SHA-256. `file_write({path, content})` writes UTF-8. `file_edit({path, expectedHash, oldText, newText})` requires valid UTF-8, a file at most 1 MiB, the current hash and one exact match. `file_search({path, query, offset?, limit?})` returns byte offsets in a file, scanning up to 65,536 bytes per page, or matching names in a single directory. A page has at most 100 matches; a directory over 10,000 entries is rejected. Paths are at most 4,096 characters; write content is at most 131,072 UTF-16 code units, each edit string at most 65,536, and search queries at most 1,024. The shared 256 KiB serialized invocation limit also applies. Follow `nextOffset` until null. Concurrent host changes can invalidate a page or race an edit; the hash check is not an atomic compare-and-swap.
 
-Paths resolve against the captured working directory unless absolute and use ordinary host permissions. Inputs changed by redaction are rejected before journal preparation. Shared action admission, Stop, recovery, and uncertain-effect handling apply. Helper and scheduled task restrictions remain in force; task mode applies to eligible actions.
+With the Linux boundary, paths resolve against the approved workspace unless absolute. The file helper rejects paths outside it, symlinks, and nested mounts. The isolated execution account and its workspace permissions apply. Inputs changed by redaction are rejected before journal preparation. Shared action admission, Stop, recovery, and uncertain-effect handling apply. Helper and scheduled task restrictions remain in force; task mode applies to eligible actions.
 
 Random file pages check the complete known-credential overlap and up to 64 KiB
 of preceding token context (or the larger known-credential overlap). Recognized
@@ -575,17 +577,15 @@ See [secret requests](usage.md#secret-requests) for storage and backup limits.
 
 ### Native process API
 
-Agent native-process and host-file calls currently fail closed before execution.
-Scratch uses a separate conditional Linux Docker backend that remains unverified.
-The resource APIs below remain available to paired owners for existing records;
-the process execution contract describes retained implementation, not a
-currently available agent capability.
+Agent native-process and host-file calls fail closed unless the experimental
+Linux boundary is explicitly configured and passes its checks. This path and
+the separate Docker scratch backend remain unverified on Linux. Resource APIs
+remain available to paired owners for existing records.
 
 
-Pipe and PTY supervisors omit `OPENROUTER_API_KEY`, `STAF_API_KEY`,
-`OPENAI_API_KEY`, `CODEX_API_KEY`, and `LMSTUDIO_API_KEY` from the inherited
-environment. Other environment variables are inherited. This does not isolate
-the service account's files, processes, or unknown credentials from agent work.
+The isolated launcher receives a fixed minimal environment, and the guard closes
+extra descriptors before accepting a command. The older retained host supervisor
+only filters selected environment variables and is not an isolation boundary.
 
 Paired clients can list `GET /api/processes`, inspect `GET /api/processes/ID`,
 read `GET /api/processes/ID/output?cursor=N`, and request termination with

@@ -72,7 +72,7 @@ static void apply_landlock(void) {
 static void apply_seccomp(void) {
   scmp_filter_ctx filter=seccomp_init(SCMP_ACT_ALLOW); require(filter!=NULL);
   require(seccomp_attr_set(filter,SCMP_FLTATR_ACT_BADARCH,SCMP_ACT_KILL_PROCESS)==0);
-  const char *blocked[]={"unshare","setns","mount","umount2","pivot_root","open_by_handle_at","ptrace","process_vm_readv","process_vm_writev","pidfd_getfd","kcmp","bpf","keyctl","add_key","request_key","io_uring_setup","io_uring_enter","io_uring_register","userfaultfd","perf_event_open","open_tree","move_mount","fsopen","fsconfig","fsmount","mount_setattr"};
+  const char *blocked[]={"unshare","setns","mount","umount2","pivot_root","mknod","mknodat","open_by_handle_at","ptrace","process_vm_readv","process_vm_writev","pidfd_getfd","kcmp","bpf","keyctl","add_key","request_key","io_uring_setup","io_uring_enter","io_uring_register","userfaultfd","perf_event_open","open_tree","move_mount","fsopen","fsconfig","fsmount","mount_setattr"};
   for(size_t i=0;i<sizeof(blocked)/sizeof(blocked[0]);i++) {
     int nr=seccomp_syscall_resolve_name(blocked[i]); require(nr!=__NR_SCMP_ERROR);
     require(seccomp_rule_add(filter,SCMP_ACT_ERRNO(EPERM),nr,0)==0);

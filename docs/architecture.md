@@ -352,16 +352,20 @@ The service installs a tracker keyed by the actual command or task attempt while
 
 ### Registered host files
 
-Agent host file and native process actions are blocked at capability input
-parsing on all platforms. Scratch uses the separate Linux Docker checks in
-[credential isolation](credential-isolation.md); those checks have not been
-verified on Linux. These rules apply to Direct, Hybrid, Code Mode, tasks and
-helpers. Previously detached processes and unrelated same-user software are
-outside that gate.
-The [Linux isolation design](credential-isolation.md) records the scratch
-implementation, the remaining host-work boundary, and verification requirements.
+Agent host file and native process actions reject input unless the owner has
+selected the experimental Linux boundary and its policy checks pass. The fixed
+launcher supplies pipe, PTY and file work, including write reconciliation;
+unsupported and failed configurations never fall back to service-account host
+execution. The launcher requests private namespaces, and the guard checks the
+mount layout and capabilities and applies Landlock and seccomp before delivery.
+Neither this path nor the separate Docker scratch boundary has been verified on
+Linux. See [credential isolation](credential-isolation.md) for prerequisites,
+trust assumptions and remaining tests. Helpers and scheduled tasks retain their
+existing restrictions. Detached processes started before this gate and unrelated
+same-user software are outside it.
 
-The retained host file implementations provide read, write, exact-match edit and bounded search, but are not dispatched while the isolation gate is closed. Their filesystem operations use service-account access, not QuickJS isolation. An external writer can race their hash check and write; Staf does not claim atomic compare-and-swap.
+Concurrent workspace writers can still race an edit: the hash check is not an
+atomic filesystem compare-and-swap.
 
 ### Secret requests
 

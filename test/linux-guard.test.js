@@ -33,15 +33,15 @@ test('Linux guard mount admission rejects nested and ambiguous exports',{skip:co
   } finally {rmSync(dir,{recursive:true,force:true});}
 });
 
-if(process.platform!=='linux')test('Linux guard fails closed on an unsupported host before reading a command',{skip:compilerProblem}, () => {
+if(process.platform!=='linux')test('Linux guard and file opener fail closed on an unsupported host before reading input',{skip:compilerProblem}, () => {
   const dir=mkdtempSync(join(tmpdir(),'staf-guard-test-'));
   try {
-    const binary=join(dir,'guard');
-    const compile=spawnSync('cc',['-std=c11','-Wall','-Wextra','-Werror','deploy/native-linux/staf-exec-guard.c','-o',binary],{encoding:'utf8'});
-    assert.equal(compile.status,0,compile.stderr);
-    const result=spawnSync(binary,[],{input:'synthetic command\n',encoding:'utf8'});
-    assert.equal(result.status,125);
-    assert.equal(result.stdout,'');
-    assert.match(result.stderr,/unavailable/i);
+    for(const source of ['staf-exec-guard.c','staf-file-open.c']) {
+      const binary=join(dir,source);
+      const compile=spawnSync('cc',['-std=c11','-Wall','-Wextra','-Werror','deploy/native-linux/'+source,'-o',binary],{encoding:'utf8'});
+      assert.equal(compile.status,0,compile.stderr);
+      const result=spawnSync(binary,[],{input:'synthetic command\n',encoding:'utf8'});
+      assert.equal(result.status,125);assert.equal(result.stdout,'');assert.match(result.stderr,/unavailable/i);
+    }
   } finally {rmSync(dir,{recursive:true,force:true});}
 });

@@ -6,9 +6,12 @@ import { ActionDenied, ActionRevision, ActionFailed, type Capability, type Actio
 import {registerTaskCapabilities, type TaskActionHooks} from './task-actions.js';
 import {clockCapability} from './clock-action.js';
 import {fileCapabilities} from './file-actions.js';
+import {isolatedFileCapabilities} from './linux-file-actions.js';
 import {SecretRequests,secretRequestInput} from './secret-requests.js';
 
 import {nativeCommandCapability,nativeOutputCapability,nativeStopCapability,nativeInteractionCapabilities,checkedInteraction} from './native-processes.js';
+import {selectLinuxHostBoundary} from './linux-host-boundary.js';
+import {linuxHostProcessBackend} from './linux-host-process.js';
 import {registerMemoryCapabilities} from './memory-actions.js';
 import {parseToolMode} from './tool-mode.js';
 import {providerLabel} from './provider-label.js';
@@ -503,13 +506,24 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
   });
   const nativeAllowed=(work:import('./work-actions.js').WorkContext)=>instance.nativeProcessAllowed(work.work);
   function isolationRequired<I,O>(capability:Capability<I,O>):Capability<I,O> {return {...capability,definition:{...capability.definition,function:{...capability.definition.function,description:'Unavailable: credential isolation is not established on this host.'}},parseInput:()=>{throw new ActionFailed('Unavailable: credential isolation is not established on this host.');}};}
-  workActions.register(isolationRequired(nativeCommandCapability(processes,nativeAllowed,redact)));
-  workActions.register(isolationRequired(nativeOutputCapability(processes,nativeAllowed)));
-  workActions.register(isolationRequired(nativeStopCapability(processes,nativeAllowed)));
-  const interactions=nativeInteractionCapabilities(processes,nativeAllowed,redact);workActions.register(isolationRequired(interactions.write));workActions.register(isolationRequired(interactions.eof));workActions.register(isolationRequired(interactions.resize));
+  const hostBoundary=selectLinuxHostBoundary({enabled:env.STAF_LINUX_HOST_EXECUTION==='1',dataDir,secretDir:resolve(dirname(path))});
+  const hostCapability=<I,O>(capability:Capability<I,O>,revalidate=true):Capability<I,O>=>{
+    if(!hostBoundary)return isolationRequired(capability);
+    if(!revalidate)return capability;
+    return {...capability,check:(input,work,action)=>{hostBoundary.recheck();capability.check(input,work,action);}};
+  };
+  workActions.register(hostCapability(nativeCommandCapability(processes,nativeAllowed,redact,(work,action,input)=>{
+    if(!hostBoundary)throw new ActionFailed('Unavailable: credential isolation is not established on this host.');
+    const mode=input.mode??'pipe',cols=input.cols??80,rows=input.rows??24;
+    return processes.startBackend(work,action,{baseCwd:hostBoundary.workspace,cwd:input.cwd,mode,retain:input.retain,cols:mode==='pty'?cols:undefined,rows:mode==='pty'?rows:undefined,backend:linuxHostProcessBackend(hostBoundary,input.command,mode,cols,rows)});
+  })));
+  workActions.register(hostCapability(nativeOutputCapability(processes,nativeAllowed),false));
+  workActions.register(hostCapability(nativeStopCapability(processes,nativeAllowed),false));
+  const interactions=nativeInteractionCapabilities(processes,nativeAllowed,redact);workActions.register(hostCapability(interactions.write));workActions.register(hostCapability(interactions.eof));workActions.register(hostCapability(interactions.resize));
   workActions.register(clockCapability(instance, work=>{const timer=work.work.kind==='task'?taskTimers.get(work.work.id):undefined;return authorizeClock(work.botId,work.work.kind,work.work.id,work.signal,timer?.pause,timer?.resume);}));
-  const files=fileCapabilities(redact,work=>instance.fileActionsAllowed(work.work),()=>credentialRedactionOverlap(env,[...knownKeys]));
-  workActions.register(isolationRequired(files.read));workActions.register(isolationRequired(files.write));workActions.register(isolationRequired(files.edit));workActions.register(isolationRequired(files.search));
+  const fileAllowed=(work:import('./work-actions.js').WorkContext)=>instance.fileActionsAllowed(work.work),fileOverlap=()=>credentialRedactionOverlap(env,[...knownKeys]);
+  const files=hostBoundary?isolatedFileCapabilities(hostBoundary,redact,fileAllowed,fileOverlap):fileCapabilities(redact,fileAllowed,fileOverlap);
+  workActions.register(hostCapability(files.read));workActions.register(hostCapability(files.write));workActions.register(hostCapability(files.edit));workActions.register(hostCapability(files.search));
   const requestSecret:Capability<z.infer<typeof secretRequestInput>,string>={
     name:'request_secret',definition:{type:'function',function:{name:'request_secret',description:'Ask the owner to enter a named secret in the official Staf UI. Supply only its name, purpose, and known destination; never supply the value. Saving does not enable or authorize an integration.',parameters:{type:'object',properties:{name:{type:'string'},purpose:{type:'string'},destination:{type:'string'}},required:['name','purpose'],additionalProperties:false}}},
     parseInput:value=>secretRequestInput.parse(value),parseResult:value=>z.enum(['saved','skipped','dismissed']).parse(value),
@@ -1307,7 +1321,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
         const controller=(kind==='command'?responseControllers:taskControllers).get(id);
         if(!controller)return json(409,{error:'Only active accepted work can be reconciled'});
         const actions=workActions.open({kind,id},controller.signal);
-        try {actions.reconcile(actionId,value.evidence);return json(200,actions.manifest());}finally{actions.dispose();}
+        try {await actions.reconcile(actionId,value.evidence);return json(200,actions.manifest());}finally{actions.dispose();}
       }
       if(req.url==='/api/shell-config'){if(req.method==='GET')return json(200,instance.shellConfig());if(req.method==='POST'){if(shellControllers.size)return json(409,{error:'Settle pending shell work before changing configuration'});if(typeof value.revision!=='number'||!(value.dockerBinary===null||typeof value.dockerBinary==='string')||!(value.dockerSocket===null||typeof value.dockerSocket==='string')||!(value.imageId===null||typeof value.imageId==='string'))return json(400,{error:'Invalid shell configuration'});return json(200,instance.setShellConfig({revision:value.revision,dockerBinary:value.dockerBinary,dockerSocket:value.dockerSocket,imageId:value.imageId}));}}
       const shellScopeMatch=req.url?.match(/^\/api\/shell-permissions\/(instance|bot:[\w-]+|task:[\w-]+)$/);
@@ -1488,7 +1502,10 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
         if(req.method==='GET' && processMatch[2]==='output')return json(200,processes.output(processMatch[1],Number(processMatch[3] ?? 0)));
         if(req.method==='GET' && !processMatch[2])return json(200,processes.get(processMatch[1]));
         if(req.method==='POST' && processMatch[2]==='stop')return json(200,processes.stop(processMatch[1]));
-        if(req.method==='POST' && ['input','eof','resize'].includes(processMatch[2]??''))return json(200,await processes.interact(processMatch[1],checkedInteraction({...value,operation:processMatch[2]},redact)));
+        if(req.method==='POST' && ['input','eof','resize'].includes(processMatch[2]??'')) {
+          if(!hostBoundary)throw new ActionFailed('Unavailable: credential isolation is not established on this host.');
+          hostBoundary.recheck();return json(200,await processes.interact(processMatch[1],checkedInteraction({...value,operation:processMatch[2]},redact)));
+        }
       }
       const messageMatch = req.url?.match(/^\/api\/bots\/([\w-]+)\/messages$/);
       if (req.method === 'GET' && messageMatch?.[1]) return json(200,instance.messages(messageMatch[1]));

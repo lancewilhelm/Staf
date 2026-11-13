@@ -44,7 +44,7 @@ export type Capability<I,O> = {
   maxResultBytes?:number;
   releaseResult?(output:O,work:WorkContext):void;
   sameAction?(previous:I,next:I,work:WorkContext):boolean;
-  recovery?: {overlaps?(previous:I,next:I,work:WorkContext):boolean; reconcile?(input:I,evidence:unknown,work:WorkContext,action:ActionIdentity):boolean};
+  recovery?: {overlaps?(previous:I,next:I,work:WorkContext):boolean; reconcile?(input:I,evidence:unknown,work:WorkContext,action:ActionIdentity):boolean|Promise<boolean>};
 };
 export class ActionDenied extends Error {}
 export class ActionDeferred extends Error {}
@@ -77,7 +77,7 @@ type ErasedCapability = {
   execute(input:Json,work:WorkContext,action:ActionIdentity):Promise<Json>;visible(output:Json):string;releaseResult?(output:Json,work:WorkContext):void;
   sameAction?: (previous:Json,next:Json,work:WorkContext)=>boolean;
   overlaps?: (previous:Json,next:Json,work:WorkContext)=>boolean;
-  reconcile?: (input:Json,evidence:unknown,work:WorkContext,action:ActionIdentity)=>boolean;
+  reconcile?: (input:Json,evidence:unknown,work:WorkContext,action:ActionIdentity)=>boolean|Promise<boolean>;
   journalInput?: (input:Json,work:WorkContext,digest:(value:string)=>string)=>Json;
   restoreJournalInput?: (input:Json,work:WorkContext,action:ActionIdentity)=>Json;
 };
@@ -171,7 +171,7 @@ export class WorkActionService {
   beginRecovery(context:WorkContext):RecoveryManifest {
     this.admit(context,true);this.db.prepare('UPDATE work_action_state SET epoch=epoch+1 WHERE kind=? AND work_id=?').run(context.work.kind,context.work.id);return this.manifest(context);
   }
-  reconcile(context:WorkContext,actionId:string,evidence:unknown):void {
+  async reconcile(context:WorkContext,actionId:string,evidence:unknown):Promise<void> {
     this.admit(context);const record=this.records(context).find(item=>item.action.id===actionId && (item.action.state==='uncertain' || (item.action.state==='succeeded' && item.description.effect==='change' && item.description.opaque)));
     const cap=record && this.capabilities.get(record.capability);
     if(!record || !cap?.reconcile)throw Error('Feature reconciliation did not establish the outcome');
@@ -180,7 +180,7 @@ export class WorkActionService {
     const restored=cap.restoreJournalInput && !legacy ? cap.restoreJournalInput(record.input,context,identity) : record.input;
     if(cap.journalInput && !legacy && encoded(cap.journalInput(restored,context,value=>this.digest(value)))!==encoded(record.input))throw Error('Feature reconciliation did not establish the outcome');
     cap.check(restored,context,identity);
-    if(!cap.reconcile(restored,evidence,context,identity))throw Error('Feature reconciliation did not establish the outcome');
+    if(!await cap.reconcile(restored,evidence,context,identity))throw Error('Feature reconciliation did not establish the outcome');
     this.admit(context);cap.check(restored,context,identity);
     this.db.exec('BEGIN IMMEDIATE');
     try {const added=this.db.prepare('INSERT OR IGNORE INTO work_action_resolutions VALUES (?)').run(actionId);if(added.changes)this.db.prepare('UPDATE work_action_state SET epoch=epoch+1 WHERE kind=? AND work_id=?').run(context.work.kind,context.work.id);this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}

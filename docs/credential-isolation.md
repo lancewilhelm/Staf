@@ -1,10 +1,10 @@
 # Credential isolation
 
-Agent host execution and file actions remain blocked. On Linux, a separately
-configured Docker scratch backend attempts bounded execution without a host
-workspace. This backend has not been tested against a Linux daemon or kernel in
-this change. The environment filter, same-user file modes, and output redaction
-do not establish a boundary.
+Agent host execution and file actions fail closed unless the experimental Linux
+host boundary is explicitly configured and its checks succeed. The host boundary
+has not been executed or verified on Linux. A separate Docker scratch backend
+also remains unverified on Linux. Environment filtering, same-user file modes,
+and output redaction do not establish a boundary.
 
 ## Linux scratch backend
 
@@ -33,80 +33,124 @@ Container and kernel bugs, a malicious daemon or image, and compromised host
 administration are outside this protection. Older Docker versions or platforms
 that cannot establish the required settings fail closed.
 
-## Host-work candidate (not enabled)
+## Experimental Linux host work
 
-The repository includes an **uninstalled, incomplete candidate**, not a usable
-host-work backend. `deploy/native-linux/staf-exec-launch.example` sketches a
-fixed launcher for distinct `staf-service` and `staf-exec` accounts and one
-operator-approved workspace. `staf-exec-guard.c` checks the in-sandbox identity, capabilities,
-no-new-privileges and mount layout; it attempts to apply Landlock ABI 9 and a
-seccomp filter before requesting a command. The filter permits only Unix socket
-families, so even networking mechanisms outside a network namespace, such as
-vsock, must fail. The example starts with no network egress; programs requiring
-the network will not work. Linux kernel and user-namespace policy must support
-every requested mechanism or the guard must reject the launch. The candidate has
-not been run on Linux and is not connected to the service. Do not install the
-example or use its readiness message as proof of a secure boundary.
+The service can select a fixed launcher for pipe, PTY and file work when started
+with `STAF_LINUX_HOST_EXECUTION=1`. Without that exact setting, on non-Linux
+systems, or when any setup check fails, the affected tools reject input before
+execution. This implementation has **not been run on Linux** and must not be
+considered an accepted credential boundary. Do not enable it for real secrets.
 
-The intended launcher enters a restricted mount and process view, drops
-supplementary groups and capabilities, sets `no_new_privs`, and executes under an
-identity distinct from the service. Its view
-must exclude the instance data directory, credential files, service process
-environment and descriptors, control sockets, Docker socket, and any other path
-or mechanism that can regain service authority. It must not accept a model-chosen
-identity, executable policy, mount, namespace, or privilege configuration.
-File actions must execute through the same boundary, rather than opening paths in
-the service process. A checked path prefix alone cannot prevent symlink, hardlink,
-mount, race, or alternate-path escapes. Shell descendants, background processes,
-PTYs and helper work must remain subject to the same restrictions. Ordinary host
-work can be exposed only through explicitly safe mounts and permissions.
+The service checks the root-owned policy, its parent directories and the fixed
+executable paths at startup and again before each launch. It checks the service
+and execution account IDs and groups, compares executable hashes, requires a
+non-setuid bubblewrap without file capabilities, and requires a dedicated
+workspace filesystem distinct from the runtime and the credential-store roots.
+It rejects an extended or default ACL on the workspace root.
+The launcher and file-worker hashes must also match the versions shipped with
+this Staf build. The service passes only a small fixed environment and standard
+streams to `sudo`. It sends the command only after the guard's exact readiness
+message. File operations and write reconciliation use the same launcher. A
+fixed helper opens each file with [`openat2`](https://man7.org/linux/man-pages/man2/openat2.2.html) beneath the workspace, refusing
+symlinks and nested mounts, and passes its descriptor to the worker. Raw file
+read context is checked in service memory before a page is returned.
 
-The operator-facing contract still needs a verified installation, trust, and
-recovery implementation. The service must establish the actual effective UID, groups,
-capabilities, namespace and filesystem restrictions for each launch, protect
-the launcher and configuration against modification by agent work, and fail
-closed on any error or unsupported platform. The environment must omit supported
-credential variables and avoid inheriting secret-bearing descriptors. Process
-inspection, setuid programs, privileged sockets, and access to service APIs must
-not restore the lost authority. A separate UID alone is insufficient if a secret
-is readable through another path or privileged service.
+The fixed launcher uses separate `staf-service` and `staf-exec` accounts and
+binds `/srv/staf-workspace` as `/workspace`. A private PID, IPC, network and
+mount view, dropped capabilities, `no_new_privs`, Landlock ABI 9 and a seccomp
+filter are required by the launcher and guard. The filter allows Unix socket
+families only. Network access, including localhost services and vsock, is not
+available. Existing host files must be deliberately placed in the workspace;
+normal file and terminal work uses the workspace as its default directory. All
+agents using this boundary share that workspace; it is not per-agent isolation.
+Scheduled and helper work retain their existing tool restrictions.
 
-The launcher example binds `/usr` and the approved workspace recursively.
-The guard rejects nested mounts in either tree, but the operator would still
-need to ensure that neither tree contains readable credentials, unsafe hard
-links, exposed control sockets, or files consumed by a more privileged service.
-It is not enough to check a workspace's path or Unix mode bits: ACLs, group
-membership, hard links, cooperating processes, and races matter. Existing user
-files would need an explicitly safe shared workspace or carefully scoped ACLs.
-The execution account must not share the service UID, groups or access to its
-credential authority. Root ownership of launcher policy and binaries is a
-trust prerequisite, not proof that the full boundary is working.
+### Disposable Linux setup
 
-The service still needs a trusted per-launch handshake and lifecycle handling,
-including PTY, job control and descendant termination, plus file operations and
-recovery inside the same boundary. Until those pieces and controlled Linux tests exist,
-agent host file and native terminal actions remain unavailable on every platform.
-See the upstream [bubblewrap security discussion](https://github.com/containers/bubblewrap#security)
-and Linux [Landlock documentation](https://docs.kernel.org/userspace-api/landlock.html)
-for the underlying primitives and their limits.
+Only an administrator of a disposable test system should prepare this
+unverified candidate. No setup is performed automatically by Staf or the tests.
 
-Before claiming Linux acceptance, tests must use real disposable Linux processes and
-synthetic credentials. They must try direct and transformed reads, environment
-inheritance, process inspection, symlink and alternate paths, privilege changes,
-socket access, and attempts from pipe, PTY, file, background and helper paths.
-They must also prove ordinary permitted work and fail-closed behavior after
-configuration or launcher failures. Linux VM and live-account acceptance remain
-separate owner-led checks.
+1. Create distinct locked-down `staf-service` and `staf-exec` accounts. The
+   execution account needs its own non-root primary group, no supplementary
+   groups, and no shared service groups. Run Staf as `staf-service`.
+2. Provision `/srv/staf-workspace` as a separate filesystem, owned by root and
+   the execution group with mode `0770`. Its parent directories must be
+   root-owned and not group- or world-writable. Do not put credentials, FIFOs,
+   or files consumed by privileged services in it. No nested mounts or extended
+   or default ACLs on the workspace root are allowed. Other host processes and
+   accounts must not use the execution UID or group.
+3. Install a trusted system `sudo`, non-setuid `bubblewrap` without file
+   capabilities, `getcap`, `getfacl` at `/usr/bin/getfacl`, Node.js 22.16 or newer at `/usr/bin/node`, and the
+   seccomp development libraries. Compile `staf-exec-guard.c` with libseccomp
+   and `staf-file-open.c` with the Linux headers. Install both compiled helpers,
+   the exact `staf-exec-launch.example` as `/usr/lib/staf-exec/launch`, and
+   `staf-file-worker.mjs` beside them. Each
+   executable and every parent directory must be root-owned and not group- or
+   world-writable. The launcher takes no arguments.
 
-`test/linux-host-guard.integration.test.js` provides opt-in checks for a pipe,
-an interactive PTY, socket and descriptor isolation, a symlink to a synthetic
-private file, environment filtering, and a background descendant. It assumes a
-disposable Linux system on which an operator has separately configured the exact
-example launcher, `sudo`, a writable shared workspace and `/usr/bin/python3`.
-On that system only, set `STAF_TEST_LINUX_WORKSPACE` to the approved host
-workspace and run `node --test test/linux-host-guard.integration.test.js`.
-The checks are skipped otherwise. Passing them is not sufficient acceptance:
-they do not yet cover service dispatch, file actions and recovery, every socket
-or privilege bypass, launcher/configuration tampering, or network and process
-namespace attacks. No account, sudo policy or privileged service is installed by
-these tests.
+   From the checkout, a compiler with current Linux headers and libseccomp can
+   build the guard with `cc -O2 -Wall -Wextra -Werror deploy/native-linux/staf-exec-guard.c -lseccomp -o staf-exec-guard`.
+   Build the file opener with `cc -O2 -Wall -Wextra -Werror deploy/native-linux/staf-file-open.c -o staf-file-open`.
+   Install the result only on the disposable test machine described here.
+4. Configure sudoers so the service account can run **only** that launcher,
+   without arguments, as `staf-exec:staf-exec`; do not grant a shell or a
+   wildcard. Validate the entry with `visudo`. An example entry is:
+
+   ```text
+   staf-service ALL=(staf-exec:staf-exec) NOPASSWD: /usr/lib/staf-exec/launch ""
+   ```
+
+5. Create root-owned `/etc/staf-exec/host.json`, readable by the service and
+   not writable by either account. Use the actual numeric IDs and lowercase
+   SHA-256 hashes of the installed files in this exact structure:
+
+   ```json
+   {
+     "version": 1,
+     "workspace": "/srv/staf-workspace",
+     "serviceUid": 1001,
+     "executionUid": 1002,
+     "executionGid": 1002,
+     "launcherSha256": "<sha256-of-launch>",
+     "guardSha256": "<sha256-of-staf-exec-guard>",
+     "bwrapSha256": "<sha256-of-/usr/bin/bwrap>",
+     "sudoSha256": "<sha256-of-/usr/bin/sudo>",
+     "nodeSha256": "<sha256-of-/usr/bin/node>",
+     "fileWorkerSha256": "<sha256-of-staf-file-worker.mjs>",
+     "fileOpenSha256": "<sha256-of-staf-file-open>"
+   }
+   ```
+
+   `sha256sum` computes these hashes. The launcher and worker must be byte-for-byte
+   identical to the bundled files. Update policy after a trusted system binary
+   changes, then restart Staf. A changed or missing file causes refusal.
+6. Set `STAF_LINUX_HOST_EXECUTION=1` in the service's host environment and
+   restart. The service requires Landlock ABI 9, unprivileged user namespaces,
+   the listed paths and privileges, and successful per-launch guard checks.
+   Missing or changed requirements reject work; they do not fall back to host
+   execution. Linux support and this procedure remain unverified.
+
+The launcher recursively binds `/usr` and the workspace. The guard rejects
+nested mounts in either tree, but the administrator must ensure `/usr` contains
+no readable credentials or privileged cooperating service endpoints. The
+operator must also exclude host FIFOs from `/usr` and the workspace. The guard
+blocks creating new device nodes and FIFOs in the sandbox, but it does not prove
+that an existing FIFO has no external reader. The
+separate workspace filesystem prevents hard links to the checked credential
+roots; it does not make unsafe ACLs, shared services, privileged software, or
+arbitrary operator changes safe. Root and system binaries remain trusted. See
+[bubblewrap](https://github.com/containers/bubblewrap#security) and the Linux
+[Landlock documentation](https://docs.kernel.org/userspace-api/landlock.html).
+
+### Required Linux verification
+
+`test/linux-host-guard.integration.test.js` exercises the candidate guard using
+synthetic files, sockets, descriptors, pipe, PTY and a background descendant.
+On an operator-prepared disposable machine, set `STAF_TEST_LINUX_WORKSPACE` to
+`/srv/staf-workspace` and run that test. Run
+`test/linux-host-service.integration.test.js` as `staf-service` with
+`STAF_TEST_LINUX_SERVICE=1` to exercise the service dispatch path. These tests
+are skipped elsewhere and have not run in this change. They do not yet prove
+all bypasses, recovery races, helper paths, or production security. Real
+controlled Linux process tests remain required before claiming acceptance;
+Linux VM and live-account checks are separate owner-led activities.

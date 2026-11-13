@@ -20,7 +20,7 @@ done
 exec /usr/bin/bwrap \
   --unshare-user --disable-userns --unshare-pid --unshare-ipc --unshare-net --unshare-uts \
   --new-session --die-with-parent --cap-drop ALL --uid 65534 --gid 65534 \
-  --clearenv --setenv PATH /usr/bin:/bin --setenv HOME /workspace \
+  --clearenv --setenv PATH /usr/bin:/bin --setenv HOME /workspace --setenv TERM xterm-256color \
   --ro-bind /usr /usr --symlink usr/bin /bin --symlink usr/lib /lib \
   --symlink usr/lib64 /lib64 --proc /proc --dev /dev --tmpfs /tmp \
   --bind /srv/staf-workspace /workspace --chdir /workspace \

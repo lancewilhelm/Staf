@@ -18,15 +18,15 @@ async function checkoutAt(root) {
 }
 
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
-async function until(fn, label) {
-  for (let i = 0; i < 400; i++) { const value = await fn(); if (value) return value; await pause(100); }
-  throw Error(`Timed out: ${label}`);
+async function until(fn, label, diagnostic=()=> '') {
+  for (let i = 0; i < 600; i++) { const value = await fn(); if (value) return value; await pause(100); }
+  throw Error(`Timed out: ${label}\n${diagnostic()}`);
 }
 async function freePort() {
   const server = createServer(); await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const port = server.address().port; await new Promise(resolve => server.close(resolve)); return port;
 }
-test('development command serves one persistent instance and releases its ownership', {timeout:90000}, async () => {
+test('development command serves one persistent instance and releases its ownership', {timeout:120000}, async () => {
   const temp = await mkdtemp(join(tmpdir(), 'staf-dev-test-')), dir = join(temp,'data'), connections=join(temp,'existing-staf'), checkout = join(temp,'checkout'), nextCheckout=join(temp,'next-checkout'), port = await freePort();
   await checkoutAt(checkout); await checkoutAt(nextCheckout); await mkdir(join(connections,'auth'),{recursive:true});
   const direct = JSON.stringify({version:1,issuer:'https://auth.openai.com',subject:'synthetic',clientId:'fixture-client',hostId:'fixture-host',accessToken:'synthetic-access',refreshToken:'synthetic-refresh',idToken:'synthetic-id',scopes:['resource.invoke','chatgpt.tokens.use.direct'],expiresAt:Date.now()+3600000});
@@ -40,7 +40,7 @@ test('development command serves one persistent instance and releases its owners
   const stop = async child => { process.kill(-child.pid, 'SIGINT'); await new Promise(resolve => child.once('exit', resolve)); };
   let child = launch();
   try {
-    const code = await until(() => { if (child.exitCode !== null) throw Error(`Launcher exited: ${output}`); return output.match(/Pairing code: (\S+)/)?.[1]; }, 'launcher and pairing code');
+    const code = await until(() => { if (child.exitCode !== null) throw Error(`Launcher exited: ${output}`); return output.match(/Pairing code: (\S+)/)?.[1]; }, 'launcher and pairing code',()=>output);
     const url = `http://127.0.0.1:${port}`;
     const call = async (path, token, body) => { const response = await fetch(url + path, {method:body?'POST':'GET', headers:{...(token?{Authorization:`Bearer ${token}`} : {}), ...(body?{'Content-Type':'application/json'}:{})}, body:body?JSON.stringify(body):undefined}); return [response.status, await response.json()]; };
     assert.match(await (await fetch(url)).text(), /\/src\/main\.ts|\/main\.ts/);

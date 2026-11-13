@@ -145,7 +145,7 @@ test('uncertain task effect fences its retry until feature reconciliation',async
     const result=await invoke(one,guest(1),'local_change',{value:'x'});assert.equal(result.action.state,'uncertain');instance.taskFinish('t1','failed','lost result');
     instance.acceptTask({id:'t2',botId:bot.id,objective:'work',limitMs:10000,predecessor:'t1'});instance.taskStart('t2');const two=instance.workActions().open({kind:'task',id:'t2'},new AbortController().signal);
     assert.equal((await invoke(two,source('retry'),'local_change',{value:'y'})).kind,'blocked');assert.equal(calls,1);
-    assert.throws(()=>two.reconcile(result.action.id,'declared-new'),/reconciliation/);two.reconcile(result.action.id,'inspected');
+    await assert.rejects(()=>two.reconcile(result.action.id,'declared-new'),/reconciliation/);await two.reconcile(result.action.id,'inspected');
     assert.equal((await invoke(two,source('after-review'),'local_change',{value:'y'})).kind,'completed');assert.equal(calls,2);
   }finally{instance.close();}
 });
@@ -239,7 +239,7 @@ test('recovery fences different changes after a completed opaque effect',async()
     const cap=localChange();cap.recovery={overlaps:()=>true,reconcile:(input,evidence,work)=>evidence==='inspected' && readFileSync(join(work.workingDirectory,'fixture'),'utf8')===input.value};instance.workActions().register(cap);
     const first=await invoke(actions,guest(1),'local_change',{value:'x'});actions.beginRecovery();
     const blocked=await invoke(actions,source('different'),'local_change',{value:'y'});assert.match(blocked.reason,/opaque/i);
-    actions.reconcile(first.actionId,'inspected');assert.equal((await invoke(actions,source('reviewed'),'local_change',{value:'y'})).value,'xy');
+    await actions.reconcile(first.actionId,'inspected');assert.equal((await invoke(actions,source('reviewed'),'local_change',{value:'y'})).value,'xy');
   }finally{instance.close();}
 });
 
@@ -301,8 +301,20 @@ test('a feature can reconcile without providing an overlap hook',async()=>{
     cap.recovery={reconcile:(_input,evidence)=>evidence==='verified'};instance.workActions().register(cap);
     const first=await invoke(actions,guest(1),'local_change',{value:'x'});assert.equal(first.action.state,'uncertain');
     assert.equal((await invoke(actions,source('blocked'),'local_change',{value:'y'})).kind,'blocked');
-    actions.reconcile(first.action.id,'verified');assert.equal((await invoke(actions,source('after'),'local_change',{value:'y'})).kind,'completed');
+    await actions.reconcile(first.action.id,'verified');assert.equal((await invoke(actions,source('after'),'local_change',{value:'y'})).kind,'completed');
   }finally{instance.close();}
+});
+
+test('asynchronous reconciliation waits for evidence and rechecks work authority',async()=>{
+ const {instance,actions,controller}=fixture();let release;
+ try {
+  const gate=new Promise(resolve=>{release=resolve;});const cap=localChange({execute:async()=>{throw Error('uncertain');}});
+  cap.recovery={reconcile:async()=>{await gate;return true;}};instance.workActions().register(cap);
+  const first=await invoke(actions,source('async-effect'),'local_change',{value:'x'});
+  const pending=actions.reconcile(first.action.id,'evidence');
+  assert.deepEqual(actions.manifest().resolutions,[]);controller.abort();release();
+  await assert.rejects(pending);assert.deepEqual(actions.manifest().resolutions,[]);
+ } finally {release?.();actions.dispose();instance.close();}
 });
 
 test('explicit shared closure rejects queued and later calls on both routes',async()=>{
