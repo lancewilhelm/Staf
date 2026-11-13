@@ -43,7 +43,9 @@ export type Capability<I,O> = {
   restoreJournalInput?(input:Json,work:WorkContext,action:ActionIdentity):unknown;
   maxResultBytes?:number;
   releaseResult?(output:O,work:WorkContext):void;
+  validateInput?(input:I,work:WorkContext):void;
   sameAction?(previous:I,next:I,work:WorkContext):boolean;
+  sameEffect?(previous:I,next:I,work:WorkContext):boolean;
   recovery?: {overlaps?(previous:I,next:I,work:WorkContext):boolean; reconcile?(input:I,evidence:unknown,work:WorkContext,action:ActionIdentity):boolean|Promise<boolean>};
 };
 export class ActionDenied extends Error {}
@@ -75,7 +77,9 @@ type ErasedCapability = {
   parse(input:unknown):Json;describe(input:Json,work:WorkContext):Description;
   check(input:Json,work:WorkContext,action?:ActionIdentity):void;authorize(input:Json,work:WorkContext,action:ActionIdentity):Promise<void|AuthorityClaim>;
   execute(input:Json,work:WorkContext,action:ActionIdentity):Promise<Json>;visible(output:Json):string;releaseResult?(output:Json,work:WorkContext):void;
+  validateInput?: (input:Json,work:WorkContext)=>void;
   sameAction?: (previous:Json,next:Json,work:WorkContext)=>boolean;
+  sameEffect?: (previous:Json,next:Json,work:WorkContext)=>boolean;
   overlaps?: (previous:Json,next:Json,work:WorkContext)=>boolean;
   reconcile?: (input:Json,evidence:unknown,work:WorkContext,action:ActionIdentity)=>boolean|Promise<boolean>;
   journalInput?: (input:Json,work:WorkContext,digest:(value:string)=>string)=>Json;
@@ -127,6 +131,8 @@ export class WorkActionService {
       ...(capability.journalInput ? {journalInput:(input:Json,work:WorkContext,digest:(value:string)=>string)=>jsonValue.parse(capability.journalInput!(parse(input),work,digest))} : {}),
       ...(capability.restoreJournalInput ? {restoreJournalInput:(input:Json,work:WorkContext,action:ActionIdentity)=>jsonValue.parse(parse(capability.restoreJournalInput!(input,work,action)))} : {}),
       ...(capability.releaseResult ? {releaseResult:(output:Json,work:WorkContext)=>{try{capability.releaseResult!(capability.parseResult(output),work);}catch(error){if(!(error instanceof ActionDeferred))this.close(work,'authority');throw error;}}} : {}),
+      ...(capability.validateInput ? {validateInput:(input:Json,work:WorkContext)=>capability.validateInput!(parse(input),work)} : {}),
+      ...(capability.sameEffect ? {sameEffect:(a:Json,b:Json,work:WorkContext)=>capability.sameEffect!(parse(a),parse(b),work)} : {}),
       ...(capability.sameAction ? {sameAction:(a:Json,b:Json,work:WorkContext)=>capability.sameAction!(parse(a),parse(b),work)} : {}),
       ...(capability.recovery?.overlaps ? {overlaps:(a:Json,b:Json,work:WorkContext)=>capability.recovery!.overlaps!(parse(a),parse(b),work)} : {}),
       ...(capability.recovery?.reconcile ? {reconcile:(input:Json,evidence:unknown,work:WorkContext,action:ActionIdentity)=>capability.recovery!.reconcile!(parse(input),evidence,work,action)} : {}),
@@ -258,11 +264,14 @@ export class WorkActionService {
     let input:Json;
     try {input=cap.parse(rawInput);}
     catch(error){if(error instanceof ActionFailed)return {kind:'blocked',reason:this.inputRedactor(error.safeResult).slice(0,16000)};throw error;}
+    try {cap.validateInput?.(input,context);}
+    catch(error){if(error instanceof ActionFailed)return {kind:'blocked',reason:this.inputRedactor(error.safeResult).slice(0,16000)};throw error;}
     const canonical=encoded(input);
     if(Buffer.byteLength(canonical)>256*1024)throw Error('Parsed input exceeds the limit');
     if(this.inputRedactor(canonical)!==canonical)return {kind:'blocked',reason:'Tool input cannot be retained faithfully under the instance redaction rules.'};
     const journalInput=cap.journalInput ? encoded(cap.journalInput(input,context,value=>this.digest(value))) : canonical;
     const matchesInput=(previous:Json)=>encoded(previous)===journalInput || (!!cap.journalInput && encoded(previous)===canonical) || (!cap.journalInput && !!cap.sameAction?.(previous,input,context));
+    const matchesEffect=(previous:Json)=>matchesInput(previous) || (!cap.journalInput && !!cap.sameEffect?.(previous,input,context));
     const digest=this.digest(encoded([request.name,rawInput,request.intent]));
     const pending=this.db.prepare('SELECT digest,challenge,reason FROM work_action_requests WHERE kind=? AND work_id=? AND source=?').get(context.work.kind,context.work.id,source);
     if(pending) {
@@ -273,7 +282,7 @@ export class WorkActionService {
       const previous=this.db.prepare('SELECT epoch,prior_ids,consumed FROM work_action_challenges WHERE id=?').get(pending.challenge);
       if(typeof previous?.prior_ids!=='string') throw Error('Missing recovery challenge');
       const state=this.state(context.work);
-      const matching=this.records(context).filter(item=>this.accounted(item.action) && item.capability===request.name && matchesInput(item.input)).map(item=>item.action);
+      const matching=this.records(context).filter(item=>this.accounted(item.action) && item.capability===request.name && matchesEffect(item.input)).map(item=>item.action);
       const priorIds=JSON.stringify(matching.map(item=>item.id));
       if(previous.epoch!==state.epoch || previous.prior_ids!==priorIds || previous.consumed!==0) {
         const challenge=randomUUID();
@@ -297,7 +306,7 @@ export class WorkActionService {
     const records=this.records(context);
     const priorRecords=records.filter(item=>item.action.work.kind==='command' && context.work.kind==='command' && item.action.work.id!==context.work.id);
     if(request.intent.kind==='resume') {const actionId=request.intent.actionId;if(priorRecords.some(item=>item.action.id===actionId))throw new ActionConflict('The originating action cannot be resumed in a question continuation');}
-    if(priorRecords.some(item=>item.capability===request.name && matchesInput(item.input))) {
+    if(priorRecords.some(item=>item.capability===request.name && matchesEffect(item.input))) {
       const reason='An action from the originating work cannot be repeated by this continuation';
       this.db.prepare('INSERT INTO work_action_requests VALUES (?,?,?,?,NULL,?)').run(context.work.kind,context.work.id,source,digest,reason);return {kind:'blocked',reason};
     }
@@ -319,8 +328,8 @@ export class WorkActionService {
         this.db.prepare('INSERT INTO work_action_requests VALUES (?,?,?,?,NULL,?)').run(context.work.kind,context.work.id,source,digest,reason);return {kind:'blocked',reason};
       }
       const state=this.state(context.work);
-      const matching=Number(state.epoch)>0 ? records.filter(item=>this.accounted(item.action) && item.capability===request.name && matchesInput(item.input)).map(item=>item.action) : [];
-      const ambiguous=Number(state.epoch)>0 && records.some(item=>item.capability!=='ask_questions' && !(item.capability==='ask_owner' && this.db.prepare('SELECT 1 FROM task_question_sets WHERE id=?').get(item.action.id)) && item.action.state==='succeeded' && item.description.effect==='change' && (item.description.opaque || description.opaque) && !(item.capability===request.name && matchesInput(item.input)) && !this.resolved(item.action.id));
+      const matching=Number(state.epoch)>0 ? records.filter(item=>this.accounted(item.action) && item.capability===request.name && matchesEffect(item.input)).map(item=>item.action) : [];
+      const ambiguous=Number(state.epoch)>0 && records.some(item=>item.capability!=='ask_questions' && !(item.capability==='ask_owner' && this.db.prepare('SELECT 1 FROM task_question_sets WHERE id=?').get(item.action.id)) && item.action.state==='succeeded' && item.description.effect==='change' && (item.description.opaque || description.opaque) && !(item.capability===request.name && matchesEffect(item.input)) && !this.resolved(item.action.id));
       if(ambiguous) {
         const reason='Opaque prior change requires reconciliation';
         this.db.prepare('INSERT INTO work_action_requests VALUES (?,?,?,?,NULL,?)').run(context.work.kind,context.work.id,source,digest,reason);return {kind:'blocked',reason};
