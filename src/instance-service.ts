@@ -7,7 +7,7 @@ import {registerTaskCapabilities, type TaskActionHooks} from './task-actions.js'
 import {clockCapability} from './clock-action.js';
 import {fileCapabilities} from './file-actions.js';
 import {isolatedFileCapabilities} from './linux-file-actions.js';
-import {SecretRequests,secretRequestInput} from './secret-requests.js';
+import {SecretRequests,secretRequestInput,secretValueSchema} from './secret-requests.js';
 import {slackSetupCapability} from './slack-setup.js';
 import {slackSetupApprovalSchema} from './slack-setup-types.js';
 import {containsCredential} from './credential-warning.js';
@@ -1228,7 +1228,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
         if(value.confirm!==true)throw Error('Confirm credential use for this Slack destination');
         const reviewed=assertSetupReview('slack',value);
         const config=slackConfigSchema.parse({teamId:value.teamId,userId:value.userId,channelId:value.channelId,botId:value.botId});
-        if(typeof value.appToken!=='string' || !/^xapp-[A-Za-z0-9-]+$/.test(value.appToken) || typeof value.botToken!=='string' || !/^xoxb-[A-Za-z0-9-]+$/.test(value.botToken))throw Error('Enter valid Slack app and bot tokens');
+        if(typeof value.appToken!=='string' || !secretValueSchema.safeParse(value.appToken).success || !/^xapp-[A-Za-z0-9-]+$/.test(value.appToken) || typeof value.botToken!=='string' || !secretValueSchema.safeParse(value.botToken).success || !/^xoxb-[A-Za-z0-9-]+$/.test(value.botToken))throw Error('Enter valid Slack app and bot tokens');
         if(instance.bot(config.botId)?.archived!==false)throw Error('Choose an active agent');
         const generation=slackGeneration,existing=instance.plugins.connection();if(existing && existing.accountId!==config.teamId)throw Error('Delete the existing Slack configuration before changing workspace');
         const tokens={appToken:value.appToken,botToken:value.botToken};
@@ -1311,7 +1311,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
           if(JSON.stringify(secretRequests.selection(`${request.id}-app`))!==JSON.stringify(approval.app) || JSON.stringify(secretRequests.selection(`${request.id}-bot`))!==JSON.stringify(approval.bot))throw Error('Selected secret changed');
         };
         check();const appToken=secretRequests.lookup(approval.app.name,approval.app.revision),botToken=secretRequests.lookup(approval.bot.name,approval.bot.revision);
-        if(!appToken || !/^xapp-[A-Za-z0-9-]+$/.test(appToken) || !botToken || !/^xoxb-[A-Za-z0-9-]+$/.test(botToken))throw Error('Enter valid Slack app and bot tokens');
+        if(!secretValueSchema.safeParse(appToken).success || !appToken || !/^xapp-[A-Za-z0-9-]+$/.test(appToken) || !secretValueSchema.safeParse(botToken).success || !botToken || !/^xoxb-[A-Za-z0-9-]+$/.test(botToken))throw Error('Enter valid Slack app and bot tokens');
         if(!secretRequests.beginSlackSetup(request.id,approval))throw Error('Slack setup changed');
         try {
           check();const identity=await slack.identify({appToken,botToken});check();
