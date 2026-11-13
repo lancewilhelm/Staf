@@ -309,9 +309,9 @@ The shared instance schedule preview exposes `schedule-create`, `schedule-list`,
 
 ### Shared-instance scratch shell
 
-Scratch-shell calls are currently blocked while credential isolation is
-unverified. Configuration and recovery controls remain available for existing
-records.
+Scratch-shell calls require Linux and a configured Docker engine that passes
+the isolation checks. This backend has not been verified on Linux. Configuration
+and recovery controls remain available for existing records.
 
 `GET` and `POST /api/shell-config` inspect and revision-safely set the owner-selected Docker binary, Unix socket and pinned image ID. `GET` and `POST /api/shell-permissions/{instance|bot:ID|task:ID}` inspect or set an explicit boolean `enabled`; shell requires instance and bot permission, and tasks require task permission. Helpers are blocked; scheduled tasks may use only their captured exact command and Docker configuration, subject to explicit task disable. Task readback includes override, inherited scope, current effective access and command. `GET /api/shell-approvals` shows exact pending commands to paired clients; `POST /api/shell-approvals/ID/approve|deny` decides one. The runtime always supplies the fixed bounded scratch workspace; a model cannot select a host path or daemon. `GET /api/shell-uncertain` lists unresolved actions and recorded endpoint configurations. Endpoint string equality does not prove the binary or socket still identifies the same daemon; the owner must verify daemon identity independently. `POST /api/shell-actions/ID/review` requires acknowledgment `verified-daemon-identity-and-accepted-late-create-risk`; review does not perform cleanup or prove that a late create cannot materialize. Version 20 adds the scratch configuration, permissions, decision snapshots, durable serialization lock and review journal. See [usage](usage.md#scratch-only-shell) for process visibility, swap and retention limits.
 
@@ -574,8 +574,8 @@ See [secret requests](usage.md#secret-requests) for storage and backup limits.
 
 ### Native process API
 
-Agent native-process, host-file, and scratch-shell calls currently fail closed
-before execution because no credential-isolation backend has been verified.
+Agent native-process and host-file calls currently fail closed before execution.
+Scratch uses a separate conditional Linux Docker backend that remains unverified.
 The resource APIs below remain available to paired owners for existing records;
 the process execution contract describes retained implementation, not a
 currently available agent capability.

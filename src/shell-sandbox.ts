@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { realpath, stat } from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
+import {inspectDockerInfo,inspectScratchContainer,scratchEntryScript,scratchPlatformAvailable} from './isolation-boundary.js';
 
 export const scratchLimits = Object.freeze({sizeBytes:16777216,maxInodes:1024,timeoutMs:30000,maxOutputBytes:65536});
 
@@ -130,12 +131,20 @@ export async function executeShellSandbox(request: ShellSandboxRequest): Promise
     const { sizeBytes, maxInodes } = configuredWorkspace;
     workspaceArgs = ['--tmpfs', `/workspace:rw,nosuid,nodev,noexec,size=${sizeBytes},nr_inodes=${maxInodes},uid=65534,gid=65534,mode=0700`];
   }
+  const protectedScratch=typeof configuredWorkspace!=='string';
+  if(protectedScratch && !scratchPlatformAvailable(process.platform))throw new Error('Linux Docker scratch isolation is unavailable on this platform');
   if (!(await stat(dockerSocket)).isSocket() || resolve(dockerBinary) !== dockerBinary) {
     throw new Error('Invalid Docker endpoint');
   }
   if (signal.aborted) throw new Error('Sandbox request aborted before execution');
   const name = sandboxName(executionId);
   const invoke = (args: readonly string[], limit = 8192, ms = 15_000) => cli(dockerBinary, dockerSocket, args, limit, ms);
+  if(protectedScratch) {
+    const info=await invoke(['info','--format','{{json .}}'],65536);
+    if(info.code!==0 || info.overflow)throw Error('Cannot inspect Linux Docker isolation');
+    let details:unknown;try{details=JSON.parse(info.output);}catch{throw Error('Cannot inspect Linux Docker isolation');}
+    inspectDockerInfo(details);
+  }
   // Image configuration is applied before the entrypoint starts. Reject every
   // variable except known-safe defaults before /bin/sh can interpret them.
   const image = await invoke(['image', 'inspect', '--format', '{{json .Config}}', imageId]);
@@ -192,17 +201,23 @@ export async function executeShellSandbox(request: ShellSandboxRequest): Promise
   const abort = () => stop('aborted');
   try {
     const create = await invoke(['container', 'create', '--name', name, '--label', 'staf.shell.sandbox=true',
-      '--label', `staf.shell.execution=${executionId}`, '--pull=never', '--network=none', '--read-only', '--cap-drop=ALL', '--security-opt=no-new-privileges',
+      '--label', `staf.shell.execution=${executionId}`, '--pull=never', '--network=none', '--ipc=private', '--cgroupns=private', '--read-only', '--cap-drop=ALL', '--security-opt=no-new-privileges', '--security-opt=seccomp=builtin',
       '--user=65534:65534', '--pids-limit=64', '--memory=128m', '--cpus=0.5', '--init',
       '--hostname=staf-sandbox', '--env=PATH=/usr/bin:/bin', '--env=HOME=/nonexistent',
       '--log-driver=none', '--no-healthcheck',
       ...workspaceArgs, '--workdir=/workspace',
-      '--entrypoint=/bin/sh', imageId, '-c', command]);
+      '--entrypoint=/bin/sh', imageId, '-c', ...(protectedScratch?[scratchEntryScript,'staf-scratch',command]:[command])]);
     if (create.code !== 0 || create.overflow) {
       // A lost daemon response can leave a container behind; do not assume creation failed.
       throw new ShellSandboxUncertainError(`Docker could not confirm sandbox creation: ${name}`, name);
     }
     created = true;
+    if(protectedScratch) {
+      const inspected=await invoke(['container','inspect','--format','{{json .}}',name],65536);
+      if(inspected.code!==0 || inspected.overflow)throw new ShellSandboxUncertainError(`Cannot inspect sandbox ${name}`,name);
+      let details:unknown;try{details=JSON.parse(inspected.output);}catch{throw new ShellSandboxUncertainError(`Invalid sandbox inspection ${name}`,name);}
+      try {inspectScratchContainer(details,imageId,configuredWorkspace,command);}catch{throw new ShellSandboxUncertainError(`Sandbox isolation check failed ${name}`,name);}
+    }
     if (signal.aborted) { stopReason = 'aborted'; terminal = true; return { output: '', exitCode: null, outputComplete: false, stopped: stopReason }; }
     signal.addEventListener('abort', abort, { once: true });
     const timer = setTimeout(() => stop('timeout'), timeoutMs);

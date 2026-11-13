@@ -15,6 +15,7 @@ import {providerLabel} from './provider-label.js';
 import { parseMemoryLanguage } from './memory-language.js';
 import { previewMemoryCandidates } from './memory-candidates.js';
 import { executeShellSandbox, scratchLimits } from './shell-sandbox.js';
+import {scratchPlatformAvailable} from './isolation-boundary.js';
 import { searchSearxng, checkedSearchQuery, type SearchTransport } from './searxng-search.js';
 import { readWebSource, checkedOwnerWebUrl, containsUnsafeWebUrl, type Dependencies as WebDependencies } from './web-reader.js';
 import type { WorkRef } from './action-journal.js';
@@ -579,7 +580,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
   registerSkillCapability(workActions,skillTrackers);
   workActions.setWorkCheck(work=>skillTrackers.get(skillWorkKey(work))?.ensure());
   workActions.register(searchCapability);
-  workActions.register(isolationRequired(shellCapability));
+  workActions.register({...shellCapability,parseInput:value=>{if(!scratchPlatformAvailable(process.platform))throw new ActionFailed('Linux Docker scratch isolation is unavailable on this platform.');return shellCapability.parseInput(value);}});
   workActions.register(webCapability);
   workActions.register(webHopCapability);
 

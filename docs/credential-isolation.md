@@ -1,8 +1,37 @@
-# Credential isolation design (not implemented)
+# Credential isolation
 
-Agent host execution and file actions remain blocked. A future Linux backend
-must establish a boundary before enabling them; the current environment filter,
-same-user file modes, and output redaction do not establish one.
+Agent host execution and file actions remain blocked. On Linux, a separately
+configured Docker scratch backend attempts bounded execution without a host
+workspace. This backend has not been tested against a Linux daemon or kernel in
+this change. The environment filter, same-user file modes, and output redaction
+do not establish a boundary.
+
+## Linux scratch backend
+
+The service requires an owner-configured Docker executable, local Unix socket,
+and pinned image ID, and the existing separate permissions and exact-command
+approval. The owner must trust the daemon, executable, image, host kernel, and
+their administrators. Staf does not expose the Docker socket or a host bind to
+the command. It requests a private PID, IPC, network and cgroup view, a bounded
+tmpfs workspace, read-only root, UID/GID 65534, no capabilities, no new
+privileges, and Docker's built-in seccomp profile. It checks the daemon's Linux
+and seccomp reports and inspects the resulting container settings before start.
+An entry wrapper checks seccomp, no-new-privileges, and zero effective, permitted
+and bounding capabilities in `/proc/self/status` before executing the command.
+Any failed or unavailable check blocks execution. This is isolated scratch, not
+access to existing host files or an interactive terminal. Previously launched
+detached processes and unrelated same-user software remain outside this gate.
+
+Docker's [container security documentation](https://docs.docker.com/engine/security/)
+explains the role and limits of namespaces and daemon authority. Docker documents
+[`seccomp=builtin`](https://docs.docker.com/reference/cli/docker/container/run/#optional-security-options---security-opt)
+as selecting its built-in profile, and the Linux kernel documents
+[no-new-privileges](https://docs.kernel.org/userspace-api/no_new_privs.html).
+Container and kernel bugs, a malicious daemon or image, and compromised host
+administration are outside this protection. Older Docker versions or platforms
+that cannot establish the required settings fail closed.
+
+## Remaining host-work design
 
 A candidate is a dedicated unprivileged execution identity and a privileged,
 small launcher configured by the operator. The launcher would enter a restricted

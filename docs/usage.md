@@ -650,9 +650,11 @@ The backend and its upstream search engines may retain queries. Queries, results
 
 ### Scratch-only shell
 
-Scratch-shell calls are currently blocked while credential isolation is
-unverified. The configuration and recovery controls described below remain
-available to the owner for existing records.
+On Linux, scratch-shell calls use the configured Docker daemon only after the
+image, daemon, container configuration, and in-container kernel state pass the
+checks described in [credential isolation](credential-isolation.md). Calls
+fail closed on other platforms or when a check fails. This backend has not yet
+been exercised against a real Linux daemon; its isolation is unverified.
 
 Scratch shell is disabled by default. A paired owner must configure an absolute Docker CLI path, an absolute Unix daemon socket path and a pinned `sha256:` image ID, then enable instance and bot permission. Ordinary background tasks also require their own shell permission. Helpers cannot use it. A scheduled task may use only its captured exact command and Docker configuration, subject to an explicit task disable. Task permission readback distinguishes the owner override, inherited scope and effective access. The commands `instance shell-config URL CREDENTIAL_FILE`, `shell-config-set URL CREDENTIAL_FILE REVISION DOCKER_BINARY DOCKER_SOCKET IMAGE_ID`, `shell-permission URL CREDENTIAL_FILE SCOPE`, and `shell-permission-set URL CREDENTIAL_FILE SCOPE true|false` manage configuration and permissions. Use `- - -` to clear the configuration. Existing bot permissions and approval settings remain independent.
 
@@ -739,7 +741,7 @@ The terminal supports `staf settings set toolMode hybrid` and
 set `toolMode` in the existing agent profile JSON, or pass `--tool-mode` at
 creation. The paired defaults command accepts a final mode argument.
 
-In chat and eligible tasks, Direct offers eligible individual tools, Hybrid offers those tools and `code_mode`, and Code Mode offers `code_mode` with the same registered capabilities inside it. The code tool description lists eligible registered capability names and input schemas. Fabricated individual calls are rejected. Web reads require approval for each redirect target. Agent host file, native process, and scratch shell calls fail closed until a credential-isolation backend is established and verified; changing tool availability or approval settings cannot bypass this restriction.
+In chat and eligible tasks, Direct offers eligible individual tools, Hybrid offers those tools and `code_mode`, and Code Mode offers `code_mode` with the same registered capabilities inside it. The code tool description lists eligible registered capability names and input schemas. Fabricated individual calls are rejected. Web reads require approval for each redirect target. Agent host file and native process calls fail closed. Linux scratch calls require an owner-configured Docker engine and pass separate isolation checks; they do not expose a host workspace. Changing tool availability or approval settings does not bypass these restrictions.
 Background tasks use their captured mode for eligible registered capabilities, including clock and task questions, discovery and helper exchanges. A helper uses its own captured mode; helper and scheduled-work restrictions still apply. Pending owner input defers queued actions until the task drains its inbox. Plain text does not start a guest. Settings edits apply to new work; an accepted task and its retries retain their captured profile and task context. Clock permissions and applicable approvals remain live.
 
 The host file implementations remain in the codebase, but agent calls are blocked before execution while isolation is unavailable. The working directory alone is not a sandbox.
@@ -811,8 +813,8 @@ retain values after any later removal. No master password is required at restart
 
 ## Native process slice
 
-Agent calls to native processes and scratch shell currently fail closed on all
-platforms. No Linux isolation backend is implemented or verified. Paired owners
+Agent calls to native processes currently fail closed on all platforms.
+The Linux Docker scratch backend is separate and has not been verified on Linux. Paired owners
 can still inspect or stop previously recorded resources, but old detached
 processes may survive an upgrade and must be stopped separately before storing
 secrets. The following describes the retained process implementation, not
