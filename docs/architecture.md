@@ -469,10 +469,14 @@ database. A service-owned continuation ID is reserved at creation; a queued outc
 is claimed as a new command only after the original command completed. A crash
 after claim leaves that command interrupted rather than automatically replaying
 it. An interrupted or failed origin retains the request and outcome without
-starting a continuation. Automatic continuations have no eligible tools, fencing
-unverified repeat effects; subsequent owner input is new work. Structured sets
-are not offered to Slack-originated commands, which retain ordinary conversational
-questions and answers. Tests use synthetic providers and disposable data.
+starting a continuation. A submitted answer starts a new command with its own
+action journal, current tool settings, and normal approval checks. The journal
+checks actions in the question request's command lineage before dispatch. It
+blocks matching prior actions and fences unresolved or opaque effects. File
+action comparisons resolve path aliases. Arbitrary commands can have equivalent
+effects that the service cannot infer from their text. A dismissal continuation
+has no tool offers. Structured sets are not offered to Slack-originated
+commands, which retain ordinary conversational questions and answers. Tests use synthetic providers and disposable data.
 
 ## Bundled plugins and Slack
 

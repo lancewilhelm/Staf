@@ -40,6 +40,8 @@ export class QuestionSets {
   this.db.prepare("UPDATE question_sets SET state=?,result=? WHERE id=? AND state='open'").run(state,JSON.stringify(result),id);return this.list().find(q=>q.id===id)!;
  }
  deliveryError(id:string,value:string|null) {this.db.prepare('UPDATE question_sets SET delivery_error=? WHERE id=?').run(value,id);}
+ ancestors(id:string):string[] {return this.db.prepare(`WITH RECURSIVE lineage(id) AS (SELECT command_id FROM question_sets WHERE continuation_id=? UNION SELECT q.command_id FROM question_sets q JOIN lineage l ON q.continuation_id=l.id) SELECT id FROM lineage`).all(id).map(row=>String(row.id));}
+ continuationState(id:string) {const row=this.db.prepare('SELECT state FROM question_sets WHERE continuation_id=?').get(id);return row?.state;}
  isContinuation(id:string) {return !!this.db.prepare('SELECT 1 FROM question_sets WHERE continuation_id=?').get(id);}
  queued() {return this.list().filter(row=>row.state!=='open' && row.continuationState===null && row.originState==='completed');}
 }

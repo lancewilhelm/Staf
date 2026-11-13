@@ -365,7 +365,7 @@ export class Instance {
   workActions():WorkActionService {
     if (!this.actionService) this.actionService=new WorkActionService(this.db,this.fingerprintKey,
       (work,signal)=>this.workContext(work,signal),
-      work=>this.assertActionWork(work),32,work=>work.kind==='task' && this.taskHasPending(work.id),this.redactSkill);
+      work=>this.assertActionWork(work),32,work=>work.kind==='task' && this.taskHasPending(work.id),this.redactSkill,work=>work.kind==='command' ? this.questionSets.ancestors(work.id) : []);
     return this.actionService;
   }
   private scheduleOrigin(attemptId:string) {

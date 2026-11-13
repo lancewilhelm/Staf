@@ -14,13 +14,23 @@ const providerFactory=async profile=>({name:'synthetic',capabilities:{toolCalls:
     const args=code?{source:`return await capabilities.ask_questions(${JSON.stringify({questions})});`}:{questions};
     return {role:'assistant',content:null,tool_calls:[{id:'fixture-question',type:'function',function:{name,arguments:JSON.stringify(args)}}]};
   }
-  return {role:'assistant',content:input.includes('Owner response to question set')?'I received your response.':'The synthetic agent is ready.'};
+  if(input.includes('Owner response to question set') && input.includes('\"status\":\"dismissed\"'))return {role:'assistant',content:'The question set was dismissed.'};
+  if(input.includes('Owner response to question set')) {
+    const results=turn.filter(message=>message.role==='tool');
+    if(!results.length) {
+      const args={path:join(directory,'synthetic-result.txt'),content:'Synthetic follow-up result'},code=profile.toolMode==='code';
+      return {role:'assistant',content:null,tool_calls:[{id:'fixture-followup',type:'function',function:{name:code?'code_mode':'file_write',arguments:JSON.stringify(code?{source:`return await capabilities.file_write(${JSON.stringify(args)});`}:args)}}]};
+    }
+    let succeeded=false;try{const result=JSON.parse(results.at(-1).content);succeeded=result.path===join(directory,'synthetic-result.txt') || (result.outcome==='return' && result.value?.value?.path===join(directory,'synthetic-result.txt'));}catch{}
+    return {role:'assistant',content:succeeded?'The synthetic follow-up saved its result.':'The synthetic follow-up could not save its result.'};
+  }
+  return {role:'assistant',content:'The synthetic agent is ready.'};
 }});
 let app=startInstance(path,0,{dataDir:directory,env:{},providerFactory}),port=await app.listen();
 const call=async(pathname,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${pathname}`,{method:'POST',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),'Content-Type':'application/json'},body:JSON.stringify(body)});if(!r.ok)throw Error(`Fixture setup failed: ${r.status}`);return r.json();};
 const {token}=await call('/api/pair','',{code:app.code});
 await call('/api/bots',token,{name:'Synthetic agent',provider:'live',model:'fixture',toolMode:'direct'});
-console.log(`Open http://127.0.0.1:${port}/ and pair with code ${app.issueCode()}.`);
+console.log(`Open http://127.0.0.1:${port}/ and pair with code ${app.issueCode()}`);
 console.log('Send “Ask a set”. Type r and Enter here to restart the service; Ctrl-C deletes the disposable fixture data.');
 let running=false;
 process.stdin.setEncoding('utf8');process.stdin.on('data',async chunk=>{if(chunk.trim()!=='r'||running)return;running=true;try{await app.close();app=startInstance(path,port,{dataDir:directory,env:{},providerFactory});await app.listen();console.log('Service restarted. Refresh the browser.');}catch(error){console.error('Restart failed:',error);process.exitCode=1;}finally{running=false;}});
