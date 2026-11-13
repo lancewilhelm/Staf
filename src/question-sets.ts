@@ -8,6 +8,7 @@ export const questionSchema=z.discriminatedUnion('kind',[
   z.strictObject({kind:z.literal('single'),prompt:text,choices}),
   z.strictObject({kind:z.literal('multiple'),prompt:text,choices}),
   z.strictObject({kind:z.literal('text'),prompt:text}),
+  z.strictObject({kind:z.literal('secret'),prompt:text,name:text.max(120),purpose:text.max(500),destination:text.max(300).optional()}),
 ]);
 export const questionSetInput=z.strictObject({questions:z.array(questionSchema).min(1).max(12)});
 const draftAnswer=z.union([z.null(),z.strictObject({choices:z.array(z.string().max(1000)).max(12),writeIn:z.string().max(4000)})]);
@@ -42,13 +43,13 @@ export class QuestionSets {
  }
  draft(id:string,value:unknown) {
   const answers=drafts.parse(value),row=this.list().find(q=>q.id===id);if(!row || row.state!=='open')throw Error('Question request is not open');if(answers.length!==row.questions.length)throw Error('Invalid answer count');
-  for(let i=0;i<answers.length;i++){const answer=answers[i],question=row.questions[i];if(!answer || !question)continue;if(question.kind==='text' && answer.choices.length)throw Error('Text questions do not accept choices');if(question.kind!=='text' && (answer.choices.some(choice=>!question.choices.includes(choice)) || new Set(answer.choices).size!==answer.choices.length || question.kind==='single' && answer.choices.length+(answer.writeIn.trim()?1:0)>1))throw Error('Invalid choices');}
+  for(let i=0;i<answers.length;i++){const answer=answers[i],question=row.questions[i];if(!answer || !question)continue;if(question.kind==='secret' && (answer.choices.length || answer.writeIn))throw Error('Secret values cannot be saved as answers');if(question.kind==='text' && answer.choices.length)throw Error('Text questions do not accept choices');if((question.kind==='single' || question.kind==='multiple') && (answer.choices.some(choice=>!question.choices.includes(choice)) || new Set(answer.choices).size!==answer.choices.length || question.kind==='single' && answer.choices.length+(answer.writeIn.trim()?1:0)>1))throw Error('Invalid choices');}
   this.db.prepare(`UPDATE ${row.workKind==='task'?'task_question_sets':'question_sets'} SET draft=? WHERE id=? AND state='open'`).run(JSON.stringify(answers),id);
  }
- finish(id:string,decision:'submit'|'dismiss') {
+ finish(id:string,decision:'submit'|'dismiss',secretStatus:(index:number)=>'saved'|'skipped'|'unavailable'=()=> 'skipped') {
   const row=this.list().find(q=>q.id===id);if(!row)throw Error('Question request not found');
   const state=decision==='submit'?'submitted':'dismissed';if(row.state!== 'open'){if(row.state!==state)throw Error('Question request already resolved');return row;}
-  const result=decision==='dismiss'?{status:'dismissed'}:{status:'submitted',answers:row.questions.map((question,i)=>{const answer=row.draft[i];return !answer || (!answer.choices.length && !answer.writeIn.trim())?{question:question.prompt,status:'skipped'}:{question:question.prompt,status:'answered',choices:answer.choices,writeIn:answer.writeIn};})};
+  const result=decision==='dismiss'?{status:'dismissed'}:{status:'submitted',answers:row.questions.map((question,i)=>{const answer=row.draft[i];if(question.kind==='secret')return {question:question.prompt,status:secretStatus(i)};return !answer || (!answer.choices.length && !answer.writeIn.trim())?{question:question.prompt,status:'skipped'}:{question:question.prompt,status:'answered',choices:answer.choices,writeIn:answer.writeIn};})};
   this.db.prepare(`UPDATE ${row.workKind==='task'?'task_question_sets':'question_sets'} SET state=?,result=? WHERE id=? AND state='open'`).run(state,JSON.stringify(result),id);return this.list().find(q=>q.id===id)!;
  }
  deliveryError(id:string,value:string|null) {this.db.prepare('UPDATE question_sets SET delivery_error=? WHERE id=?').run(value,id);}

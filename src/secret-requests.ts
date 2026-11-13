@@ -36,6 +36,7 @@ export class SecretRequests {
    CREATE TABLE IF NOT EXISTS secret_requests(id TEXT PRIMARY KEY,bot_id TEXT NOT NULL,work_kind TEXT NOT NULL,work_id TEXT NOT NULL,name TEXT NOT NULL,purpose TEXT NOT NULL,destination TEXT,state TEXT NOT NULL);
    CREATE TABLE IF NOT EXISTS secrets(name TEXT PRIMARY KEY,value TEXT NOT NULL);
    CREATE TABLE IF NOT EXISTS secret_metadata(name TEXT PRIMARY KEY,purpose TEXT,revision TEXT NOT NULL);
+   CREATE TABLE IF NOT EXISTS question_secret_selections(question_id TEXT NOT NULL,step INTEGER NOT NULL,secret_name TEXT NOT NULL,secret_revision TEXT NOT NULL,PRIMARY KEY(question_id,step));
    CREATE TABLE IF NOT EXISTS secret_selections(request_id TEXT PRIMARY KEY,secret_name TEXT NOT NULL,secret_revision TEXT NOT NULL);
    CREATE TABLE IF NOT EXISTS secret_grants(name TEXT NOT NULL,revision TEXT NOT NULL,integration TEXT NOT NULL,destination TEXT NOT NULL,PRIMARY KEY(integration,destination));
    CREATE TABLE IF NOT EXISTS secret_integration_config(integration TEXT NOT NULL,destination TEXT NOT NULL,config TEXT NOT NULL,PRIMARY KEY(integration,destination));
@@ -58,6 +59,18 @@ export class SecretRequests {
  resolve(input:{integration:SecretIntegration;destination:string}):string|undefined {const row=this.db?.prepare('SELECT s.value FROM secret_grants g JOIN secret_metadata m ON m.name=g.name AND m.revision=g.revision JOIN secrets s ON s.name=g.name WHERE g.integration=? AND g.destination=?').get(input.integration,input.destination);return typeof row?.value==='string'?row.value:undefined;}
  lookup(name:string,revision:string):string|undefined {const row=this.db?.prepare('SELECT s.value FROM secrets s JOIN secret_metadata m ON m.name=s.name WHERE s.name=? AND m.revision=?').get(name,revision);return typeof row?.value==='string'?row.value:undefined;}
  select(id:string,name:string,revision:string):Outcome {const db=this.db;if(!db)throw Error('Secret request unavailable');db.exec('BEGIN IMMEDIATE');try{const row=db.prepare("SELECT state FROM secret_requests WHERE id=?").get(id),secret=db.prepare('SELECT revision FROM secret_metadata WHERE name=? AND revision=?').get(name,revision);if(row?.state!=='pending' || !secret)throw Error('Secret request unavailable');db.prepare('INSERT INTO secret_selections VALUES (?,?,?)').run(id,name,revision);db.prepare("UPDATE secret_requests SET state='saved' WHERE id=?").run(id);db.exec('COMMIT');}catch(error){db.exec('ROLLBACK');throw error;}this.waiters.get(id)?.('saved');return 'saved';}
+ questionStepStatus(questionId:string,step:number):'saved'|'skipped'|'unavailable' {const row=this.db?.prepare('SELECT CASE WHEN s.name IS NOT NULL THEN m.revision END AS current_revision, q.secret_revision FROM question_secret_selections q LEFT JOIN secret_metadata m ON m.name=q.secret_name LEFT JOIN secrets s ON s.name=q.secret_name WHERE q.question_id=? AND q.step=?').get(questionId,step);return !row?'skipped':row.current_revision===row.secret_revision?'saved':'unavailable';}
+ saveQuestionStep(input:{questionId:string;step:number;name:string;purpose:string;value:string}|{questionId:string;step:number;name:string;revision:string}):void {
+  const db=this.open(true);db.exec('BEGIN IMMEDIATE');
+  try {
+   if(this.questionStepStatus(input.questionId,input.step)==='saved')throw Error('Secret step already saved');
+   db.prepare('DELETE FROM question_secret_selections WHERE question_id=? AND step=?').run(input.questionId,input.step);
+   let revision:string;
+   if('value' in input) {revision=randomUUID();db.prepare('INSERT INTO secrets VALUES (?,?)').run(input.name,valueSchema.parse(input.value));db.prepare('INSERT INTO secret_metadata VALUES (?,?,?)').run(input.name,input.purpose,revision);}
+   else {revision=input.revision;if(!db.prepare('SELECT 1 FROM secrets s JOIN secret_metadata m ON m.name=s.name WHERE s.name=? AND m.revision=?').get(input.name,revision))throw Error('Secret changed');}
+   db.prepare('INSERT INTO question_secret_selections VALUES (?,?,?,?)').run(input.questionId,input.step,input.name,revision);db.exec('COMMIT');
+  }catch(error){db.exec('ROLLBACK');throw error;}
+ }
  list() {if(!this.db)return [];return this.db.prepare("SELECT id,bot_id AS botId,work_kind AS workKind,work_id AS workId,name,purpose,destination,state FROM secret_requests WHERE state IN ('pending','interrupted') ORDER BY rowid").all().map(row=>({kind:'secret' as const,id:String(row.id),botId:String(row.botId),work:{kind:row.workKind==='task'?'task' as const:'command' as const,id:String(row.workId)},name:String(row.name),purpose:String(row.purpose),destination:row.destination===null?null:String(row.destination),state:String(row.state)}));}
  create(id:string,botId:string,work:WorkRef,input:Input):void {this.open(true).prepare("INSERT INTO secret_requests VALUES (?,?,?,?,?,?,?,'pending')").run(id,botId,work.kind,work.id,input.name,input.purpose,input.destination??null);}
  wait(id:string,signal:AbortSignal):Promise<Outcome> {return new Promise((resolve,reject)=>{

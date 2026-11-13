@@ -375,7 +375,7 @@ The registered request action accepts descriptive metadata only. A separate
 paired-client endpoint sends a value directly to the service, outside generic
 action arguments and results. A separate SQLite database under the data directory
 stores named values in plaintext and request metadata; the main action journal
-contains the nonsecret request and outcome. The store restores pending requests
+contains the nonsecret request and outcome. Protected question-set steps bind their question and step to a specific named secret revision in that separate store. Ordinary draft inputs cannot contain a value for a secret step. The submitted result reports only its status; selection or saving does not authorize use. The store restores pending requests
 as interrupted, and work is not replayed. Paired-client and work authority are
 checked before a save or selection. Settings can add a value or confirm a
 replacement or deletion using the current opaque revision. Metadata for existing

@@ -25,8 +25,13 @@ it; inspect the prior work before giving new direction. A follow-up interrupted
 by restart is not automatically replayed. Simple questions in an ordinary Slack
 conversation can still be asked and answered in that conversation. Background
 task questions and answers stay in Staf, including for work started in Slack.
-These question sets do not provide protected secret entry. Avoid putting
-credentials in ordinary answers; detection is incomplete.
+A set can also include a protected secret step. Save or select a named secret
+there independently of submitting the other answers. The input is masked until
+you reveal it, and saved values are not shown. Skipping or dismissing the rest
+of the set does not delete a saved secret. Saving does not authorize its use. If
+the selected secret is replaced or deleted before submission, select it again.
+Interrupted work cannot accept a new protected entry; start a reviewed new attempt.
+Avoid putting credentials in ordinary answers; detection is incomplete.
 
 A waiting task pauses its execution limit while you answer. Other chats and tasks remain available. The agent sidebar shows a count when questions need attention. Open the task in its agent's conversation to answer or dismiss the set.
 
