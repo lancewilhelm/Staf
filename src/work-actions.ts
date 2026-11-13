@@ -97,6 +97,7 @@ export class WorkActionService {
   setPrivateWork(check:(work:WorkContext)=>boolean,disclosure:(work:WorkContext)=>void):void {this.privateWork=check;this.privateDisclosure=disclosure;}
   isPrivate(context:WorkContext):boolean {return this.privateWork(context);}
   assertPrivateDisclosure(context:WorkContext):void {if(this.privateWork(context))this.privateDisclosure(context);}
+  private privateCapabilityAllowed(context:WorkContext,name:string) {return ['gmail_search','gmail_read','gmail_reply','gmail_modify'].includes(name) || (context.work.kind==='task' && (name==='ask_questions' || name==='ask_owner'));}
   private readonly closures=new Map<string,{controller:AbortController;refs:number}>();
   private readonly completedHopParents=new Set<string>();
   private readonly readReceipts=new Map<string,{work:string;value:Json}>();
@@ -135,7 +136,7 @@ export class WorkActionService {
   }
   offers(context:WorkContext,route:'direct'|'guest'):ToolDefinition[] {
     if ((route==='direct' && context.mode==='code') || (route==='guest' && context.mode==='direct')) return [];
-    return [...this.capabilities.values()].filter(cap=>!cap.internal && !(route==='guest' && cap.directOnly) && (!this.privateWork(context) || ['gmail_search','gmail_read','gmail_reply','gmail_modify'].includes(cap.name)) && cap.eligible(context)).map(cap=>structuredClone(cap.definition));
+    return [...this.capabilities.values()].filter(cap=>!cap.internal && !(route==='guest' && cap.directOnly) && (!this.privateWork(context) || this.privateCapabilityAllowed(context,cap.name)) && cap.eligible(context)).map(cap=>structuredClone(cap.definition));
   }
   recognizes(name:string):boolean {const cap=this.capabilities.get(name);return !!cap && !cap.internal;}
   private digest(value:string):string {return createHmac('sha256',this.key).update(value).digest('hex');}
@@ -239,7 +240,7 @@ export class WorkActionService {
   }
   private async dispatch(context:WorkContext,request:{source:InvocationSource|InternalInvocationSource;name:string;input:unknown;intent:ActionIntent}):Promise<InvocationResult> {
     this.admit(context);
-    if(this.privateWork(context) && !['gmail_search','gmail_read','gmail_reply','gmail_modify'].includes(request.name)) return {kind:'blocked',reason:'Capability unavailable after private Gmail data was read'};
+    if(this.privateWork(context) && !this.privateCapabilityAllowed(context,request.name)) return {kind:'blocked',reason:'Capability unavailable after private Gmail data was read'};
     this.assertPrivateDisclosure(context);
     const route=request.source.kind==='provider'?'direct':request.source.kind==='guest'?'guest':'internal';
     const cap=this.capabilities.get(request.name);
@@ -306,14 +307,14 @@ export class WorkActionService {
     }
     const description=actionDescription.parse(cap.describe(input,context));
     if(description.effect==='change') {
-      const uncertain=records.filter(item=>item.capability!=='ask_questions' && (item.action.state==='uncertain' || item.action.state==='started') && item.description.effect==='change' && !this.resolved(item.action.id));
+      const uncertain=records.filter(item=>item.capability!=='ask_questions' && !(item.capability==='ask_owner' && this.db.prepare('SELECT 1 FROM task_question_sets WHERE id=?').get(item.action.id)) && (item.action.state==='uncertain' || item.action.state==='started') && item.description.effect==='change' && !this.resolved(item.action.id));
       if(uncertain.some(item=>item.description.opaque || description.opaque || item.capability!==request.name || !!cap.journalInput || !cap.overlaps || cap.overlaps(item.input,input,context))) {
         const reason='Uncertain overlapping change requires reconciliation';
         this.db.prepare('INSERT INTO work_action_requests VALUES (?,?,?,?,NULL,?)').run(context.work.kind,context.work.id,source,digest,reason);return {kind:'blocked',reason};
       }
       const state=this.state(context.work);
       const matching=Number(state.epoch)>0 ? records.filter(item=>this.accounted(item.action) && item.capability===request.name && matchesInput(item.input)).map(item=>item.action) : [];
-      const ambiguous=Number(state.epoch)>0 && records.some(item=>item.capability!=='ask_questions' && item.action.state==='succeeded' && item.description.effect==='change' && (item.description.opaque || description.opaque) && !(item.capability===request.name && matchesInput(item.input)) && !this.resolved(item.action.id));
+      const ambiguous=Number(state.epoch)>0 && records.some(item=>item.capability!=='ask_questions' && !(item.capability==='ask_owner' && this.db.prepare('SELECT 1 FROM task_question_sets WHERE id=?').get(item.action.id)) && item.action.state==='succeeded' && item.description.effect==='change' && (item.description.opaque || description.opaque) && !(item.capability===request.name && matchesInput(item.input)) && !this.resolved(item.action.id));
       if(ambiguous) {
         const reason='Opaque prior change requires reconciliation';
         this.db.prepare('INSERT INTO work_action_requests VALUES (?,?,?,?,NULL,?)').run(context.work.kind,context.work.id,source,digest,reason);return {kind:'blocked',reason};

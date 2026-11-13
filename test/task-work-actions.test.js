@@ -13,7 +13,7 @@ test('paired tasks use captured tool mode and the real action service',async()=>
   const port=await app.listen();let token;
   const call=async(path,body)=>{const r=await fetch(`http://127.0.0.1:${port}${path}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});const v=await r.json();assert.ok(r.ok,JSON.stringify(v));return v;};
   try {token=(await call('/api/pair',{code:app.code})).token;
-    for(const mode of ['direct','hybrid','code']) {const bot=await call('/api/bots',{provider:'live',model:'fixture-offline',name:mode,toolMode:mode});const index=offers.length;await call('/api/tasks',{id:mode,botId:bot.id,objective:'Read time'});let task;for(let i=0;i<500;i++){task=await call('/api/tasks/'+mode);if(!['queued','running'].includes(task.state))break;await new Promise(r=>setTimeout(r,10));}assert.equal(task.state,'completed',JSON.stringify(task));const individual=['terminal_run','terminal_read','terminal_stop','terminal_write','terminal_eof','terminal_resize','clock','file_read','file_write','file_edit','file_search','request_secret','memory_search','memory_read','memory_remember','memory_update','memory_forget','memory_proposal_status','ask_owner','discover_bots','request_bot_help','answer_bot'];assert.deepEqual(offers[index].names,mode==='code'?['code_mode']:mode==='hybrid'?[...individual,'code_mode']:individual);assert.equal(task.workActions.length,1);assert.equal(task.workActions[0].state,'succeeded');}
+    for(const mode of ['direct','hybrid','code']) {const bot=await call('/api/bots',{provider:'live',model:'fixture-offline',name:mode,toolMode:mode});const index=offers.length;await call('/api/tasks',{id:mode,botId:bot.id,objective:'Read time'});let task;for(let i=0;i<500;i++){task=await call('/api/tasks/'+mode);if(!['queued','running'].includes(task.state))break;await new Promise(r=>setTimeout(r,10));}assert.equal(task.state,'completed',JSON.stringify(task));const individual=['terminal_run','terminal_read','terminal_stop','terminal_write','terminal_eof','terminal_resize','clock','file_read','file_write','file_edit','file_search','request_secret','memory_search','memory_read','memory_remember','memory_update','memory_forget','memory_proposal_status','ask_owner','discover_bots','request_bot_help','answer_bot','ask_questions'];assert.deepEqual(offers[index].names,mode==='code'?['code_mode']:mode==='hybrid'?[...individual,'code_mode']:individual);assert.equal(task.workActions.length,1);assert.equal(task.workActions[0].state,'succeeded');}
   } finally {await app.close();}
 });
 
@@ -21,7 +21,7 @@ test('owner answers defer queued calls and the next task iteration can still act
   for(const mode of ['direct','hybrid','code']) {
     let calls=0,seenAnswer=false;
     const app=startInstance(':memory:',0,{env:{},providerFactory:async()=>({name:'fixture',capabilities:{toolCalls:true},async complete(messages,tools){
-      const user=messages.filter(m=>m.role==='user').map(m=>m.content).join('\n');
+      const user=JSON.stringify(messages);
       if(user.includes('Use the blue file'))seenAnswer=true;
       calls++;
       if(calls===1) {
@@ -35,8 +35,8 @@ test('owner answers defer queued calls and the next task iteration can still act
     const call=async(path,body)=>{const r=await fetch(`http://127.0.0.1:${port}${path}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});const v=await r.json();assert.ok(r.ok,JSON.stringify(v));return v;};
     const until=async fn=>{for(let i=0;i<1000;i++){const result=await fn();if(result)return result;await new Promise(r=>setTimeout(r,10));}throw Error('timed out');};
     try {token=(await call('/api/pair',{code:app.code})).token;const bot=await call('/api/bots',{provider:'live',model:'fixture-offline',name:mode,toolMode:mode});await call('/api/tasks',{id:'task',botId:bot.id,objective:'Choose file'});
-      const question=await until(async()=>{const task=await call('/api/tasks/task');return task.inbox.questions.find(q=>q.state==='open');});
-      await call('/api/tasks/task/input',{id:'answer',kind:'answer',questionId:question.id,text:'Use the blue file'});
+      const question=await until(async()=>(await call('/api/question-sets')).find(q=>q.workId==='task' && q.state==='open'));
+      await call(`/api/question-sets/${question.id}/draft`,{answers:[{choices:[],writeIn:'Use the blue file'}]});await call(`/api/question-sets/${question.id}/submit`,{});
       const task=await until(async()=>{const task=await call('/api/tasks/task');return !['queued','running'].includes(task.state)&&task;});
       assert.equal(task.state,'completed',JSON.stringify(task));assert.ok(seenAnswer);assert.equal(task.workActions.filter(a=>a.summary==='Read UTC clock').length,1);assert.equal(task.workActions.filter(a=>a.state==='succeeded').length,2);
     } finally {await app.close();}

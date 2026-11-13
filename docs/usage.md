@@ -5,7 +5,7 @@ to the same development instance, see [Run the development workspace](developmen
 
 ## Answer a question set
 
-A tool-capable agent can present a set of questions in its main chat. Choose an
+A tool-capable agent can present a set of questions in main chat or a background task. Choose an
 answer, enter your own, or leave any question unanswered. For multiple-select
 questions, you can combine choices and a write-in. Use **Next**, **Back**, or a
 numbered question to move around. **Skip this question** clears its draft.
@@ -15,7 +15,7 @@ open, and ordinary drafts are saved on the instance across browser refresh and
 service restart. Drafts may briefly be unsaved while a network request is in
 progress; errors appear beside the controls.
 
-The submitted set is retained as a new chat input, separate from later corrections.
+For main chat, Staf retains the submitted set as a new chat input, separate from later corrections.
 If the original response completed, Staf sends one correlated follow-up to the
 agent as new work. The follow-up can use tools under the current permissions,
 approvals, and scope. Staf blocks matching actions recorded in the original work.
@@ -23,11 +23,16 @@ A dismissed request receives a reply without tools. If the original response
 was interrupted, stopped, or failed, Staf retains the answers without resuming
 it; inspect the prior work before giving new direction. A follow-up interrupted
 by restart is not automatically replayed. Simple questions in an ordinary Slack
-conversation can still be asked and answered in that conversation. Structured
-question sets here are for main chat, not protected secret entry. Avoid putting
+conversation can still be asked and answered in that conversation. Background
+task questions and answers stay in Staf, including for work started in Slack.
+These question sets do not provide protected secret entry. Avoid putting
 credentials in ordinary answers; detection is incomplete.
 
-This behavior has controlled synthetic service and browser coverage, not live
+A waiting task pauses its execution limit while you answer. Other chats and tasks remain available. The agent sidebar shows a count when questions need attention. Open the task in its agent's conversation to answer or dismiss the set.
+
+After a restart or stop, the questions and drafts remain available, but the interrupted attempt does not resume. Submit or dismiss the set, inspect the prior task and any uncertain effects, then choose **Start a new attempt** if appropriate. A new attempt checks prior action records and current permissions. It cannot establish whether every external effect occurred.
+
+This behavior has controlled synthetic service coverage, not live
 model or Slack acceptance. Availability depends on the selected model supporting
 tool calls; Direct, Hybrid, and Code Mode are supported.
 
@@ -334,7 +339,7 @@ Incremental output is available when the adapter supplies it; buffered adapters
 show progress and then the completed message. A failed or interrupted response
 remains labeled as incomplete.
 
-Pending chat and task approvals appear in the conversation. Explicit background tasks show their status, outcome and activity there; task questions are visible but answers still require the CLI or API. The workspace checks for updates while visible; it does not provide background notifications.
+Pending chat and task approvals appear in the conversation. Explicit background tasks show their status, outcome, activity, and question sets there. The workspace checks for updates while visible; it does not provide background notifications.
 
 Drafts and pending message IDs are stored in the browser's local journal.
 An agent's draft and pending submission recover automatically after reload or
@@ -535,7 +540,6 @@ pnpm start instance task-start http://127.0.0.1:3210 ~/.staf-client.json BOT_ID 
 pnpm start instance tasks http://127.0.0.1:3210 ~/.staf-client.json BOT_ID
 pnpm start instance task http://127.0.0.1:3210 ~/.staf-client.json ATTEMPT_ID
 pnpm start instance task-direct http://127.0.0.1:3210 ~/.staf-client.json ATTEMPT_ID 'Focus on the report'
-pnpm start instance task-answer http://127.0.0.1:3210 ~/.staf-client.json ATTEMPT_ID QUESTION_ID 'The report'
 pnpm start instance task-stop http://127.0.0.1:3210 ~/.staf-client.json ATTEMPT_ID
 pnpm start instance task-retry http://127.0.0.1:3210 ~/.staf-client.json ATTEMPT_ID
 pnpm start instance task-replace http://127.0.0.1:3210 ~/.staf-client.json ATTEMPT_ID 'Changed objective'
@@ -547,7 +551,7 @@ submission; do not silently submit again. The workspace polls while visible. On 
 unfinished work is marked interrupted and never restarts automatically. Existing
 databases get a private SQLite backup before the task schema migration.
 
-The selected task accepts explicit directions through `task-direct` or main chat with `direct task ATTEMPT_ID: your direction`. Use `stop task ATTEMPT_ID` in main chat to stop it. A request without a full attempt ID asks for clarification. Provider calls to `start_background_task` fail with no task started. Input is accepted first and applied at a subsequent safe boundary, with both statuses shown in Activity. A task may use the structured `ask_owner` tool to request clarification; answer the specific question ID with `task-answer`. Waiting for an answer does not consume the execution limit. Input is not approval for a tool action. Accepted but unapplied inputs remain visible after stop or restart. Adapters without tool-call support cannot request clarification.
+The selected task accepts explicit directions through `task-direct` or main chat with `direct task ATTEMPT_ID: your direction`. Use `stop task ATTEMPT_ID` in main chat to stop it. A request without a full attempt ID asks for clarification. Provider calls to `start_background_task` fail with no task started. Input is accepted first and applied at a subsequent safe boundary, with both statuses shown in Activity. A task may use `ask_owner` or `ask_questions` to request clarification in the Staf workspace. Waiting for an answer does not consume the execution limit. Input is not approval for a tool action. Accepted but unapplied inputs remain visible after stop or restart. Adapters without tool-call support cannot request clarification.
 
 The shared instance also supports separately permitted web reading, local search and scratch-only shell, as described below. A complete recovery workflow is not implemented. Browser task submission does not yet recover an uncertain request automatically. Provider cancellation and live execution require separate live verification.
 
@@ -744,7 +748,7 @@ set `toolMode` in the existing agent profile JSON, or pass `--tool-mode` at
 creation. The paired defaults command accepts a final mode argument.
 
 In chat and eligible tasks, Direct offers eligible individual tools, Hybrid offers those tools and `code_mode`, and Code Mode offers `code_mode` with the same registered capabilities inside it. The code tool description lists eligible registered capability names and input schemas. Fabricated individual calls are rejected. Web reads require approval for each redirect target. Agent host file and native process calls fail closed. Linux scratch calls require an owner-configured Docker engine and pass separate isolation checks; they do not expose a host workspace. Changing tool availability or approval settings does not bypass these restrictions.
-Background tasks use their captured mode for eligible registered capabilities, including clock and task questions, discovery and helper exchanges. A helper uses its own captured mode; helper and scheduled-work restrictions still apply. Pending owner input defers queued actions until the task drains its inbox. Plain text does not start a guest. Settings edits apply to new work; an accepted task and its retries retain their captured profile and task context. Clock permissions and applicable approvals remain live.
+Background tasks use their captured mode for eligible registered capabilities, including clock and task questions, discovery and helper exchanges. A helper uses its own captured mode; helper and scheduled-work restrictions still apply. Pending owner input defers queued actions until it is handled. Plain text does not start a guest. Settings edits apply to new work; an accepted task and its retries retain their captured profile and task context. Clock permissions and applicable approvals remain live.
 
 The host file implementations remain in the codebase, but agent calls are blocked before execution while isolation is unavailable. The working directory alone is not a sandbox.
 
@@ -1116,10 +1120,10 @@ explicitly and securely restored.
 Ask the agent for work in a normal DM, for example, “Please investigate this
 and let me know what you find.” A tool-capable model can choose to start
 independent work; the service uses your original message as its objective and
-sends a receipt in that message's thread. For an update, direction, an answer,
-or Stop, reply in that same thread in ordinary language. Staf binds these actions
-to that thread's task. If there is no unique binding or open question, it asks
-for clarification and makes no change. If older work shares a thread, quote the
+sends a receipt in that message's thread. For an update, direction, or Stop,
+reply in that same thread in ordinary language. Staf binds these actions to that
+thread's task. If there is no unique binding, it asks for clarification and makes
+no change. If older work shares a thread, quote the
 full original request from the offered choices to identify it. Start a new
 top-level message for a new task. An agent can run one background task at a time.
 
@@ -1130,8 +1134,21 @@ in [issue #109](https://github.com/lancewilhelm/Staf/issues/109). A model that
 cannot call tools cannot use the natural-language task capabilities. Existing
 `work:` and ID-based controls remain available for diagnostics and older threads.
 
-Receipt, actual tool progress, questions and the terminal outcome are sent to
-the request's thread. A result does not require another DM. If Slack is disabled,
+Receipt, tool progress, and the terminal outcome are sent to the request's
+thread. Background questions and answers stay in Staf. If a task or its helper
+asked questions, Slack receives only the outcome state until you review the
+text in Staf. Open the task, edit the proposed outcome, check the displayed
+workspace, user, channel, and original thread, and select **Send reviewed
+outcome**. Remove questions and answers, including paraphrases and encoded
+details. Staf rejects some direct matches but cannot detect every disclosure.
+It sends only the exact text you confirm. A Gmail task also requires its
+current Gmail task authorization; Gmail clarification and action approvals
+remain separate.
+
+If access or the destination changes before dispatch, review again. If the
+original thread is unavailable, Staf cannot send the reviewed outcome. If a
+send has an uncertain result, check the thread; Staf will not resend it
+automatically. A result does not require another DM. If Slack is disabled,
 disconnected or rate limited, pending delivery is retained for the same
 workspace, user, channel and agent; reconnect and enable that same binding to
 resume. A confirmed Slack acceptance is not proof that a person read the message.

@@ -117,14 +117,14 @@ test('explicit directions reach a held task in order, and an explicit clarificat
   assert.equal((await call('/api/tasks/task/input',{...one,text:'Different'}))[0],400);
   assert.equal((await call('/api/tasks/task/input',two))[1].kind,'accepted');
   const detail=(await call('/api/tasks/task'))[1];assert.ok(detail.inbox.inputs.every(input=>!('digest' in input)));release();
-  const asking=await wait(t=>t.inbox.questions.some(q=>q.state==='open'));const question=asking.inbox.questions[0];assert.equal(asking.waitReason,'owner-input');assert.match(requests[1].at(-1).content,/First[\s\S]*Second/);
-  assert.equal((await call('/api/tasks/task/input',{id:'answer',kind:'answer',questionId:question.id,text:'report.txt'}))[1].kind,'accepted');
-  const done=await wait(t=>t.state==='completed');assert.equal(done.outcome,'finished');assert.match(requests[2].at(-1).content,/report.txt/);assert.deepEqual(done.inbox.inputs.map(i=>i.status),['applied','applied','applied']);
+  const asking=await wait(t=>t.waitReason==='owner-input');const question=(await call('/api/question-sets'))[1].find(q=>q.workId==='task');assert.ok(question);assert.equal(asking.waitReason,'owner-input');assert.match(requests[1].at(-1).content,/First[\s\S]*Second/);
+  assert.equal((await call(`/api/question-sets/${question.id}/draft`,{answers:[{choices:[],writeIn:'report.txt'}]}))[0],200);assert.equal((await call(`/api/question-sets/${question.id}/submit`,{}))[0],200);
+  const done=await wait(t=>t.state==='completed');assert.equal(done.outcome,'finished');assert.match(JSON.stringify(requests[2]),/report.txt/);assert.deepEqual(done.inbox.inputs.map(i=>i.status),['applied','applied']);
   assert.equal((await call('/api/tasks/task/input',{id:'late',kind:'direction',text:'too late'}))[0],400);
   await app.close();closed=true;const {DatabaseSync}=await import('node:sqlite');const db=new DatabaseSync(path);const session=JSON.parse(db.prepare('SELECT session FROM task_attempts WHERE id=?').get('task').session);db.close();
   const {validSession}=await import('../dist/validation.js');assert.ok(validSession(session,'task'));
-  const {responsesInput}=await import('../dist/codex-direct.js');const codex=responsesInput(requests[2],'fixture');assert.equal(codex.at(-2).type,'function_call_output');assert.match(codex.at(-1).content[0].text,/report.txt/);
-  const {openRouterProvider}=await import('../dist/providers.js');let outbound;const provider=openRouterProvider({OPENROUTER_API_KEY:'dummy'},'fixture',async (_url,init)=>{outbound=JSON.parse(init.body);return Response.json({choices:[{message:{role:'assistant',content:'ok'}}]});});await provider.complete(requests[2],[]);assert.equal(outbound.messages.at(-2).role,'tool');assert.match(outbound.messages.at(-1).content,/report.txt/);
+  const {responsesInput}=await import('../dist/codex-direct.js');const codex=responsesInput(requests[2],'fixture');assert.match(JSON.stringify(codex),/report.txt/);
+  const {openRouterProvider}=await import('../dist/providers.js');let outbound;const provider=openRouterProvider({OPENROUTER_API_KEY:'dummy'},'fixture',async (_url,init)=>{outbound=JSON.parse(init.body);return Response.json({choices:[{message:{role:'assistant',content:'ok'}}]});});await provider.complete(requests[2],[]);assert.match(JSON.stringify(outbound.messages),/report.txt/);
  }finally{release();if(!closed)await app.close();rmSync(dir,{recursive:true,force:true});}
 });
 

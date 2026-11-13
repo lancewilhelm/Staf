@@ -90,3 +90,53 @@ test('a question answer queued during a secret request continues once after it r
  try {const port=await app.listen();let token;const call=async(path,body)=>{const response=await fetch(`http://127.0.0.1:${port}${path}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});const result=await response.json();assert.ok(response.ok,JSON.stringify(result));return result;};token=(await call('/api/pair',{code:app.code})).token;const bot=await call('/api/bots',{name:'Both',provider:'live',model:'fixture-offline',toolMode:'direct'});await call('/api/commands',{id:'both',botId:bot.id,content:'Ask both'});const q=await until(async()=>(await call('/api/question-sets'))[0]);const secret=await until(async()=>(await call('/api/inbox')).find(item=>item.kind==='secret'));await call(`/api/question-sets/${q.id}/draft`,{answers:[{choices:[],writeIn:'example account'}]});await call(`/api/question-sets/${q.id}/submit`,{});assert.equal((await call('/api/question-sets'))[0].continuationState,null);await call(`/api/secret-requests/${secret.id}/skip`,{});await until(async()=>(await call('/api/question-sets'))[0].continuationState==='completed');assert.equal(messagesSeen.filter(value=>value?.includes('example account')).length,1);
  } finally {await app.close();}
 });
+
+test('schema 53 upgrade keeps named secrets while adding task questions and Slack reviews',async()=>{
+ const {Instance,INSTANCE_SCHEMA_VERSION}=await import('../dist/instance.js');
+ const {DatabaseSync}=await import('node:sqlite');
+ const dir=mkdtempSync(join(tmpdir(),'staf-secret-schema-')),path=join(dir,'instance.sqlite');
+ const value='synthetic-upgrade-secret-7301';let instance,store;
+ try {
+  instance=new Instance(path);const bot=instance.createBot({name:'Existing',provider:'live',model:'fixture',instructions:''});instance.close();instance=undefined;
+  store=new SecretRequests(dir,false);
+  store.create('saved-request',bot.id,{kind:'command',id:'old-work'},{name:'Example',purpose:'Test upgrade'});
+  store.decide('saved-request','saved',value);
+  store.create('pending-request',bot.id,{kind:'task',id:'old-task'},{name:'Pending',purpose:'Test interruption'});
+  store.close();store=undefined;
+  let db=new DatabaseSync(path);db.exec('DROP TABLE task_question_sets; DROP TABLE slack_outcome_reviews; PRAGMA user_version=53');db.close();
+  instance=new Instance(path);assert.ok(instance.migrationBackup);assert.equal(instance.bot(bot.id).name,'Existing');instance.close();instance=undefined;
+  db=new DatabaseSync(path,{readOnly:true});assert.equal(db.prepare('PRAGMA user_version').get().user_version,INSTANCE_SCHEMA_VERSION);
+  for(const table of ['question_sets','task_question_sets','slack_outcome_reviews','gmail_reply_proposals','inbox_assessment_history'])assert.ok(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table),table);
+  db.close();assert.equal(readFileSync(path).includes(Buffer.from(value)),false);
+  store=new SecretRequests(dir,false);assert.deepEqual(store.values(),[value]);assert.equal(store.names()[0].name,'Example');
+  assert.equal(store.list().find(request=>request.id==='pending-request').state,'interrupted');
+ } finally {store?.close();instance?.close();rmSync(dir,{recursive:true,force:true});}
+});
+
+test('a background question followed by a secret request stays private and resumes once',async()=>{
+ const dir=mkdtempSync(join(tmpdir(),'staf-task-question-secret-')),path=join(dir,'instance.sqlite');
+ const value='synthetic-task-credential-9271',seen=[];
+ const app=startInstance(path,0,{dataDir:dir,providerFactory:async()=>({name:'fixture',capabilities:{toolCalls:true},async complete(messages){
+  seen.push(JSON.stringify(messages));const count=messages.filter(message=>message.role==='tool').length;
+  if(count===0)return {role:'assistant',content:null,tool_calls:[{id:'question',type:'function',function:{name:'ask_questions',arguments:JSON.stringify({questions:[{kind:'text',prompt:'Which account?'}]})}}]};
+  if(count===1)return {role:'assistant',content:null,tool_calls:[{id:'secret',type:'function',function:{name:'request_secret',arguments:JSON.stringify({name:'Task fixture',purpose:'Continue setup'})}}]};
+  return {role:'assistant',content:'Finished'};
+ }})});
+ const until=async fn=>{for(let i=0;i<500;i++){const result=await fn();if(result)return result;await new Promise(resolve=>setTimeout(resolve,10));}throw Error('Timed out');};
+ try {
+  const port=await app.listen();let token;
+  const call=async(route,body)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});const result=await response.json();assert.ok(response.ok,JSON.stringify(result));return result;};
+  token=(await call('/api/pair',{code:app.code})).token;
+  const bot=await call('/api/bots',{name:'Task fixture',provider:'live',model:'fixture-offline',toolMode:'direct'});
+  await call('/api/tasks',{id:'combined-task',botId:bot.id,objective:'Ask and request'});
+  const question=await until(async()=>(await call('/api/question-sets')).find(item=>item.workKind==='task' && item.workId==='combined-task'));
+  await call(`/api/question-sets/${question.id}/draft`,{answers:[{choices:[],writeIn:'example account'}]});await call(`/api/question-sets/${question.id}/submit`,{});
+  const request=await until(async()=>(await call('/api/inbox')).find(item=>item.kind==='secret' && item.work.id==='combined-task'));
+  await call(`/api/secret-requests/${request.id}/save`,{value});
+  const task=await until(async()=>{const item=await call('/api/tasks/combined-task');return item.state==='completed' && item;});
+  assert.equal(task.workActions.filter(item=>item.state==='succeeded').length,2);
+  assert.ok(seen.some(message=>message.includes('example account')));
+  assert.ok(seen.every(message=>!message.includes(value)));
+  assert.ok(!JSON.stringify(task).includes(value));assert.equal(readFileSync(path).includes(Buffer.from(value)),false);
+ } finally {await app.close();rmSync(dir,{recursive:true,force:true});}
+});
