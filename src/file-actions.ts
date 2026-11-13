@@ -1,6 +1,7 @@
 import {createHash} from 'node:crypto';
 import {closeSync, constants, fstatSync, ftruncateSync, openSync, opendirSync, readSync, statSync, writeFileSync} from 'node:fs';
 import {resolve} from 'node:path';
+import {isDeepStrictEqual} from 'node:util';
 import {z} from 'zod';
 import {ActionFailed, type Capability, type WorkContext} from './work-actions.js';
 
@@ -47,7 +48,7 @@ function definition(name:string,description:string,properties:Record<string,{typ
 const pathProp={type:'string',description:'Relative to the captured working folder or an absolute host path.'};
 const numberProp={type:'integer',minimum:0};
 function base<I extends {path:string}>(name:string,definitionValue:ReturnType<typeof definition>,schema:z.ZodType<I>,effect:'read'|'change',redact:(value:string)=>string,allowed:(work:WorkContext)=>boolean,execute:(input:I,work:WorkContext)=>Promise<unknown>):Capability<I,z.infer<typeof result>> {
- return {name,definition:definitionValue,parseInput:value=>safeInput(schema,value,redact),parseResult:value=>result.parse(value),eligible:allowed,check:(_input,work)=>{if(!allowed(work))throw Error('File action is no longer authorized');},authorize:async()=>{},describe:(input,work)=>({summary:`${name} ${filename(work,input.path)}`,resource:filename(work,input.path),effect}),execute:async (input,work)=>result.parse(await execute(input,work)),visibleResult:()=>`${name} completed`};
+ return {name,definition:definitionValue,sameAction:(previous,next,work)=>{const {path:oldPath,...oldInput}=previous,{path:newPath,...newInput}=next;return filename(work,oldPath)===filename(work,newPath) && isDeepStrictEqual(oldInput,newInput);},parseInput:value=>safeInput(schema,value,redact),parseResult:value=>result.parse(value),eligible:allowed,check:(_input,work)=>{if(!allowed(work))throw Error('File action is no longer authorized');},authorize:async()=>{},describe:(input,work)=>({summary:`${name} ${filename(work,input.path)}`,resource:filename(work,input.path),effect}),execute:async (input,work)=>result.parse(await execute(input,work)),visibleResult:()=>`${name} completed`};
 }
 export function fileCapabilities(redact:(value:string)=>string,allowed:(work:WorkContext)=>boolean,readOverlap:()=>number) {
  const read=base('file_read',definition('file_read','Read a bounded page of actual file bytes, returned as base64. Follow nextOffset for more.',{path:pathProp,offset:numberProp,limit:{type:'integer',minimum:1,maximum:32768}},['path']),readInput,'read',redact,allowed,async(input,work)=>{

@@ -364,7 +364,7 @@ export class Instance {
       work=>{
         const record=work.kind==='command' ? this.command(work.id) : this.taskAttempt(work.id);
         if (!record || typeof record.botId !== 'string' || record.state!==(work.kind==='command' ? 'pending' : 'running') || this.botIdentity(record.botId)?.archived !== false || (work.kind==='command' && this.responseStopping(work.id)) || (work.kind==='task' && this.scheduleOrigin(work.id)?.revoked === 1) || (this.plugins.isPluginCommand(work.id) && !(work.kind==='command' ? this.plugins.authority(work.id) : this.plugins.currentAuthority(work.id)))) throw Error('Work is no longer active or authorized');
-      },32,work=>work.kind==='task' && this.taskHasPending(work.id),this.redactSkill);
+      },32,work=>work.kind==='task' && this.taskHasPending(work.id),this.redactSkill,work=>work.kind==='command' ? this.questionSets.ancestors(work.id) : []);
     return this.actionService;
   }
   private scheduleOrigin(attemptId:string) {

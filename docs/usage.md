@@ -17,8 +17,9 @@ progress; errors appear beside the controls.
 
 The submitted set is retained as a new chat input, separate from later corrections.
 If the original response completed, Staf sends one correlated follow-up to the
-agent. That automatic follow-up has no tools: it can acknowledge your answers,
-but further action requires a new message from you. If the original response
+agent as new work. The follow-up can use tools under the current permissions,
+approvals, and scope. Staf blocks matching actions recorded in the original work.
+A dismissed request receives a reply without tools. If the original response
 was interrupted, stopped, or failed, Staf retains the answers without resuming
 it; inspect the prior work before giving new direction. A follow-up interrupted
 by restart is not automatically replayed. Simple questions in an ordinary Slack
@@ -33,7 +34,8 @@ tool calls; Direct, Hybrid, and Code Mode are supported.
 For a disposable manual check with no provider account or network model call,
 run `corepack pnpm run build` and then `node scripts/question-set-demo.mjs`.
 Open the printed local address, pair with its printed code, and send **Ask a
-set** to the synthetic agent. Type `r` and press Enter in the fixture terminal
+set** to the synthetic agent. Submit the answers to see a new synthetic file
+action and its result. Type `r` and press Enter in the fixture terminal
 to restart the service with the same disposable data, then refresh the browser.
 Press Ctrl-C to stop it and remove that data. The fixture is separate from the
 normal persistent development workspace.

@@ -459,10 +459,12 @@ resolution is idempotent; a different resolution cannot replace it.
 
 A completed origin permits a new, correlated continuation. A reserved command
 identity makes repeated delivery converge on one command. Interrupted origins
-and interrupted continuations are not automatically replayed. The automatic
-continuation has no tool offers; subsequent owner-directed turns use normal tool
-permissions. Ordinary Slack chat continues as conversation; this structured
-main-chat capability is not offered to Slack commands. This is not secret storage.
+and interrupted continuations are not automatically replayed. A submitted answer
+starts new work with the current tool mode, permissions, approvals, and scope.
+The action journal checks the originating question-work lineage before dispatch.
+It blocks matching prior actions and fences unresolved effects. A dismissal
+follow-up has no tool offers. Ordinary Slack chat continues as conversation.
+The structured main-chat capability is not offered to Slack commands. This is not secret storage.
 Known credentials and recognized OpenRouter key patterns are rejected from drafts,
 but detection is incomplete.
 

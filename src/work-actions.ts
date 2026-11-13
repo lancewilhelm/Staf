@@ -43,6 +43,7 @@ export type Capability<I,O> = {
   restoreJournalInput?(input:Json,work:WorkContext,action:ActionIdentity):unknown;
   maxResultBytes?:number;
   releaseResult?(output:O,work:WorkContext):void;
+  sameAction?(previous:I,next:I,work:WorkContext):boolean;
   recovery?: {overlaps?(previous:I,next:I,work:WorkContext):boolean; reconcile?(input:I,evidence:unknown,work:WorkContext,action:ActionIdentity):boolean};
 };
 export class ActionDenied extends Error {}
@@ -74,6 +75,7 @@ type ErasedCapability = {
   parse(input:unknown):Json;describe(input:Json,work:WorkContext):Description;
   check(input:Json,work:WorkContext,action?:ActionIdentity):void;authorize(input:Json,work:WorkContext,action:ActionIdentity):Promise<void|AuthorityClaim>;
   execute(input:Json,work:WorkContext,action:ActionIdentity):Promise<Json>;visible(output:Json):string;releaseResult?(output:Json,work:WorkContext):void;
+  sameAction?: (previous:Json,next:Json,work:WorkContext)=>boolean;
   overlaps?: (previous:Json,next:Json,work:WorkContext)=>boolean;
   reconcile?: (input:Json,evidence:unknown,work:WorkContext,action:ActionIdentity)=>boolean;
   journalInput?: (input:Json,work:WorkContext,digest:(value:string)=>string)=>Json;
@@ -100,7 +102,7 @@ export class WorkActionService {
   private readonly readReceipts=new Map<string,{work:string;value:Json}>();
   constructor(private readonly db:DatabaseSync, private readonly key:Uint8Array,
     private readonly context:(work:WorkRef,signal:AbortSignal)=>WorkContext,
-    private readonly active:(work:WorkRef)=>void, private readonly budget=32, private readonly deferred:(work:WorkRef)=>boolean=()=>false,private readonly inputRedactor:(value:string)=>string=value=>value) {
+    private readonly active:(work:WorkRef)=>void, private readonly budget=32, private readonly deferred:(work:WorkRef)=>boolean=()=>false,private readonly inputRedactor:(value:string)=>string=value=>value,private readonly precedingCommands:(work:WorkRef)=>string[]=()=>[]) {
     this.journal=new ActionJournal(db);
     this.db.exec("UPDATE work_action_invocations SET private_result=NULL WHERE private_result IS NOT NULL AND CASE WHEN json_valid(description) THEN json_extract(description,'$.effect')='read' ELSE 0 END");
   }
@@ -118,6 +120,7 @@ export class WorkActionService {
       ...(capability.journalInput ? {journalInput:(input:Json,work:WorkContext,digest:(value:string)=>string)=>jsonValue.parse(capability.journalInput!(parse(input),work,digest))} : {}),
       ...(capability.restoreJournalInput ? {restoreJournalInput:(input:Json,work:WorkContext,action:ActionIdentity)=>jsonValue.parse(parse(capability.restoreJournalInput!(input,work,action)))} : {}),
       ...(capability.releaseResult ? {releaseResult:(output:Json,work:WorkContext)=>{try{capability.releaseResult!(capability.parseResult(output),work);}catch(error){if(!(error instanceof ActionDeferred))this.close(work,'authority');throw error;}}} : {}),
+      ...(capability.sameAction ? {sameAction:(a:Json,b:Json,work:WorkContext)=>capability.sameAction!(parse(a),parse(b),work)} : {}),
       ...(capability.recovery?.overlaps ? {overlaps:(a:Json,b:Json,work:WorkContext)=>capability.recovery!.overlaps!(parse(a),parse(b),work)} : {}),
       ...(capability.recovery?.reconcile ? {reconcile:(input:Json,evidence:unknown,work:WorkContext,action:ActionIdentity)=>capability.recovery!.reconcile!(parse(input),evidence,work,action)} : {}),
     });
@@ -136,7 +139,7 @@ export class WorkActionService {
   }
   recognizes(name:string):boolean {const cap=this.capabilities.get(name);return !!cap && !cap.internal;}
   private digest(value:string):string {return createHmac('sha256',this.key).update(value).digest('hex');}
-  private state(work:WorkRef) {const recovery=work.kind==='task' && !!this.db.prepare('SELECT 1 FROM task_attempts WHERE id=? AND predecessor IS NOT NULL').get(work.id);this.db.prepare('INSERT OR IGNORE INTO work_action_state(kind,work_id,epoch) VALUES (?,?,?)').run(work.kind,work.id,recovery?1:0);return this.db.prepare('SELECT used,closed,epoch FROM work_action_state WHERE kind=? AND work_id=?').get(work.kind,work.id)!;}
+  private state(work:WorkRef) {const recovery=(work.kind==='task' && !!this.db.prepare('SELECT 1 FROM task_attempts WHERE id=? AND predecessor IS NOT NULL').get(work.id)) || this.precedingCommands(work).length>0;this.db.prepare('INSERT OR IGNORE INTO work_action_state(kind,work_id,epoch) VALUES (?,?,?)').run(work.kind,work.id,recovery?1:0);return this.db.prepare('SELECT used,closed,epoch FROM work_action_state WHERE kind=? AND work_id=?').get(work.kind,work.id)!;}
   private admit(context:WorkContext, allowPending=false):void {
     const state=this.state(context.work);if (typeof state.closed==='string') throw Error(`Action admission closed: ${state.closed}`);
     try {context.signal.throwIfAborted();this.active(context.work);this.workCheck(context.work);} catch(error) {this.close(context,context.signal.aborted?'stopped':'authority');throw error;}
@@ -148,6 +151,12 @@ export class WorkActionService {
     const records=rows.map(row=>{const action=this.journal.get(String(row.action_id));if (!action) throw Error('Missing journal action');return {action,capability:String(row.capability),input:jsonValue.parse(JSON.parse(String(row.input))),description:actionDescription.parse(JSON.parse(String(row.description)))};});
     const unknown=this.db.prepare(`WITH RECURSIVE lineage(id) AS (SELECT ? UNION ALL SELECT predecessor FROM task_attempts JOIN lineage ON task_attempts.id=lineage.id WHERE predecessor IS NOT NULL) SELECT a.id FROM action_journal a WHERE a.state IN ('started','uncertain') AND ((?='command' AND a.command_id=?) OR (?='task' AND a.task_attempt_id IN lineage)) AND NOT EXISTS (SELECT 1 FROM work_action_invocations i WHERE i.action_id=a.id)`).all(context.work.id,context.work.kind,context.work.id,context.work.kind);
     for(const row of unknown) {const action=this.journal.get(String(row.id));if(action)records.push({action,capability:'',input:null,description:{summary:action.summary,resource:'unknown',effect:'change',opaque:true}});}
+    for(const priorId of this.precedingCommands(context.work)) {
+      const prior=this.db.prepare("SELECT action_id,capability,input,description FROM work_action_invocations WHERE kind='command' AND work_id=? GROUP BY action_id ORDER BY MIN(rowid)").all(priorId);
+      for(const row of prior) {const action=this.journal.get(String(row.action_id));if(!action)throw Error('Missing prior action');if(!records.some(record=>record.action.id===action.id))records.push({action,capability:String(row.capability),input:jsonValue.parse(JSON.parse(String(row.input))),description:actionDescription.parse(JSON.parse(String(row.description)))});}
+      const unknown=this.db.prepare("SELECT id FROM action_journal a WHERE command_id=? AND state IN ('started','uncertain') AND NOT EXISTS (SELECT 1 FROM work_action_invocations i WHERE i.action_id=a.id)").all(priorId);
+      for(const row of unknown){const action=this.journal.get(String(row.id));if(action && !records.some(record=>record.action.id===action.id))records.push({action,capability:'',input:null,description:{summary:action.summary,resource:'unknown',effect:'change',opaque:true}});}
+    }
     return records;
   }
   private resolved(id:string):boolean {return !!this.db.prepare('SELECT 1 FROM work_action_resolutions WHERE action_id=?').get(id);}
@@ -279,6 +288,12 @@ export class WorkActionService {
     if(Number(state.used)>=this.budget) {this.close(context,'limit');return {kind:'blocked',reason:'Action limit reached'};}
     this.db.prepare('UPDATE work_action_state SET used=used+1 WHERE kind=? AND work_id=?').run(context.work.kind,context.work.id);
     const records=this.records(context);
+    const priorRecords=records.filter(item=>item.action.work.kind==='command' && context.work.kind==='command' && item.action.work.id!==context.work.id);
+    if(request.intent.kind==='resume') {const actionId=request.intent.actionId;if(priorRecords.some(item=>item.action.id===actionId))throw new ActionConflict('The originating action cannot be resumed in a question continuation');}
+    if(priorRecords.some(item=>item.capability===request.name && (matchesInput(item.input) || (!cap.journalInput && cap.sameAction?.(item.input,input,context))))) {
+      const reason='An action from the originating work cannot be repeated by this continuation';
+      this.db.prepare('INSERT INTO work_action_requests VALUES (?,?,?,?,NULL,?)').run(context.work.kind,context.work.id,source,digest,reason);return {kind:'blocked',reason};
+    }
     if(request.intent.kind==='resume') {
       const actionId=request.intent.actionId;
       const record=records.find(item=>item.action.id===actionId);
@@ -291,14 +306,14 @@ export class WorkActionService {
     }
     const description=actionDescription.parse(cap.describe(input,context));
     if(description.effect==='change') {
-      const uncertain=records.filter(item=>(item.action.state==='uncertain' || item.action.state==='started') && item.description.effect==='change' && !this.resolved(item.action.id));
+      const uncertain=records.filter(item=>item.capability!=='ask_questions' && (item.action.state==='uncertain' || item.action.state==='started') && item.description.effect==='change' && !this.resolved(item.action.id));
       if(uncertain.some(item=>item.description.opaque || description.opaque || item.capability!==request.name || !!cap.journalInput || !cap.overlaps || cap.overlaps(item.input,input,context))) {
         const reason='Uncertain overlapping change requires reconciliation';
         this.db.prepare('INSERT INTO work_action_requests VALUES (?,?,?,?,NULL,?)').run(context.work.kind,context.work.id,source,digest,reason);return {kind:'blocked',reason};
       }
       const state=this.state(context.work);
       const matching=Number(state.epoch)>0 ? records.filter(item=>this.accounted(item.action) && item.capability===request.name && matchesInput(item.input)).map(item=>item.action) : [];
-      const ambiguous=Number(state.epoch)>0 && records.some(item=>item.action.state==='succeeded' && item.description.effect==='change' && (item.description.opaque || description.opaque) && !(item.capability===request.name && matchesInput(item.input)) && !this.resolved(item.action.id));
+      const ambiguous=Number(state.epoch)>0 && records.some(item=>item.capability!=='ask_questions' && item.action.state==='succeeded' && item.description.effect==='change' && (item.description.opaque || description.opaque) && !(item.capability===request.name && matchesInput(item.input)) && !this.resolved(item.action.id));
       if(ambiguous) {
         const reason='Opaque prior change requires reconciliation';
         this.db.prepare('INSERT INTO work_action_requests VALUES (?,?,?,?,NULL,?)').run(context.work.kind,context.work.id,source,digest,reason);return {kind:'blocked',reason};
