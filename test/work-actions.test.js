@@ -41,6 +41,21 @@ function fixture(redact) {
   const instance=new Instance(':memory:',redact);const bot=instance.createBot({provider:'live',model:'fixture-offline',name:'Test',instructions:'',toolMode:'hybrid'});instance.claim({id:'c',botId:bot.id,content:'hello'});const controller=new AbortController();return {instance,bot,controller,actions:instance.workActions().open({kind:'command',id:'c'},controller.signal)};
 }
 
+test('action results and failure details filter known credentials before records and callers',async()=>{
+  const {redactor}=await import('../dist/config.js'),{ActionFailed}=await import('../dist/work-actions.js'),secret='synthetic-saved-credential';
+  const {instance,actions}=fixture(redactor({OPENROUTER_API_KEY:secret}));
+  try {
+    instance.workActions().register({...localChange({execute:async()=>`result ${secret}`}),visibleResult:value=>value});
+    const result=await invoke(actions,source('result'),'local_change',{value:'safe'});
+    assert.equal(result.kind,'completed');assert.equal(result.value,'result [REDACTED]');
+    assert.doesNotMatch(JSON.stringify(instance.workActions().inspectActions({kind:'command',id:'c'})),new RegExp(secret));
+    assert.doesNotMatch(JSON.stringify(instance.db.prepare('SELECT private_result FROM work_action_invocations').all()),new RegExp(secret));
+    instance.workActions().register({...localChange({execute:async()=>{throw new ActionFailed(`failed ${secret}`);}}),name:'failure',definition:{type:'function',function:{name:'failure',description:'Fail a fixture',parameters:{type:'object'}}}});
+    const failed=await invoke(actions,source('failed'),'failure',{value:'safe'});
+    assert.equal(failed.kind,'status');assert.doesNotMatch(JSON.stringify(failed),new RegExp(secret));assert.doesNotMatch(JSON.stringify(instance.workActions().inspectActions({kind:'command',id:'c'})),new RegExp(secret));
+  } finally {actions.dispose();instance.close();}
+});
+
 test('input normalization cannot introduce a credential before the shared journal boundary',async()=>{
   const {redactor}=await import('../dist/config.js'),secret='syntheticnormalizedcredential';const {instance,actions}=fixture(redactor({OPENROUTER_API_KEY:secret}));let effects=0;
   try{instance.workActions().register({...localChange({execute:async()=>{effects++;return 'changed';}}),parseInput:value=>({value:value.value.replaceAll(' ','')})});for(const src of [source('normalized'),guest(1)])assert.equal((await invoke(actions,src,'local_change',{value:[...secret].join(' ')})).kind,'blocked');assert.equal(effects,0);assert.deepEqual(instance.workActions().inspectActions({kind:'command',id:'c'}),[]);}finally{actions.dispose();instance.close();}
@@ -104,6 +119,25 @@ test('recovery resumes completed changes and requires a single-use repeat challe
     assert.equal(readFileSync(join(actions.context.workingDirectory,'fixture'),'utf8'),'xx');
     assert.equal(instance.db.prepare('SELECT count(*) AS n FROM action_journal').get().n,2);
   }finally{instance.close();}
+});
+
+test('recovery challenges equivalent isolated workspace paths',async()=>{
+ const {isolatedFileCapabilities}=await import('../dist/linux-file-actions.js');const {instance,actions}=fixture();let effects=0;
+ try {const files=isolatedFileCapabilities({workspace:'/srv/staf-workspace',recheck(){}},value=>value,()=>true,()=>16);instance.workActions().register({...files.write,execute:async()=>{effects++;return {bytes:3,sha256:'a'.repeat(64)};}});
+  const first=await invoke(actions,source('host-path'),'file_write',{path:'/srv/staf-workspace/a',content:'one'});assert.equal(first.kind,'completed');actions.beginRecovery();
+  const repeat=await invoke(actions,source('visible-path'),'file_write',{path:'/workspace/a',content:'one'});assert.equal(repeat.kind,'repeat-required');assert.equal(effects,1);
+  const same=await invoke(actions,source('visible-path'),'file_write',{path:'/workspace/a',content:'one'});assert.equal(same.kind,'repeat-required');assert.equal(same.challenge,repeat.challenge);assert.equal(effects,1);
+  const confirmed=await invoke(actions,source('confirmed'),'file_write',{path:'/workspace/a',content:'one'},{kind:'repeat',challenge:repeat.challenge});assert.equal(confirmed.kind,'completed');assert.equal(effects,2);
+ }finally{actions.dispose();instance.close();}
+});
+
+test('question continuation blocks an equivalent isolated terminal command',async()=>{
+ const {nativeCommandCapability,NativeProcesses}=await import('../dist/native-processes.js');const {isolatedWorkingDirectory}=await import('../dist/linux-host-boundary.js');const {instance,bot,actions,controller}=fixture();let starts=0,continuation;
+ try {const manager=new NativeProcesses(instance.db);instance.workActions().register(nativeCommandCapability(manager,()=>true,value=>value,async()=>{starts++;return {started:true};},cwd=>'/workspace/'+isolatedWorkingDirectory('/srv/staf-workspace',cwd)));
+  const first=await invoke(actions,source('original'),'terminal_run',{command:'printf safe',cwd:'/srv/staf-workspace/project'});assert.equal(first.kind,'completed');instance.db.prepare('INSERT INTO work_action_resolutions VALUES (?)').run(first.actionId);
+  instance.questionSets.create('question',bot.id,'c',{questions:[{kind:'text',prompt:'Continue?'}]});const request=instance.questionSets.list()[0];instance.complete('c','waiting for answer');actions.dispose();instance.claim({id:request.continuationId,botId:bot.id,content:'Answer'});continuation=instance.workActions().open({kind:'command',id:request.continuationId},controller.signal);
+  const repeated=await invoke(continuation,source('continuation'),'terminal_run',{command:'printf safe',cwd:'/workspace/project'});assert.equal(repeated.kind,'blocked');assert.match(repeated.reason,/originating work cannot be repeated/);assert.equal(starts,1);
+ }finally{continuation?.dispose();actions.dispose();instance.close();}
 });
 
 test('stop during authorization prevents the effect and closes queued admission',async()=>{

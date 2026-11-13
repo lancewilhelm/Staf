@@ -379,9 +379,13 @@ contains the nonsecret request and outcome. The store restores pending requests
 as interrupted, and work is not replayed. Paired-client and work authority are
 checked before a save or selection. Settings can add a value or confirm a
 replacement or deletion using the current opaque revision. Metadata for existing
-stores is added when the store opens. The current store does not implement use
-grants or connect plugins. Known saved values join the existing output filter, which remains a
-secondary safeguard rather than isolation.
+stores is added when the store opens. Known saved values join the existing output filter, which remains a
+secondary safeguard rather than isolation. The shared action coordinator filters
+known values from result strings, keys, visible outcomes, and retained change
+results before release to callers or normal records. The paired browser checks
+recognizable formats locally before chat and question submission; flagged
+question text is omitted from draft saves. Unknown and transformed values may
+escape filtering, and historical records are not rewritten.
 
 ### Native process slice
 
@@ -445,7 +449,9 @@ file-write bytes or scoped memory state before recording a resolution and a new
 recovery epoch. Task retries can resolve eligible predecessor actions. Original
 outcomes remain unchanged, closed work stays closed, and a matching resolved
 uncertain change still requires a repeat challenge. There is no generic force
-resolution or model reconciliation tool. See [the contract](work-actions.md).
+resolution or model reconciliation tool. Capability-defined action equivalence
+is used for both new recovery challenges and challenge refresh. See [the
+contract](work-actions.md).
 
 ## Creation defaults and Demo migration
 

@@ -807,10 +807,27 @@ path for a plugin or tool to use a named secret, and no usage grants are stored.
 Deletion does not revoke a provider credential, recall an in-flight request, or
 erase backups. Existing Gmail and Slack credential files and their use are unchanged.
 
+The paired browser checks ordinary chat and written question answers for a few
+recognizable credential formats. It warns and blocks submission when one is
+found. Remove or correct the text; for a secret, ask the agent to create a
+protected request, or use the appropriate connection in Settings. An answer
+that triggers the warning stays in the current view and is omitted from saved
+question drafts; other answers can still be saved. Chat drafts remain in browser
+storage. Detection can miss credentials and can flag ordinary text. Other
+clients do not provide this browser warning, and Staf cannot retract a message
+already sent to Slack.
+
+Known saved and supported environment credential values are filtered from
+applicable tool results and action records before model delivery. The filter is
+a secondary safeguard: unknown, encoded, fragmented, or transformed secrets
+can escape it. Existing records, backups, and data already sent elsewhere are
+not erased. Use protected entry rather than relying on detection or filtering.
+
 Named values are unencrypted in `secrets/credentials.sqlite` under the instance
 data directory, with owner-only directory and file permissions. The service
 account, host administrator, and anyone with a copy of the store can read them.
-Agent-accessible host execution and file tools are blocked on every platform;
+Agent-accessible host execution and file tools fail closed unless the experimental
+Linux boundary is explicitly configured and its checks pass;
 this does not protect against pre-existing detached processes, other programs
 running as the service user, host administrators, or host compromise. Stop old
 agent processes before using the store. No Linux isolation or live provider

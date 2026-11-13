@@ -26,7 +26,8 @@ test('configured service runs file and terminal work inside the Linux boundary',
    const bot=await call('/api/bots',{name:mode,provider:'live',model:'fixture-offline',toolMode:mode});let sequence=0;
    const run=async(name,input)=>{planned={name,input};const id=`service-${mode}-${++sequence}`;await call('/api/commands',{id,botId:bot.id,content:'Run controlled action'});const command=await wait(async()=>{const value=await call('/api/commands/'+id);return value.state!=='pending'&&value;});assert.equal(command.state,'completed');assert.equal(command.workActions.length,1);assert.equal(command.workActions[0].state,'succeeded',JSON.stringify(command));return id;};
    const file=name+'-'+mode;
-   await run('file_write',{path:file,content:'ordinary fixture'});await run('file_read',{path:file,offset:0,limit:64});
+   await run('file_write',{path:file,content:'ordinary fixture'});await run('file_read',{path:`/workspace/${file}`,offset:0,limit:64});
+   await run('file_read',{path:`/srv/staf-workspace/${file}`,offset:0,limit:64});
    await run('file_search',{path:file,query:'fixture'});
    await run('file_edit',{path:file,expectedHash:createHash('sha256').update('ordinary fixture').digest('hex'),oldText:'fixture',newText:'edited'});
    await run('file_read',{path:file,offset:0,limit:64});
@@ -37,10 +38,10 @@ test('configured service runs file and terminal work inside the Linux boundary',
    const rejected=await wait(async()=>{const item=await call('/api/commands/'+denied);return item.state!=='pending'&&item;});
    assert.equal(rejected.state,'completed');assert.ok(rejected.workActions.every(item=>item.state!=='succeeded'));
    for(const terminalMode of ['pipe','pty']) {
-    const id=await run('terminal_run',{command:`printf 'ordinary env:%s' "\${OPENROUTER_API_KEY-unset}"; test ! -r '${join(dir,'private')}'`,mode:terminalMode,retain:true});
+    const id=await run('terminal_run',{command:`printf 'ordinary env:%s' "\${OPENROUTER_API_KEY-unset}"; test ! -r '${join(dir,'private')}'`,cwd:terminalMode==='pipe'?'/workspace':'/srv/staf-workspace',mode:terminalMode,retain:true});
     const process=await wait(async()=>(await call('/api/processes')).find(item=>item.work.id===id && item.outputComplete));
     const output=await call(`/api/processes/${process.id}/output`);const text=output.chunks.map(chunk=>chunk.text??'').join('');
-    assert.match(text,/ordinary env:unset/);assert.equal(process.exitCode,0);assert.ok(!text.includes(secret));
+    assert.match(text,/ordinary env:unset/);assert.equal(process.cwd,'/workspace');assert.equal(process.exitCode,0);assert.ok(!text.includes(secret));
    }
    const cleanup=await run('terminal_run',{command:`rm -f '${file}' '${link}'`,retain:true});
    await wait(async()=>(await call('/api/processes')).find(item=>item.work.id===cleanup && item.outputComplete));

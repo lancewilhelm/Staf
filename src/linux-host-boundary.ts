@@ -43,6 +43,9 @@ export function isolatedWorkingDirectory(root:string,path:string):string {
  if(part==='..' || part.startsWith('..'+sep) || isAbsolute(part))throw new ActionFailed('Working directory is outside the approved workspace');
  return part || '.';
 }
+export function isolatedVisiblePath(root:string,path:string):string {
+ return resolve('/workspace',isolatedWorkingDirectory(root,path));
+}
 
 export type LinuxHostBoundary={workspace:string;recheck:()=>void};
 /** Explicit selection is never a fallback: failed checks leave the capability unavailable. */

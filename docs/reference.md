@@ -521,7 +521,10 @@ explicitly configured, unverified host boundary described in
 With the Linux boundary, paths resolve against the approved workspace unless absolute. The file helper rejects paths outside it, symlinks, and nested mounts. The isolated execution account and its workspace permissions apply. Inputs changed by redaction are rejected before journal preparation. Shared action admission, Stop, recovery, and uncertain-effect handling apply. Helper and scheduled task restrictions remain in force; task mode applies to eligible actions.
 
 File tools return paths under `/workspace`, matching terminal commands. They also
-accept the equivalent paths under `/srv/staf-workspace`.
+accept the equivalent paths under `/srv/staf-workspace`. Isolated terminal
+records use `/workspace` for the working directory. Recovery and question
+continuations treat equivalent file and terminal working-directory paths as the
+same action.
 
 Random file pages check the complete known-credential overlap and up to 64 KiB
 of preceding token context (or the larger known-credential overlap). Recognized
@@ -579,7 +582,12 @@ rejected. `GET /api/secrets` returns metadata and an opaque revision only.
 `POST /api/secrets/add` accepts a name, purpose, and value; `/replace` accepts a
 name, current revision, value, and explicit confirmation; `/delete` accepts a
 name, current revision, and explicit confirmation. Stale revisions fail. No API
-returns values or grants a plugin permission to use them.
+returns saved values.
+The browser's recognizable-pattern warning is client-side; it is not an API
+validation guarantee. It blocks flagged chat and question submissions and omits
+flagged written answers from draft saves. Action results are filtered for known
+values before normal retention and model delivery; this does not cover arbitrary
+encodings, unknown values, historical records, or messages already sent.
 See [secret requests](usage.md#secret-requests) for storage and backup limits.
 
 
