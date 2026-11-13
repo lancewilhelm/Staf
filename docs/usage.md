@@ -809,11 +809,13 @@ the decision. A stale confirmation fails if the secret changed. Deletion does no
 revoke a provider credential, recall an in-flight request, or erase backups.
 
 Gmail and Slack require a fresh connection to the managed store. Staf does not
-import, use, or delete old `auth/gmail.json` or `auth/slack.json` files. They can
-still contain credentials and remain the owner's responsibility. A connection
+import, use for connections, or delete old `auth/gmail.json` or `auth/slack.json`
+files. When readable, their values remain in the in-memory output filter. The
+files can still contain credentials and remain the owner's responsibility. A connection
 approval covers the displayed Google endpoints and Gmail account, or Slack's API
-and the selected workspace, user, and DM. A changed destination requires another
-approval. Gmail and Slack do not read credentials from environment variables.
+and the selected workspace, user, and DM. Slack Socket Mode also connects to a
+Slack-provided WSS address at `slack.com` or a `slack.com` subdomain. A changed destination requires
+another approval. Gmail and Slack do not read credentials from environment variables.
 Other provider environment settings retain the precedence in the
 [configuration reference](reference.md#terminal-commands-and-environment). The
 shared instance's OpenRouter connection remains separate from named secrets and
@@ -835,8 +837,9 @@ a secondary safeguard: unknown, encoded, fragmented, or transformed secrets
 can escape it. Existing records, backups, and data already sent elsewhere are
 not erased. Use protected entry rather than relying on detection or filtering.
 
-Named values are unencrypted in `secrets/credentials.sqlite` under the instance
-data directory, with owner-only directory and file permissions. The service
+Named values are unencrypted in `secrets/credentials.sqlite` beside the instance
+database, with owner-only directory and file permissions. In-memory instances
+keep the secret store in memory. The service
 account, host administrator, and anyone with a copy of the store can read them.
 Agent-accessible host execution and file tools fail closed unless the experimental
 Linux boundary is explicitly configured and its checks pass;

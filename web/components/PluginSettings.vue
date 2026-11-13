@@ -38,7 +38,7 @@ function connect(){void action('connect',{...form.value,confirm:true});}
      <label>Approved user ID<input v-model.trim="form.userId" required /></label>
      <label>Direct message channel ID<input v-model.trim="form.channelId" required /></label>
      <label>Agent<select v-model="form.botId" required><option value="" disabled>Choose an agent</option><option v-for="bot in state.bots.filter(item=>!item.archived)" :key="bot.id" :value="bot.id">{{ bot.name }}</option></select></label>
-     <p>Connecting approves these tokens for Slack at https://slack.com/api and the workspace, user, and DM above. Agent access is a separate decision.</p>
+     <p>Connecting approves these tokens for https://slack.com/api and the selected workspace, user, and DM. Socket Mode connects to a Slack-provided address at wss://slack.com or a slack.com subdomain. Agent access is a separate decision.</p>
      <button :disabled="busy">Connect and approve</button>
     </form>
    </details>

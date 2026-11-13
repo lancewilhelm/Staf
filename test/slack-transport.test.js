@@ -31,6 +31,15 @@ test('Socket Mode accepts only plain DMs and acknowledges envelopes; posting use
  }finally{globalThis.fetch=originalFetch;globalThis.WebSocket=OriginalWebSocket;}
 });
 
+test('Socket Mode rejects non-Slack hosts, credentials and nonstandard ports',async()=>{
+ const originalFetch=globalThis.fetch,OriginalWebSocket=globalThis.WebSocket;let opened=0;
+ globalThis.WebSocket=class {constructor(){opened++;}};
+ try {for(const url of ['wss://evil.example/socket','wss://wss.slack.com:444/socket','wss://user:password@wss.slack.com/socket']){
+  globalThis.fetch=async(_url,options)=>{assert.equal(options.redirect,'error');return Response.json({ok:true,url});};
+  const stop=await slackTransport.start({appToken:'xapp-synthetic',botToken:'xoxb-synthetic'},async()=>{});stop();
+ }assert.equal(opened,0);}finally{globalThis.fetch=originalFetch;globalThis.WebSocket=OriginalWebSocket;}
+});
+
 test('HTTP 429 exposes a safe retry delay while other transport failures remain ambiguous',async()=>{
  const {SlackRateLimited}=await import('../dist/slack.js');const original=globalThis.fetch;const tokens={appToken:'xapp-synthetic',botToken:'xoxb-synthetic'};
  try{

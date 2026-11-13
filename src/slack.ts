@@ -29,7 +29,7 @@ export const slackTransport:SlackTransport={
   let stopped=false,socket:WebSocket|undefined,timer:ReturnType<typeof setTimeout>|undefined;
   async function connect() {
    assertAuthority();const result=await api('apps.connections.open',tokens.appToken,{});assertAuthority();if(!result.url)throw Error('Slack socket URL unavailable');
-   const url=new URL(result.url);if(url.protocol!=='wss:' || !(url.hostname==='slack.com' || url.hostname.endsWith('.slack.com')))throw Error('Invalid Slack socket URL');
+   const url=new URL(result.url);if(url.protocol!=='wss:' || url.port!=='' || url.username || url.password || !(url.hostname==='slack.com' || url.hostname.endsWith('.slack.com')))throw Error('Invalid Slack socket URL');
    if(stopped)return;
    socket=new WebSocket(url);const current=socket;
    current.addEventListener('open',()=>{if(!stopped)status?.('connected');});

@@ -35,6 +35,8 @@ import {bundledPlugins, slackConfigSchema, type SlackConfig} from './plugins.js'
 import {slackTransport as defaultSlackTransport, SlackRateLimited, type SlackTransport, type SlackEvent, type SlackInteraction} from './slack.js';
 import {GmailAuth,gmailStartSchema} from './gmail-auth.js';
 import type {GmailCredential} from './gmail-credential.js';
+import {loadGmailCredential as loadLegacyGmailCredential} from './gmail-credential.js';
+import {loadSlackTokens as loadLegacySlackTokens} from './slack-credential.js';
 import {gmailHistoryTransport} from './gmail-transport.js';
 import {GmailApi,checkedGmailId} from './gmail-api.js';
 import {inboxPreferencesSchema,inboxClarification,inboxMessage,inboxUncertainMessage} from './inbox-monitor.js';
@@ -79,6 +81,8 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
   const dataDir = options.dataDir ?? resolve(dirname(path));
   const knownKeys = new Set<string>();
   try {const initialKey=loadOpenRouterKey(dataDir);if(initialKey) knownKeys.add(initialKey);}catch {/* A damaged store can be replaced or disconnected by a paired client. */}
+  try {const legacy=loadLegacyGmailCredential(dataDir);if(legacy){knownKeys.add(legacy.clientSecret);knownKeys.add(legacy.refreshToken);}}catch {/* Legacy files are not used for connections. */}
+  try {const legacy=loadLegacySlackTokens(dataDir);if(legacy){knownKeys.add(legacy.appToken);knownKeys.add(legacy.botToken);}}catch {/* Legacy files are not used for connections. */}
   const redactEnv=redactor(env);
   const redactProgress=streamingRedactor(env,()=>[...knownKeys]);
   const redact = (text:string) => [...knownKeys].reduce((result,key)=>redactor({OPENROUTER_API_KEY:key})(result),redactEnv(text));
@@ -87,7 +91,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
   let secretRequests:SecretRequests;
   try {secretRequests=new SecretRequests(resolve(dirname(path)),path===':memory:');for(const value of secretRequests.values())knownKeys.add(value);}catch(error){instance.close();throw error;}
   const gmailDestination=(email:string)=>JSON.stringify(['https://oauth2.googleapis.com/token','https://gmail.googleapis.com',email]);
-  const slackDestination=(config:SlackConfig)=>JSON.stringify(['https://slack.com/api',config.teamId,config.userId,config.channelId]);
+  const slackDestination=(config:SlackConfig)=>JSON.stringify(['https://slack.com/api','wss://slack.com or *.slack.com',config.teamId,config.userId,config.channelId]);
   const gmailRoles=['gmail.client','gmail.refresh'] as const,slackRoles=['slack.app','slack.bot'] as const;
   function loadGmailCredential(_root:string):GmailCredential|undefined {
     const c=instance.plugins.gmailConnection();if(!c)return undefined;const destination=gmailDestination(c.accountId);
@@ -1256,7 +1260,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
         return json(200,{updated:true});
       }
       if(req.method==='POST' && req.url==='/api/secrets/add') {const parsed=z.strictObject({name:z.string().trim().min(1).max(120),purpose:z.string().trim().min(1).max(500),value:z.string().min(1).max(16000)}).parse(value);if(!instance.authorized(token))return json(401,{error:'Unauthorized'});if(redact(parsed.name)!==parsed.name || redact(parsed.purpose)!==parsed.purpose || parsed.name.includes(parsed.value) || parsed.purpose.includes(parsed.value) || containsUnsafeWebUrl(parsed.name) || containsUnsafeWebUrl(parsed.purpose))throw Error('Invalid metadata');secretRequests.add(parsed);knownKeys.add(parsed.value);return json(200,{saved:true});}
-      if(req.method==='POST' && req.url==='/api/secrets/replace') {const parsed=z.strictObject({name:z.string().min(1).max(120),revision:z.string().uuid(),value:z.string().min(1).max(16000),confirm:z.literal(true)}).parse(value);if(!instance.authorized(token))return json(401,{error:'Unauthorized'});if(!secretRequests.lookup(parsed.name,parsed.revision))throw Error('Secret changed');const grants=secretRequests.grants().filter(grant=>grant.name===parsed.name);if(grants.some(grant=>String(grant.integration).startsWith('gmail.'))){gmailAuth.cancel();stopGmailChecks();stopGmailWork();}if(grants.some(grant=>String(grant.integration).startsWith('slack.')))stopSlackConnection();secretRequests.replace(parsed);knownKeys.add(parsed.value);return json(200,{saved:true});}
+      if(req.method==='POST' && req.url==='/api/secrets/replace') {const parsed=z.strictObject({name:z.string().min(1).max(120),revision:z.string().uuid(),value:z.string().min(1).max(16000).refine(text=>!text.includes('\0')),confirm:z.literal(true)}).parse(value);if(!instance.authorized(token))return json(401,{error:'Unauthorized'});if(!secretRequests.lookup(parsed.name,parsed.revision))throw Error('Secret changed');const grants=secretRequests.grants().filter(grant=>grant.name===parsed.name);if(grants.some(grant=>String(grant.integration).startsWith('gmail.'))){gmailAuth.cancel();stopGmailChecks();stopGmailWork();}if(grants.some(grant=>String(grant.integration).startsWith('slack.')))stopSlackConnection();secretRequests.replace(parsed);knownKeys.add(parsed.value);return json(200,{saved:true});}
       if(req.method==='POST' && req.url==='/api/secrets/delete') {const input=z.strictObject({name:z.string().min(1).max(120),revision:z.string().uuid(),confirm:z.literal(true)}).parse(value);if(!instance.authorized(token))return json(401,{error:'Unauthorized'});if(!secretRequests.lookup(input.name,input.revision))throw Error('Secret changed');const grants=secretRequests.grants().filter(grant=>grant.name===input.name);if(grants.some(grant=>String(grant.integration).startsWith('gmail.'))){gmailAuth.cancel();stopGmailChecks();stopGmailWork();}if(grants.some(grant=>String(grant.integration).startsWith('slack.')))stopSlackConnection();if(!secretRequests.delete(input.name,input.revision))throw Error('Secret not found');return json(200,{deleted:true});}
       const secretDecision=req.url?.match(/^\/api\/secret-requests\/([\w-]+)\/(save|select|skip|dismiss)$/);
       if(req.method==='POST' && secretDecision?.[1] && secretDecision[2]) {
