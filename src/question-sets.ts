@@ -23,7 +23,7 @@ export const taskQuestionSetSchema=`CREATE TABLE IF NOT EXISTS task_question_set
  questions TEXT NOT NULL, draft TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('open','submitted','dismissed')),
  result TEXT
 );`;
-export const gmailConnectionNotice='Credential status reflects locally saved grants, not Google access or agent and model permissions.';
+export const gmailConnectionNotice='Credential status reflects locally saved grants, not Google access or agent and model permissions. Earlier authorization may refer to a different account.';
 export type GmailConnectionStatus={status:'credentials_available'|'credentials_unavailable'|'disconnected'|'unknown';enabled:boolean|null};
 export class QuestionSets {
  constructor(private db:DatabaseSync) {}
