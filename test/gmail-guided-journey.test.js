@@ -237,3 +237,8 @@ test('a failure writing authorization evidence rolls back the plugin connection'
 test('migration does not invent overwritten historical authorization evidence',async()=>{
  const f=await fixture();try{await f.restart(()=>{const db=new DatabaseSync(f.path);db.prepare("UPDATE gmail_setup_requests SET state='failed' WHERE question_id=?").run(f.q.id);db.exec('DROP TABLE gmail_setup_successes; PRAGMA user_version=56');db.close();});const q=(await f.call('/api/question-sets')).value.find(item=>item.id===f.q.id);assert.equal(q.gmailSetup,'failed');assert.equal(q.gmailAuthorization,'not_recorded');}finally{await f.close();}
 });
+
+
+test('the initial guided response does not assert the current connection state',async()=>{
+ const f=await fixture();try{assert.ok(f.seen.some(item=>item.includes('Authorization has not been completed for this request')));assert.ok(!f.seen.some(item=>item.includes('The account is not connected yet')));}finally{await f.close();}
+});

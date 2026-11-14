@@ -644,7 +644,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
     parseInput:value=>gmailSetupActionInput.parse(value),parseResult:value=>z.string().parse(value),
     describe:()=>({summary:'Guide Gmail setup',resource:'paired owner',effect:'change'}),
     eligible:work=>work.work.kind==='task' ? taskActionHooks.has(work.work.id) : !slackContext(work),check:(_input,work)=>{instance.assertWorkAuthority(work.work);if(slackContext(work))throw Error('Gmail setup is available in Staf');},authorize:async()=>{},
-    execute:async(_input,work,identity)=>{if(work.work.kind==='command'){instance.questionSets.create(identity.id,work.botId,work.work.id,gmailSetupQuestions);const bot=instance.bot(work.botId);if(!bot || bot.archived)throw Error('Agent unavailable');instance.questionSets.createGmailSetup(identity.id,bot.revision);return 'Gmail setup questions are pending. The account is not connected yet.';}return waitForTaskQuestions(work.work.id,work.botId,identity.id,gmailSetupQuestions,work.signal,true);},visibleResult:value=>value,
+    execute:async(_input,work,identity)=>{if(work.work.kind==='command'){instance.questionSets.create(identity.id,work.botId,work.work.id,gmailSetupQuestions);const bot=instance.bot(work.botId);if(!bot || bot.archived)throw Error('Agent unavailable');instance.questionSets.createGmailSetup(identity.id,bot.revision);return 'Gmail setup questions are pending. Authorization has not been completed for this request.';}return waitForTaskQuestions(work.work.id,work.botId,identity.id,gmailSetupQuestions,work.signal,true);},visibleResult:value=>value,
   };
   workActions.register(guidedGmail);
   const startSlackTask:Capability<Record<string,never>,string>={
