@@ -944,12 +944,24 @@ authorization, open the authorization link, sign in to the intended account,
 and return to Staf. Refresh the status and submit the answers so the agent can
 report the observed result. A saved secret alone is not a connection. Submitting
 or dismissing while Google authorization is pending interrupts that attempt.
-Submitting without starting authorization records the setup as skipped.
+Submitting without starting authorization records the setup as skipped. Dismissing
+questions after a successful connection leaves Gmail connected and tells the
+agent that the questions were dismissed and Gmail connected. If the agent's
+settings change during setup, start a new Gmail setup request before saving,
+selecting, or clearing its secret.
+
+If an existing connection lacks managed credentials, you can review and reconnect
+the same account here without disconnecting it. The review shows the existing
+connection and any use approvals that the new setup replaces. If saved scopes
+are unavailable, choose the Google permissions explicitly. The existing state
+remains until the new connection and approvals commit together; the reconnected
+account starts disabled. Existing agent and model permissions remain in place.
+Legacy credential files remain untouched and are not imported.
+
 A definite transaction failure retains the prior connection and approvals. If
 the outcome is uncertain, restart Staf and review Gmail status and named-secret
-uses before retrying. This flow does not enable
-Gmail or grant an agent/model access. A new connection starts disabled; existing
-agent and model permissions are retained for a reconnect to the same account.
+uses before retrying. This flow does not enable Gmail or grant agent or model
+access. A new connection starts disabled.
 The guided service journey has controlled synthetic coverage, not a live Google
 or live model acceptance test. Linux credential isolation remains unverified.
 
