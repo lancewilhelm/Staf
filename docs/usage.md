@@ -944,6 +944,7 @@ authorization, open the authorization link, sign in to the intended account,
 and return to Staf. Refresh the status and submit the answers so the agent can
 report the observed result. A saved secret alone is not a connection. Submitting
 or dismissing while Google authorization is pending interrupts that attempt.
+Submitting without starting authorization records the setup as skipped.
 A failed or interrupted attempt can have saved credentials or approvals; check
 Gmail status and named-secret uses before retrying. This flow does not enable
 Gmail or grant an agent/model access. A new connection starts disabled; existing
