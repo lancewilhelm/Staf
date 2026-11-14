@@ -95,7 +95,10 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
   let secretRequests:SecretRequests;
   try {secretRequests=new SecretRequests(resolve(dirname(path)),path===':memory:');for(const value of secretRequests.values())knownKeys.add(value);}catch(error){instance.close();throw error;}
   const transitionFences=new Set<'gmail'|'slack'>();
-  if(secretRequests.pendingSlackTransition())transitionFences.add('slack');
+  try {const slackOrigin=secretRequests.slackActivationOrigin();
+    if(slackOrigin && instance.plugins.connection()?.enabled){const work=slackOrigin.work.kind==='command'?instance.command(slackOrigin.work.id):instance.taskAttempt(slackOrigin.work.id);if(work?.state!=='completed')secretRequests.fenceSlackActivation(slackOrigin.id);}
+    if(secretRequests.pendingSlackTransition())transitionFences.add('slack');
+  }catch(error){secretRequests.close();instance.close();throw error;}
   let credentialTransitionUnsafe=false;
   function fenceTransition(kind:'gmail'|'slack') {transitionFences.add(kind);credentialTransitionUnsafe=true;for(const controller of active)controller.abort();stopSlackConnection();stopGmailChecks();stopGmailWork();if(scheduleTimer)clearInterval(scheduleTimer);if(gmailMonitorTimer)clearInterval(gmailMonitorTimer);if(inboxTimer)clearInterval(inboxTimer);if(slackWorkTimer)clearInterval(slackWorkTimer);if(questionTimer)clearInterval(questionTimer);}
   const gmailDestination=(email:string)=>JSON.stringify(['https://oauth2.googleapis.com/token','https://gmail.googleapis.com',email]);
@@ -1136,7 +1139,8 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
       const token = req.headers.authorization?.match(/^Bearer ([A-Za-z0-9_-]+)$/)?.[1];
       if (!token || !instance.authorized(token)) return json(401,{error:'Unauthorized'});
       if(req.method==='POST' && (((req.url??'').startsWith('/api/plugins/gmail/') && transitionFences.has('gmail')) || ((req.url??'').startsWith('/api/plugins/slack/') && transitionFences.has('slack') && req.url!=='/api/plugins/slack/recover-setup')))return json(409,{error:'Connection outcome is uncertain. Restart Staf and review the connection before continuing.'});
-      if(req.method==='POST' && req.url==='/api/plugins/slack/recover-setup') {const id=secretRequests.pendingSlackTransition();if(value.confirm!==true || !id || !transitionFences.has('slack'))throw Error('No interrupted Slack setup to review');stopSlackConnection();if(instance.plugins.connection()?.enabled)instance.plugins.setEnabled(false);dependencies.credentialTransition?.('slack','recovery-disabled');secretRequests.clearSlackTransition(id);transitionFences.delete('slack');slackStatus='inactive';return json(200,pluginStatus()[0]);}
+      if(req.method==='POST' && secretRequests.pendingSlackTransition() && (req.url==='/api/plugins/slack/connect' || req.url==='/api/plugins/slack/enable' || /^\/api\/slack-setup\/[\w-]+\/confirm$/.test(req.url??'')))return json(409,{error:'Slack setup is still being resolved. Review its status before connecting.'});
+      if(req.method==='POST' && req.url==='/api/plugins/slack/recover-setup') {const id=secretRequests.pendingSlackTransition();if(value.confirm!==true || !id || !transitionFences.has('slack'))throw Error('No interrupted Slack setup to review');stopSlackConnection();if(instance.plugins.connection()?.enabled)instance.plugins.setEnabled(false);dependencies.credentialTransition?.('slack','recovery-disabled');try{secretRequests.clearSlackRecovery(id);}catch(error){if(error instanceof CredentialTransitionUncertain)fenceTransition('slack');throw error;}transitionFences.delete('slack');slackStatus='inactive';return json(200,pluginStatus()[0]);}
       if(req.method==='POST' && (req.url==='/api/secrets/replace' || req.url==='/api/secrets/delete') && transitionFences.size)return json(409,{error:'Connection outcome is uncertain. Restart Staf and review the connection before changing secrets.'});
       const imageMatch=req.url?.match(/^\/api\/agent-images\/([a-f0-9]{64})$/);
       if(req.method==='GET' && imageMatch?.[1]) {

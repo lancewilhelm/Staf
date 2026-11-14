@@ -20,7 +20,7 @@ async function fixture({identity={teamId:'T123',botUserId:'B123'},identify,prepa
  const appRequest=await until(async()=>(await call('/api/inbox'))[1].find(item=>item.kind==='secret'));await call(`/api/secret-requests/${appRequest.id}/save`,{value:appValue});
  const botRequest=await until(async()=>(await call('/api/inbox'))[1].find(item=>item.kind==='secret'&&item.id!==appRequest.id));await call(`/api/secret-requests/${botRequest.id}/save`,{value:'xoxb-synthetic-journey'});
  const request=await until(async()=>(await call('/api/inbox'))[1].find(item=>item.kind==='slack-setup'));
- return {get app(){return app;},bot,call,dir,model,path,request,starts,token,until,inject:()=>{inject=true;},restart:async()=>{inject=false;await app.close();app=startInstance(path,0,options,dependencies);port=await app.listen();},close:async()=>{await app.close();rmSync(dir,{recursive:true,force:true});}};
+ return {get app(){return app;},bot,call,dir,model,path,request,starts,token,until,inject:()=>{inject=true;},restart:async(beforeStart)=>{inject=false;await app.close();await beforeStart?.();app=startInstance(path,0,options,dependencies);port=await app.listen();},close:async()=>{await app.close();rmSync(dir,{recursive:true,force:true});}};
 }
 
 test('owner confirmation connects the exact Slack binding using two scoped managed secrets',async()=>{
@@ -144,6 +144,7 @@ test('revoking the approving browser while the socket is starting disconnects th
  const f=await fixture({startHook:async()=>{entered();await gate;}});try{
   const second=(await f.call('/api/pair',{code:f.app.issueCode()},''))[1].token;
   const pending=f.call(`/api/slack-setup/${f.request.id}/confirm`,{approval:f.request.approval});await started;
+  assert.equal((await f.call('/api/plugins/slack/enable',{},second))[0],409);assert.equal((await f.call('/api/plugins/slack/connect',{},second))[0],409);
   const clients=(await f.call('/api/clients',undefined,second))[1],first=clients.find(item=>!item.current);await f.call(`/api/clients/${first.id}/revoke`,{},second);
   release();assert.notEqual((await pending)[0],200);
   const plugin=(await f.call('/api/plugins',undefined,second))[1].find(item=>item.id==='slack');assert.equal(plugin.connected,false);assert.deepEqual((await f.call('/api/secret-grants',undefined,second))[1],[]);
@@ -209,10 +210,21 @@ test('guided reconnect recovers abrupt process exits at every transaction bounda
    app=startInstance(path,0,{dataDir:dir,env:{},slackTransport:transport});let port=await app.listen();
    const call=async(route,body)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${setup.token}`,...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});return [response.status,await response.json()];};
    const plugin=(await call('/api/plugins'))[1].find(item=>item.id==='slack'),grants=(await call('/api/secret-grants'))[1];
-   if(point==='after-commit' || point==='setup-socket-started'){assert.equal(plugin.setupRecoveryPending,true);assert.equal(plugin.reconnectUncertain,true);assert.notDeepEqual(grants,setup.before);await app.close();app=undefined;restoredDir=mkdtempSync(join(tmpdir(),'staf-guided-restore-'));cpSync(dir,restoredDir,{recursive:true});chmodSync(join(restoredDir,'secrets'),0o700);app=startInstance(join(restoredDir,'instance.sqlite'),0,{dataDir:restoredDir,env:{},slackTransport:transport});port=await app.listen();assert.equal((await call('/api/plugins'))[1].find(item=>item.id==='slack').setupRecoveryPending,true);assert.deepEqual((await call('/api/secret-grants'))[1],grants);assert.equal((await call('/api/plugins/slack/recover-setup',{confirm:true}))[0],200);assert.equal((await call('/api/plugins'))[1].find(item=>item.id==='slack').enabled,false);}
-   else if(point==='setup-completed'){assert.notDeepEqual(grants,setup.before);assert.ok(!plugin.enabled || plugin.reconnectUncertain,'interrupted work must not resume its Slack socket');}
+   if(point==='after-commit' || point==='setup-socket-started' || point==='setup-completed'){assert.equal(plugin.setupRecoveryPending,true);assert.equal(plugin.reconnectUncertain,true);assert.notDeepEqual(grants,setup.before);await app.close();app=undefined;restoredDir=mkdtempSync(join(tmpdir(),'staf-guided-restore-'));cpSync(dir,restoredDir,{recursive:true});chmodSync(join(restoredDir,'secrets'),0o700);app=startInstance(join(restoredDir,'instance.sqlite'),0,{dataDir:restoredDir,env:{},slackTransport:transport});port=await app.listen();assert.equal((await call('/api/plugins'))[1].find(item=>item.id==='slack').setupRecoveryPending,true);assert.deepEqual((await call('/api/secret-grants'))[1],grants);assert.equal((await call('/api/plugins/slack/recover-setup',{confirm:true}))[0],200);assert.equal((await call('/api/plugins'))[1].find(item=>item.id==='slack').enabled,false);}
    else {assert.deepEqual(grants,setup.before,point);assert.equal(plugin.setupRecoveryPending,false,point);assert.equal(plugin.enabled,false,point);}
    assert.equal(starts,0,point);for(const value of ['xapp-original-fixture','xoxb-original-fixture','xapp-new-fixture','xoxb-new-fixture'])assert.equal(readFileSync(path).includes(Buffer.from(value)),false,point);
   }finally{if(child)child.kill('SIGKILL');await app?.close();rmSync(dir,{recursive:true,force:true});if(restoredDir)rmSync(restoredDir,{recursive:true,force:true});}
  }
+});
+
+test('a successful direct reconnect replaces the old guided activation origin',async()=>{
+ const f=await fixture();try{
+  assert.equal((await f.call(`/api/slack-setup/${f.request.id}/confirm`,{approval:f.request.approval}))[0],200);
+  await f.until(async()=>(await f.call('/api/commands/setup'))[1].state==='completed');
+  const review=(await f.call('/api/secret-setup-review?integration=slack'))[1];
+  assert.equal((await f.call('/api/plugins/slack/connect',{confirm:true,reviewedVersion:review.version,confirmDisplacements:true,appToken:'xapp-direct-fixture',botToken:'xoxb-direct-fixture',teamId:'T123',userId:'U123',channelId:'D123',botId:f.bot.id}))[0],200);
+  assert.equal((await f.call('/api/plugins/slack/enable',{}))[0],200);
+  await f.restart(()=>{const db=new DatabaseSync(f.path);try{db.prepare("UPDATE commands SET state='interrupted' WHERE id='setup'").run();}finally{db.close();}});
+  const plugin=(await f.call('/api/plugins'))[1].find(item=>item.id==='slack');assert.equal(plugin.reconnectUncertain,false);assert.equal(plugin.setupRecoveryPending,false);assert.equal(plugin.enabled,true);await f.until(()=>f.starts.some(tokens=>tokens.appToken==='xapp-direct-fixture'));
+ }finally{await f.close();}
 });

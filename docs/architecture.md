@@ -422,8 +422,11 @@ outside its initial socket attempt. A restart never resumes a marked setup: a
 paired owner must keep Slack disabled and review the saved binding and approvals.
 The recovery operation disables the plugin before clearing the marker, so it can
 be repeated after interruption. The approval and marker are completed together;
-the originating work is not replayed. A restart leaves an unfinished review
-interrupted. Connection status comes from the Slack
+the originating work is not replayed. The activation also retains its originating
+work identity. On restart, an enabled guided connection whose work did not finish
+is fenced for owner review even if its approval had already completed. A direct
+reconnect replaces that origin in the same transaction. A restart leaves an
+unfinished review interrupted. Connection status comes from the Slack
 transport; identifying the bot's workspace does not verify the user or DM IDs.
 These paths use synthetic Slack and model fixtures, not live account verification.
 
