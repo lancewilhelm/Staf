@@ -316,7 +316,9 @@ export async function runTurn({ session, store, provider, text, emit = () => {},
           checkpoint={...checkpoint,messages:structuredClone(messages)};
         }
       }
-      const accounting: Session = { ...(task ? checkpoint : history), usage: [...(history.usage || []), ...usage], events: [...history.events, ...events] };
+      const accountingEvents=[...history.events,...events];
+      const safeAccountingEvents=secretsChanged() ? omitUnsafeHistoricalEvents(accountingEvents,accountingEvents.length,redact,secretValues?.()??[],historicalCall) : accountingEvents;
+      const accounting: Session = { ...(task ? checkpoint : history), usage: [...(history.usage || []), ...usage], events: safeAccountingEvents };
       try { await save(accounting); Object.assign(session, accounting); } catch { /* Original failure wins; usage cannot be durable if storage is unavailable. */ }
     }
     report({ type: 'error', message: redact(errorMessage(error)) });
