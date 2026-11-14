@@ -477,10 +477,18 @@ Schema 56 adds service-owned guided Gmail request state. `guide_gmail_setup`
 creates the fixed mixed set in main chat or a task. A paired client can review
 `GET /api/question-sets/ID/gmail-preview` and confirm its exact returned review
 with `POST /api/question-sets/ID/gmail-start`. The review includes the current
-client and refresh grant versions and the uses that would be replaced. The
-in-memory `GET /api/question-sets/ID/gmail-authorization` URL is available only
-while authorization is pending. Submitting or dismissing during authorization
-interrupts it; submitting before authorization starts records a skipped setup. Failures may leave saved use approvals or credentials, because
+client and refresh grant versions, the uses that would be replaced, the current
+connection snapshot, and whether managed credentials are available. A connected
+account with unavailable credentials can be reviewed for same-account reconnection.
+An enabled connection is disabled before its client-secret approval changes.
+The question set's `gmailSetupStale` field reports a changed agent revision;
+protected step mutations and Gmail review and authorization return `409` with
+`gmail_setup_stale` in that case. The in-memory
+`GET /api/question-sets/ID/gmail-authorization` URL is available only while
+authorization is pending. Submitting or dismissing during authorization
+interrupts it; submitting before authorization starts records a skipped setup.
+Dismissing questions after a connection records both the dismissal and the
+actual Gmail outcome. Failures may leave saved use approvals or credentials, because
 the instance and secret stores do not share a transaction. Restart interrupts an
 unfinished exchange without replay. The connected result requires a matching
 Google profile and a successful plugin commit. No secret value is included in

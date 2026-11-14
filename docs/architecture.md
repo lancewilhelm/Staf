@@ -558,9 +558,16 @@ and saves the client secret and refresh token as separate managed secrets with
 destination-scoped approvals. Guided setup uses a service-defined mixed question
 set and resolves its saved secret by revision. A paired owner reviews the exact
 account, scopes, selected secret, destination, prior client and refresh grants,
-and durable review versions before starting. The OAuth attempt rechecks client,
-request, agent revision, grant identity and version, connection revision, and
-nonsecret fields at dispatch and before commit. A failure or interrupted attempt
+and durable review versions before starting. A connected account with unavailable
+managed credentials can be reconnected only to the same account; the reviewed
+connection snapshot prevents a stale review from replacing a later connection.
+An enabled connection is disabled before a new client grant could restore access
+with an older refresh grant. Agent and model permissions are retained. Protected
+secret changes require the captured agent revision, and stale requests require a
+new setup. Question dismissal and the actual Gmail outcome are recorded separately.
+The OAuth attempt rechecks client, request, agent revision, grant identity and
+version, connection revision, and nonsecret fields at dispatch and before commit.
+A failure or interrupted attempt
 is not success and may leave saved credentials or use approvals; the owner must
 review them. Startup marks a pending exchange interrupted and never replays it.
 The secret store and instance database commit separately; this is not an atomic
