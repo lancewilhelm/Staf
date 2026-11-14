@@ -154,14 +154,67 @@ arbitrary operator changes safe. Root and system binaries remain trusted. See
 
 ### Required Linux verification
 
-`test/linux-host-guard.integration.test.js` exercises the candidate guard using
-synthetic files, sockets, descriptors, pipe, PTY and background descendants,
-including one whose shell has already exited.
-On an operator-prepared disposable machine, set `STAF_TEST_LINUX_WORKSPACE` to
-`/srv/staf-workspace` and run that test. Run
-`test/linux-host-service.integration.test.js` as `staf-service` with
-`STAF_TEST_LINUX_SERVICE=1` to exercise the service dispatch path. These tests
-are skipped elsewhere and have not run in this change. They do not yet prove
-all bypasses, recovery races, helper paths, or production security. Real
-controlled Linux process tests remain required before claiming acceptance;
-Linux VM and live-account checks are separate owner-led activities.
+These are destructive only to their own disposable test files, but they run an
+experimental boundary with real processes. An administrator must first prepare
+an isolated Linux test system using the setup above, with no real credentials,
+accounts or paid services. The tests do not install packages or change policy.
+The guard test additionally requires `/usr/bin/python3`; the PTY test requires
+the checkout's installed `node-pty`. Install the locked Node dependencies and
+build the checkout before running the tests, using Node.js 22.16 or newer and
+Corepack:
+
+```sh
+corepack pnpm install --frozen-lockfile
+corepack pnpm run build
+```
+
+The checkout and temporary directory must be accessible to the account running
+each command, and the service's temp and data directories must be on a different
+filesystem from the workspace.
+
+Run the guard test as root on that disposable host: it creates test files and a
+Unix socket directly in the root-owned, execution-group-only workspace, then
+launches the candidate as `staf-exec`. This tests the guard and its descendants;
+it does not test the service account's sudo policy. From the checkout:
+
+```sh
+STAF_TEST_LINUX_WORKSPACE=/srv/staf-workspace node --test test/linux-host-guard.integration.test.js
+```
+
+Run the next command as `staf-service`, with the configured sudo policy and
+boundary described above. Use a checkout and build readable by that account:
+
+```sh
+STAF_TEST_LINUX_SERVICE=1 node --test test/linux-host-service.integration.test.js test/linux-host-task.integration.test.js
+```
+
+Require every Linux test to **pass without skips**. The opt-in tests explicitly
+skip on other platforms, without their environment variable, or when their
+basic setup/policy preflight is unavailable. A skip is not evidence that the
+boundary works. A preflight only checks the service's policy and setup checks;
+it does not prove the launcher can run. Failures must be investigated rather
+than interpreted as successful isolation. The tests normally remove their own
+files; after a failed or interrupted run, an administrator may need to remove
+only the `staf-boundary-*`, `staf-pty-boundary-*`, or `staf-task-*` fixtures
+from the disposable workspace after inspecting them.
+
+The guard suite attempts synthetic private-file and transformed reads, inherited
+environment and descriptors, UID/GID changes, network and host Unix sockets,
+namespace and FIFO creation, ordinary file work, PTY input, and descendant
+termination. The service suite covers main-chat file and pipe/PTY dispatch in
+all modes. The task suite uses a real service and SQLite secret store with
+synthetic credentials: background tasks exercise ordinary file work and pipe/PTY
+commands, attempts to read, search, write and edit the store directly and via a
+symlink, transformed reads, inherited supported environment credentials, sudo,
+and a retained orphan across service shutdown and restart. It also tests that
+real delegated helpers cannot use the ten file and terminal capabilities, in
+Direct and Code Mode. The helper restrictions are service-level checks, not an
+execution of those denied tools. These tests do not inject a host executor.
+
+As of this change, these controlled Linux tests have **not been run on Linux**;
+#117 and #122 remain incomplete. The tests are a candidate verification suite,
+not proof of every bypass, cancellation race, restart scenario, log sink or
+production security. They do not test live providers or the owner's Linux VM.
+An owner-led VM or live-account check is separate and optional after controlled
+Linux evidence is obtained; do not enable this unverified boundary for real
+secrets.

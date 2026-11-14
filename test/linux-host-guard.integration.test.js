@@ -3,19 +3,24 @@ import {spawn} from 'node:child_process';
 import {chmodSync,closeSync,existsSync,linkSync,mkdtempSync,openSync,rmSync,symlinkSync,writeFileSync} from 'node:fs';
 import {createServer} from 'node:net';
 import {tmpdir} from 'node:os';
-import {basename,join} from 'node:path';
+import {isAbsolute,join,relative} from 'node:path';
 import {once} from 'node:events';
 import test from 'node:test';
 
 const workspace=process.env.STAF_TEST_LINUX_WORKSPACE;
-const enabled=process.platform==='linux' && !!workspace;
+const enabled=process.platform==='linux' && !!workspace && existsSync(workspace) && existsSync('/usr/lib/staf-exec/launch') && existsSync('/usr/bin/sudo');
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+const workspaceCwd=path=>{
+  const result=relative('/srv/staf-workspace',path);
+  assert.ok(result && result!=='..' && !result.startsWith('../') && !isAbsolute(result),'test fixture directory must be inside /srv/staf-workspace');
+  return result;
+};
 
 // Opt in only on a disposable Linux machine where an operator has deliberately
 // installed the fixed candidate launcher and configured its workspace. This
 // does not install software, modify sudoers or contact a real provider.
 test('candidate Linux launcher confines a disposable process and its descendants',{
-  skip:enabled?false:'Requires an operator-prepared disposable Linux workspace and launcher',timeout:20000,
+  skip:enabled?false:'Requires Linux, an existing STAF_TEST_LINUX_WORKSPACE fixture directory, sudo and the prepared launcher; no isolation was tested',timeout:20000,
 },async()=>{
   const outside=mkdtempSync(join(tmpdir(),'staf-host-private-'));
   const inside=mkdtempSync(join(workspace,'staf-boundary-'));
@@ -34,7 +39,7 @@ test('candidate Linux launcher confines a disposable process and its descendants
     });
     children.add(child);child.once('close',()=>children.delete(child));return child;
   };
-  const ready=async(child,command,cwd=basename(inside))=>{
+  const ready=async(child,command,cwd=workspaceCwd(inside))=>{
     let pending='',errors='';child.stderr.on('data',data=>{errors+=data.toString();});
     await new Promise((resolve,reject)=>{
       const timer=setTimeout(()=>reject(Error('guard did not become ready: '+errors)),5000);
@@ -50,7 +55,7 @@ test('candidate Linux launcher confines a disposable process and its descendants
     child.stdin.end();const [code]=await once(child,'close');
     assert.equal(code,0,Buffer.concat(output).toString());assert.match(Buffer.concat(output).toString(),/boundary-ok/);
     const escape=launch();const escapeClosed=once(escape,'close');
-    await ready(escape,'printf escaped > /workspace/'+basename(inside)+'/late','../');
+    await ready(escape,'printf escaped > /workspace/'+workspaceCwd(inside)+'/late','../');
     escape.stdin.end();const [escapeCode]=await escapeClosed;
     assert.notEqual(escapeCode,0);assert.equal(existsSync(late),false,'an invalid cwd dispatched the command');
     const background=launch();
@@ -81,7 +86,7 @@ test('candidate Linux launcher confines a disposable process and its descendants
 });
 
 test('candidate Linux launcher retains a usable PTY after its readiness handshake',{
-  skip:enabled?false:'Requires an operator-prepared disposable Linux workspace and launcher',timeout:15000,
+  skip:enabled?false:'Requires Linux, an existing STAF_TEST_LINUX_WORKSPACE fixture directory, sudo and the prepared launcher; no isolation was tested',timeout:15000,
 },async()=>{
   const dir=mkdtempSync(join(workspace,'staf-pty-boundary-'));chmodSync(dir,0o777);
   const {spawn:spawnPty}=await import('node-pty');
@@ -97,7 +102,7 @@ test('candidate Linux launcher retains a usable PTY after its readiness handshak
         if(!sentCommand && output.includes('STAF-EXEC-READY-1')){
           sentCommand=true;
           const command='test -t 0 && printf PTY_READY; IFS= read -r line; printf "RESULT:%s" "$line"';
-          terminal.write(Buffer.from(basename(dir)).toString('base64')+'\n'+Buffer.from(command).toString('base64')+'\n');
+          terminal.write(Buffer.from(workspaceCwd(dir)).toString('base64')+'\n'+Buffer.from(command).toString('base64')+'\n');
         }
         if(!sentInput && output.includes('PTY_READY')){sentInput=true;terminal.write('hello\n');}
         if(output.includes('RESULT:hello')){clearTimeout(timer);resolve();}

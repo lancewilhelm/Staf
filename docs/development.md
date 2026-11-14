@@ -580,6 +580,21 @@ tests exercise the production default and require it to reject host work when
 isolation is unavailable. The opt-in Linux tests are the only tests here that
 attempt to exercise the experimental kernel boundary.
 
+### Linux credential isolation handoff
+
+The experimental Linux host boundary is unverified. For this test branch, an
+administrator can run the controlled synthetic suite only on a separately
+prepared disposable Linux host. Follow the exact account, workspace, build and
+command prerequisites in [required Linux verification](credential-isolation.md#required-linux-verification).
+Expect every opt-in Linux case to pass with no skips, including ordinary task
+work and rejected credential and privilege attempts; a skip or failure does not
+establish isolation. The delegated-helper permission tests also run on other
+platforms, but do not establish a Linux process boundary. These tests use no
+live accounts or paid services. They have not been run on Linux in this change,
+so #117 and #122 remain incomplete. Normal persistent development remains the
+starting point for other manual checks; do not enable this boundary for real
+secrets before it is verified.
+
 ### Task action verification
 
 `node --test test/task-work-actions.test.js` after `corepack pnpm exec tsc -p tsconfig.json` exercises paired disposable tasks with controlled providers and the real QuickJS worker. It covers all modes, owner input and a differently configured helper. Existing `test/background-task.test.js`, `test/clock-approval.test.js`, and `test/collaboration-integration.test.js` exercise task lifecycle and CLI behavior. These are local synthetic-provider checks; they do not establish GUI, live-provider, Docker or production behavior.

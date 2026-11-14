@@ -5,12 +5,14 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'node:test';
 import {startInstance} from './fixtures/controlled-instance.mjs';
+import {selectLinuxHostBoundary} from '../dist/linux-host-boundary.js';
 
-const enabled=process.platform==='linux' && process.env.STAF_TEST_LINUX_SERVICE==='1';
+const optedIn=process.platform==='linux' && process.env.STAF_TEST_LINUX_SERVICE==='1';
+const enabled=optedIn && !!selectLinuxHostBoundary({enabled:true,dataDir:tmpdir(),secretDir:tmpdir()});
 const wait=async fn=>{for(let i=0;i<500;i++){const value=await fn();if(value)return value;await new Promise(resolve=>setTimeout(resolve,20));}throw Error('Timed out');};
 
 test('configured service runs file and terminal work inside the Linux boundary',{
- skip:enabled?false:'Requires an operator-prepared disposable Linux service and launcher',timeout:60000,
+ skip:enabled?false:'Requires Linux, STAF_TEST_LINUX_SERVICE=1, and a prepared service account and boundary policy; no isolation was tested',timeout:60000,
 },async()=>{
  const dir=mkdtempSync(join(tmpdir(),'staf-linux-service-')),secret='synthetic-service-private-482913',name='staf-fixture-'+randomUUID();
  writeFileSync(join(dir,'private'),secret,{mode:0o600});let planned,seen=[];
