@@ -4,6 +4,8 @@ import { computed, ref } from 'vue';
 import { useWorkspace } from '../workspace';
 import type { ChatEvent, ChatWork, InboxItem } from '../controller';
 import ApprovalItem from './ApprovalItem.vue';
+import SecretRequest from './SecretRequest.vue';
+import SlackSetupApproval from './SlackSetupApproval.vue';
 const { app: controller } = useWorkspace();
 const outputs = ref<Record<string,string>>({});
 const cursors = ref<Record<string,{next:number;more:boolean}>>({});
@@ -13,7 +15,9 @@ async function endInput(id:string){try{await controller.processEof(id);await sho
 async function resize(id:string){try{await controller.resizeProcess(id,cols.value[id]??80,rows.value[id]??24);}catch{outputs.value[id]='Could not resize terminal.';}}
 async function showOutput(id:string,append=false) { try { const page=await controller.processOutput(id,append ? cursors.value[id]?.next ?? 0 : 0);outputs.value[id]=(append ? outputs.value[id] ?? '' : '')+(page.gap?'Earlier output expired.\n':'')+page.chunks.map(chunk=>`[${chunk.stream}] ${chunk.text ?? '[binary or incomplete UTF-8 chunk; see base64 output in API]'} `).join('');cursors.value[id]={next:page.nextCursor,more:page.hasMore}; } catch {outputs.value[id]='Could not load output.';} }
 const props = withDefaults(defineProps<{work: ChatWork | undefined; inbox: InboxItem[]; events?:ChatEvent[]; controls?:boolean}>(),{controls:true});
-const approvals = computed(() => props.inbox.filter(item => item.kind === 'approval' && item.work.kind === 'command' && item.work.id === props.work?.id));
+const approvals = computed(() => props.inbox.filter((item):item is Extract<InboxItem,{kind:'approval'}> => item.kind === 'approval' && item.work.kind === 'command' && item.work.id === props.work?.id));
+const secrets = computed(() => props.inbox.filter((item):item is Extract<InboxItem,{kind:'secret'}> => item.kind === 'secret' && item.work.kind === 'command' && item.work.id === props.work?.id));
+const slackSetups = computed(() => props.inbox.filter((item):item is Extract<InboxItem,{kind:'slack-setup'}> => item.kind === 'slack-setup' && item.work.kind === 'command' && item.work.id === props.work?.id));
 const calls = computed(() => {
   const rows: Array<{key:string;name:string;start:string|null;result:string|null;success:number|null;done:boolean}> = [];
   const byId = new Map<string,number>();
@@ -66,6 +70,8 @@ const calls = computed(() => {
       <button v-if="cursors[process.id]?.more" type="button" @click="showOutput(process.id,true)">More output</button>
     </details>
     <ApprovalItem v-for="item in approvals" :key="item.id" :item="item" />
+    <SecretRequest v-for="item in secrets" :key="item.id" :item="item" />
+    <SlackSetupApproval v-for="item in slackSetups" :key="item.id" :item="item" />
     </template>
   </div>
 </template>

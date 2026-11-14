@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {mkdtempSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {startInstance} from './fixtures/controlled-instance.mjs';
+import {startControlledInstance as startInstance} from './fixtures/controlled-instance.mjs';
 
 const wait=async fn=>{for(let i=0;i<400;i++){const v=await fn();if(v)return v;await new Promise(r=>setTimeout(r,25));}throw Error('timed out');};
 const questions=[{kind:'single',prompt:'Which?',choices:['A','B']},{kind:'multiple',prompt:'What else?',choices:['C','D']},{kind:'text',prompt:'Anything else?'}];

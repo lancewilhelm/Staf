@@ -5,15 +5,21 @@ import type {Json} from './json.js';
 import {ActionDeferred, type WorkActions} from '../work-actions.js';
 import {skillEvidence} from '../skill-actions.js';
 import type {RuntimeEvent} from '../types.js';
+import {secretRequestInput} from '../secret-requests.js';
+import {slackSetupInput} from '../slack-setup-types.js';
+import {gmailSetupActionInput} from '../gmail-setup.js';
+import {assertEncodedResult} from '../encoded-results.js';
 
 /** Runs one provider-requested program against the accepted work's action coordinator. */
-export async function runCode(input:{actions:WorkActions;responseId:string;callId:string;source:string;redact:(text:string)=>string;emit?:(event:RuntimeEvent)=>void;ensureSkills?:()=>void}):Promise<string> {
+export async function runCode(input:{actions:WorkActions;responseId:string;callId:string;source:string;redact:(text:string)=>string;secretGeneration?:()=>number;emit?:(event:RuntimeEvent)=>void;ensureSkills?:()=>void}):Promise<string> {
   const {actions,source,redact}=input;
   if(Buffer.byteLength(source,'utf8')>limits.sourceBytes || redact(source)!==source) throw Error('Source cannot be retained safely or exceeds 32 KiB');
   let id:string;
   try {id=actions.startExecution(input.responseId,input.callId,source);} catch(error) {if(error instanceof ActionDeferred)return JSON.stringify({outcome:'deferred',notice:error.message});throw error;}
   const receipts=new Map<string,Json>(), emitted:Json[]=[];
-  const persist=()=>actions.updateExecution(id,JSON.stringify({emitted}));
+  const initialGeneration=input.secretGeneration?.();let encodedReceipt=false,encodedBytesReceipt=false;
+  const assertReceiptGeneration=()=>{if(encodedReceipt && initialGeneration!==undefined && input.secretGeneration?.()!==initialGeneration)throw Error('Known secrets changed after encoded output was produced');};
+  const persist=()=>{assertReceiptGeneration();assertEncodedResult(emitted,redact,true);actions.updateExecution(id,JSON.stringify({emitted}));};
   let outputBytes=0, cachedBytes=0, fatal:string|undefined,ownerRevision:string|undefined;
   const pending=new Set<Promise<unknown>>();
   let taskQuestionPending=false;
@@ -21,16 +27,19 @@ export async function runCode(input:{actions:WorkActions;responseId:string;callI
   const keep=(value:Json):Json=>{const result=safe(value);outputBytes+=Buffer.byteLength(JSON.stringify(result));if(outputBytes>limits.outputBytes){fatal='Guest output limit reached';actions.close(fatal);throw Error(fatal);}return result;};
   let guest:ReturnType<typeof startQuickJSGuest>;
   try {guest=startQuickJSGuest({source,names:actions.offers('guest').map(tool=>tool.function.name),guestMs:limits.guestMs,phase:()=>{},request:message=>{
-    const isQuestion=actions.context.work.kind==='task' && message.type==='call' && (message.name==='ask_questions' || message.name==='ask_owner');
+    const isQuestion=actions.context.work.kind==='task' && message.type==='call' && (message.name==='ask_questions' || message.name==='ask_owner' || message.name==='guide_gmail_setup');
     if(taskQuestionPending && message.type==='call')return Promise.resolve({ok:false as const,error:'Owner input is pending'});
     if(isQuestion)taskQuestionPending=true;
     const operation=(async()=>{
     if(fatal || actions.context.signal.aborted) return {ok:false as const,error:'Work stopped or closed'};
     try {
       input.ensureSkills?.();
-      if(message.type==='emit') {actions.assertPrivateDisclosure();emitted.push(keep(message.value));persist();return {ok:true as const,value:null};}
-      if(message.type==='reuse') {actions.assertPrivateDisclosure();const value=receipts.get(message.receipt);if(value===undefined)return {ok:false as const,error:'Receipt unavailable'};return {ok:true as const,value};}
+      if(message.type==='emit') {actions.assertPrivateDisclosure();assertReceiptGeneration();emitted.push(keep(message.value));persist();return {ok:true as const,value:null};}
+      if(message.type==='reuse') {actions.assertPrivateDisclosure();assertReceiptGeneration();const value=receipts.get(message.receipt);if(value===undefined)return {ok:false as const,error:'Receipt unavailable'};assertEncodedResult(value,redact,true);return {ok:true as const,value};}
       const eventId=`${id}:${message.seq}`;
+      if(message.name==='request_secret' && !secretRequestInput.safeParse(message.input).success) {input.emit?.({type:'tool_start',id:eventId,name:message.name,arguments:'[invalid secret request metadata]'});input.emit?.({type:'tool_result',id:eventId,name:message.name,success:false,content:'Invalid secret request metadata'});return {ok:false as const,error:'Invalid secret request metadata'};}
+      if(message.name==='setup_slack' && !slackSetupInput.safeParse(message.input).success) {input.emit?.({type:'tool_start',id:eventId,name:message.name,arguments:'[invalid Slack setup metadata]'});input.emit?.({type:'tool_result',id:eventId,name:message.name,success:false,content:'Invalid Slack setup metadata'});return {ok:false as const,error:'Invalid Slack setup metadata'};}
+      if(message.name==='guide_gmail_setup' && !gmailSetupActionInput.safeParse(message.input).success) {input.emit?.({type:'tool_start',id:eventId,name:message.name,arguments:'[invalid Gmail setup metadata]'});input.emit?.({type:'tool_result',id:eventId,name:message.name,success:false,content:'Invalid Gmail setup metadata'});return {ok:false as const,error:'Invalid Gmail setup metadata'};}
       input.emit?.({type:'tool_start',id:eventId,name:message.name,arguments:JSON.stringify(safe(message.input))});
       let result:Awaited<ReturnType<WorkActions['invoke']>>;
       try {result=await actions.invoke({source:{kind:'guest',executionId:id,sequence:message.seq},name:message.name,input:message.input,intent:message.intent ?? {kind:'new'}});}
@@ -39,6 +48,7 @@ export async function runCode(input:{actions:WorkActions;responseId:string;callI
       if(result.kind==='blocked') {if(actions.closedReason()) fatal ??= result.reason;return {ok:false as const,error:result.reason};}
       if(result.kind==='revision-requested') {ownerRevision=result.direction;return {ok:false as const,error:JSON.stringify(result)};}
       if(result.kind!=='completed') return {ok:false as const,error:JSON.stringify(result)};
+      if(['file_read','terminal_read','run_scratch_shell'].includes(message.name)){encodedReceipt=true;if(message.name!=='run_scratch_shell')encodedBytesReceipt=true;assertReceiptGeneration();}
       const receipt=randomUUID(),value=safe(result.value);
       cachedBytes+=Buffer.byteLength(JSON.stringify(value));if(cachedBytes>limits.cacheBytes){fatal='Guest cache limit reached';actions.close(fatal);throw Error(fatal);}receipts.set(receipt,value);
       return {ok:true as const,value:{receipt,actionId:result.actionId,value}};
@@ -62,6 +72,7 @@ export async function runCode(input:{actions:WorkActions;responseId:string;callI
   try {actions.assertPrivateDisclosure();} catch {fatal='Gmail permission changed before model disclosure';actions.close('authority');}
   let result:Json={emitted};
   if(end.outcome==='return' && !fatal) {try {result={emitted,value:keep(end.value)};} catch { /* limit closed admission */ }}
+  try {assertReceiptGeneration();assertEncodedResult(result,redact,true);} catch {actions.finishExecution(id,'closed',null);throw Error('Encoded action result cannot be retained safely');}
   actions.finishExecution(id,fatal?'closed':end.outcome,JSON.stringify(result));
   if(fatal==='Action denied' && !actions.context.workSignal.aborted) return JSON.stringify({executionId:id,outcome:'denied',notice:'Action denied. No further actions are admitted for this work.'});
   if(fatal) throw Error(fatal);
@@ -69,5 +80,7 @@ export async function runCode(input:{actions:WorkActions;responseId:string;callI
     const manifest=actions.beginRecovery();
     return JSON.stringify({executionId:id,outcome:end.outcome,recovery:manifest,mode:actions.context.mode,...(ownerRevision?{ownerRevision}:{}),notice:actions.context.mode==='code'?'Code Mode remains selected; correct the program or explain the failure.':'Correct the program or continue with offered direct tools.'});
   }
-  return JSON.stringify({executionId:id,outcome:end.outcome,...result,...(ownerRevision?{ownerRevision}:{})});
+  const content=JSON.stringify({executionId:id,outcome:end.outcome,...result,...(ownerRevision?{ownerRevision}:{})});
+  actions.recordCodeOutput(id,input.callId,content,encodedBytesReceipt?'bytes':encodedReceipt?'scratch':'plain');
+  return content;
 }

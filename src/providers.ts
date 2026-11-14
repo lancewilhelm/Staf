@@ -21,10 +21,12 @@ function compatibleProvider(env: Record<string, string | undefined>, request: ty
       let response: Response;
       const signal = options?.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(60000)]) : AbortSignal.timeout(60000);
       signal.throwIfAborted();
+      const payload={ model, messages: [{role:'system', content: instructions}, ...(options?.refreshMessages?.() ?? messages).map(message => {const {usage, responseReplay, ...visible} = message.role === 'assistant' ? message : {...message,usage:undefined,responseReplay:undefined};return visible;})], tools, ...(effort && effort !== 'default' ? { reasoning: { effort } } : {}) };
+      options?.assertSafePayload?.(payload);
       try { response = await request(endpoint, {
         method: 'POST', redirect: 'error', signal,
         headers: { ...(key ? { Authorization: `Bearer ${key}` } : {}), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model, messages: [{role:'system', content: instructions}, ...messages.map(message => {const {usage, responseReplay, ...visible} = message.role === 'assistant' ? message : {...message,usage:undefined,responseReplay:undefined};return visible;})], tools, ...(effort && effort !== 'default' ? { reasoning: { effort } } : {}) }),
+        body: JSON.stringify(payload),
       }); } catch { options?.signal?.throwIfAborted(); throw new Error('Provider connection failed or timed out; check endpoint and server availability'); }
       if (!response.ok) {
         const hint = response.status === 401 ? 'check your API key' : response.status === 402 ? 'provider credits are required' : response.status === 429 ? 'rate limit reached; retry later' : 'request failed';

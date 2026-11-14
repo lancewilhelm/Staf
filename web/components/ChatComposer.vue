@@ -5,6 +5,7 @@ import type { BotProfile } from '../controller';
 import { useWorkspace } from '../workspace';
 import ProviderPicker from './ProviderPicker.vue';
 import { ArrowUp, ChevronDown, Square } from '@lucide/vue';
+import {containsCredential} from '../credential-warning';
 const emit = defineEmits<{settings: [id: string]}>();
 const {app, state: s} = useWorkspace();
 const selected = computed(() => s.value.bots.find(agent => agent.id === s.value.selected));
@@ -85,6 +86,7 @@ function keydown(event: KeyboardEvent) {
       </button>
     </div>
     <p v-if="stopping" class="composer-status" role="status">Stopping…</p>
+    <p v-if="containsCredential(s.draft.text)" role="alert">This message looks like it contains a credential and will not be sent. Remove it, then ask the agent to request it through protected secret entry, or use the relevant connection in Settings. Detection is incomplete.</p>
     <p v-if="!s.draftReady" role="status">{{ s.actionError.includes('Browser storage or locking is unavailable') ? 'Draft unavailable. Check browser storage and locking.' : 'Loading saved draft…' }}</p>
     <p v-if="s.actionError" role="alert">{{ s.actionError }}</p>
   </div><p class="composer-hint">Enter to send · Shift + Enter for a new line</p></div>

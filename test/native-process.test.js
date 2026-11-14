@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { startInstance } from './fixtures/controlled-instance.mjs';
+import {startControlledInstance as startInstance} from './fixtures/controlled-instance.mjs';
 
 const tool = (name, args) => ({role:'assistant',content:null,tool_calls:[{id:'native',type:'function',function:{name,arguments:JSON.stringify(args)}}]});
 

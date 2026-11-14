@@ -91,7 +91,7 @@ test('schema 42 upgrade preserves Slack work, memory, shared proposals, tools an
   instance.memories.create({scope:{kind:'bot',botId:bot.id},text:'preserved'});instance.proposeSharedMemory(bot.id,'shared pending','old-proposal');
   const config={teamId:'T123',userId:'U123',channelId:'D123',botId:bot.id};instance.plugins.connect(config);instance.plugins.setAccess(bot.id,true);const connection=instance.plugins.setEnabled(true);instance.acceptSlackTask({id:'old-task',eventId:'old-event',revision:connection.revision,config,objective:'Existing work'},'Existing work');instance.close();instance=undefined;
   let db=new DatabaseSync(path);db.exec('DROP TABLE sensitive_memory_proposals; DROP TABLE memory_sensitivity; PRAGMA user_version=42');db.close();
-  instance=new Instance(path);assert.ok(instance.migrationBackup);assert.equal(INSTANCE_SCHEMA_VERSION,55);assert.equal(instance.memories.list({kind:'bot',botId:bot.id})[0].text,'preserved');assert.equal(instance.sharedMemoryProposal(bot.id,'old-proposal').state,'pending');assert.equal(instance.plugins.workBinding('old-task').bot_id,bot.id);assert.ok(instance.plugins.deliveries().some(item=>item.attemptId==='old-task'));assert.equal(instance.plugins.connection().enabled,true);assert.equal(instance.plugins.connection().agentAccess,true);assert.equal(instance.toolDefaults().memory,true);assert.equal(instance.memorySensitivity().mode,'model');
+  instance=new Instance(path);assert.ok(instance.migrationBackup);assert.equal(INSTANCE_SCHEMA_VERSION,61);assert.equal(instance.memories.list({kind:'bot',botId:bot.id})[0].text,'preserved');assert.equal(instance.sharedMemoryProposal(bot.id,'old-proposal').state,'pending');assert.equal(instance.plugins.workBinding('old-task').bot_id,bot.id);assert.ok(instance.plugins.deliveries().some(item=>item.attemptId==='old-task'));assert.equal(instance.plugins.connection().enabled,true);assert.equal(instance.plugins.connection().agentAccess,true);assert.equal(instance.toolDefaults().memory,true);assert.equal(instance.memorySensitivity().mode,'model');
  }finally{instance?.close();rmSync(dir,{recursive:true,force:true});}
 });
 
@@ -158,7 +158,7 @@ test('a proposed update cannot be reconciled as an applied memory effect',async(
   const result=await actions.invoke({source:{kind:'provider',responseId:'fixture',callId:'one'},name:'memory_update',input:{scope:{kind:'agent'},id:item.id,version:item.version,text:'medical synthetic',classification:'sensitive'},intent:{kind:'new'}});
   assert.equal(result.kind,'completed');instance.db.prepare("UPDATE action_journal SET state='uncertain' WHERE id=?").run(result.actionId);
   instance.memories.update({id:item.id,scope,version:item.version,text:'medical synthetic'});
-  assert.throws(()=>actions.reconcile(result.actionId,{version:2}),/proposal cannot be reconciled/);actions.dispose();
+  await assert.rejects(()=>actions.reconcile(result.actionId,{version:2}),/proposal cannot be reconciled/);actions.dispose();
  }finally{instance.close();}
 });
 

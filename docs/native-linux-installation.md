@@ -214,7 +214,19 @@ fi
 
 Stop the gateway too before backup or replacement. The archive command runs only when the user manager reports `inactive` or `failed`.
 Each run creates a new owner-only directory, so simultaneous backups do not
-overwrite one another. Verify the archive exists and is
+overwrite one another. A full data-directory backup includes the unencrypted named
+secret store at `secrets/credentials.sqlite`; protect the archive accordingly.
+Keep both databases on storage that honors SQLite's rollback-journal and sync
+guarantees. After a crash, start the instance at its original location so SQLite
+can recover, then stop it cleanly before copying the entire data directory.
+Copying a database with unrecovered journals to a different location has not been
+tested as a restore method. After an interrupted guided Slack setup, keep Slack
+disabled and review its binding and approvals in Settings after restart or restore.
+Preserve its owner-only directory and file permissions on restore. The service
+rejects a secrets directory or database accessible to group or other users.
+Restoring an old backup can restore secrets and use approvals deleted or revoked
+later. Review secret approvals and revoke provider credentials
+as needed after recovery. Verify the archive exists and is
 readable, then retain it independently of the host. Inspect the archive with
 `tar -tzf BACKUP_FILE`. Do not proceed with an update if backup creation or
 inspection fails.

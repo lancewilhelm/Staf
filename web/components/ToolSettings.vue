@@ -39,6 +39,7 @@ async function saveSearch(){
   <section class="settings-section" aria-label="Tools">
     <h2 class="section-title">Tools</h2>
     <p>These instance-wide controls make tools available to agents. Permissions, task scope and approvals still determine whether a call can run. Disabling memory denies pending sensitive proposals; saved memories and settings remain.</p>
+    <p>Host file and native terminal actions are unavailable. Scratch shell requires Linux and a configured Docker engine that passes isolation checks; Linux verification is still pending.</p>
     <template v-if="draft">
       <label class="tool-toggle"><input v-model="draft.clock" type="checkbox" :disabled="busy" /> Clock</label>
       <label class="tool-toggle"><input v-model="draft.memory" type="checkbox" :disabled="busy" /> Memory</label>

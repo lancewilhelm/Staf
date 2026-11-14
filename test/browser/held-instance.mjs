@@ -53,12 +53,16 @@ return {
     if (options?.currentUserInput==='Hold chat for task association') {await new Promise(resolve=>{releaseAssociationChat=resolve;console.log('Association chat held')});return {role:'assistant',content:'Interleaved chat result.'};}
     if (options?.currentUserInput==='Hold task for late output') {await new Promise(resolve=>{releaseLateTask=resolve});return {role:'assistant',content:'Observed after stopping.'};}
     if (options?.currentUserInput==='Interactive process fixture') {
-      if(messages.at(-1)?.role==='tool')return {role:'assistant',content:'Interactive fixture started.'};
+      if(messages.at(-1)?.role==='tool') {
+        let failed=/isolation is not established/.test(messages.at(-1).content);
+        if(scripted){try{failed=JSON.parse(messages.at(-1).content).outcome==='error';}catch{failed=true;}}
+        return {role:'assistant',content:failed?'Interactive fixture could not start; host execution requires an established isolation boundary.':'Interactive fixture started.'};
+      }
       const input={command:'printf "interactive ready\\n"; read answer; printf "answer:%s\\n" "$answer"; exec sleep 30',mode:'pty',retain:true};
       return calls([[scripted?'code_mode':'terminal_run',scripted?{source:`return (await capabilities.terminal_run(${JSON.stringify(input)})).value;`}:input]]);
     }
     if (options?.currentUserInput==='Native process fixture') {
-      if (messages.at(-1)?.role==='tool') return {role:'assistant',content:'Native fixture started.'};
+      if (messages.at(-1)?.role==='tool') return {role:'assistant',content:/isolation is not established/.test(messages.at(-1).content)?'Native fixture unavailable: host isolation is not established.':'Native fixture started.'};
       return {role:'assistant',content:null,tool_calls:[{id:'native-fixture',type:'function',function:{name:'terminal_run',arguments:JSON.stringify({retain:true,command:"printf 'native browser output'; exec sleep 30"})}}]};
     }
     if (options?.currentUserInput==='Repeated clock fixture') {

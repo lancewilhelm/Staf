@@ -32,6 +32,10 @@ docker compose run --rm -T --no-deps --user 0 --entrypoint tar staf -C /data -cf
 docker compose start staf
 ```
 
+The stopped volume includes the unencrypted named-secret database and use approvals. Protect the archive like the data volume. An older backup can restore secrets and approvals deleted or revoked later; review access and provider credentials after restoring it. Preserve the owner-only permissions on the `secrets` directory and its database.
+
+Keep the instance and secret databases on storage that honors SQLite's rollback-journal and sync guarantees. After a crash, start the instance at its original location so SQLite can recover, then stop it cleanly before copying the entire volume. Copying a database with unrecovered journals to a different location has not been tested as a restore method. If guided Slack setup was interrupted, keep it disabled and review its binding and approvals in Settings after restart or restore.
+
 To restore the archive into a separate Compose project, use the same source checkout and build its image first. The separate project has its own named volume. Do not start both projects on port 3210 at the same time. This command restores into the destination volume and overwrites matching files there; choose a new project with an empty volume.
 
 ```sh

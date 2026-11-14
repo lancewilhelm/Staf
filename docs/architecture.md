@@ -247,7 +247,7 @@ Public web reads use a per-hop action broker. The action journal records generic
 
 The search tool sends only an approved literal query to the owner-configured loopback origin. The model cannot select the backend. Search uses a separate permission boundary and a keyed action journal, checks current configuration and permissions before dispatch, and aborts affected requests on revocation or task stop. It limits a single instance process to two concurrent dispatches and limits its database to ten per rolling minute, with rate history in the instance database. Separate instance processes do not share a concurrency limit. Search previews are untrusted, and result URLs are not fetched automatically. Queries can be retained by the selected service, its upstreams and the provider/session history. For chat and tasks the shared action service captures the backend, revision and query in a durable action binding and rechecks that binding and any claimed grant before start and result release. Task approvals pause the corresponding attempt timer. Synthetic tests include the production HTTP transport against a disposable loopback server; live SearXNG and provider behavior remain unverified.
 
-Scratch shell uses only an owner-configured Docker CLI, daemon socket and pinned image, and always supplies a fixed bounded tmpfs workspace without an explicit host bind. A keyed action identity and exact-command owner decision precede daemon work. A durable lock and unresolved-action gate serialize execution; started work is marked uncertain on restart. The recorded endpoint configuration is retained for manual inspection. The owner must independently verify daemon identity because matching paths do not prove that the binary or socket still identifies the same daemon. Explicit owner review acknowledges that an absent observation cannot rule out a late create; it neither retries nor removes the old action. The CLI process and daemon can observe the command, tmpfs can use swap, and unknown output secrets can be retained. Integration tests use a synthetic executor; the component itself has separate disposable-container coverage.
+Scratch shell uses only an owner-configured Docker CLI, daemon socket and pinned image, and always supplies a fixed bounded tmpfs workspace without an explicit host bind. A keyed action identity and exact-command owner decision precede daemon work. A durable lock and unresolved-action gate serialize execution; started work is marked uncertain on restart. The recorded endpoint configuration is retained for manual inspection. The owner must independently verify daemon identity because matching paths do not prove that the binary or socket still identifies the same daemon. Explicit owner review acknowledges that an absent observation cannot rule out a late create; it neither retries nor removes the old action. The CLI process and daemon can observe the command, tmpfs can use swap, and unknown output secrets can be retained. Integration tests use a synthetic executor. The hardened Linux container boundary has not been verified against a Linux daemon or kernel.
 
 Descriptive memory language is parsed before the broad memory fallback. It lists a bounded set of candidates from the explicitly resolved scope and never mutates an entry. Model actions and owner commands use the same version-checked store; shared-save confirmation is unchanged.
 
@@ -352,7 +352,92 @@ The service installs a tracker keyed by the actual command or task attempt while
 
 ### Registered host files
 
-The host file capability registration supplies read, write, exact-match edit and bounded search to the existing work-action coordinator. Both chat calling styles use the accepted working directory and the same invocation identity and journal. Hash checks run within the edit effect so a completed-action resume returns its recorded result. An external writer may still race the check and the filesystem write; Staf does not claim atomic compare-and-swap. Effects with unknown outcomes remain uncertain rather than being automatically retried. File data uses service-account filesystem access, not QuickJS isolation.
+Agent host file and native process actions reject input unless the owner has
+selected the experimental Linux boundary and its policy checks pass. The fixed
+launcher supplies pipe, PTY and file work, including write reconciliation;
+unsupported and failed configurations never fall back to service-account host
+execution. The launcher requests private namespaces, and the guard checks the
+mount layout and capabilities and applies Landlock and seccomp before delivery.
+File and terminal paths share the `/workspace` namespace. A scratch container
+rejected before start is removed; failed removal remains uncertain for review.
+Neither this path nor the separate Docker scratch boundary has been verified on
+Linux. See [credential isolation](credential-isolation.md) for prerequisites,
+trust assumptions and remaining tests. Helpers and scheduled tasks retain their
+existing restrictions. Detached processes started before this gate and unrelated
+same-user software are outside it.
+
+Concurrent workspace writers can still race an edit: the hash check is not an
+atomic filesystem compare-and-swap.
+
+### Secret requests
+
+The registered request action accepts descriptive metadata only. A separate
+paired-client endpoint sends a value directly to the service, outside generic
+action arguments and results. A separate SQLite database under the data directory
+stores named values in plaintext and request metadata; the main action journal
+contains the nonsecret request and outcome. Protected question-set steps bind their question and step to a specific named secret revision in that separate store. Ordinary draft inputs cannot contain a value for a secret step. The submitted result reports only its status; selection or saving does not authorize use. The store restores pending requests
+as interrupted, and work is not replayed. Paired-client and work authority are
+checked before a save or selection. Settings can add a value or confirm a
+replacement or deletion using the current opaque revision. Metadata for existing
+stores is added when the store opens. The secret database also stores grants bound
+to the named secret revision, registered plugin role, and exact provider and
+account or conversation destination. Each destination has a durable version even
+when no grant exists. Decisions compare the reviewed version and prior grant in
+the same transaction as the update. Replacement and deletion remove the grants
+and advance their versions in the same transaction. Plugin setup reviews existing
+grants, requires confirmation to replace them, and checks for changes before
+connection. Gmail and Slack recheck grants at use alongside their
+existing connection and agent permissions. Owner confirmation is required for
+setup and grant changes. Interrupted and in-flight external requests are not
+automatically replayed. Known saved values join the existing output filter, which remains a
+secondary safeguard rather than isolation. The shared action coordinator filters
+known values from result strings, keys, visible outcomes, and retained change
+results before release to callers or normal records. The paired browser checks
+recognizable formats locally before chat and question submission; flagged
+question text is omitted from draft saves. Unknown and transformed values may
+escape filtering. Older records and backups are not erased; an unsafe historical
+encoded tool result is omitted when its conversation is next replayed and saved.
+Incoming Slack messages matching recognized credential patterns or known values
+are rejected before work or model dispatch, with only a generic notice retained.
+This cannot remove the message from Slack or detect every credential.
+
+The `setup_slack` work action captures only Slack IDs. Two separate protected
+requests bind saved or selected secret names to their exact revisions. A durable
+review presents the agent, destination, existing connection and current Slack
+grants; replacing any grants requires a separate explicit confirmation. The
+service checks the paired client, originating work, agent and connection
+revisions, secret selections, and durable grant-review version before Slack
+identification and again after it returns. Direct Gmail and Slack reconnects
+attach the secret database to the instance database and commit configuration,
+credentials and grant versions in one SQLite transaction. The service requires
+rollback journals and full synchronous writes for both persistent databases;
+unsupported journal settings reject the transition. A definite rollback retains
+the previous configuration and grant versions. An ambiguous transaction stops
+work and requires a restart and review. SQLite's cross-database crash atomicity
+depends on its VFS, filesystem and storage honoring its durability assumptions;
+process-interruption fixtures do not establish power-loss behavior.
+
+Guided Slack setup commits its selected grants and binding with a durable pending
+marker in the same transaction. Until setup completes, credential use is fenced
+outside its initial socket attempt. A restart never resumes a marked setup: a
+paired owner must keep Slack disabled and review the saved binding and approvals.
+The recovery operation disables the plugin before clearing the marker, so it can
+be repeated after interruption. The approval and marker are completed together;
+the originating work is not replayed. The activation also retains its originating
+work identity. On restart, an enabled guided connection whose work did not finish
+is fenced for owner review even if its approval had already completed. A direct
+reconnect replaces that origin in the same transaction. When upgrading a secret
+store without transition tracking, an older setup recorded as connecting is
+fenced during the same transaction that adds the tracking tables; the latest
+completed guided setup is retained as a conservative origin for the startup
+work check. A restart leaves an
+unfinished review interrupted. Before delivery, including after restart, Staf
+checks the workspace and compares the selected DM with Slack's response for the
+selected user via `conversations.open` with `prevent_creation` and the `im:write`
+bot scope. Socket startup succeeds only after the WebSocket opens; status belongs
+to the verified generation and binding. The action journal must succeed before
+delivery is released.
+These paths use synthetic Slack and model fixtures, not live account verification.
 
 ### Native process slice
 
@@ -389,6 +474,10 @@ output, failed, exited, closed and lost observations, including a combined
 owns output, Stop, shutdown and restart accounting. Handles also implement input,
 EOF and optional PTY resize. `native-pty.ts` uses pinned node-pty with byte output,
 a live supervisor and a private control socket; it never signals a stored group ID.
+Both launch paths remove the supported credential environment variable names
+before starting the supervisor. This limits direct inheritance, but the
+supervisor and agent commands still run with the service account's host access;
+it is not an isolation boundary for credential files or process inspection.
 Interactions share a bounded per-process queue. Pipe writes await backpressure;
 PTY submission has a cumulative byte budget because node-pty exposes no write
 receipt or drain callback. A submitted receipt does not prove application consumption.
@@ -412,7 +501,9 @@ file-write bytes or scoped memory state before recording a resolution and a new
 recovery epoch. Task retries can resolve eligible predecessor actions. Original
 outcomes remain unchanged, closed work stays closed, and a matching resolved
 uncertain change still requires a repeat challenge. There is no generic force
-resolution or model reconciliation tool. See [the contract](work-actions.md).
+resolution or model reconciliation tool. Capability-defined action equivalence
+is used for both new recovery challenges and challenge refresh. See [the
+contract](work-actions.md).
 
 ## Creation defaults and Demo migration
 
@@ -478,14 +569,90 @@ retries a known rate limit, and marks ambiguous in-flight dispatches uncertain.
 Current plugin access and the exact captured destination are checked before each
 send. Disable pauses delivery but does not cancel accepted background tasks.
 A restart interrupts unfinished tasks rather than replaying their effects.
-Tokens live separately in the host credential directory. A reconnecting socket
+Tokens live in the separate managed secret store. A reconnecting socket
 can miss events during an outage; this slice has no Slack history backfill.
 These paths are exercised with controlled providers, not live Slack.
 
 Gmail uses the same account-keyed connection and agent-access tables. A paired
 client starts an in-memory desktop OAuth attempt with PKCE and a loopback
 callback; the service exchanges the code, verifies the Gmail profile identity,
-and saves the client secret and refresh token in a separate host credential file.
+and saves the client secret and refresh token as separate managed secrets with
+destination-scoped approvals. Guided setup uses a service-defined mixed question
+set and resolves its saved secret by revision. A paired owner reviews the exact
+account, scopes, selected secret, destination, prior client and refresh grants,
+and durable review versions before starting. A connected account with unavailable
+managed credentials can be reconnected only to the same account; the reviewed
+connection snapshot prevents a stale review from replacing a later connection.
+Agent and model permissions are retained. Protected
+secret changes require the captured agent revision, and stale requests require a
+new setup. The service records an observed authorization success in the same
+instance transaction as the plugin connection. Revocation or a later failed
+attempt cannot erase that evidence. It records credential availability for the
+current account at resolution. For each relevant provider call it computes a
+fresh status in a transient message copy, after provider initialization and any
+adapter preflight. At dispatch, built-in adapters refresh the messages and check
+the complete model-bound payload against the current secret redactor. If a new
+secret would change it, the call fails before sending. The check includes
+instructions, tool schemas, model settings, and replay. Structured file and
+terminal results are decoded and checked again before replay and session writes.
+The credential store advances a durable generation on secret mutations; an
+in-flight turn with encoded file or process output is fenced if that generation
+changes before release. Terminal capture stops retaining new bytes after a change
+and reports incomplete output. Historical structured output is rechecked against
+current known values, including partial pages and interleaved process streams;
+unsafe or unverifiable tool results are omitted from later replay and session
+saves without removing unrelated conversation text. Structured bytes are checked
+before text redaction can obscure their encoding tag; a new result is withheld
+if redaction would make that tag unverifiable. Code Mode records an authenticated
+proof bound to the exact guest result and whether it received file or terminal
+bytes. Because a guest can return raw base64 without the original
+encoding tag, historical guest results with such receipts, or without valid
+provenance, are omitted from replay and new session/event saves. Other verified
+guest results remain available. This also applies to records made before the
+proof was introduced; the surrounding conversation is retained. Earlier durable records and
+backups are not erased. The checks do not establish safety for every transformed
+or unattributed fragment, including arbitrary scratch output. They do not prove
+a platform isolation boundary. At preparation, tool
+descriptions are redacted; an offer is omitted if its identity or schema keys
+contain a known secret. Stored checkpoints are redacted again before writing; reasoning replay that cannot be retained safely
+causes the write to fail. A later revocation or newly recognized secret cannot
+recall input already sent to a provider.
+
+Injected provider adapters are trusted code. An adapter must call
+`refreshMessages` after any asynchronous preparation, immediately before each
+model dispatch, and use its returned messages. It must then pass the complete
+model-bound payload to `assertSafePayload` immediately before sending. It must
+not cache earlier messages, input, instructions, or tool definitions for a
+later dispatch. Staf cannot enforce these calls inside a noncompliant adapter.
+
+A task that captures a Gmail setup continuation, its assistant reply, or a
+related task outcome also receives current status. The instance records those
+message identities and marks captured task snapshots for that agent. Chat turns
+carry a service-signed identity bound to their stored message. These records
+survive retries and partial context retention. The service never infers identity
+from a prefix in user or model text. Legacy snapshots without trustworthy
+identity do not acquire provenance from their content. The setup result has its own authenticated span within a turn, separate from
+other notices and owner text. The service renews proofs only when it redacts
+already authenticated content. If redaction crosses an authenticated result
+boundary, the turn fails before provider dispatch instead of losing the result
+identity. The service binds a new result only when its exact structured span
+remains valid through persistence. A service-signed setup identity with unverifiable content fails closed; an
+untrusted or unrelated message does not create provenance; other text is not replaced. Older signed
+turns without a result span remain usable when their full content verifies.
+Isolated
+helpers do not inherit the parent's chat; separately approved helper text does
+not grant access to Gmail status.
+
+That status does not verify Google access or agent and model permissions. Older results
+whose success was already overwritten cannot be reconstructed. The OAuth attempt
+rechecks client, request, agent revision, grant identity and
+version, connection revision, and nonsecret fields at dispatch and before commit.
+The selected client secret is authorized for the exchange, while prior grants
+remain until the selected grant, refresh token, plugin binding and setup result
+commit together. A definite rollback retains prior state; an uncertain result
+is fenced until restart and review. Startup marks a pending exchange interrupted
+and never replays it. Controlled service and Google fixtures do not establish
+live Google behavior.
 The service fences an in-flight exchange against cancellation, expiry, client
 revocation and connection revision changes. The connection-time history ID and
 candidate message IDs are stored in SQLite; complete pages and the next cursor

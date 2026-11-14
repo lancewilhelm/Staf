@@ -3,6 +3,8 @@ import { computed } from 'vue';
 import type { ConversationTask, InboxItem } from '../controller';
 import { useWorkspace } from '../workspace';
 import ApprovalItem from './ApprovalItem.vue';
+import SecretRequest from './SecretRequest.vue';
+import SlackSetupApproval from './SlackSetupApproval.vue';
 import DisclosureSummary from './DisclosureSummary.vue';
 import ResponseText from './ResponseText.vue';
 import QuestionSet from './QuestionSet.vue';
@@ -22,7 +24,7 @@ const observations=computed(()=>props.task.activity.filter(event=>event.type==='
     <template v-if="task.state==='completed' && task.outcome"><ResponseText :text="task.outcome" /></template>
     <p v-else-if="task.outcome" class="meta">{{ task.outcome }}</p>
     <div v-for="event in observations" :key="event.seq"><p class="meta">Observed output{{ event.late ? ' after Stop' : ' (not a completed result)' }}</p><ResponseText :text="event.text ?? ''" /></div>
-    <ApprovalItem v-for="item in relevant" :key="item.id" :item="item" />
+    <template v-for="item in relevant" :key="item.id"><SecretRequest v-if="item.kind==='secret'" :item="item" /><SlackSetupApproval v-else-if="item.kind==='slack-setup'" :item="item" /><ApprovalItem v-else :item="item" /></template>
     <p v-if="questions.some(q=>q.state==='open')" role="status">This task has questions in Staf.</p>
     <QuestionSet v-for="request in questions" :key="request.id" :request="request" />
     <div v-if="['failed','stopped','interrupted'].includes(task.state) && questions.length && questions.every(q=>q.state!=='open')"><p>Review the prior work and any uncertain effects before starting a new attempt.</p><button class="quiet" type="button" @click="app.retryTask(task,questions)">Start a new attempt</button></div>

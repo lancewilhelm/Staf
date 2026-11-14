@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {startInstance} from './fixtures/controlled-instance.mjs';
+import {startInstance,startControlledInstance} from './fixtures/controlled-instance.mjs';
 
 test('paired chat offers each captured mode and runs the real guest clock', async () => {
   const seen=[];
@@ -29,7 +29,7 @@ const memoryOffers=['memory_search','memory_read','memory_remember','memory_upda
 const tool=(name,args={},id='call')=>({role:'assistant',content:null,tool_calls:[{id,type:'function',function:{name,arguments:JSON.stringify(args)}}]});
 async function fixture(respond,env={},options={}) {
   const seen=[];
-  const app=startInstance(options.path ?? ':memory:',0,{...options,env,providerFactory:async profile=>({name:'controlled',capabilities:{toolCalls:true},async complete(messages,tools){seen.push({profile,messages:structuredClone(messages),offers:tools.map(x=>x.function.name)});return respond(messages,tools,profile);}})});
+  const app=(options.shellExecutor?startControlledInstance:startInstance)(options.path ?? ':memory:',0,{...options,env,providerFactory:async profile=>({name:'controlled',capabilities:{toolCalls:true},async complete(messages,tools){seen.push({profile,messages:structuredClone(messages),offers:tools.map(x=>x.function.name)});return respond(messages,tools,profile);}})});
   const port=await app.listen();let token;
   const call=async(path,body)=>{const r=await fetch(`http://127.0.0.1:${port}${path}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});const v=await r.json();assert.ok(r.ok,`${path} ${r.status}: ${JSON.stringify(v)}`);return v;};
   token=(await call('/api/pair',{code:app.code})).token;
@@ -59,7 +59,7 @@ test('direct, hybrid and code offers are captured and unoffered calls cannot dis
     for(const mode of ['direct','hybrid','code']){
       const bot=await f.call('/api/bots',{provider:'live',model:'fixture-offline',name:mode,toolMode:mode});const index=f.seen.length;
       await f.submit(mode,bot.id,mode);const command=await f.wait(mode);assert.equal(command.state,'completed');
-      assert.deepEqual(f.seen[index].offers,mode==='direct'?['terminal_run','terminal_read','terminal_stop','terminal_write','terminal_eof','terminal_resize','clock','file_read','file_write','file_edit','file_search',...memoryOffers,'ask_questions']:mode==='hybrid'?['terminal_run','terminal_read','terminal_stop','terminal_write','terminal_eof','terminal_resize','clock','file_read','file_write','file_edit','file_search',...memoryOffers,'ask_questions','code_mode']:['code_mode']);
+      assert.deepEqual(f.seen[index].offers,mode==='direct'?['terminal_run','terminal_read','terminal_stop','terminal_write','terminal_eof','terminal_resize','clock','file_read','file_write','file_edit','file_search','request_secret','setup_slack',...memoryOffers,'ask_questions','guide_gmail_setup']:mode==='hybrid'?['terminal_run','terminal_read','terminal_stop','terminal_write','terminal_eof','terminal_resize','clock','file_read','file_write','file_edit','file_search','request_secret','setup_slack',...memoryOffers,'ask_questions','guide_gmail_setup','code_mode']:['code_mode']);
       assert.equal(command.workActions.length,1);assert.equal(command.workActions[0].state,'succeeded');
       assert.equal(command.codeExecutions.length,mode==='direct'?0:1);
       if(mode!=='direct')assert.match(command.codeExecutions[0].result.value,/^\d{4}-/);
@@ -88,7 +88,7 @@ test('Code Mode offers skill guidance while rejecting forged individual calls',a
       const index=f.seen.length;
       await f.submit('skill-'+mode,bot.id);const command=await f.wait('skill-'+mode);
       assert.equal(command.state,'completed',command.error);
-      assert.deepEqual(f.seen[index].offers,mode==='direct'?['terminal_run','terminal_read','terminal_stop','terminal_write','terminal_eof','terminal_resize','clock','file_read','file_write','file_edit','file_search',...memoryOffers,'ask_questions','select_skill']:mode==='hybrid'?['terminal_run','terminal_read','terminal_stop','terminal_write','terminal_eof','terminal_resize','clock','file_read','file_write','file_edit','file_search',...memoryOffers,'ask_questions','code_mode','select_skill']:['code_mode']);
+      assert.deepEqual(f.seen[index].offers,mode==='direct'?['terminal_run','terminal_read','terminal_stop','terminal_write','terminal_eof','terminal_resize','clock','file_read','file_write','file_edit','file_search','request_secret','setup_slack',...memoryOffers,'ask_questions','guide_gmail_setup','select_skill']:mode==='hybrid'?['terminal_run','terminal_read','terminal_stop','terminal_write','terminal_eof','terminal_resize','clock','file_read','file_write','file_edit','file_search','request_secret','setup_slack',...memoryOffers,'ask_questions','guide_gmail_setup','code_mode','select_skill']:['code_mode']);
       assert.equal(f.seen[index].messages.some(message=>typeof message.content==='string' && message.content.includes('Available skill catalog')),true);
       assert.equal(command.skillActivity.length,mode==='code'?0:1);
       const result=command.runtimeEvents.find(event=>event.type==='tool_result' && event.name==='select_skill');

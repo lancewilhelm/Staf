@@ -61,10 +61,7 @@ test('the offline review fixture keeps sign-in local and simulates a saved conne
   await call('/api/commands',{id:'interactive-fixture',botId:bot.id,content:'Interactive process fixture'});
   let command;for(let i=0;i<300;i++){command=await call('/api/commands/interactive-fixture');if(command.state!=='pending')break;await new Promise(resolve=>setTimeout(resolve,10));}
   assert.equal(command.state,'completed',command.error);
+  assert.match(command.responseProgress.text,/could not start.*isolation boundary/i);
   const processes=(await call('/api/processes')).filter(p=>p.work.id==='interactive-fixture');
-  assert.equal(processes.length,1,'the manual fixture starts one retained terminal');
-  await call(`/api/processes/${processes[0].id}/input`,{data:'hello\n'});
-  let processOutput;for(let i=0;i<300;i++){processOutput=await call(`/api/processes/${processes[0].id}/output`);if(processOutput.chunks.some(c=>c.text?.includes('answer:hello')))break;await new Promise(resolve=>setTimeout(resolve,10));}
-  assert.match(processOutput.chunks.map(c=>c.text??'').join(''),/answer:hello/);
-  await call(`/api/processes/${processes[0].id}/stop`,{});
+  assert.equal(processes.length,0,'the fixture must not dispatch a terminal without an established host boundary');
 });

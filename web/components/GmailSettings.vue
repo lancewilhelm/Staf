@@ -6,6 +6,7 @@ import DisclosureSummary from './DisclosureSummary.vue';
 
 const {app,state}=useWorkspace();
 const gmail=ref<Awaited<ReturnType<typeof app.gmailPlugin>>|null>(null),busy=ref(false),message=ref(''),authorizationUrl=ref('');
+const setupReview=ref<Awaited<ReturnType<typeof app.secretSetupReview>>|null>(null);
 const form=ref({email:'',clientId:'',clientSecret:'',sendEnabled:false,modifyEnabled:false});
 const confirm=ref<'disconnect'|'delete-config'|'rebaseline'|null>(null),grant=ref<{botId:string;provider:string;model:string}|null>(null);
 const workGrant=ref<{botId:string;provider:string;model:string}|null>(null);
@@ -16,7 +17,7 @@ const uncertain=ref<Awaited<ReturnType<typeof app.gmailUncertain>>>([]);
 const resolution=ref<{item:(typeof uncertain.value)[number];outcome:'sent'|'not-sent'|'applied'|'not-applied'}|null>(null);
 const inspected=ref<Awaited<ReturnType<typeof app.gmailRead>>|null>(null);let timer:ReturnType<typeof setInterval>|undefined;
 const older=ref<Array<{messageId:string;inbox:'yes'|'no'|'unknown';assessmentExists:boolean;retryAttemptId:string|null}>>([]),olderBefore=ref<number|null>(null),loadedOlder=ref(false);let olderPages=0,paginationVersion=0;
-async function refresh(fillForm=false){const version=++paginationVersion,previous=gmail.value?.accountId,[next,unknown]=await Promise.all([app.gmailPlugin(),app.gmailUncertain()]);const accountChanged=previous!==next.accountId;let cursor=next.nextBefore;const refreshed:typeof older.value=[];let pages=0;if(!accountChanged){while(pages<olderPages && cursor){const page=await app.gmailArrivals(cursor);refreshed.push(...page.arrivals);cursor=page.nextBefore;pages++;}}if(version!==paginationVersion)return;if(accountChanged){inspected.value=null;monitorLoaded.value=false;attention.value='';sensitiveTerms.value='';}older.value=refreshed;olderBefore.value=cursor;olderPages=pages;loadedOlder.value=pages>0;gmail.value=next;uncertain.value=unknown;if(!monitorLoaded.value){attention.value=next.inboxPreferences?.attention ?? '';sensitiveTerms.value=next.inboxPreferences?.sensitiveTerms.join('\n') ?? '';monitorRevision.value=next.inboxPreferences?.revision ?? null;digestMinutes.value=next.inboxPreferences?.digestMinutes ?? 60;memoryContext.value=next.inboxPreferences?.memoryContext ?? false;monitorLoaded.value=true;}if(fillForm && next.config){form.value.email=next.config.email;form.value.clientId=next.config.clientId;}if(next.authorizationStatus==='Connected')authorizationUrl.value='';}
+async function refresh(fillForm=false){const version=++paginationVersion,previous=gmail.value?.accountId,[next,unknown,review]=await Promise.all([app.gmailPlugin(),app.gmailUncertain(),app.secretSetupReview('gmail')]);const accountChanged=previous!==next.accountId;let cursor=next.nextBefore;const refreshed:typeof older.value=[];let pages=0;if(!accountChanged){while(pages<olderPages && cursor){const page=await app.gmailArrivals(cursor);refreshed.push(...page.arrivals);cursor=page.nextBefore;pages++;}}if(version!==paginationVersion)return;if(accountChanged){inspected.value=null;monitorLoaded.value=false;attention.value='';sensitiveTerms.value='';}older.value=refreshed;olderBefore.value=cursor;olderPages=pages;loadedOlder.value=pages>0;gmail.value=next;uncertain.value=unknown;setupReview.value=review;if(!monitorLoaded.value){attention.value=next.inboxPreferences?.attention ?? '';sensitiveTerms.value=next.inboxPreferences?.sensitiveTerms.join('\n') ?? '';monitorRevision.value=next.inboxPreferences?.revision ?? null;digestMinutes.value=next.inboxPreferences?.digestMinutes ?? 60;memoryContext.value=next.inboxPreferences?.memoryContext ?? false;monitorLoaded.value=true;}if(fillForm && next.config){form.value.email=next.config.email;form.value.clientId=next.config.clientId;}if(next.authorizationStatus==='Connected')authorizationUrl.value='';}
 async function reconcile(){const selected=resolution.value;if(!selected || busy.value)return;busy.value=true;message.value='';try{await app.gmailReconcile({actionId:selected.item.actionId,fingerprint:selected.item.fingerprint,kind:selected.item.effect.kind==='modify'?'modify':'reply',outcome:selected.outcome});message.value='Your finding was recorded. No Gmail action was sent.';await refresh();}catch(error){message.value='Could not record the finding. '+String(error);await refresh().catch(()=>{});}finally{busy.value=false;resolution.value=null;}}
 function onFocus(){void refresh().catch(()=>{message.value='Could not refresh Gmail status.';});}
 onMounted(()=>{window.addEventListener('focus',onFocus);void refresh(true).catch(()=>{message.value='Could not load Gmail status.';});timer=setInterval(()=>{if(!busy.value)void refresh().catch(()=>{});},10000);});
@@ -43,6 +44,7 @@ async function loadOlder(){const before=loadedOlder.value?olderBefore.value:gmai
   <p v-if="gmail?.connected">Approved reply sending: {{ gmail.sendEnabled ? 'Authorized with Google' : 'Not authorized' }}</p>
   <p v-if="gmail?.connected">Approved inbox changes: {{ gmail.modifyEnabled ? 'Authorized with Google' : 'Not authorized' }}</p>
   <p v-if="gmail">Connection status: {{ gmail.status }}</p>
+  <p v-if="gmail?.reconnectUncertain" role="alert">The connection outcome is uncertain. Restart Staf, then review the connection before continuing.</p>
   <p v-if="gmail && gmail.authorizationStatus!=='Connected' && gmail.authorizationStatus!=='Not connected'">Authorization: {{ gmail.authorizationStatus }}</p>
   <p>Email sent to a model provider remains your choice. Agent access alone does not allow Gmail content to be sent to a model.</p>
   <section v-if="uncertain.length" aria-label="Gmail outcomes needing review">
@@ -61,13 +63,15 @@ async function loadOlder(){const before=loadedOlder.value?olderBefore.value:gmai
   </section>
   <details class="saved-settings"><DisclosureSummary>{{ gmail?.config ? 'Reconnect Gmail' : 'Set up Gmail' }}</DisclosureSummary>
    <p>Create a Google desktop OAuth client and enable the Gmail API first. The Gmail read-only scope is restricted. Google's modify permission also permits sending; Staf still requires the separate send option and approval for replies. See the Gmail setup documentation for requirements and limitations.</p>
-   <form @submit.prevent="action('start',{...form})">
+   <form @submit.prevent="setupReview && action('start',{...form,confirm:true,reviewedVersion:setupReview.version,confirmDisplacements:setupReview.grants.length>0})">
     <label>Gmail account email<input v-model.trim="form.email" type="email" autocomplete="off" required /></label>
     <label>Google OAuth client ID<input v-model.trim="form.clientId" autocomplete="off" required /></label>
     <label>Google OAuth client secret<input v-model="form.clientSecret" type="password" autocomplete="off" required /></label>
     <label><input v-model="form.sendEnabled" type="checkbox" /> Allow Gmail to send replies after explicit approval in Slack</label>
     <label><input v-model="form.modifyEnabled" type="checkbox" /> Allow Gmail inbox changes after explicit approval in Slack</label>
-    <button :disabled="busy">Begin Google authorization</button>
+    <p>Beginning authorization approves this client secret and the resulting refresh token for {{ form.email || 'the account above' }} at https://oauth2.googleapis.com/token and https://gmail.googleapis.com. Agent access is a separate decision.</p>
+    <p v-if="setupReview?.grants.length">Connecting replaces these existing approvals: {{ setupReview.grants.map(grant=>grant.name+' ('+grant.integration+')').join(', ') }}.</p>
+    <button :disabled="busy || !setupReview || gmail?.reconnectUncertain">{{ setupReview?.grants.length?'Begin authorization and replace approvals':'Begin Google authorization and approve' }}</button>
    </form>
    <p v-if="authorizationUrl"><a :href="authorizationUrl" target="_blank" rel="noreferrer">Open Google authorization</a>. Return here after granting access, then refresh status.</p>
   </details>

@@ -27,6 +27,6 @@ const gmailRequest=async(url)=>{
  }
  throw Error('Unexpected provider request');
 };
-const slackTransport={identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async()=>()=>{},post:async()=>({messageTs:'1.1'})};
+const slackTransport={verifyDestination:async(_tokens,config)=>({channelId:config.channelId}),identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async(_tokens,_receive,status)=>{status?.('connected');return ()=>{};},post:async()=>({messageTs:'1.1'})};
 const app=startInstance(path,Number(port),{env:{},gmailRequest,slackTransport});await app.listen();process.stdout.write('Pairing code: '+app.code+'\n');
 process.on('SIGTERM',()=>{void app.close().then(()=>process.exit(0));});

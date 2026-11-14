@@ -371,3 +371,9 @@ test('OpenRouter parses split UTF-8 SSE frames and rejects truncated tool calls 
     const output=[];await assert.rejects(async()=>{for await(const event of p.stream([],[]))output.push(event);});assert.ok(!output.some(event=>event.type==='message'));
   }
 });
+
+test('Codex planner refreshes messages after its asynchronous preflight',async()=>{
+ let release,started,checks=0,sent;const gate=new Promise(resolve=>release=resolve),entered=new Promise(resolve=>started=resolve);let status='credentials_available';
+ const runner=async(args,input)=>{if(args[0]==='login')return 'Logged in using ChatGPT';if(args[0]==='mcp'){if(++checks===2){started();await gate;}return '[]';}sent=input;await writeFile(args[args.indexOf('--output-last-message')+1],JSON.stringify({kind:'text',text:'done'}));return '';};
+ const provider=await codexProvider('test-model',runner),pending=provider.complete([{role:'user',content:'stale'}],[],{refreshMessages:()=>[{role:'user',content:status}]});await entered;status='credentials_unavailable';release();await pending;assert.ok(sent.includes('credentials_unavailable'));assert.ok(!sent.includes('credentials_available'));
+});

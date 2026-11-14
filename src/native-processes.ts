@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
-import { byteStreamRedactor, type ByteRedactor } from './config.js';
+import { agentProcessEnvironment, byteStreamRedactor, type ByteRedactor } from './config.js';
 import { ActionFailed } from './work-actions.js';
 import {ptyBackend} from './native-pty.js';
 import type { Capability, WorkContext, ActionIdentity } from './work-actions.js';
@@ -20,9 +20,9 @@ export type ProcessHandle = {terminate:(signal:NodeJS.Signals)=>void;detach:()=>
 export type ProcessBackend = {launch:(cwd:string,observers:ProcessObservers)=>ProcessHandle};
 type Live = {handle:ProcessHandle; signal:AbortSignal; abort:()=>void; timer?:ReturnType<typeof setTimeout>; finished:Promise<void>; done:()=>void;flush:()=>void};
 
-function pipeBackend(command:string):ProcessBackend {
+function pipeBackend(command:string,environment=agentProcessEnvironment(process.env)):ProcessBackend {
   return {launch:(cwd,observers)=>{
-    const child=spawn(process.execPath,[fileURLToPath(new URL('./native-process-supervisor.js',import.meta.url)),command],{cwd,env:process.env,detached:true,stdio:['pipe','pipe','pipe','ipc']});
+    const child=spawn(process.execPath,[fileURLToPath(new URL('./native-process-supervisor.js',import.meta.url)),command],{cwd,env:environment,detached:true,stdio:['pipe','pipe','pipe','ipc']});
     const stdin=child.stdin;if(!stdin)throw Error('Process input pipe was not created');stdin.on('error',()=>{});
     let code:number|null=null,signal:string|null=null,completed=false,failed=false;
     child.stdout?.on('data',(data:Buffer)=>observers.output('stdout',data));child.stderr?.on('data',(data:Buffer)=>observers.output('stderr',data));
@@ -43,6 +43,10 @@ export class NativeProcesses {
   private readonly live=new Map<string,Live>();
   private readonly interactions=new Map<string,{tail:Promise<void>;pending:number}>();
   private closing=false;
+  private outputGuard:(bytes:Buffer,partial:boolean)=>void=()=>{};
+  private secretGeneration:()=>number=()=>0;
+  setSecretGeneration(get:()=>number):void {this.secretGeneration=get;}
+  setOutputGuard(guard:(bytes:Buffer,partial:boolean)=>void):void {this.outputGuard=guard;}
   constructor(private readonly db:DatabaseSync,private readonly outputFilter:()=>ByteRedactor=()=>byteStreamRedactor({})) {
     db.exec("UPDATE native_processes SET state='unknown' WHERE state IN ('starting','running','stopping')");
   }
@@ -65,14 +69,15 @@ export class NativeProcesses {
     if(cursor>next)throw Error('Output cursor is beyond the observed output');
     const rows=this.db.prepare('SELECT cursor,stream,data FROM native_process_output WHERE process_id=? AND cursor>=? ORDER BY cursor').all(id,Math.max(cursor,first));
     let bytes=0,pageNext=Math.max(cursor,first);
-    const chunks=[];
+    const chunks=[];const observed=new Map<string,Buffer[]>();
     for(const row of rows) {
       if(!(row.data instanceof Uint8Array))throw Error('Invalid stored process output');
       const data=Buffer.from(row.data);if(bytes+data.length>nativeProcessLimits.pageBytes)break;
-      bytes+=data.length;pageNext=Number(row.cursor)+1;
+      bytes+=data.length;pageNext=Number(row.cursor)+1;const stream=String(row.stream),prior=observed.get(stream)??[];prior.push(data);observed.set(stream,prior);
       let text:string|null=null;try{text=new TextDecoder('utf-8',{fatal:true}).decode(data);}catch{/* Base64 preserves bytes that are not a complete UTF-8 chunk. */}
       chunks.push({cursor:row.cursor,stream:row.stream,data:data.toString('base64'),text});
     }
+    const partial=cursor>0 || first>0 || pageNext<next || !process.outputComplete;for(const data of observed.values())this.outputGuard(Buffer.concat(data),partial);
     return {processId:id,process,encoding:'base64',redaction:'known-credentials',gap:cursor<first,firstCursor:first,nextCursor:pageNext,observedCursor:next,hasMore:pageNext<next,chunks,limits:nativeProcessLimits};
   }
   private append(id:string,stream:'stdout'|'stderr'|'terminal',buffer:Buffer) {
@@ -90,29 +95,31 @@ export class NativeProcesses {
       }
     }
   }
-  start(work:WorkContext,action:ActionIdentity,input:{command:string;cwd?:string;mode?:'pipe'|'pty';retain?:boolean;cols?:number;rows?:number}) {
+  start(work:WorkContext,action:ActionIdentity,input:{command:string;cwd?:string;mode?:'pipe'|'pty';retain?:boolean;cols?:number;rows?:number},environment=agentProcessEnvironment(process.env)) {
     const mode=input.mode??'pipe',cols=input.cols??80,rows=input.rows??24;
-    return this.startBackend(work,action,{cwd:input.cwd,mode,retain:input.retain,cols:mode==='pty'?cols:undefined,rows:mode==='pty'?rows:undefined,backend:mode==='pty'?ptyBackend(input.command,cols,rows):pipeBackend(input.command)});
+    return this.startBackend(work,action,{cwd:input.cwd,mode,retain:input.retain,cols:mode==='pty'?cols:undefined,rows:mode==='pty'?rows:undefined,backend:mode==='pty'?ptyBackend(input.command,cols,rows,environment):pipeBackend(input.command,environment)});
   }
   /** Register ownership before launch; #85 can supply a PTY backend through this seam. */
-  async startBackend(work:WorkContext,action:ActionIdentity,input:{cwd?:string;mode:string;retain?:boolean;cols?:number;rows?:number;backend:ProcessBackend}) {
+  async startBackend(work:WorkContext,action:ActionIdentity,input:{cwd?:string;baseCwd?:string;mode:string;retain?:boolean;cols?:number;rows?:number;backend:ProcessBackend}) {
     if(this.closing)throw Error('Process admission closed');
     work.signal.throwIfAborted();if(this.live.size>=nativeProcessLimits.active)throw Error('Active process limit reached');
-    const id=randomUUID(),cwd=resolve(work.workingDirectory,input.cwd ?? '.');
+    const id=randomUUID(),cwd=resolve(input.baseCwd??work.workingDirectory,input.cwd ?? '.');
     this.db.prepare("INSERT INTO native_processes (id,bot_id,work_kind,work_id,action_id,cwd,mode,state,created_ms) VALUES (?,?,?,?,?,?,?,'starting',?)").run(id,work.botId,work.work.kind,work.work.id,action.id,cwd,input.mode,Date.now());
     this.db.prepare('UPDATE native_processes SET retained=?,cols=?,rows=? WHERE id=?').run(input.retain?1:0,input.cols??null,input.rows??null,id);
     let done!:()=>void;const finished=new Promise<void>(resolve=>{done=resolve;});
-    const filters=new Map<'stdout'|'stderr'|'terminal',ByteRedactor>();let flushed=false;
-    const flush=()=>{if(flushed)return;flushed=true;for(const [stream,filter] of filters)this.append(id,stream,filter.finish());};
+    const filters=new Map<'stdout'|'stderr'|'terminal',ByteRedactor>();let flushed=false,outputFenced=false;const initialGeneration=this.secretGeneration();
+    const current=()=>{try{if(this.secretGeneration()===initialGeneration)return true;}catch{/* Fence output if secret state cannot be verified. */}outputFenced=true;return false;};
+    const retain=(stream:'stdout'|'stderr'|'terminal',data:Buffer)=>{if(!data.length || !current())return;this.append(id,stream,data);};
+    const flush=()=>{if(flushed)return;flushed=true;for(const [stream,filter] of filters)retain(stream,filter.finish());};
     const lifetime=work.workSignal??work.signal;
     const abort=()=>{this.stop(id);};let live!:Live;
     const observers:ProcessObservers={
       started:pid=>{this.db.prepare("UPDATE native_processes SET state=CASE WHEN stop_requested=1 THEN 'stopping' ELSE 'running' END,pid=? WHERE id=?").run(pid,id);if(lifetime.aborted || this.get(id)?.stopRequested)this.stop(id);},
-      output:(stream,data)=>{const filter=filters.get(stream)??this.outputFilter();filters.set(stream,filter);this.append(id,stream,filter.write(data));},
+      output:(stream,data)=>{if(!current())return;const filter=filters.get(stream)??this.outputFilter();filters.set(stream,filter);retain(stream,filter.write(data));},
       failed:()=>{this.db.prepare("UPDATE native_processes SET state='failed' WHERE id=?").run(id);},
       exited:(code,signal)=>{this.db.prepare("UPDATE native_processes SET exit_code=?,exit_signal=? WHERE id=?").run(code,signal,id);},
       lost:()=>{flush();if(live.timer)clearTimeout(live.timer);lifetime.removeEventListener('abort',abort);this.live.delete(id);this.db.prepare("UPDATE native_processes SET state='unknown' WHERE id=?").run(id);done();},
-      closed:(code,signal)=>{flush();if(live.timer)clearTimeout(live.timer);lifetime.removeEventListener('abort',abort);this.live.delete(id);this.db.prepare("UPDATE native_processes SET state=CASE WHEN state='failed' THEN 'failed' ELSE 'exited' END,exit_code=?,exit_signal=?,output_complete=1 WHERE id=?").run(code,signal,id);done();},
+      closed:(code,signal)=>{flush();if(live.timer)clearTimeout(live.timer);lifetime.removeEventListener('abort',abort);this.live.delete(id);this.db.prepare("UPDATE native_processes SET state=CASE WHEN state='failed' THEN 'failed' ELSE 'exited' END,exit_code=?,exit_signal=?,output_complete=? WHERE id=?").run(code,signal,outputFenced?0:1,id);done();},
     };
     let handle:ProcessHandle;
     try {handle=input.backend.launch(cwd,observers);} catch(error){this.db.prepare("UPDATE native_processes SET state='failed' WHERE id=?").run(id);throw error;}
@@ -159,9 +166,12 @@ const dimensions=z.number().int().min(1).max(1000);
 export const processInteraction=z.discriminatedUnion('operation',[z.strictObject({operation:z.literal('input'),data:z.string().refine(value=>Buffer.byteLength(value)<=nativeProcessLimits.inputBytes)}),z.strictObject({operation:z.literal('eof')}),z.strictObject({operation:z.literal('resize'),cols:dimensions,rows:dimensions})]);
 export type ProcessInteraction=z.infer<typeof processInteraction>;
 export function checkedInteraction(value:unknown,redact:(value:string)=>string):ProcessInteraction {const parsed=processInteraction.parse(value);if(parsed.operation==='input' && redact(parsed.data)!==parsed.data)throw new ActionFailed('Terminal input cannot be retained faithfully under the instance redaction rules.');return parsed;}
-const input=z.strictObject({command:z.string().min(1).max(32000).refine(value=>!value.includes('\0')),cwd:z.string().min(1).optional(),mode:z.enum(['pipe','pty']).optional(),retain:z.boolean().optional(),cols:dimensions.optional(),rows:dimensions.optional()});
-export function nativeCommandCapability(manager:NativeProcesses, allowed:(work:WorkContext)=>boolean,redact:(value:string)=>string):Capability<z.infer<typeof input>,unknown> {
-  return {name:'terminal_run',definition:{type:'function',function:{name:'terminal_run',description:'Run ordinary host shell text. Set mode pty for a terminal and retain true to keep the process after work completes. Returns process ID/status; read output separately.',parameters:{type:'object',properties:{command:{type:'string'},cwd:{type:'string'},mode:{type:'string',enum:['pipe','pty']},retain:{type:'boolean'},cols:{type:'integer'},rows:{type:'integer'}},required:['command'],additionalProperties:false}}},parseInput:value=>{const parsed=input.parse(value);for(const text of [parsed.command,parsed.cwd])if(text!==undefined && redact(text)!==text)throw new ActionFailed('Terminal input cannot be retained faithfully under the instance redaction rules.');return parsed;},parseResult:value=>value,describe:()=>({summary:'Run host command',resource:'host',effect:'change',opaque:true}),eligible:allowed,check:(_value,work)=>{if(!allowed(work))throw Error('Process work is no longer authorized');},authorize:async()=>{},execute:(value,work,action)=>manager.start(work,action,value),visibleResult:value=>JSON.stringify(value),recovery:{reconcile:(_value,evidence,work,action)=>manager.reconcileRun(work,action,evidence)}};
+const input=z.strictObject({command:z.string().min(1).max(32000).refine(value=>!value.includes('\0') && Buffer.byteLength(value)<=32000),cwd:z.string().min(1).refine(value=>!value.includes('\0') && Buffer.byteLength(value)<=4096).optional(),mode:z.enum(['pipe','pty']).optional(),retain:z.boolean().optional(),cols:dimensions.optional(),rows:dimensions.optional()});
+export function nativeCommandCapability(manager:NativeProcesses, allowed:(work:WorkContext)=>boolean,redact:(value:string)=>string,start:(work:WorkContext,action:ActionIdentity,value:z.infer<typeof input>)=>Promise<unknown>,canonicalCwd?:(cwd:string|undefined,work:WorkContext)=>string):Capability<z.infer<typeof input>,unknown> {
+  const cwd=(value:z.infer<typeof input>,work:WorkContext)=>canonicalCwd?canonicalCwd(value.cwd,work):resolve(work.workingDirectory,value.cwd??'.');
+  const identity=(value:z.infer<typeof input>,work:WorkContext)=>{const mode=value.mode??'pipe';return JSON.stringify([value.command,cwd(value,work),mode,value.retain??false,mode==='pty'?value.cols??80:null,mode==='pty'?value.rows??24:null]);};
+  const compare=(previous:z.infer<typeof input>,next:z.infer<typeof input>,work:WorkContext,full:boolean)=>{try{return full?identity(previous,work)===identity(next,work):previous.command===next.command && cwd(previous,work)===cwd(next,work);}catch{return false;}};
+  return {name:'terminal_run',parseHistoricalInput:value=>input.parse(value),validateInput:(value,work)=>{try{cwd(value,work);}catch{throw new ActionFailed('Terminal working directory is outside the permitted workspace.');}},sameAction:(previous,next,work)=>compare(previous,next,work,true),sameEffect:(previous,next,work)=>compare(previous,next,work,false),definition:{type:'function',function:{name:'terminal_run',description:'Run ordinary host shell text. Set mode pty for a terminal and retain true to keep the process after work completes. Returns process ID/status; read output separately.',parameters:{type:'object',properties:{command:{type:'string'},cwd:{type:'string'},mode:{type:'string',enum:['pipe','pty']},retain:{type:'boolean'},cols:{type:'integer'},rows:{type:'integer'}},required:['command'],additionalProperties:false}}},parseInput:value=>{const parsed=input.parse(value);for(const text of [parsed.command,parsed.cwd])if(text!==undefined && redact(text)!==text)throw new ActionFailed('Terminal input cannot be retained faithfully under the instance redaction rules.');return parsed;},parseResult:value=>value,describe:()=>({summary:'Run host command',resource:'host',effect:'change',opaque:true}),eligible:allowed,check:(_value,work)=>{if(!allowed(work))throw Error('Process work is no longer authorized');},authorize:async()=>{},execute:(value,work,action)=>start(work,action,value),visibleResult:value=>JSON.stringify(value),recovery:{reconcile:(_value,evidence,work,action)=>manager.reconcileRun(work,action,evidence)}};
 }
 
 const processReadInput=z.strictObject({processId:z.string().uuid(),cursor:z.number().int().nonnegative().optional()});

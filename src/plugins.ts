@@ -75,16 +75,18 @@ export class PluginStore {
   const agentAccessIds=this.db.prepare("SELECT bot_id FROM plugin_agent_access WHERE plugin_id='gmail' AND account_id=? AND enabled=1 ORDER BY bot_id").all(String(row.account_id)).map(item=>String(item.bot_id));
   return {accountId:String(row.account_id),config,connected:row.connected===1,enabled:row.enabled===1,revision:Number(row.revision),agentAccessIds};
  }
- gmailConnect(config:GmailConfig,historyId:string) {
+ gmailConnect(config:GmailConfig,historyId:string,guidedSetupId?:string) {
   const existing=this.gmailConnection();if(existing && existing.accountId!==config.email)throw Error('Delete the existing Gmail configuration before changing accounts');
-  if(!/^\d+$/.test(historyId))throw Error('Invalid Gmail history ID');this.db.exec('BEGIN IMMEDIATE');
+  if(!/^\d+$/.test(historyId))throw Error('Invalid Gmail history ID');this.db.exec('SAVEPOINT gmail_connect');
   try {
    const baseline=this.db.prepare('SELECT 1 FROM gmail_history WHERE account_id=?').get(config.email);
    if(existing && !baseline)this.db.prepare('INSERT INTO gmail_history_gaps VALUES (?,NULL,?,?,?)').run(config.email,historyId,'Monitoring began after the account was connected',Date.now());
    this.db.prepare("INSERT OR IGNORE INTO gmail_history VALUES (?,?,'ready',NULL)").run(config.email,historyId);
    this.db.prepare("INSERT INTO plugin_connections VALUES ('gmail',?,?,1,0,1) ON CONFLICT(plugin_id,account_id) DO UPDATE SET config=excluded.config,connected=1,enabled=0,revision=plugin_connections.revision+1").run(config.email,JSON.stringify(config));
-   this.db.exec('COMMIT');
-  }catch(error){this.db.exec('ROLLBACK');throw error;}
+   if(guidedSetupId && !this.db.prepare("UPDATE gmail_setup_requests SET state='connected' WHERE question_id=? AND state='authorizing'").run(guidedSetupId).changes)throw Error('Gmail setup authority changed');
+   if(guidedSetupId)this.db.prepare('INSERT OR IGNORE INTO gmail_setup_successes (question_id) VALUES (?)').run(guidedSetupId);
+   this.db.exec('RELEASE SAVEPOINT gmail_connect');
+  }catch(error){this.db.exec('ROLLBACK TO SAVEPOINT gmail_connect; RELEASE SAVEPOINT gmail_connect');throw error;}
   return this.gmailConnection();
  }
  gmailSetEnabled(enabled:boolean) {const c=this.gmailConnection();if(!c || (enabled && !c.connected))throw Error('Connect Gmail first');this.db.prepare("UPDATE plugin_connections SET enabled=?,revision=revision+1 WHERE plugin_id='gmail' AND account_id=?").run(enabled?1:0,c.accountId);return this.gmailConnection();}
