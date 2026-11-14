@@ -591,11 +591,14 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
     if(request.workKind==='task')instance.assertWorkAuthority({kind:'task',id:request.workId});
     else if(request.workKind==='command' && request.originState==='pending')instance.assertWorkAuthority({kind:'command',id:request.workId});
     else if(request.workKind!=='command' || request.originState!=='completed')throw Error('Gmail setup work was interrupted');
-    const input=parseGmailSetupDraft(request.draft),selection=secretRequests.questionStepSelection(id,2);
+    const parsed=parseGmailSetupDraft(request.draft),selection=secretRequests.questionStepSelection(id,2);
     if(!selection)throw Error('Save or select the client secret first');
     const rawEmail=request.draft[0]?.writeIn??'',rawClientId=request.draft[1]?.writeIn??'';
-    if(redact(rawEmail)!==rawEmail || redact(rawClientId)!==rawClientId || redact(input.email)!==input.email || redact(input.clientId)!==input.clientId)throw Error('Gmail account and client ID cannot contain a known secret');
-    const current=instance.plugins.gmailConnection();if(current && (current.connected || current.accountId!==input.email))throw Error('Gmail is already connected or a different account is configured');
+    if(redact(rawEmail)!==rawEmail || redact(rawClientId)!==rawClientId || redact(parsed.email)!==parsed.email || redact(parsed.clientId)!==parsed.clientId)throw Error('Gmail account and client ID cannot contain a known secret');
+    const current=instance.plugins.gmailConnection();if(current && (current.connected || current.accountId!==parsed.email))throw Error('Gmail is already connected or a different account is configured');
+    const existingConfig=current && !request.draft[3]?.choices.length ? secretRequests.getConfig('gmail',gmailDestination(parsed.email)) : undefined;
+    const prior=existingConfig===undefined?undefined:z.strictObject({sendEnabled:z.boolean(),modifyEnabled:z.boolean()}).parse(JSON.parse(existingConfig));
+    const input=prior?{...parsed,...prior}:parsed;
     return {request,input,selection};
   }
   const slackAllowed=(work:WorkContext)=>{const context=slackContext(work);return !!context && instance.plugins.authority(work.work.id) && work.botId===context.config.botId;};

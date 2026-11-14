@@ -8,6 +8,8 @@ test('guided Gmail drafts keep secret steps separate and request only chosen Goo
  assert.deepEqual(parseGmailSetupDraft([account,client,null,scopes]),{email:'owner@example.test',clientId:'synthetic-client',sendEnabled:true,modifyEnabled:false});
  assert.deepEqual(parseGmailSetupDraft([account,client,null,null]),{email:'owner@example.test',clientId:'synthetic-client',sendEnabled:false,modifyEnabled:false});
  assert.throws(()=>parseGmailSetupDraft([account,client,{choices:[],writeIn:'synthetic-secret'},null]));
+ assert.deepEqual(parseGmailSetupDraft([account,client,null,{choices:['Read-only (remove optional permissions)'],writeIn:''}]),{email:'owner@example.test',clientId:'synthetic-client',sendEnabled:false,modifyEnabled:false});
+ assert.throws(()=>parseGmailSetupDraft([account,client,null,{choices:['Read-only (remove optional permissions)','Send replies after explicit approval'],writeIn:''}]));
  assert.throws(()=>parseGmailSetupDraft([account,client,null,{choices:['unsupported'],writeIn:''}]));
  assert.throws(()=>parseGmailSetupDraft([null,client,null,null]));
 });

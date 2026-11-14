@@ -935,7 +935,8 @@ In a paired Staf browser on the loopback address, ask a tool-capable agent to
 help set up Gmail. In its question set, enter the Gmail address and desktop
 client ID, then save or select the client secret in the protected step. You can give a new value a distinct name to keep
 an earlier saved secret. If a connection fails, **Choose a different secret** keeps
-the earlier value and lets you select or save another. Choose optional Google scopes only if wanted. Each answer can be skipped; saving the
+the earlier value and lets you select or save another. For a reconnect, leaving the optional scope question blank retains the saved
+send and inbox scopes; choose **Read-only** to remove them. Each answer can be skipped; saving the
 secret is independent and does not authorize its use. Select **Review Gmail
 connection** and check the account, client ID, secret name, Google destinations,
 scopes, and any existing uses shown as being replaced. Confirm to begin Google
