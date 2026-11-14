@@ -97,7 +97,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
   const transitionFences=new Set<'gmail'|'slack'>();
   if(secretRequests.pendingSlackTransition())transitionFences.add('slack');
   let credentialTransitionUnsafe=false;
-  function fenceTransition(kind:'gmail'|'slack') {transitionFences.add(kind);credentialTransitionUnsafe=true;for(const controller of active)controller.abort();}
+  function fenceTransition(kind:'gmail'|'slack') {transitionFences.add(kind);credentialTransitionUnsafe=true;for(const controller of active)controller.abort();stopSlackConnection();stopGmailChecks();stopGmailWork();if(scheduleTimer)clearInterval(scheduleTimer);if(gmailMonitorTimer)clearInterval(gmailMonitorTimer);if(inboxTimer)clearInterval(inboxTimer);if(slackWorkTimer)clearInterval(slackWorkTimer);if(questionTimer)clearInterval(questionTimer);}
   const gmailDestination=(email:string)=>JSON.stringify(['https://oauth2.googleapis.com/token','https://gmail.googleapis.com',email]);
   const slackDestination=(config:SlackConfig)=>JSON.stringify(['https://slack.com/api','wss://slack.com or *.slack.com',config.teamId,config.userId,config.channelId]);
   const gmailRoles=['gmail.client','gmail.refresh'] as const,slackRoles=['slack.app','slack.bot'] as const;
