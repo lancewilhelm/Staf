@@ -589,10 +589,21 @@ instance transaction as the plugin connection. Revocation or a later failed
 attempt cannot erase that evidence. It records credential availability for the
 current account at resolution. For each relevant provider call it computes a
 fresh status in a transient message copy, after provider initialization and any
-adapter preflight. The built-in adapters refresh that copy immediately before
-sending. An adapter that performs asynchronous preparation must call the supplied
-`refreshMessages` callback at its own dispatch boundary. A later revocation
-cannot recall input already sent to a provider.
+adapter preflight. At dispatch, built-in adapters refresh the messages and check
+the complete model-bound payload against the current secret redactor. If a new
+secret would change it, the call fails before sending. The check includes
+instructions, tool schemas, model settings, and replay. At preparation, tool
+descriptions are redacted; an offer is omitted if its identity or schema keys
+contain a known secret. Stored checkpoints are redacted again before writing; reasoning replay that cannot be retained safely
+causes the write to fail. A later revocation or newly recognized secret cannot
+recall input already sent to a provider.
+
+Injected provider adapters are trusted code. An adapter must call
+`refreshMessages` after any asynchronous preparation, immediately before each
+model dispatch, and use its returned messages. It must then pass the complete
+model-bound payload to `assertSafePayload` immediately before sending. It must
+not cache earlier messages, input, instructions, or tool definitions for a
+later dispatch. Staf cannot enforce these calls inside a noncompliant adapter.
 
 A task that captures a Gmail setup continuation, its assistant reply, or a
 related task outcome also receives current status. The instance records those
@@ -602,10 +613,11 @@ survive retries and partial context retention. The service never infers identity
 from a prefix in user or model text. Legacy snapshots without trustworthy
 identity do not acquire provenance from their content. The setup result has its own authenticated span within a turn, separate from
 other notices and owner text. The service renews proofs only when it redacts
-already authenticated content. If redaction crosses a result boundary or changes
-the message during provider initialization, the service retains only the
-verified whole-turn proof; it cannot then recognize a later partial result. An
-altered or truncated result without valid evidence does not create provenance; other text is not replaced. Older signed
+already authenticated content. If redaction crosses an authenticated result
+boundary, the turn fails before provider dispatch instead of losing the result
+identity. The service binds a new result only when its exact structured span
+remains valid through persistence. An altered or truncated result without valid
+evidence does not create provenance; other text is not replaced. Older signed
 turns without a result span remain usable when their full content verifies.
 Isolated
 helpers do not inherit the parent's chat; separately approved helper text does

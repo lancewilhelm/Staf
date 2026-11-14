@@ -9,14 +9,16 @@ export async function* openRouterStream({key, model, effort, instructions, reque
 }): AsyncGenerator<ProviderEvent> {
   const signal = options?.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(60000)]) : AbortSignal.timeout(60000);
   signal.throwIfAborted();
+  const payload={model, messages:[{role:'system',content:instructions},...(options?.refreshMessages?.() ?? messages).map(message=>{
+    if (message.role !== 'assistant') return message;
+    const {usage, responseReplay, ...visible} = message; return visible;
+  })], tools, stream:true, stream_options:{include_usage:true}, ...(effort && effort !== 'default' ? {reasoning:{effort}} : {})};
+  options?.assertSafePayload?.(payload);
   let response: Response;
   try {
     response = await request('https://openrouter.ai/api/v1/chat/completions', {
       method:'POST', redirect:'error', signal, headers:{Authorization:`Bearer ${key}`,'Content-Type':'application/json'},
-      body:JSON.stringify({model, messages:[{role:'system',content:instructions},...(options?.refreshMessages?.() ?? messages).map(message=>{
-        if (message.role !== 'assistant') return message;
-        const {usage, responseReplay, ...visible} = message; return visible;
-      })], tools, stream:true, stream_options:{include_usage:true}, ...(effort && effort !== 'default' ? {reasoning:{effort}} : {})}),
+      body:JSON.stringify(payload),
     });
   } catch { options?.signal?.throwIfAborted(); throw Error('OpenRouter connection failed or timed out; check your connection and retry'); }
   if (!response.ok) {

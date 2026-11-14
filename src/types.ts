@@ -37,7 +37,7 @@ export type ProviderEvent =
   | { type: 'message'; message: AssistantMessage }
   | { type: 'text_delta'; text: string }
   | { type: 'error'; message: string };
-export interface ProviderCallOptions { signal?: AbortSignal; currentUserInput?: string; refreshMessages?: () => Message[] }
+export interface ProviderCallOptions { signal?: AbortSignal; currentUserInput?: string; refreshMessages?: () => Message[]; assertSafePayload?: (payload: unknown) => void }
 export interface Provider {
   name: string;
   capabilities: ProviderCapabilities;

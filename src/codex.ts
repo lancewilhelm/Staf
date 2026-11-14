@@ -81,7 +81,9 @@ export async function codexProvider(model: string | undefined, run: CodexRunner,
         if (model) args.push('--model', model);
         if (effort && effort !== 'default') args.push('-c', `model_reasoning_effort=${JSON.stringify(effort)}`);
         args.push('-');
-        const jsonl = await run(args, codexPrompt(call?.refreshMessages?.() ?? messages, tools));
+        const prompt=codexPrompt(call?.refreshMessages?.() ?? messages, tools);
+        call?.assertSafePayload?.({args,prompt,schema:codexResponseSchema});
+        const jsonl = await run(args, prompt);
         const usage = codexUsage(jsonl);
         const result: unknown = JSON.parse(await readFile(output, 'utf8'));
         if (!isRecord(result) || typeof result.text !== 'string') throw new Error('Invalid Codex structured response');
