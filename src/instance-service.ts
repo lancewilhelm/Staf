@@ -8,6 +8,9 @@ import {clockCapability} from './clock-action.js';
 import {fileCapabilities} from './file-actions.js';
 import {isolatedFileCapabilities} from './linux-file-actions.js';
 import {SecretRequests,secretRequestInput,secretValueSchema} from './secret-requests.js';
+import {slackSetupCapability} from './slack-setup.js';
+import {slackSetupApprovalSchema} from './slack-setup-types.js';
+import {containsCredential} from './credential-warning.js';
 
 import {nativeCommandCapability,nativeOutputCapability,nativeStopCapability,nativeInteractionCapabilities,checkedInteraction} from './native-processes.js';
 import type {NativeProcesses} from './native-processes.js';
@@ -63,7 +66,7 @@ import { usageText } from './usage.js';
 import { loadOpenRouterKey, saveOpenRouterKey, disconnectOpenRouter } from './openrouter-credential.js';
 
 /** Trusted in-process dependencies, never parsed from configuration or requests. */
-export type InstanceDependencies={hostWork?:{recheck:()=>void;files:typeof fileCapabilities;start:(manager:NativeProcesses,work:import('./work-actions.js').WorkContext,action:import('./work-actions.js').ActionIdentity,input:Parameters<NativeProcesses['start']>[2])=>Promise<unknown>};scratchExecutor?:typeof executeShellSandbox};
+export type InstanceDependencies={hostWork?:{recheck:()=>void;files:typeof fileCapabilities;start:(manager:NativeProcesses,work:import('./work-actions.js').WorkContext,action:import('./work-actions.js').ActionIdentity,input:Parameters<NativeProcesses['start']>[2])=>Promise<unknown>};scratchExecutor?:typeof executeShellSandbox;slackSetupBinding?:(commit:()=>void)=>void};
 export function startInstance(path: string, port = 0, options: {dataDir?: string; publicOrigin?: string; maintenanceToken?:string; env?: Environment; enableCollaboration?: boolean; enableReusableApprovals?: boolean; localBootstrapToken?: string; authNow?:()=>number; authLifetimeMs?:number; webDependencies?:WebDependencies; searchTransport?:SearchTransport; shellExecutor?:typeof executeShellSandbox; modelRequest?:typeof fetch; authHooks?: {prepare:typeof prepareDirectLogin; complete:typeof completeDirectLogin; authorizationUrl?:typeof authorizationUrl}; slackTransport?:SlackTransport; gmailRequest?:typeof fetch; gmailPollIntervalMs?:number; inboxNow?:()=>number; providerFactory?: (profile: {provider:string; model:string | null; reasoning:string | null; instructions:string; chatId:string}, instructions:string) => Promise<Provider>} = {},dependencies:InstanceDependencies={}) {
   assertDatasetAvailable(path,options.maintenanceToken);
   const selectionCatalogs=new Map<string,ModelCatalog>();
@@ -561,6 +564,14 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
     execute:async(input,work,action)=>{secretRequests.create(action.id,work.botId,work.work,input);const timer=work.work.kind==='task'?taskTimers.get(work.work.id):undefined;timer?.pause();try{return await secretRequests.wait(action.id,work.signal);}finally{if(!work.signal.aborted)timer?.resume();}},visibleResult:value=>`Secret request ${value}`,
   };
   workActions.register(requestSecret);
+  const slackSetupEligible=(work:WorkContext)=>work.work.kind==='command' ? !instance.plugins.isPluginCommand(work.work.id) : !instance.plugins.workBinding(work.work.id);
+  workActions.register(slackSetupCapability({
+    secrets:secretRequests,eligible:slackSetupEligible,
+    check:work=>{instance.assertWorkAuthority(work.work);if(!slackSetupEligible(work))throw Error('Slack setup requires the official Staf workspace');},
+    pause:work=>{if(work.work.kind==='task')taskTimers.get(work.work.id)?.pause();},
+    resume:work=>{if(work.work.kind==='task')taskTimers.get(work.work.id)?.resume();},
+    confirm:async(selection,work,action)=>{const bot=instance.bot(work.botId),connection=instance.plugins.connection();if(!bot || bot.archived)throw new ActionFailed('Agent is unavailable');const approval=slackSetupApprovalSchema.parse({...selection,authority:{agentRevision:bot.revision,slackGeneration,connectionRevision:connection?.revision ?? null,agentAccess:connection?.accountId===selection.config.teamId ? instance.plugins.access(connection.accountId,work.botId) : null,existingConfig:connection?.config ?? null,existingEnabled:connection?.enabled ?? null},grantReview:setupReview('slack')});secretRequests.createSlackSetup(action.id,work.botId,work.work,approval);return secretRequests.waitSlackSetup(action.id,work.signal);},
+  }));
   registerMemoryCapabilities(instance,workActions,redact);
   registerTaskCapabilities(workActions,taskActionHooks,redact);
   const slackContext=(work:WorkContext)=>work.work.kind==='command' ? slackCommands.get(work.work.id) : undefined;
@@ -942,6 +953,9 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
     if(instance.bot(c.config.botId)?.archived!==false)return;
     const id='slack-'+createHash('sha256').update(JSON.stringify([event.teamId,event.eventId])).digest('hex');
     if(instance.inboxMonitor.replySeen(event.eventId) || instance.plugins.isPluginCommand(id))return;
+    if(containsCredential(event.text) || redact(event.text)!==event.text) {
+      if(instance.plugins.reserve(event.eventId,id,c.revision)){instance.plugins.queueNotice({id:id+':credential',config:c.config,...((event.threadTs ?? event.messageTs)?{threadTs:event.threadTs ?? event.messageTs}:{}),text:'That message appears to contain a credential. Please use protected secret entry in Staf instead. Detection is incomplete; remove the message from Slack if needed.'});instance.plugins.state(id,'failed','Credential-like message was not processed');void deliverSlackWork().catch(()=>{});}return;
+    }
     if(event.threadTs) {
       if((instance.inboxMonitor.awaiting(event.threadTs) || (instance.inboxMonitor.delivered(event.threadTs).length>0 && /\b(?:urgent|sensitive|private|routine|correction)\b/i.test(event.text))) && [...revisionWaiters.values()].some(item=>item.threadTs===event.threadTs)){instance.plugins.queueNotice({id:id+':ambiguous-questions',config:c.config,threadTs:event.threadTs,text:'More than one request could match this reply. Please resolve the Gmail action in Staf before continuing.'});void deliverSlackWork().catch(()=>{});return;}
       const matches=[...revisionWaiters.entries()].filter(([,item])=>item.threadTs===event.threadTs);
@@ -1049,13 +1063,13 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
     if(!next || !instance.gmailReplyDecision(event.value,state,next,event.messageTs))return;
     try {if(next==='denied')instance.plugins.queueNotice({id:event.value+':denied',config:c.config,text:'Gmail action denied. Nothing was changed.'});} finally {pending.resolve(next);}
   }
-  async function startSlackConnection() {
+  async function startSlackConnection(assertInitial?:()=>void) {
     stopSlackConnection();const c=instance.plugins.connection();if(!c?.enabled || !c.connected)return;
     let tokens:ReturnType<typeof loadSlackTokens>;try{tokens=loadSlackTokens(dataDir);}catch{slackStatus='credentials unavailable';return;}
     if(!tokens){slackStatus='credentials unavailable';return;}
-    const generation=slackGeneration;slackStatus='connecting';
-    const assertAuthority=()=>{const current=instance.plugins.connection(),saved=loadSlackTokens(dataDir);if(closing || generation!==slackGeneration || !current?.enabled || !current.connected || current.revision!==c.revision || saved?.appToken!==tokens.appToken || saved.botToken!==tokens.botToken)throw Error('Slack authority changed');};
-    try {const stop=await slack.start(tokens,event=>generation===slackGeneration ? receiveSlack(event) : Promise.resolve(),status=>{if(!closing && generation===slackGeneration)slackStatus=status;},event=>generation===slackGeneration ? receiveSlackInteraction(event) : Promise.resolve(),assertAuthority);if(closing || generation!==slackGeneration){stop();return;}stopSlack=stop;}
+    const generation=slackGeneration;slackStatus='connecting';let initial=true;
+    const assertAuthority=()=>{const current=instance.plugins.connection(),saved=loadSlackTokens(dataDir);if(closing || generation!==slackGeneration || !current?.enabled || !current.connected || current.revision!==c.revision || saved?.appToken!==tokens.appToken || saved.botToken!==tokens.botToken)throw Error('Slack authority changed');if(initial)assertInitial?.();};
+    try {assertAuthority();const stop=await slack.start(tokens,event=>generation===slackGeneration ? receiveSlack(event) : Promise.resolve(),status=>{if(!closing && generation===slackGeneration)slackStatus=status;},event=>generation===slackGeneration ? receiveSlackInteraction(event) : Promise.resolve(),assertAuthority);try{assertAuthority();}catch{stop();throw Error('Slack authority changed');}initial=false;if(closing || generation!==slackGeneration){stop();return;}stopSlack=stop;}
     catch {if(generation===slackGeneration)slackStatus='connection failed';}
   }
   function pluginStatus() {
@@ -1281,6 +1295,38 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
         }
         z.strictObject({}).parse(value);return json(200,{status:secretRequests.decide(request.id,secretDecision[2]==='skip'?'skipped':'dismissed')});
       }
+      const slackSetupDecision=req.url?.match(/^\/api\/slack-setup\/([\w-]+)\/(confirm|dismiss)$/);
+      if(req.method==='POST' && slackSetupDecision?.[1] && slackSetupDecision[2]) {
+        const request=secretRequests.slackSetups().find(item=>item.id===slackSetupDecision[1]);if(!request)throw Error('Slack setup unavailable');
+        const input=z.strictObject({approval:slackSetupApprovalSchema,confirmDisplacements:z.boolean().optional()}).parse(value),approval=input.approval;
+        if(JSON.stringify(approval)!==JSON.stringify(request.approval))throw Error('Slack setup changed');
+        if(slackSetupDecision[2]==='dismiss') {if(!secretRequests.finishSlackSetup(request.id,'dismissed','dismissed'))throw Error('Slack setup changed');return json(200,{status:'dismissed'});}
+        if(approval.grantReview.grants.length && input.confirmDisplacements!==true)throw Error('Confirm replacement of the reviewed Slack grants');
+        const config=slackConfigSchema.parse(approval.config),destination=slackDestination(config);
+        const check=()=>{
+          if(!instance.authorized(token))throw Error('Client authorization changed');instance.assertWorkAuthority(request.work);
+          const bot=instance.bot(request.botId),current=instance.plugins.connection(),review=setupReview('slack');
+          if(!bot || bot.archived || bot.revision!==approval.authority.agentRevision || request.botId!==config.botId || slackGeneration!==approval.authority.slackGeneration || (current?.revision??null)!==approval.authority.connectionRevision || JSON.stringify(current?.config??null)!==JSON.stringify(approval.authority.existingConfig) || (current?.enabled??null)!==approval.authority.existingEnabled || review.version!==approval.grantReview.version || JSON.stringify(review.grants)!==JSON.stringify(approval.grantReview.grants))throw Error('Slack setup authority changed');
+          if(current && current.accountId!==config.teamId)throw Error('Delete the existing Slack configuration before changing workspace');
+          if(JSON.stringify(secretRequests.selection(`${request.id}-app`))!==JSON.stringify(approval.app) || JSON.stringify(secretRequests.selection(`${request.id}-bot`))!==JSON.stringify(approval.bot))throw Error('Selected secret changed');
+        };
+        check();const appToken=secretRequests.lookup(approval.app.name,approval.app.revision),botToken=secretRequests.lookup(approval.bot.name,approval.bot.revision);
+        if(!secretValueSchema.safeParse(appToken).success || !appToken || !/^xapp-[A-Za-z0-9-]+$/.test(appToken) || !secretValueSchema.safeParse(botToken).success || !botToken || !/^xoxb-[A-Za-z0-9-]+$/.test(botToken))throw Error('Enter valid Slack app and bot tokens');
+        if(!secretRequests.beginSlackSetup(request.id,approval))throw Error('Slack setup changed');
+        try {
+          check();const identity=await slack.identify({appToken,botToken});check();
+          if(!secretRequests.slackSetups().some(item=>item.id===request.id && item.state==='connecting'))throw Error('Slack setup interrupted');
+          if(identity.teamId!==config.teamId || identity.botUserId===config.userId)throw Error('Slack identity does not match');
+          stopSlackConnection();if(instance.plugins.connection()?.enabled)instance.plugins.setEnabled(false);
+          secretRequests.replaceSlackGrants({reviewedVersion:approval.grantReview.version,destination,app:approval.app,bot:approval.bot,confirmDisplacements:input.confirmDisplacements===true});
+          const bind=()=>{instance.plugins.connect(config);};if(dependencies.slackSetupBinding)dependencies.slackSetupBinding(bind);else bind();instance.plugins.setAccess(config.botId,true);instance.plugins.setEnabled(true);
+          const bound=instance.plugins.connection(),applied=secretRequests.grants().filter(grant=>grant.destination===destination && (grant.integration==='slack.app' || grant.integration==='slack.bot'));
+          const checkClient=()=>{if(!instance.authorized(token))throw Error('Client authorization changed');instance.assertWorkAuthority(request.work);};
+          await startSlackConnection(checkClient);
+          try{checkClient();}catch(error){const current=instance.plugins.connection();if(bound && current?.revision===bound.revision){stopSlackConnection();instance.plugins.disconnect();for(const grant of applied){const parsed=z.object({name:z.string(),revision:z.string(),integration:z.enum(['slack.app','slack.bot']),destination:z.string(),version:z.string()}).parse(grant);secretRequests.revoke(parsed);}}throw error;}
+          const status=slackStatus;secretRequests.finishSlackSetup(request.id,'completed',status);return json(200,{status});
+        } catch {secretRequests.finishSlackSetup(request.id,'failed','failed');throw Error('Slack setup failed');}
+      }
       if(req.method==='GET' && req.url==='/api/question-sets')return json(200,instance.questionSets.list());
       const questionSetMatch=req.url?.match(/^\/api\/question-sets\/([\w-]+)\/(draft|submit|dismiss)$/);
       if(req.method==='POST' && questionSetMatch?.[1]) {
@@ -1295,7 +1341,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
         const clock=instance.approvalRequests().filter(a=>a.state==='pending').map(a=>({kind:'approval',approvalKind:'clock',id:a.id,botId:a.botId,work:{kind:a.workKind,id:a.workId},detail:a.action}));
         const disclosure=instance.disclosureRequests().filter(a=>a.state==='pending').map(a=>({kind:'approval',approvalKind:'disclosure',id:a.id,botId:instance.taskAttempt(String(a.parentAttemptId))?.botId ?? null,work:{kind:'task',id:a.parentAttemptId},detail:a}));
         const action=(kind:'web'|'search'|'shell',entries:Iterable<[string,{work:WorkRef}]>)=>[...entries].map(([id,item])=>({kind:'approval',approvalKind:kind,id,botId:instance.webWorkBotId(item.work) ?? null,work:item.work,detail:kind==='web' ? {url:webApprovals.get(id)?.url} : kind==='search' ? {query:searchApprovals.get(id)?.query,origin:searchApprovals.get(id)?.origin} : {command:shellApprovals.get(id)?.command,dockerBinary:shellApprovals.get(id)?.dockerBinary,dockerSocket:shellApprovals.get(id)?.dockerSocket,imageId:shellApprovals.get(id)?.imageId,limits:scratchLimits}}));
-        return json(200,[...secretRequests.list(),...questions,...clock,...disclosure,...action('web',webApprovals),...action('search',searchApprovals),...action('shell',shellApprovals)]);
+        return json(200,[...secretRequests.list(),...secretRequests.slackSetups().map(item=>({kind:'slack-setup' as const,...item})),...questions,...clock,...disclosure,...action('web',webApprovals),...action('search',searchApprovals),...action('shell',shellApprovals)]);
       }
       if (req.method === 'GET' && req.url === '/api/codex-auth/current') return json(200,{attempt:instanceAuth?.currentStatus(token) ?? null});
       if (req.method === 'GET' && req.url === '/api/codex-auth/credential') {try{const credential=await loadDirectCredential(dataDir);return json(200,{signedIn:true,expiresAt:credential.expiresAt});}catch{return json(200,{signedIn:false});}}
@@ -1598,7 +1644,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
         return json(200,submitCommand({id:value.id,botId:value.botId,content:value.content}));
       }
       return json(404,{error:'Not found'});
-    } catch (error) { if((req.url??'').startsWith('/api/secret-requests/') || (req.url??'').startsWith('/api/secrets/') || (req.url??'').startsWith('/api/secret-grants/'))return json(400,{error:'Secret operation could not be completed'});if(error instanceof ActionFailed)return json(400,{error:error.safeResult});if(error instanceof CoreInvalid)return json(422,{error:error.message,code:'invalid_core_configuration'});if(error instanceof AgentConfigInvalid)return json(422,{error:error.message,code:'invalid_agent_configuration'});if(error instanceof AgentConfigUncertain)return json(503,{error:error.message,code:'configuration_save_uncertain'});return json((error instanceof BotConflict || error instanceof AgentConfigConflict || error instanceof MemoryConflict || error instanceof SkillConflict || error instanceof ScheduleConflict) ? 409 : 400,{error:error instanceof Error ? error.message : 'Request failed'}); }
+    } catch (error) { if((req.url??'').startsWith('/api/secret-requests/') || (req.url??'').startsWith('/api/secrets/') || (req.url??'').startsWith('/api/secret-grants/') || (req.url??'').startsWith('/api/slack-setup/'))return json(400,{error:'Secret operation could not be completed'});if(error instanceof ActionFailed)return json(400,{error:error.safeResult});if(error instanceof CoreInvalid)return json(422,{error:error.message,code:'invalid_core_configuration'});if(error instanceof AgentConfigInvalid)return json(422,{error:error.message,code:'invalid_agent_configuration'});if(error instanceof AgentConfigUncertain)return json(503,{error:error.message,code:'configuration_save_uncertain'});return json((error instanceof BotConflict || error instanceof AgentConfigConflict || error instanceof MemoryConflict || error instanceof SkillConflict || error instanceof ScheduleConflict) ? 409 : 400,{error:error instanceof Error ? error.message : 'Request failed'}); }
   });
   return { server, code, migrationBackup: instance.migrationBackup, finishUpgrade: (token:string)=>instance.finishUpgrade(token), issueCode: () => (code = randomBytes(18).toString('base64url')), close: () => new Promise<void>((resolve,reject)=>{closing=true; stopSlackConnection(); gmailAuth.cancel(); stopGmailChecks(); instanceAuth?.shutdown(); if(scheduleTimer) clearInterval(scheduleTimer); if(gmailMonitorTimer)clearInterval(gmailMonitorTimer); if(inboxTimer)clearInterval(inboxTimer); if(slackWorkTimer)clearInterval(slackWorkTimer); if(questionTimer)clearInterval(questionTimer); for(const subscriber of responseSubscribers)subscriber.response.end();for(const controller of active) controller.abort(); server.close(error=>{void processes.shutdown().then(()=>{secretRequests.close();instance.close(); if(error)reject(error);else resolve();},reject);});}), listen: () => new Promise<number>((resolve,reject)=>{server.once('error',reject);server.listen(port,'127.0.0.1',()=>{const a=server.address();if(a && typeof a !== 'string') { tickSchedules(); dispatchQuestionContinuations(); questionTimer=setInterval(dispatchQuestionContinuations,250); scheduleTimer=setInterval(tickSchedules,30000); gmailMonitorTimer=setInterval(()=>{void scheduledGmailPoll().catch(()=>{});},options.gmailPollIntervalMs??30000); inboxTimer=setInterval(()=>{void tickInbox();},250); void startSlackConnection(); slackWorkTimer=setInterval(()=>{void deliverSlackWork().catch(()=>{});},250); void deliverSlackWork().catch(()=>{}); resolve(a.port); }else reject(Error('Listen failed'));});}) };
 }
