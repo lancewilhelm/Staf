@@ -44,6 +44,7 @@ async function loadOlder(){const before=loadedOlder.value?olderBefore.value:gmai
   <p v-if="gmail?.connected">Approved reply sending: {{ gmail.sendEnabled ? 'Authorized with Google' : 'Not authorized' }}</p>
   <p v-if="gmail?.connected">Approved inbox changes: {{ gmail.modifyEnabled ? 'Authorized with Google' : 'Not authorized' }}</p>
   <p v-if="gmail">Connection status: {{ gmail.status }}</p>
+  <p v-if="gmail?.reconnectUncertain" role="alert">The connection outcome is uncertain. Restart Staf, then review the connection before continuing.</p>
   <p v-if="gmail && gmail.authorizationStatus!=='Connected' && gmail.authorizationStatus!=='Not connected'">Authorization: {{ gmail.authorizationStatus }}</p>
   <p>Email sent to a model provider remains your choice. Agent access alone does not allow Gmail content to be sent to a model.</p>
   <section v-if="uncertain.length" aria-label="Gmail outcomes needing review">
@@ -70,7 +71,7 @@ async function loadOlder(){const before=loadedOlder.value?olderBefore.value:gmai
     <label><input v-model="form.modifyEnabled" type="checkbox" /> Allow Gmail inbox changes after explicit approval in Slack</label>
     <p>Beginning authorization approves this client secret and the resulting refresh token for {{ form.email || 'the account above' }} at https://oauth2.googleapis.com/token and https://gmail.googleapis.com. Agent access is a separate decision.</p>
     <p v-if="setupReview?.grants.length">Connecting replaces these existing approvals: {{ setupReview.grants.map(grant=>grant.name+' ('+grant.integration+')').join(', ') }}.</p>
-    <button :disabled="busy || !setupReview">{{ setupReview?.grants.length?'Begin authorization and replace approvals':'Begin Google authorization and approve' }}</button>
+    <button :disabled="busy || !setupReview || gmail?.reconnectUncertain">{{ setupReview?.grants.length?'Begin authorization and replace approvals':'Begin Google authorization and approve' }}</button>
    </form>
    <p v-if="authorizationUrl"><a :href="authorizationUrl" target="_blank" rel="noreferrer">Open Google authorization</a>. Return here after granting access, then refresh status.</p>
   </details>

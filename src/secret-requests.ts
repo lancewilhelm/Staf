@@ -5,6 +5,8 @@ import {z} from 'zod';
 import type {WorkRef} from './action-journal.js';
 import {containsUnsafeWebUrl} from './web-reader.js';
 import {createHash,randomUUID} from 'node:crypto';
+import type {CredentialTransitionStage} from './credential-transition.js';
+import {CredentialTransitionUncertain} from './credential-transition.js';
 import {slackSetupApprovalSchema,type SlackSetupApproval} from './slack-setup-types.js';
 
 export const secretRequestInput=z.strictObject({name:z.string().trim().min(1).max(120),purpose:z.string().trim().min(1).max(500),destination:z.string().trim().min(1).max(300).optional()}).refine(input=>Object.values(input).every(value=>!containsUnsafeWebUrl(value)));
@@ -18,6 +20,7 @@ export const secretValueSchema=z.string().min(1).max(16000).refine(value=>!value
 /** Separate store: ordinary instance records never contain the submitted value. */
 export class SecretRequests {
  private db?:DatabaseSync;
+ private readonly memoryPath=`file:staf-secrets-${randomUUID()}?mode=memory&cache=shared`;
  private readonly waiters=new Map<string,(outcome:Outcome|'interrupted')=>void>();
  private readonly slackSetupWaiters=new Map<string,(outcome:string)=>void>();
  constructor(private readonly root:string,private readonly memory:boolean) {
@@ -25,7 +28,7 @@ export class SecretRequests {
  }
  private open(create:boolean):DatabaseSync {
   if(this.db)return this.db;
-  let path=':memory:';
+  let path=this.memoryPath;
   if(!this.memory) {
    const directory=join(this.root,'secrets');
    if(create)mkdirSync(directory,{mode:0o700,recursive:true});
@@ -35,7 +38,10 @@ export class SecretRequests {
    const stat=lstatSync(path);if(!stat.isFile() || stat.isSymbolicLink() || (stat.mode & 0o077)!==0 || stat.nlink!==1)throw Error('Secret store unavailable');
   }
   const db=new DatabaseSync(path);
-  db.exec(`PRAGMA journal_mode=DELETE; PRAGMA secure_delete=ON;
+  try {
+  db.exec('PRAGMA journal_mode=DELETE; PRAGMA secure_delete=ON; BEGIN IMMEDIATE');
+  const legacyTransitions=!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='credential_transition_pending'").get();
+  db.exec(`
    CREATE TABLE IF NOT EXISTS secret_requests(id TEXT PRIMARY KEY,bot_id TEXT NOT NULL,work_kind TEXT NOT NULL,work_id TEXT NOT NULL,name TEXT NOT NULL,purpose TEXT NOT NULL,destination TEXT,state TEXT NOT NULL);
    CREATE TABLE IF NOT EXISTS secrets(name TEXT PRIMARY KEY,value TEXT NOT NULL);
    CREATE TABLE IF NOT EXISTS secret_metadata(name TEXT PRIMARY KEY,purpose TEXT,revision TEXT NOT NULL);
@@ -45,13 +51,42 @@ export class SecretRequests {
    CREATE TABLE IF NOT EXISTS secret_grant_states(integration TEXT NOT NULL,destination TEXT NOT NULL,version TEXT NOT NULL,PRIMARY KEY(integration,destination));
    CREATE TABLE IF NOT EXISTS secret_integration_config(integration TEXT NOT NULL,destination TEXT NOT NULL,config TEXT NOT NULL,PRIMARY KEY(integration,destination));
    CREATE TABLE IF NOT EXISTS slack_setup_approvals(id TEXT PRIMARY KEY,bot_id TEXT NOT NULL,work_kind TEXT NOT NULL,work_id TEXT NOT NULL,approval TEXT NOT NULL,state TEXT NOT NULL,result TEXT);
+   CREATE TABLE IF NOT EXISTS credential_transition_pending(integration TEXT PRIMARY KEY,request_id TEXT NOT NULL);
+   CREATE TABLE IF NOT EXISTS slack_activation_origin(id INTEGER PRIMARY KEY CHECK(id=1),request_id TEXT NOT NULL);
+   ${legacyTransitions ? "INSERT OR IGNORE INTO credential_transition_pending SELECT 'slack',id FROM slack_setup_approvals WHERE state='connecting' ORDER BY rowid DESC LIMIT 1;" : ''}
+   ${legacyTransitions ? "INSERT OR IGNORE INTO slack_activation_origin SELECT 1,id FROM slack_setup_approvals WHERE state='completed' ORDER BY rowid DESC LIMIT 1;" : ''}
    CREATE TABLE IF NOT EXISTS slack_activation(id TEXT PRIMARY KEY CHECK(id='current'),attempt TEXT NOT NULL,state TEXT NOT NULL);
    UPDATE slack_activation SET state='interrupted' WHERE state='pending';
    UPDATE slack_setup_approvals SET state='interrupted' WHERE state IN ('pending','connecting');
    UPDATE secret_requests SET state='interrupted' WHERE state='pending';`);
   for(const row of db.prepare('SELECT name FROM secrets WHERE name NOT IN (SELECT name FROM secret_metadata)').all())db.prepare("INSERT INTO secret_metadata VALUES (?,(SELECT purpose FROM secret_requests WHERE name=? AND state='saved' ORDER BY rowid DESC LIMIT 1),?)").run(String(row.name),String(row.name),randomUUID());
   for(const row of db.prepare('SELECT integration,destination FROM secret_grants WHERE NOT EXISTS (SELECT 1 FROM secret_grant_states s WHERE s.integration=secret_grants.integration AND s.destination=secret_grants.destination)').all())db.prepare('INSERT OR IGNORE INTO secret_grant_states VALUES (?,?,?)').run(String(row.integration),String(row.destination),randomUUID());
+  db.exec('COMMIT');
+  }catch(error){if(db.isTransaction)db.exec('ROLLBACK');db.close();throw error;}
   this.db=db;return db;
+ }
+ attachment():{path:string;memory:boolean} {this.open(true);if(this.memory)return {path:this.memoryPath,memory:true};const dir=join(this.root,'secrets'),path=join(dir,'credentials.sqlite'),directory=lstatSync(dir),file=lstatSync(path);if(!directory.isDirectory() || directory.isSymbolicLink() || (directory.mode & 0o077)!==0 || !file.isFile() || file.isSymbolicLink() || (file.mode & 0o077)!==0 || file.nlink!==1)throw Error('Secret store unavailable');return {path,memory:false};}
+ installForPlugin(db:DatabaseSync,input:{integrations:readonly SecretIntegration[];entries:Array<{integration:SecretIntegration;destination:string;name:string;purpose:string;value:string}>;config?:{integration:string;destination:string;value:string}},stage:(stage:CredentialTransitionStage)=>void):void {
+  if(!db.isTransaction)throw Error('Credential transaction required');
+  for(const entry of input.entries)secretValueSchema.parse(entry.value);
+  if(input.integrations.some(integration=>integration.startsWith('slack.'))){db.prepare('DELETE FROM credential_transition.slack_activation_origin WHERE id=1').run();db.prepare('DELETE FROM credential_transition.slack_activation').run();db.prepare("DELETE FROM credential_transition.credential_transition_pending WHERE integration='slack'").run();}
+  for(const integration of input.integrations){for(const row of db.prepare('SELECT destination FROM credential_transition.secret_grant_states WHERE integration=?').all(integration))db.prepare('UPDATE credential_transition.secret_grant_states SET version=? WHERE integration=? AND destination=?').run(randomUUID(),integration,String(row.destination));db.prepare('DELETE FROM credential_transition.secret_grants WHERE integration=?').run(integration);}
+  stage('grants-revoked');
+  if(input.config)db.prepare('INSERT INTO credential_transition.secret_integration_config VALUES (?,?,?) ON CONFLICT(integration,destination) DO UPDATE SET config=excluded.config').run(input.config.integration,input.config.destination,input.config.value);
+  stage('secret-config-written');
+  for(const [index,item] of input.entries.entries()){const revision=randomUUID();db.prepare('INSERT INTO credential_transition.secrets VALUES (?,?)').run(item.name,item.value);db.prepare('INSERT INTO credential_transition.secret_metadata VALUES (?,?,?)').run(item.name,item.purpose,revision);db.prepare('INSERT INTO credential_transition.secret_grant_states VALUES (?,?,?) ON CONFLICT(integration,destination) DO UPDATE SET version=excluded.version').run(item.integration,item.destination,randomUUID());db.prepare('INSERT INTO credential_transition.secret_grants VALUES (?,?,?,?) ON CONFLICT(integration,destination) DO UPDATE SET name=excluded.name,revision=excluded.revision').run(item.name,revision,item.integration,item.destination);if(index===0)stage('first-secret-written');}
+  stage('credentials-written');
+ }
+ installGuidedGmail(db:DatabaseSync,input:{questionId:string;selection:{name:string;revision:string};destination:string;reviewedVersion:string;clientVersion:string;refreshVersion:string;refreshName:string;refreshValue:string;email:string;sendEnabled:boolean;modifyEnabled:boolean},stage:(stage:CredentialTransitionStage)=>void):void {
+  if(!db.isTransaction)throw Error('Credential transaction required');secretValueSchema.parse(input.refreshValue);
+  const rows=db.prepare("SELECT integration,destination,version FROM credential_transition.secret_grant_states WHERE integration IN ('gmail.client','gmail.refresh') ORDER BY integration,destination").all();
+  if(createHash('sha256').update(JSON.stringify(rows)).digest('hex')!==input.reviewedVersion)throw Error('Gmail grants changed');
+  if(!db.prepare('SELECT 1 FROM credential_transition.question_secret_selections q JOIN credential_transition.secret_metadata m ON m.name=q.secret_name AND m.revision=q.secret_revision JOIN credential_transition.secrets s ON s.name=m.name WHERE q.question_id=? AND q.step=2 AND m.name=? AND m.revision=?').get(input.questionId,input.selection.name,input.selection.revision))throw Error('Selected secret changed');
+  for(const [role,version] of [['gmail.client',input.clientVersion],['gmail.refresh',input.refreshVersion]] as const){if(!db.prepare('UPDATE credential_transition.secret_grant_states SET version=? WHERE integration=? AND destination=? AND version=?').run(randomUUID(),role,input.destination,version).changes)throw Error('Gmail grant changed');db.prepare('DELETE FROM credential_transition.secret_grants WHERE integration=? AND destination=?').run(role,input.destination);}
+  stage('grants-revoked');
+  db.prepare("INSERT INTO credential_transition.secret_integration_config VALUES ('gmail',?,?) ON CONFLICT(integration,destination) DO UPDATE SET config=excluded.config").run(input.destination,JSON.stringify({sendEnabled:input.sendEnabled,modifyEnabled:input.modifyEnabled}));stage('secret-config-written');
+  db.prepare('INSERT INTO credential_transition.secret_grants VALUES (?,?,?,?)').run(input.selection.name,input.selection.revision,'gmail.client',input.destination);stage('first-secret-written');
+  const revision=randomUUID();db.prepare('INSERT INTO credential_transition.secrets VALUES (?,?)').run(input.refreshName,input.refreshValue);db.prepare('INSERT INTO credential_transition.secret_metadata VALUES (?,?,?)').run(input.refreshName,`Gmail account ${input.email}`,revision);db.prepare('INSERT INTO credential_transition.secret_grants VALUES (?,?,?,?)').run(input.refreshName,revision,'gmail.refresh',input.destination);stage('credentials-written');
  }
  values():string[] {return this.db ? this.db.prepare('SELECT value FROM secrets').all().map(row=>String(row.value)) : [];}
  names() {if(!this.db)return [];return this.db.prepare("SELECT s.name,m.purpose,m.revision,(SELECT r.destination FROM secret_requests r WHERE r.name=s.name AND r.state='saved' ORDER BY r.rowid DESC LIMIT 1) AS destination FROM secrets s JOIN secret_metadata m ON m.name=s.name ORDER BY s.name").all();}
@@ -61,16 +96,24 @@ export class SecretRequests {
  delete(name:string,revision?:string):boolean {const db=this.db;if(!db)return false;db.exec('BEGIN IMMEDIATE');try{if(revision && !db.prepare('SELECT 1 FROM secret_metadata WHERE name=? AND revision=?').get(name,revision))throw Error('Secret changed');const changed=!!db.prepare('DELETE FROM secrets WHERE name=?').run(name).changes;db.prepare('DELETE FROM secret_metadata WHERE name=?').run(name);db.prepare('DELETE FROM secret_selections WHERE secret_name=?').run(name);this.invalidateName(db,name);db.exec('COMMIT');return changed;}catch(error){db.exec('ROLLBACK');throw error;}}
  grants(){return this.db?.prepare('SELECT g.name,g.revision,g.integration,g.destination,s.version FROM secret_grants g JOIN secret_grant_states s ON s.integration=g.integration AND s.destination=g.destination ORDER BY g.name,g.integration,g.destination').all() ?? [];}
  setupReview(integrations:readonly SecretIntegration[]) {const rows=this.db?.prepare('SELECT integration,destination,version FROM secret_grant_states ORDER BY integration,destination').all().filter(row=>integrations.some(integration=>integration===row.integration))??[];const grants=this.grants().filter(grant=>integrations.some(integration=>integration===grant.integration));return {version:createHash('sha256').update(JSON.stringify(rows)).digest('hex'),hasHistory:rows.length>0,grants};}
- replaceSlackGrants(input:{reviewedVersion:string;destination:string;app:{name:string;revision:string};bot:{name:string;revision:string};confirmDisplacements:boolean}):void {
-  const db=this.open(true),roles=['slack.app','slack.bot'] as const;db.exec('BEGIN IMMEDIATE');
-  try {
-   const review=this.setupReview(roles);if(review.version!==input.reviewedVersion || (review.grants.length>0 && !input.confirmDisplacements))throw Error('Slack grants changed');
-   for(const selected of [input.app,input.bot])if(!db.prepare('SELECT 1 FROM secret_metadata WHERE name=? AND revision=?').get(selected.name,selected.revision))throw Error('Secret changed');
-   for(const role of roles){for(const row of db.prepare('SELECT destination FROM secret_grant_states WHERE integration=?').all(role))db.prepare('UPDATE secret_grant_states SET version=? WHERE integration=? AND destination=?').run(randomUUID(),role,String(row.destination));db.prepare('DELETE FROM secret_grants WHERE integration=?').run(role);}
-   for(const [role,selected] of [['slack.app',input.app],['slack.bot',input.bot]] as const){db.prepare('INSERT INTO secret_grant_states VALUES (?,?,?) ON CONFLICT(integration,destination) DO UPDATE SET version=excluded.version').run(role,input.destination,randomUUID());db.prepare('INSERT INTO secret_grants VALUES (?,?,?,?)').run(selected.name,selected.revision,role,input.destination);}
-   db.exec('COMMIT');
-  } catch(error){db.exec('ROLLBACK');throw error;}
+ installSelectedSlack(db:DatabaseSync,input:{id:string;reviewedVersion:string;destination:string;app:{name:string;revision:string};bot:{name:string;revision:string};confirmDisplacements:boolean},stage:(stage:CredentialTransitionStage)=>void):void {
+  if(!db.isTransaction)throw Error('Credential transaction required');
+  const roles=['slack.app','slack.bot'] as const;
+  const rows=db.prepare("SELECT integration,destination,version FROM credential_transition.secret_grant_states WHERE integration IN ('slack.app','slack.bot') ORDER BY integration,destination").all();
+  const version=createHash('sha256').update(JSON.stringify(rows)).digest('hex');
+  if(version!==input.reviewedVersion || (!input.confirmDisplacements && db.prepare("SELECT 1 FROM credential_transition.secret_grants WHERE integration IN ('slack.app','slack.bot') LIMIT 1").get()))throw Error('Slack grants changed');
+  for(const [suffix,selected] of [['app',input.app],['bot',input.bot]] as const)if(!db.prepare("SELECT 1 FROM credential_transition.secret_selections s JOIN credential_transition.secret_metadata m ON m.name=s.secret_name AND m.revision=s.secret_revision JOIN credential_transition.secret_requests r ON r.id=s.request_id AND r.state='saved' WHERE s.request_id=? AND m.name=? AND m.revision=?").get(`${input.id}-${suffix}`,selected.name,selected.revision))throw Error('Selected secret changed');
+  for(const role of roles){for(const row of db.prepare('SELECT destination FROM credential_transition.secret_grant_states WHERE integration=?').all(role))db.prepare('UPDATE credential_transition.secret_grant_states SET version=? WHERE integration=? AND destination=?').run(randomUUID(),role,String(row.destination));db.prepare('DELETE FROM credential_transition.secret_grants WHERE integration=?').run(role);}
+  stage('grants-revoked');stage('secret-config-written');
+  for(const [index,[role,selected]] of ([['slack.app',input.app],['slack.bot',input.bot]] as const).entries()){db.prepare('INSERT INTO credential_transition.secret_grant_states VALUES (?,?,?) ON CONFLICT(integration,destination) DO UPDATE SET version=excluded.version').run(role,input.destination,randomUUID());db.prepare('INSERT INTO credential_transition.secret_grants VALUES (?,?,?,?)').run(selected.name,selected.revision,role,input.destination);if(index===0)stage('first-secret-written');}
+  db.prepare("INSERT INTO credential_transition.credential_transition_pending VALUES ('slack',?)").run(input.id);db.prepare('INSERT INTO credential_transition.slack_activation_origin VALUES (1,?) ON CONFLICT(id) DO UPDATE SET request_id=excluded.request_id').run(input.id);db.prepare("INSERT INTO credential_transition.slack_activation VALUES ('current',?,'pending') ON CONFLICT(id) DO UPDATE SET attempt=excluded.attempt,state='pending'").run(input.id);stage('credentials-written');
  }
+ pendingSlackTransition():string|undefined {const id=this.db?.prepare("SELECT request_id FROM credential_transition_pending WHERE integration='slack'").get()?.request_id;return typeof id==='string'?id:undefined;}
+ slackActivationOrigin():{id:string;work:WorkRef}|undefined {const row=this.db?.prepare('SELECT a.request_id,r.work_kind,r.work_id FROM slack_activation_origin a LEFT JOIN slack_setup_approvals r ON r.id=a.request_id WHERE a.id=1').get();if(!row)return undefined;if(typeof row.request_id!=='string' || (row.work_kind!=='command' && row.work_kind!=='task') || typeof row.work_id!=='string')throw Error('Slack activation origin unavailable');return {id:row.request_id,work:{kind:row.work_kind,id:row.work_id}};}
+ fenceSlackActivation(id:string):void {this.open(true).prepare("INSERT OR IGNORE INTO credential_transition_pending VALUES ('slack',?)").run(id);}
+ clearSlackTransition(id:string):void {if(!this.db?.prepare("DELETE FROM credential_transition_pending WHERE integration='slack' AND request_id=?").run(id).changes)throw Error('Slack transition changed');}
+ clearSlackRecovery(id:string):void {const db=this.open(true);let committing=false;db.exec('BEGIN IMMEDIATE');try{this.clearSlackTransition(id);db.prepare('DELETE FROM slack_activation_origin WHERE id=1').run();db.prepare("DELETE FROM slack_activation WHERE id='current' AND attempt=?").run(id);committing=true;db.exec('COMMIT');}catch(error){let rolledBack=false;if(db.isTransaction)try{db.exec('ROLLBACK');rolledBack=true;}catch{throw new CredentialTransitionUncertain();}if(committing && !rolledBack)throw new CredentialTransitionUncertain();throw error;}}
+ completeSlackTransition(id:string,result:string):void {const db=this.open(true);let committing=false;db.exec('BEGIN IMMEDIATE');try{if(!db.prepare("UPDATE slack_activation SET state='ready' WHERE id='current' AND attempt=? AND state='pending'").run(id).changes || !db.prepare("UPDATE slack_setup_approvals SET state='completed',result=? WHERE id=? AND state='connecting'").run(result,id).changes)throw Error('Slack setup changed');this.clearSlackTransition(id);committing=true;db.exec('COMMIT');}catch(error){let rolledBack=false;if(db.isTransaction)try{db.exec('ROLLBACK');rolledBack=true;}catch{throw new CredentialTransitionUncertain();}if(committing && !rolledBack)throw new CredentialTransitionUncertain();throw error;}this.slackSetupWaiters.get(id)?.(result);}
  target(integration:SecretIntegration,destination:string) {const db=this.open(true);db.exec('BEGIN IMMEDIATE');try{db.prepare('INSERT OR IGNORE INTO secret_grant_states VALUES (?,?,?)').run(integration,destination,randomUUID());const state=db.prepare('SELECT version FROM secret_grant_states WHERE integration=? AND destination=?').get(integration,destination);const grant=db.prepare('SELECT name,revision FROM secret_grants WHERE integration=? AND destination=?').get(integration,destination);db.exec('COMMIT');return {integration,destination,version:String(state?.version),current:grant?{name:String(grant.name),revision:String(grant.revision)}:null};}catch(error){db.exec('ROLLBACK');throw error;}}
  grant(input:GrantDecision & {previous:{name:string;revision:string}|null;confirmDisplacement:boolean}):void {const db=this.open(true);db.exec('BEGIN IMMEDIATE');try{if(!db.prepare('SELECT 1 FROM secret_metadata WHERE name=? AND revision=?').get(input.name,input.revision))throw Error('Secret changed');const current=db.prepare('SELECT name,revision FROM secret_grants WHERE integration=? AND destination=?').get(input.integration,input.destination);if((current?String(current.name):null)!==(input.previous?.name??null) || (current?String(current.revision):null)!==(input.previous?.revision??null))throw Error('Grant changed');if(current && (current.name!==input.name || current.revision!==input.revision) && !input.confirmDisplacement)throw Error('Confirm replacement of the existing grant');if(!db.prepare('UPDATE secret_grant_states SET version=? WHERE integration=? AND destination=? AND version=?').run(randomUUID(),input.integration,input.destination,input.version).changes)throw Error('Grant changed');db.prepare('INSERT INTO secret_grants VALUES (?,?,?,?) ON CONFLICT(integration,destination) DO UPDATE SET name=excluded.name,revision=excluded.revision').run(input.name,input.revision,input.integration,input.destination);db.exec('COMMIT');}catch(error){db.exec('ROLLBACK');throw error;}}
  provision(input:{integration:SecretIntegration;destination:string;name:string;purpose:string;value:string}[]):void {const db=this.open(true);db.exec('BEGIN IMMEDIATE');try{for(const item of input){const revision=randomUUID();db.prepare('INSERT INTO secrets VALUES (?,?)').run(item.name,secretValueSchema.parse(item.value));db.prepare('INSERT INTO secret_metadata VALUES (?,?,?)').run(item.name,item.purpose,revision);db.prepare('INSERT INTO secret_grant_states VALUES (?,?,?) ON CONFLICT(integration,destination) DO UPDATE SET version=excluded.version').run(item.integration,item.destination,randomUUID());db.prepare('INSERT INTO secret_grants VALUES (?,?,?,?) ON CONFLICT(integration,destination) DO UPDATE SET name=excluded.name,revision=excluded.revision').run(item.name,revision,item.integration,item.destination);}db.exec('COMMIT');}catch(error){db.exec('ROLLBACK');throw error;}}
@@ -82,7 +125,7 @@ export class SecretRequests {
  lookup(name:string,revision:string):string|undefined {const row=this.db?.prepare('SELECT s.value FROM secrets s JOIN secret_metadata m ON m.name=s.name WHERE s.name=? AND m.revision=?').get(name,revision);return typeof row?.value==='string'?row.value:undefined;}
  selection(id:string):{name:string;revision:string}|undefined {const row=this.db?.prepare("SELECT m.name,m.revision FROM secret_selections s JOIN secret_metadata m ON m.name=s.secret_name AND m.revision=s.secret_revision JOIN secret_requests r ON r.id=s.request_id AND r.state='saved' WHERE s.request_id=?").get(id);return typeof row?.name==='string' && typeof row.revision==='string'?{name:row.name,revision:row.revision}:undefined;}
  beginSlackActivation(attempt:string):void {this.open(true).prepare("INSERT INTO slack_activation VALUES ('current',?,'pending') ON CONFLICT(id) DO UPDATE SET attempt=excluded.attempt,state='pending'").run(attempt);}
- finishSlackActivation(attempt:string,state:'ready'|'interrupted'):boolean {return !!this.db?.prepare("UPDATE slack_activation SET state=? WHERE id='current' AND attempt=? AND state='pending'").run(state,attempt).changes;}
+ finishSlackActivation(attempt:string,state:'ready'|'interrupted'):boolean {const db=this.db;if(!db)return false;if(state==='interrupted')return !!db.prepare("UPDATE slack_activation SET state=? WHERE id='current' AND attempt=? AND state='pending'").run(state,attempt).changes;let committing=false;db.exec('BEGIN IMMEDIATE');try{const changed=!!db.prepare("UPDATE slack_activation SET state='ready' WHERE id='current' AND attempt=? AND state='pending'").run(attempt).changes;if(changed)db.prepare('DELETE FROM slack_activation_origin WHERE id=1').run();committing=true;db.exec('COMMIT');return changed;}catch(error){let rolledBack=false;if(db.isTransaction)try{db.exec('ROLLBACK');rolledBack=true;}catch{throw new CredentialTransitionUncertain();}if(committing && !rolledBack)throw new CredentialTransitionUncertain();throw error;}}
  slackActivationPending(attempt:string):boolean {return !!this.db?.prepare("SELECT 1 FROM slack_activation WHERE id='current' AND attempt=? AND state='pending'").get(attempt);}
  slackActivationReady(attempt:string):boolean {return !!this.db?.prepare("SELECT 1 FROM slack_activation WHERE id='current' AND attempt=? AND state='ready'").get(attempt);}
  slackActivationOwner():{attempt:string;work:WorkRef}|undefined {const row=this.db?.prepare("SELECT a.attempt,s.work_kind,s.work_id FROM slack_activation a JOIN slack_setup_approvals s ON s.id=a.attempt WHERE a.id='current' AND a.state='ready'").get();if(!row || typeof row.attempt!=='string' || typeof row.work_id!=='string' || (row.work_kind!=='command' && row.work_kind!=='task'))return undefined;return {attempt:row.attempt,work:{kind:row.work_kind,id:row.work_id}};}

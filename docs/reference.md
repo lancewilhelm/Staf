@@ -480,7 +480,6 @@ with `POST /api/question-sets/ID/gmail-start`. The review includes the current
 client and refresh grant versions, the uses that would be replaced, the current
 connection snapshot, and whether managed credentials are available. A connected
 account with unavailable credentials can be reviewed for same-account reconnection.
-An enabled connection is disabled before its client-secret approval changes.
 The question set's `gmailSetupStale` field reports a changed agent revision;
 protected step mutations and Gmail review and authorization return `409` with
 `gmail_setup_stale` in that case. The in-memory
@@ -489,7 +488,8 @@ authorization is pending. Submitting or dismissing during authorization
 interrupts it; submitting before authorization starts records a skipped setup.
 Schema 57 records successful guided authorization separately from the latest
 attempt state. `gmailAuthorization` is `previously_succeeded` when at least one
-attempt for the request succeeded, and `not_recorded` otherwise. Migration
+attempt for the request succeeded, and `not_recorded` otherwise; during an
+uncertain commit the affected request reports `unknown` until restart. Migration
 preserves successes still marked connected; it cannot reconstruct successes
 that older versions had already overwritten. `gmailConnection` reports the current
 account's `credentials_available`, `credentials_unavailable`, `disconnected`,
@@ -497,9 +497,12 @@ or `unknown` status and its enabled state. Available credentials do not verify
 Google access or imply agent or model permission. Submitted and dismissed results
 include `gmailConnectionAtResolution`; model delivery includes a fresh
 `gmailConnectionAtDelivery`. Both snapshots describe the current account, which
-may differ from an earlier authorized account. Failures may leave saved use approvals or credentials, because
-the instance and secret stores do not share a transaction. Restart interrupts an
-unfinished exchange without replay. The connected result requires a matching
+may differ from an earlier authorized account. The reviewed client approval is
+used for the attempt; durable grants, authorization history and the connection
+commit together after Google verification. A definite rollback retains earlier
+grants and configuration; an uncertain result requires restart and review.
+Restart interrupts an unfinished exchange without replay. The connected result
+requires a matching
 Google profile and a successful plugin commit. No secret value is included in
 the question result. Existing agent/model access remains separate.
 
@@ -649,15 +652,13 @@ current binding and Slack grant-review snapshot as a `slack-setup` inbox item.
 `confirmDisplacements: true` when the review lists existing grants. `/dismiss`
 takes the same approval. Confirmation rechecks the client, work, agent, binding,
 secret selections and reviewed grant state before identification and commit.
-The service verifies that Slack returns the selected DM for the selected user
+The service checks that Slack returns the selected DM for the selected user
 using `conversations.open` with `prevent_creation` and the `im:write` bot scope.
 The result distinguishes connecting, connected, reconnecting and failure; the
-action cannot succeed before the Socket Mode WebSocket opens. Interrupted
-activation is durably fenced from automatic startup until an owner retries.
-Restart interrupts an
-unfinished request without replay. The secret-grant update and instance binding
-are separate transactions: after a failure the owner must inspect both, since
-new grants can remain while the old binding is disabled. See [Slack setup](usage.md#slack-plugin).
+action cannot succeed before the Socket Mode WebSocket opens. Grants and binding
+commit together. An interrupted activation remains fenced until the owner keeps
+it disabled and reviews the connection; unfinished requests are not replayed.
+See [Slack setup](usage.md#slack-plugin).
 
 
 ### Native process API
@@ -726,6 +727,14 @@ would replace. If a prior grant state exists, the connection request must includ
 the reviewed `reviewedVersion`. If an approval exists, it also requires
 `confirmDisplacements: true`. Setup rechecks the reviewed state before committing
 the connection. An older backup restores the grant state recorded in that backup.
+Persistent reconnects require both databases to support rollback journals and
+full synchronous writes. A definite transaction failure preserves the prior
+connection and grant versions; an uncertain result requires restart and review.
+`GET /api/plugins` exposes `reconnectUncertain` and, for Slack,
+`setupRecoveryPending`. After a guided setup is interrupted, the paired owner
+can call `POST /api/plugins/slack/recover-setup` with `confirm: true` to keep
+Slack disabled and clear the recovery fence before reviewing the configuration
+and approvals. This operation does not enable or replay the setup.
 
 Gmail uses `POST /api/plugins/gmail/start` with `email`, `clientId`,
 `clientSecret`, `confirm: true`, and optional booleans `sendEnabled` and `modifyEnabled`; it

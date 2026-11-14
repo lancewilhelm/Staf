@@ -955,16 +955,17 @@ secret.
 
 If an existing connection lacks managed credentials, you can review and reconnect
 the same account here without disconnecting it. The review shows the existing
-connection and any use approvals that the new setup replaces. If the saved scope record is missing or unreadable, choose the Google permissions
-explicitly before reviewing the reconnect. Staf disables an
-active connection before changing its client-secret approval, and the reconnected
+connection and any use approvals that the new setup replaces. If the saved scope
+record is missing or unreadable, choose the Google permissions explicitly before
+reviewing the reconnect. The existing state remains until the new connection and
+approvals commit together; the reconnected
 account starts disabled. Existing agent and model permissions remain in place.
 Legacy credential files remain untouched and are not imported.
 
-A failed or interrupted attempt can leave the connection disabled and can have
-saved credentials or approvals; check Gmail status and named-secret uses before
-retrying. This flow does not enable Gmail or grant agent or model access. A new
-connection starts disabled.
+A definite transaction failure retains the prior connection and approvals. If
+the outcome is uncertain, restart Staf and review Gmail status and named-secret
+uses before retrying. This flow does not enable Gmail or grant agent or model
+access. A new connection starts disabled.
 The guided service journey has controlled synthetic coverage, not a live Google
 or live model acceptance test. Linux credential isolation remains unverified.
 
@@ -1219,11 +1220,12 @@ Slack app or revoke tokens at Slack. Reconnect requires the tokens again. Tokens
 are separate named secrets in the managed store. Existing configurations are
 rechecked before receiving or sending; a missing scope, failed check, or
 interrupted activation blocks delivery. Use **Retry connection** after reviewing
-and correcting the configuration. Old `auth/slack.json` files are
-left untouched and are not used. If guided setup fails after replacing approvals,
-the new approvals may remain while the connection is disabled. Inspect **Named
-secrets** and the Slack connection before retrying; Staf does not automatically
-replay an interrupted setup. Protect host access and backups.
+and correcting the configuration. Old `auth/slack.json` files are left untouched
+and are not used. A rolled-back reconnect keeps the previous connection and
+approvals. If the outcome is uncertain, restart Staf and review it. If guided
+setup was interrupted, choose **Keep disabled and review**, then inspect the Slack
+binding and **Named secrets** before enabling or reconnecting. Staf does not
+automatically replay the setup. Protect host access and backups.
 
 Ask the agent for work in a normal DM, for example, “Please investigate this
 and let me know what you find.” A tool-capable model can choose to start

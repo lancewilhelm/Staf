@@ -27,6 +27,18 @@ test('saved and selected requests bind to the exact current secret revision',()=
  } finally {store?.close();rmSync(dir,{recursive:true,force:true});}
 });
 
+test('failed legacy Slack transition migration leaves the old schema intact and retries safely',async()=>{
+ const {DatabaseSync}=await import('node:sqlite');const dir=mkdtempSync(join(tmpdir(),'staf-transition-migration-'));let store;
+ try{
+  store=new SecretRequests(dir,false);store.add({name:'Synthetic',purpose:'Fixture',value:'synthetic-value'});store.close();store=undefined;
+  const path=join(dir,'secrets','credentials.sqlite');let db=new DatabaseSync(path);
+  try{db.exec("DROP TABLE credential_transition_pending; DROP TABLE slack_activation_origin; INSERT INTO slack_setup_approvals VALUES ('setup','agent','command','work','{}','connecting',NULL); CREATE TRIGGER fail_transition_upgrade BEFORE UPDATE ON slack_setup_approvals BEGIN SELECT RAISE(ABORT,'synthetic migration failure'); END");}finally{db.close();}
+  assert.throws(()=>new SecretRequests(dir,false),/Secret store unavailable/);
+  db=new DatabaseSync(path);try{assert.equal(db.prepare("SELECT 1 FROM sqlite_master WHERE name='credential_transition_pending'").get(),undefined);assert.equal(db.prepare("SELECT state FROM slack_setup_approvals WHERE id='setup'").get().state,'connecting');db.exec('DROP TRIGGER fail_transition_upgrade');}finally{db.close();}
+  store=new SecretRequests(dir,false);assert.equal(store.pendingSlackTransition(),'setup');assert.deepEqual(store.values(),['synthetic-value']);
+ }finally{store?.close();rmSync(dir,{recursive:true,force:true});}
+});
+
 test('paired owner saves a requested secret without exposing its value to the model or ordinary records',async()=>{
  const dir=mkdtempSync(join(tmpdir(),'staf-secret-request-')),seen=[];
  const secret='synthetic-example-credential-48152';

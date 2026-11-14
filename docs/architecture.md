@@ -406,21 +406,36 @@ review presents the agent, destination, existing connection and current Slack
 grants; replacing any grants requires a separate explicit confirmation. The
 service checks the paired client, originating work, agent and connection
 revisions, secret selections, and durable grant-review version before Slack
-identification and again after it returns. Both new grants replace the reviewed
-Slack grants in one secret-store transaction. A previous active connection is
-disabled before grants are changed; binding and enabling occur afterward in the
-instance database. A failure between those separate databases can leave the new
-grants saved while the connection is disabled or unconfigured. The action reports
-failure, does not replay the setup, and the owner should inspect the connection
-and grants; durable cross-store recovery remains separate work. A restart leaves
-an unfinished review interrupted. Before any delivery, including after restart,
-Staf checks the bot workspace and compares the selected DM ID to the one returned
-by `conversations.open` for the selected user with `prevent_creation`; this needs
-the bot's `im:write` scope. A durable activation fence blocks automatic startup
-when setup is interrupted before the socket opens and the activation is committed.
-Socket startup succeeds only after the WebSocket opens; an interrupted activation
-requires a new owner-initiated retry. Connection status belongs to the exact
-generation and binding that was verified.
+identification and again after it returns. Direct Gmail and Slack reconnects
+attach the secret database to the instance database and commit configuration,
+credentials and grant versions in one SQLite transaction. The service requires
+rollback journals and full synchronous writes for both persistent databases;
+unsupported journal settings reject the transition. A definite rollback retains
+the previous configuration and grant versions. An ambiguous transaction stops
+work and requires a restart and review. SQLite's cross-database crash atomicity
+depends on its VFS, filesystem and storage honoring its durability assumptions;
+process-interruption fixtures do not establish power-loss behavior.
+
+Guided Slack setup commits its selected grants and binding with a durable pending
+marker in the same transaction. Until setup completes, credential use is fenced
+outside its initial socket attempt. A restart never resumes a marked setup: a
+paired owner must keep Slack disabled and review the saved binding and approvals.
+The recovery operation disables the plugin before clearing the marker, so it can
+be repeated after interruption. The approval and marker are completed together;
+the originating work is not replayed. The activation also retains its originating
+work identity. On restart, an enabled guided connection whose work did not finish
+is fenced for owner review even if its approval had already completed. A direct
+reconnect replaces that origin in the same transaction. When upgrading a secret
+store without transition tracking, an older setup recorded as connecting is
+fenced during the same transaction that adds the tracking tables; the latest
+completed guided setup is retained as a conservative origin for the startup
+work check. A restart leaves an
+unfinished review interrupted. Before delivery, including after restart, Staf
+checks the workspace and compares the selected DM with Slack's response for the
+selected user via `conversations.open` with `prevent_creation` and the `im:write`
+bot scope. Socket startup succeeds only after the WebSocket opens; status belongs
+to the verified generation and binding. The action journal must succeed before
+delivery is released.
 These paths use synthetic Slack and model fixtures, not live account verification.
 
 ### Native process slice
@@ -567,8 +582,7 @@ account, scopes, selected secret, destination, prior client and refresh grants,
 and durable review versions before starting. A connected account with unavailable
 managed credentials can be reconnected only to the same account; the reviewed
 connection snapshot prevents a stale review from replacing a later connection.
-An enabled connection is disabled before a new client grant could restore access
-with an older refresh grant. Agent and model permissions are retained. Protected
+Agent and model permissions are retained. Protected
 secret changes require the captured agent revision, and stale requests require a
 new setup. The service records an observed authorization success in the same
 instance transaction as the plugin connection. Revocation or a later failed
@@ -578,11 +592,11 @@ status does not verify Google access or agent and model permissions. Older resul
 whose success was already overwritten cannot be reconstructed. The OAuth attempt
 rechecks client, request, agent revision, grant identity and
 version, connection revision, and nonsecret fields at dispatch and before commit.
-A failure or interrupted attempt
-is not success and may leave saved credentials or use approvals; the owner must
-review them. Startup marks a pending exchange interrupted and never replays it.
-The secret store and instance database commit separately; this is not an atomic
-cross-store transaction. Controlled service and Google fixtures do not establish
+The selected client secret is authorized for the exchange, while prior grants
+remain until the selected grant, refresh token, plugin binding and setup result
+commit together. A definite rollback retains prior state; an uncertain result
+is fenced until restart and review. Startup marks a pending exchange interrupted
+and never replays it. Controlled service and Google fixtures do not establish
 live Google behavior.
 The service fences an in-flight exchange against cancellation, expiry, client
 revocation and connection revision changes. The connection-time history ID and

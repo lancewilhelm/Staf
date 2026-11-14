@@ -1,6 +1,7 @@
 import {createHash,randomBytes} from 'node:crypto';
 import {z} from 'zod';
 import type {GmailCredential} from './gmail-credential.js';
+import {CredentialTransitionFailed,CredentialTransitionUncertain} from './credential-transition.js';
 
 export const gmailScope='https://www.googleapis.com/auth/gmail.readonly';
 export const gmailSendScope='https://www.googleapis.com/auth/gmail.send';
@@ -50,7 +51,7 @@ export class GmailAuth {
    if(profile.emailAddress.toLowerCase()!==a.input.email)throw Error('Google account did not match');
    this.assertAttempt(a);
    (a.commit??this.commit)({email:a.input.email,clientId:a.input.clientId,clientSecret:a.input.clientSecret,refreshToken:tokens.refresh_token,...(a.input.sendEnabled?{sendEnabled:true}:{}),...(a.input.modifyEnabled?{modifyEnabled:true}:{})},profile.historyId);if(a.timer)clearTimeout(a.timer);this.attempt=undefined;this.result='Connected';a.settled?.('connected');return true;
-  } catch {if(this.attempt===a){if(a.timer)clearTimeout(a.timer);this.attempt=undefined;this.result='Connection failed. Check the account, consent and Google client settings.';a.settled?.('failed');}return false;}
+  } catch(error) {if(this.attempt===a){if(a.timer)clearTimeout(a.timer);this.attempt=undefined;this.result=error instanceof CredentialTransitionFailed || error instanceof CredentialTransitionUncertain?error.message:'Connection failed. Check the account, consent and Google client settings.';a.settled?.('failed');}return false;}
  }
  async profile(accessToken:string,signal?:AbortSignal) {
   const response=await this.request('https://gmail.googleapis.com/gmail/v1/users/me/profile',{headers:{Authorization:'Bearer '+accessToken},redirect:'error',signal:signal?AbortSignal.any([signal,AbortSignal.timeout(15000)]):AbortSignal.timeout(15000)});

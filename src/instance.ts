@@ -32,6 +32,7 @@ import { ApprovalGrants, approvalGrantSchema, type GrantBoundary } from './appro
 import { PluginStore, pluginSchema, slackWorkSchema, slackOutcomeReviewSchema, type SlackConfig } from './plugins.js';
 import {GmailHistory,gmailHistorySchema,gmailMonitorRunsSchema,gmailArrivalEvidenceSchema,type GmailHistoryTransport} from './gmail-history.js';
 import {InboxMonitorStore,inboxMonitorSchema} from './inbox-monitor.js';
+import {CredentialTransitionFailed,CredentialTransitionUncertain,type CredentialTransitionStage} from './credential-transition.js';
 
 const clockAction: Action = { capability:'clock', operation:'read', resource:'utc', effect:'read', limits:{}, risk:'safe' };
 const clockBoundary = { enabledCapabilities:['clock'], actions:[clockAction] };
@@ -639,6 +640,23 @@ export class Instance {
   finishUpgrade(token:string) {
     if (!this.maintenanceToken || this.maintenanceToken!==token) throw Error('Invalid upgrade maintenance token.');
     this.db.exec(`PRAGMA user_version=${INSTANCE_SCHEMA_VERSION}`);this.maintenanceToken=undefined;
+  }
+  atomicCredentialTransition(store:{path:string;memory:boolean},write:(db:DatabaseSync)=>void,stage:(stage:CredentialTransitionStage)=>void=()=>{}) {
+    if(this.db.isTransaction || store.memory!==(this.temporaryConfigRoot!==undefined))throw new CredentialTransitionFailed();
+    let attached=false,commitAttempted=false,committed=false,rolledBack=false;
+    try {
+      this.db.prepare('ATTACH DATABASE ? AS credential_transition').run(store.path);attached=true;
+      const mainMode=this.db.prepare('PRAGMA main.journal_mode').get()?.journal_mode,secretMode=this.db.prepare('PRAGMA credential_transition.journal_mode').get()?.journal_mode;
+      const mainSync=this.db.prepare('PRAGMA main.synchronous').get()?.synchronous,secretSync=this.db.prepare('PRAGMA credential_transition.synchronous').get()?.synchronous;
+      if(store.memory ? mainMode!=='memory' || secretMode!=='memory' : mainMode!=='delete' || secretMode!=='delete' || Number(mainSync)<2 || Number(secretSync)<2)throw Error('Atomic credential transaction unavailable');
+      stage('attached');this.db.exec('BEGIN IMMEDIATE');stage('begun');write(this.db);stage('before-commit');commitAttempted=true;this.db.exec('COMMIT');committed=true;stage('after-commit');
+    } catch {
+      if(this.db.isTransaction)try{this.db.exec('ROLLBACK');rolledBack=true;}catch{throw new CredentialTransitionUncertain();}
+      if(committed || (commitAttempted && !rolledBack))throw new CredentialTransitionUncertain();
+      throw new CredentialTransitionFailed();
+    } finally {
+      if(attached && !this.db.isTransaction)try{this.db.exec('DETACH DATABASE credential_transition');}catch{throw new CredentialTransitionUncertain();}
+    }
   }
   close() { this.db.close(); if(this.temporaryConfigRoot)rmSync(this.temporaryConfigRoot,{recursive:true,force:true}); }
   shellConfig() {const row=this.db.prepare('SELECT revision,docker_binary AS dockerBinary,docker_socket AS dockerSocket,image_id AS imageId FROM shell_config WHERE id=1').get();if(!row || typeof row.revision!=='number' || !(row.dockerBinary===null || typeof row.dockerBinary==='string') || !(row.dockerSocket===null || typeof row.dockerSocket==='string') || !(row.imageId===null || typeof row.imageId==='string'))throw Error('Invalid shell configuration');return {revision:row.revision,dockerBinary:row.dockerBinary,dockerSocket:row.dockerSocket,imageId:row.imageId};}

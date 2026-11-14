@@ -40,5 +40,15 @@ try {
  await until(()=>evaluate("document.querySelector('section[aria-label=Plugins]').innerText.includes('Recent message outcomes')"),'outcome shown');
  await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Disable').click()");
  await until(()=>evaluate("document.querySelector('section[aria-label=Plugins]').innerText.includes('Disabled')"),'disabled');
+ service.stdin.write('interrupted-setup\n');await until(()=>output.includes('INTERRUPTED'),'interrupted setup fixture');
+ service.kill('SIGTERM');await new Promise(resolve=>service.once('exit',resolve));output='';
+ service=spawn(process.execPath,['test/fixtures/slack-browser.mjs',join(temp,'instance.sqlite'),String(port)],{cwd:root,env,stdio:['pipe','pipe','pipe']});service.stdout.on('data',chunk=>output+=chunk);service.stderr.on('data',chunk=>output+=chunk);await until(()=>output.includes('Pairing code:'),'restarted service');
+ await evaluate("[...document.querySelectorAll('section[aria-label=Plugins] button')].find(b=>b.textContent.trim()==='Refresh status').click()");
+ await until(()=>evaluate("document.querySelector('section[aria-label=Plugins]').innerText.includes('Slack setup was interrupted')"),'recovery warning');
+ await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Keep disabled and review').click()");
+ await until(()=>evaluate("document.body.innerText.includes('Keep Slack disabled?')"),'recovery confirmation');
+ await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Keep disabled').click()");
+ await until(()=>evaluate("!document.querySelector('section[aria-label=Plugins]').innerText.includes('Slack setup was interrupted')"),'recovery completed');
+ assert.equal(await evaluate("document.querySelector('section[aria-label=Plugins] .provider').innerText.includes('Disabled')"),true);
  console.log('PASS controlled Slack plugin settings and DM journey');
 }finally{socket?.close();browser?.kill();if(service){service.kill('SIGTERM');await new Promise(resolve=>service.once('exit',resolve));}await rm(temp,{recursive:true,force:true});}
