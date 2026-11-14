@@ -13,7 +13,7 @@ export async function* openRouterStream({key, model, effort, instructions, reque
   try {
     response = await request('https://openrouter.ai/api/v1/chat/completions', {
       method:'POST', redirect:'error', signal, headers:{Authorization:`Bearer ${key}`,'Content-Type':'application/json'},
-      body:JSON.stringify({model, messages:[{role:'system',content:instructions},...messages.map(message=>{
+      body:JSON.stringify({model, messages:[{role:'system',content:instructions},...(options?.refreshMessages?.() ?? messages).map(message=>{
         if (message.role !== 'assistant') return message;
         const {usage, responseReplay, ...visible} = message; return visible;
       })], tools, stream:true, stream_options:{include_usage:true}, ...(effort && effort !== 'default' ? {reasoning:{effort}} : {})}),
