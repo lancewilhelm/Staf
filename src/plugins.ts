@@ -75,7 +75,7 @@ export class PluginStore {
   const agentAccessIds=this.db.prepare("SELECT bot_id FROM plugin_agent_access WHERE plugin_id='gmail' AND account_id=? AND enabled=1 ORDER BY bot_id").all(String(row.account_id)).map(item=>String(item.bot_id));
   return {accountId:String(row.account_id),config,connected:row.connected===1,enabled:row.enabled===1,revision:Number(row.revision),agentAccessIds};
  }
- gmailConnect(config:GmailConfig,historyId:string) {
+ gmailConnect(config:GmailConfig,historyId:string,guidedSetupId?:string) {
   const existing=this.gmailConnection();if(existing && existing.accountId!==config.email)throw Error('Delete the existing Gmail configuration before changing accounts');
   if(!/^\d+$/.test(historyId))throw Error('Invalid Gmail history ID');this.db.exec('SAVEPOINT gmail_connect');
   try {
@@ -83,6 +83,7 @@ export class PluginStore {
    if(existing && !baseline)this.db.prepare('INSERT INTO gmail_history_gaps VALUES (?,NULL,?,?,?)').run(config.email,historyId,'Monitoring began after the account was connected',Date.now());
    this.db.prepare("INSERT OR IGNORE INTO gmail_history VALUES (?,?,'ready',NULL)").run(config.email,historyId);
    this.db.prepare("INSERT INTO plugin_connections VALUES ('gmail',?,?,1,0,1) ON CONFLICT(plugin_id,account_id) DO UPDATE SET config=excluded.config,connected=1,enabled=0,revision=plugin_connections.revision+1").run(config.email,JSON.stringify(config));
+   if(guidedSetupId && !this.db.prepare("UPDATE gmail_setup_requests SET state='connected' WHERE question_id=? AND state='authorizing'").run(guidedSetupId).changes)throw Error('Gmail setup authority changed');
    this.db.exec('RELEASE SAVEPOINT gmail_connect');
   }catch(error){this.db.exec('ROLLBACK TO SAVEPOINT gmail_connect; RELEASE SAVEPOINT gmail_connect');throw error;}
   return this.gmailConnection();

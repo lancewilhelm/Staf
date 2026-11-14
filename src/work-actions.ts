@@ -325,14 +325,14 @@ export class WorkActionService {
     }
     const description=actionDescription.parse(cap.describe(input,context));
     if(description.effect==='change') {
-      const uncertain=records.filter(item=>item.capability!=='ask_questions' && !(item.capability==='ask_owner' && this.db.prepare('SELECT 1 FROM task_question_sets WHERE id=?').get(item.action.id)) && (item.action.state==='uncertain' || item.action.state==='started') && item.description.effect==='change' && !this.resolved(item.action.id));
+      const uncertain=records.filter(item=>item.capability!=='ask_questions' && item.capability!=='guide_gmail_setup' && !(item.capability==='ask_owner' && this.db.prepare('SELECT 1 FROM task_question_sets WHERE id=?').get(item.action.id)) && (item.action.state==='uncertain' || item.action.state==='started') && item.description.effect==='change' && !this.resolved(item.action.id));
       if(uncertain.some(item=>item.description.opaque || description.opaque || item.capability!==request.name || !!cap.journalInput || !cap.overlaps || cap.overlaps(item.input,input,context))) {
         const reason='Uncertain overlapping change requires reconciliation';
         this.db.prepare('INSERT INTO work_action_requests VALUES (?,?,?,?,NULL,?)').run(context.work.kind,context.work.id,source,digest,reason);return {kind:'blocked',reason};
       }
       const state=this.state(context.work);
       const matching=Number(state.epoch)>0 ? records.filter(item=>this.accounted(item.action) && item.capability===request.name && matchesEffect(item.input)).map(item=>item.action) : [];
-      const ambiguous=Number(state.epoch)>0 && records.some(item=>item.capability!=='ask_questions' && !(item.capability==='ask_owner' && this.db.prepare('SELECT 1 FROM task_question_sets WHERE id=?').get(item.action.id)) && item.action.state==='succeeded' && item.description.effect==='change' && (item.description.opaque || description.opaque) && !(item.capability===request.name && matchesEffect(item.input)) && !this.resolved(item.action.id));
+      const ambiguous=Number(state.epoch)>0 && records.some(item=>item.capability!=='ask_questions' && item.capability!=='guide_gmail_setup' && !(item.capability==='ask_owner' && this.db.prepare('SELECT 1 FROM task_question_sets WHERE id=?').get(item.action.id)) && item.action.state==='succeeded' && item.description.effect==='change' && (item.description.opaque || description.opaque) && !(item.capability===request.name && matchesEffect(item.input)) && !this.resolved(item.action.id));
       if(ambiguous) {
         const reason='Opaque prior change requires reconciliation';
         this.db.prepare('INSERT INTO work_action_requests VALUES (?,?,?,?,NULL,?)').run(context.work.kind,context.work.id,source,digest,reason);return {kind:'blocked',reason};

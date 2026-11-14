@@ -4,12 +4,12 @@ import {tmpdir} from 'node:os';
 import {demoProvider} from './echo-provider.mjs';
 
 // Tests explicitly opt into the service injection boundary. No network fallback.
-export function startInstance(path,port=0,options={}) {
+export function startInstance(path,port=0,options={},dependencies={}) {
   const providerFactory=options.providerFactory ?? (async profile=>{
     if(profile.model!=='fixture-offline') throw Error('No controlled provider configured for this fixture');
     return demoProvider;
   });
-  return startService(path,port,{env:{},...options,providerFactory});
+  return startService(path,port,{env:{},...options,providerFactory},dependencies);
 }
 
 // Trusted synthetic tests only. This is service/protocol coverage, not isolation.

@@ -455,11 +455,11 @@ independent and authoritative. Search still needs a configured backend.
 ## Question sets
 
 Schema 53 stores main-chat question definitions, drafts, resolution, the originating command, and a continuation ID. Schema 54 adds task-bound question sets and drafts. `ask_questions` accepts up to
-12 optional single-choice, multiple-select or text questions. Choice questions
-include a list of choices; every question accepts a write-in. Paired clients can
+12 optional single-choice, multiple-select, text, or protected secret steps. Choice questions
+include a list of choices; ordinary questions accept a write-in. Paired clients can
 inspect `GET /api/question-sets`, save an entire draft with
 `POST /api/question-sets/ID/draft`, and resolve it through `submit` or `dismiss`.
-The service validates choices and retains explicit skipped results. The same
+A protected step is saved or selected separately with `POST /api/question-sets/ID/secret/INDEX/save|select|clear`; its value goes directly to the secret store; a new value may use an owner-chosen name. Clearing a selection keeps the saved value. The instance database retains only its saved, skipped, or unavailable status. Saving a step does not grant its use, and a deleted or replaced selection becomes unavailable. The service validates choices and retains explicit skipped results. The same
 resolution is idempotent; a different resolution cannot replace it.
 
 A completed origin permits a new, correlated continuation. A reserved command
@@ -469,9 +469,24 @@ starts new work with the current tool mode, permissions, approvals, and scope.
 The action journal checks the originating question-work lineage before dispatch.
 It blocks matching prior actions and fences unresolved effects. A dismissal
 follow-up has no tool offers. Ordinary Slack chat continues as conversation.
-The structured main-chat capability is not offered to Slack commands. A task waits for its own question outcome without spending its execution limit. A restart or stop retains the request and draft without resuming the attempt. A paired client can resolve the retained request and initiate a new attempt after review. Current task authority is checked while waiting and before accepting an answer to an active attempt. Task questions and answers are excluded from automatic Slack updates. A Slack-bound task with questions offers a separate owner review of its exact outcome text and original destination. Schema 55 records the approval with the current Slack and agent revisions and uses the existing delivery journal. A changed identity or authority blocks a pending approval. The owner may submit a new review when the original destination and authority are available. Ambiguous dispatch remains uncertain and is not replayed. The service rejects recognizable direct question or answer matches, but cannot detect every paraphrase or encoding. Gmail-private task outcomes also require current Gmail task authority; existing Gmail clarifications and action approvals remain separate. This is not secret storage.
+The structured main-chat capability is not offered to Slack commands. A task waits for its own question outcome without spending its execution limit. A restart or stop retains the request and draft without resuming the attempt. A paired client can resolve the retained request and initiate a new attempt after review. Current task authority is checked while waiting and before accepting an answer to an active attempt. Task questions and answers are excluded from automatic Slack updates. A Slack-bound task with questions offers a separate owner review of its exact outcome text and original destination. Schema 55 records the approval with the current Slack and agent revisions and uses the existing delivery journal. A changed identity or authority blocks a pending approval. The owner may submit a new review when the original destination and authority are available. Ambiguous dispatch remains uncertain and is not replayed. The service rejects recognizable direct question or answer matches, but cannot detect every paraphrase or encoding. Gmail-private task outcomes also require current Gmail task authority; existing Gmail clarifications and action approvals remain separate. Secret values are not ordinary question answers.
 Known credentials and recognized OpenRouter key patterns are rejected from drafts,
 but detection is incomplete.
+
+Schema 56 adds service-owned guided Gmail request state. `guide_gmail_setup`
+creates the fixed mixed set in main chat or a task. A paired client can review
+`GET /api/question-sets/ID/gmail-preview` and confirm its exact returned review
+with `POST /api/question-sets/ID/gmail-start`. The review includes the current
+client and refresh grant versions and the uses that would be replaced. The
+in-memory `GET /api/question-sets/ID/gmail-authorization` URL is available only
+while authorization is pending. Submitting or dismissing during authorization
+interrupts it; submitting before authorization starts records a skipped setup. The
+reviewed client approval is used for that attempt; durable grant changes and the
+connection commit together only after Google verification. A definite rollback
+retains earlier grants and configuration; an uncertain result requires restart
+and review. Restart interrupts an unfinished exchange without replay. The connected result requires a matching
+Google profile and a successful plugin commit. No secret value is included in
+the question result. Existing agent/model access remains separate.
 
 ## Saved tool mode contract
 
@@ -621,9 +636,9 @@ takes the same approval. Confirmation rechecks the client, work, agent, binding,
 secret selections and reviewed grant state before identification and commit.
 The result distinguishes connecting, connected, reconnecting and failure; a
 verified socket does not verify the user or DM IDs. Restart interrupts an
-unfinished request without replay. The secret-grant update and instance binding
-are separate transactions: after a failure the owner must inspect both, since
-new grants can remain while the old binding is disabled. See [Slack setup](usage.md#slack-plugin).
+unfinished request without replay. Grants and binding commit together; an
+interrupted activation remains fenced until the owner keeps it disabled and
+reviews the connection. See [Slack setup](usage.md#slack-plugin).
 
 
 ### Native process API

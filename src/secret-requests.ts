@@ -45,6 +45,7 @@ export class SecretRequests {
    CREATE TABLE IF NOT EXISTS secret_requests(id TEXT PRIMARY KEY,bot_id TEXT NOT NULL,work_kind TEXT NOT NULL,work_id TEXT NOT NULL,name TEXT NOT NULL,purpose TEXT NOT NULL,destination TEXT,state TEXT NOT NULL);
    CREATE TABLE IF NOT EXISTS secrets(name TEXT PRIMARY KEY,value TEXT NOT NULL);
    CREATE TABLE IF NOT EXISTS secret_metadata(name TEXT PRIMARY KEY,purpose TEXT,revision TEXT NOT NULL);
+   CREATE TABLE IF NOT EXISTS question_secret_selections(question_id TEXT NOT NULL,step INTEGER NOT NULL,secret_name TEXT NOT NULL,secret_revision TEXT NOT NULL,PRIMARY KEY(question_id,step));
    CREATE TABLE IF NOT EXISTS secret_selections(request_id TEXT PRIMARY KEY,secret_name TEXT NOT NULL,secret_revision TEXT NOT NULL);
    CREATE TABLE IF NOT EXISTS secret_grants(name TEXT NOT NULL,revision TEXT NOT NULL,integration TEXT NOT NULL,destination TEXT NOT NULL,PRIMARY KEY(integration,destination));
    CREATE TABLE IF NOT EXISTS secret_grant_states(integration TEXT NOT NULL,destination TEXT NOT NULL,version TEXT NOT NULL,PRIMARY KEY(integration,destination));
@@ -73,6 +74,17 @@ export class SecretRequests {
   stage('secret-config-written');
   for(const [index,item] of input.entries.entries()){const revision=randomUUID();db.prepare('INSERT INTO credential_transition.secrets VALUES (?,?)').run(item.name,item.value);db.prepare('INSERT INTO credential_transition.secret_metadata VALUES (?,?,?)').run(item.name,item.purpose,revision);db.prepare('INSERT INTO credential_transition.secret_grant_states VALUES (?,?,?) ON CONFLICT(integration,destination) DO UPDATE SET version=excluded.version').run(item.integration,item.destination,randomUUID());db.prepare('INSERT INTO credential_transition.secret_grants VALUES (?,?,?,?) ON CONFLICT(integration,destination) DO UPDATE SET name=excluded.name,revision=excluded.revision').run(item.name,revision,item.integration,item.destination);if(index===0)stage('first-secret-written');}
   stage('credentials-written');
+ }
+ installGuidedGmail(db:DatabaseSync,input:{questionId:string;selection:{name:string;revision:string};destination:string;reviewedVersion:string;clientVersion:string;refreshVersion:string;refreshName:string;refreshValue:string;email:string;sendEnabled:boolean;modifyEnabled:boolean},stage:(stage:CredentialTransitionStage)=>void):void {
+  if(!db.isTransaction)throw Error('Credential transaction required');secretValueSchema.parse(input.refreshValue);
+  const rows=db.prepare("SELECT integration,destination,version FROM credential_transition.secret_grant_states WHERE integration IN ('gmail.client','gmail.refresh') ORDER BY integration,destination").all();
+  if(createHash('sha256').update(JSON.stringify(rows)).digest('hex')!==input.reviewedVersion)throw Error('Gmail grants changed');
+  if(!db.prepare('SELECT 1 FROM credential_transition.question_secret_selections q JOIN credential_transition.secret_metadata m ON m.name=q.secret_name AND m.revision=q.secret_revision JOIN credential_transition.secrets s ON s.name=m.name WHERE q.question_id=? AND q.step=2 AND m.name=? AND m.revision=?').get(input.questionId,input.selection.name,input.selection.revision))throw Error('Selected secret changed');
+  for(const [role,version] of [['gmail.client',input.clientVersion],['gmail.refresh',input.refreshVersion]] as const){if(!db.prepare('UPDATE credential_transition.secret_grant_states SET version=? WHERE integration=? AND destination=? AND version=?').run(randomUUID(),role,input.destination,version).changes)throw Error('Gmail grant changed');db.prepare('DELETE FROM credential_transition.secret_grants WHERE integration=? AND destination=?').run(role,input.destination);}
+  stage('grants-revoked');
+  db.prepare("INSERT INTO credential_transition.secret_integration_config VALUES ('gmail',?,?) ON CONFLICT(integration,destination) DO UPDATE SET config=excluded.config").run(input.destination,JSON.stringify({sendEnabled:input.sendEnabled,modifyEnabled:input.modifyEnabled}));stage('secret-config-written');
+  db.prepare('INSERT INTO credential_transition.secret_grants VALUES (?,?,?,?)').run(input.selection.name,input.selection.revision,'gmail.client',input.destination);stage('first-secret-written');
+  const revision=randomUUID();db.prepare('INSERT INTO credential_transition.secrets VALUES (?,?)').run(input.refreshName,input.refreshValue);db.prepare('INSERT INTO credential_transition.secret_metadata VALUES (?,?,?)').run(input.refreshName,`Gmail account ${input.email}`,revision);db.prepare('INSERT INTO credential_transition.secret_grants VALUES (?,?,?,?)').run(input.refreshName,revision,'gmail.refresh',input.destination);stage('credentials-written');
  }
  values():string[] {return this.db ? this.db.prepare('SELECT value FROM secrets').all().map(row=>String(row.value)) : [];}
  names() {if(!this.db)return [];return this.db.prepare("SELECT s.name,m.purpose,m.revision,(SELECT r.destination FROM secret_requests r WHERE r.name=s.name AND r.state='saved' ORDER BY r.rowid DESC LIMIT 1) AS destination FROM secrets s JOIN secret_metadata m ON m.name=s.name ORDER BY s.name").all();}
@@ -120,6 +132,20 @@ export class SecretRequests {
   this.slackSetupWaiters.set(id,finish);signal.addEventListener('abort',abort,{once:true});if(signal.aborted)abort();
  });}
  select(id:string,name:string,revision:string):Outcome {const db=this.db;if(!db)throw Error('Secret request unavailable');db.exec('BEGIN IMMEDIATE');try{const row=db.prepare("SELECT state FROM secret_requests WHERE id=?").get(id),secret=db.prepare('SELECT revision FROM secret_metadata WHERE name=? AND revision=?').get(name,revision);if(row?.state!=='pending' || !secret)throw Error('Secret request unavailable');db.prepare('INSERT INTO secret_selections VALUES (?,?,?)').run(id,name,revision);db.prepare("UPDATE secret_requests SET state='saved' WHERE id=?").run(id);db.exec('COMMIT');}catch(error){db.exec('ROLLBACK');throw error;}this.waiters.get(id)?.('saved');return 'saved';}
+ questionStepSelection(questionId:string,step:number):{name:string;revision:string}|undefined {const row=this.db?.prepare('SELECT q.secret_name,q.secret_revision FROM question_secret_selections q JOIN secret_metadata m ON m.name=q.secret_name AND m.revision=q.secret_revision JOIN secrets s ON s.name=m.name WHERE q.question_id=? AND q.step=?').get(questionId,step);return typeof row?.secret_name==='string' && typeof row.secret_revision==='string'?{name:row.secret_name,revision:row.secret_revision}:undefined;}
+ clearQuestionStep(input:{questionId:string;step:number;name:string;revision:string}):void {if(!this.db?.prepare('DELETE FROM question_secret_selections WHERE question_id=? AND step=? AND secret_name=? AND secret_revision=?').run(input.questionId,input.step,input.name,input.revision).changes)throw Error('Secret selection changed');}
+ questionStepStatus(questionId:string,step:number):'saved'|'skipped'|'unavailable' {const row=this.db?.prepare('SELECT CASE WHEN s.name IS NOT NULL THEN m.revision END AS current_revision, q.secret_revision FROM question_secret_selections q LEFT JOIN secret_metadata m ON m.name=q.secret_name LEFT JOIN secrets s ON s.name=q.secret_name WHERE q.question_id=? AND q.step=?').get(questionId,step);return !row?'skipped':row.current_revision===row.secret_revision?'saved':'unavailable';}
+ saveQuestionStep(input:{questionId:string;step:number;name:string;purpose:string;value:string}|{questionId:string;step:number;name:string;revision:string}):void {
+  const db=this.open(true);db.exec('BEGIN IMMEDIATE');
+  try {
+   if(this.questionStepStatus(input.questionId,input.step)==='saved')throw Error('Secret step already saved');
+   db.prepare('DELETE FROM question_secret_selections WHERE question_id=? AND step=?').run(input.questionId,input.step);
+   let revision:string;
+   if('value' in input) {revision=randomUUID();db.prepare('INSERT INTO secrets VALUES (?,?)').run(input.name,secretValueSchema.parse(input.value));db.prepare('INSERT INTO secret_metadata VALUES (?,?,?)').run(input.name,input.purpose,revision);}
+   else {revision=input.revision;if(!db.prepare('SELECT 1 FROM secrets s JOIN secret_metadata m ON m.name=s.name WHERE s.name=? AND m.revision=?').get(input.name,revision))throw Error('Secret changed');}
+   db.prepare('INSERT INTO question_secret_selections VALUES (?,?,?,?)').run(input.questionId,input.step,input.name,revision);db.exec('COMMIT');
+  }catch(error){db.exec('ROLLBACK');throw error;}
+ }
  list() {if(!this.db)return [];return this.db.prepare("SELECT id,bot_id AS botId,work_kind AS workKind,work_id AS workId,name,purpose,destination,state FROM secret_requests WHERE state IN ('pending','interrupted') ORDER BY rowid").all().map(row=>({kind:'secret' as const,id:String(row.id),botId:String(row.botId),work:{kind:row.workKind==='task'?'task' as const:'command' as const,id:String(row.workId)},name:String(row.name),purpose:String(row.purpose),destination:row.destination===null?null:String(row.destination),state:String(row.state)}));}
  create(id:string,botId:string,work:WorkRef,input:Input):void {this.open(true).prepare("INSERT INTO secret_requests VALUES (?,?,?,?,?,?,?,'pending')").run(id,botId,work.kind,work.id,input.name,input.purpose,input.destination??null);}
  wait(id:string,signal:AbortSignal):Promise<Outcome> {return new Promise((resolve,reject)=>{

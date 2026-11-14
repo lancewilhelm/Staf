@@ -375,7 +375,7 @@ The registered request action accepts descriptive metadata only. A separate
 paired-client endpoint sends a value directly to the service, outside generic
 action arguments and results. A separate SQLite database under the data directory
 stores named values in plaintext and request metadata; the main action journal
-contains the nonsecret request and outcome. The store restores pending requests
+contains the nonsecret request and outcome. Protected question-set steps bind their question and step to a specific named secret revision in that separate store. Ordinary draft inputs cannot contain a value for a secret step. The submitted result reports only its status; selection or saving does not authorize use. The store restores pending requests
 as interrupted, and work is not replayed. Paired-client and work authority are
 checked before a save or selection. Settings can add a value or confirm a
 replacement or deletion using the current opaque revision. Metadata for existing
@@ -572,7 +572,18 @@ Gmail uses the same account-keyed connection and agent-access tables. A paired
 client starts an in-memory desktop OAuth attempt with PKCE and a loopback
 callback; the service exchanges the code, verifies the Gmail profile identity,
 and saves the client secret and refresh token as separate managed secrets with
-destination-scoped approvals.
+destination-scoped approvals. Guided setup uses a service-defined mixed question
+set and resolves its saved secret by revision. A paired owner reviews the exact
+account, scopes, selected secret, destination, prior client and refresh grants,
+and durable review versions before starting. The OAuth attempt rechecks client,
+request, agent revision, grant identity and version, connection revision, and
+nonsecret fields at dispatch and before commit. The reviewed selected client
+secret is authorized for the exchange, but prior durable grants are retained
+until the selected grant, refresh token, plugin binding and setup result commit
+together. A definite rollback retains prior state; an uncertain result is fenced
+until restart and review. Startup marks a pending exchange interrupted and never
+replays it. Controlled service and Google fixtures do not establish
+live Google behavior.
 The service fences an in-flight exchange against cancellation, expiry, client
 revocation and connection revision changes. The connection-time history ID and
 candidate message IDs are stored in SQLite; complete pages and the next cursor

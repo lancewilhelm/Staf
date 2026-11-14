@@ -7,6 +7,7 @@ import {skillEvidence} from '../skill-actions.js';
 import type {RuntimeEvent} from '../types.js';
 import {secretRequestInput} from '../secret-requests.js';
 import {slackSetupInput} from '../slack-setup-types.js';
+import {gmailSetupActionInput} from '../gmail-setup.js';
 
 /** Runs one provider-requested program against the accepted work's action coordinator. */
 export async function runCode(input:{actions:WorkActions;responseId:string;callId:string;source:string;redact:(text:string)=>string;emit?:(event:RuntimeEvent)=>void;ensureSkills?:()=>void}):Promise<string> {
@@ -23,7 +24,7 @@ export async function runCode(input:{actions:WorkActions;responseId:string;callI
   const keep=(value:Json):Json=>{const result=safe(value);outputBytes+=Buffer.byteLength(JSON.stringify(result));if(outputBytes>limits.outputBytes){fatal='Guest output limit reached';actions.close(fatal);throw Error(fatal);}return result;};
   let guest:ReturnType<typeof startQuickJSGuest>;
   try {guest=startQuickJSGuest({source,names:actions.offers('guest').map(tool=>tool.function.name),guestMs:limits.guestMs,phase:()=>{},request:message=>{
-    const isQuestion=actions.context.work.kind==='task' && message.type==='call' && (message.name==='ask_questions' || message.name==='ask_owner');
+    const isQuestion=actions.context.work.kind==='task' && message.type==='call' && (message.name==='ask_questions' || message.name==='ask_owner' || message.name==='guide_gmail_setup');
     if(taskQuestionPending && message.type==='call')return Promise.resolve({ok:false as const,error:'Owner input is pending'});
     if(isQuestion)taskQuestionPending=true;
     const operation=(async()=>{
@@ -35,6 +36,7 @@ export async function runCode(input:{actions:WorkActions;responseId:string;callI
       const eventId=`${id}:${message.seq}`;
       if(message.name==='request_secret' && !secretRequestInput.safeParse(message.input).success) {input.emit?.({type:'tool_start',id:eventId,name:message.name,arguments:'[invalid secret request metadata]'});input.emit?.({type:'tool_result',id:eventId,name:message.name,success:false,content:'Invalid secret request metadata'});return {ok:false as const,error:'Invalid secret request metadata'};}
       if(message.name==='setup_slack' && !slackSetupInput.safeParse(message.input).success) {input.emit?.({type:'tool_start',id:eventId,name:message.name,arguments:'[invalid Slack setup metadata]'});input.emit?.({type:'tool_result',id:eventId,name:message.name,success:false,content:'Invalid Slack setup metadata'});return {ok:false as const,error:'Invalid Slack setup metadata'};}
+      if(message.name==='guide_gmail_setup' && !gmailSetupActionInput.safeParse(message.input).success) {input.emit?.({type:'tool_start',id:eventId,name:message.name,arguments:'[invalid Gmail setup metadata]'});input.emit?.({type:'tool_result',id:eventId,name:message.name,success:false,content:'Invalid Gmail setup metadata'});return {ok:false as const,error:'Invalid Gmail setup metadata'};}
       input.emit?.({type:'tool_start',id:eventId,name:message.name,arguments:JSON.stringify(safe(message.input))});
       let result:Awaited<ReturnType<WorkActions['invoke']>>;
       try {result=await actions.invoke({source:{kind:'guest',executionId:id,sequence:message.seq},name:message.name,input:message.input,intent:message.intent ?? {kind:'new'}});}
