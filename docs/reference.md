@@ -678,7 +678,7 @@ configuration without tokens, connection state, agent access, recent event
 outcomes, and recent task delivery states (`pending`, `sending`, `sent`, or
 `uncertain`). `sent` records Slack acceptance, not a human read. `POST /api/plugins/slack/connect` accepts `appToken`, `botToken`,
 `teamId`, `userId`, `channelId`, `botId`, and `confirm: true`; it validates the bot token against
-the workspace. Both tokens must satisfy the managed-secret limit of 16,000 characters; invalid tokens are rejected before changing the connection. `POST /api/plugins/slack/access` takes `botId` and `enabled`.
+the workspace. Both tokens must satisfy the managed-secret limit of 16,000 characters; tokens that fail this limit or the format check are rejected before changing the connection. `POST /api/plugins/slack/access` takes `botId` and `enabled`.
 The `enable`, `disable`, `disconnect`, and `delete-config` endpoints take empty
 objects. Connections are instance-owned and keyed by service account identity;
 this slice exposes one Slack account. Tokens remain host-local and are never
