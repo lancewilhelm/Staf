@@ -948,7 +948,8 @@ Submitting without starting authorization records the setup as skipped. Dismissi
 questions does not undo a successful authorization. Staf records the observed
 authorization separately from the current Gmail credential status, and reports
 both to the agent. Staf refreshes the current status before each relevant model
-request. A later revocation can make credentials unavailable without erasing the
+request, including a task that captures the earlier setup conversation. A later
+revocation can make credentials unavailable without erasing the
 earlier success, but cannot recall input already sent to a model. Available credentials do not verify Google access
 or grant an agent or model permission. If the agent's settings change during
 setup, start a new Gmail setup request before saving, selecting, or clearing its

@@ -593,6 +593,16 @@ adapter preflight. The built-in adapters refresh that copy immediately before
 sending. An adapter that performs asynchronous preparation must call the supplied
 `refreshMessages` callback at its own dispatch boundary. A later revocation
 cannot recall input already sent to a provider.
+
+A task that captures a Gmail setup continuation or its assistant reply also
+receives current status. The task snapshot marks those message identities for
+that agent, retaining the mark across retries and partial context retention.
+Older snapshots with message IDs use the source chat to recover the mark when
+possible. Isolated helpers do not inherit the parent's chat. Separately approved
+helper text does not establish provenance for a paraphrased Gmail claim or grant
+the helper access to Gmail status. Truncated prior setup results are omitted from
+the transient provider input rather than replaying a stale status.
+
 That status does not verify Google access or agent and model permissions. Older results
 whose success was already overwritten cannot be reconstructed. The OAuth attempt
 rechecks client, request, agent revision, grant identity and

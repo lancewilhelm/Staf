@@ -27,6 +27,13 @@ export const gmailConnectionNotice='Credential status reflects locally saved gra
 export type GmailConnectionStatus={status:'credentials_available'|'credentials_unavailable'|'disconnected'|'unknown';enabled:boolean|null};
 export class QuestionSets {
  constructor(private db:DatabaseSync) {}
+ gmailChatMessageIds(botId:string):Set<string> {
+  const ids=new Set<string>();
+  const questions=this.db.prepare(`SELECT u.id,u.seq FROM question_sets q JOIN gmail_setup_requests g ON g.question_id=q.id JOIN commands c ON c.id=q.continuation_id AND c.state='completed' JOIN messages u ON u.id='command-user-'||q.continuation_id AND u.bot_id=q.bot_id WHERE q.bot_id=? AND q.state<>'open'`).all(botId);
+  const next=this.db.prepare(`SELECT m.id,m.role FROM messages m WHERE m.bot_id=? AND m.seq>? AND NOT EXISTS(SELECT 1 FROM task_notices n WHERE n.message_id=m.id) ORDER BY m.seq LIMIT 1`);
+  for(const question of questions) {if(typeof question.id!=='string' || typeof question.seq!=='number')continue;ids.add(question.id);const answer=next.get(botId,question.seq);if(answer?.role==='assistant' && typeof answer.id==='string')ids.add(answer.id);}
+  return ids;
+ }
  create(id:string,botId:string,commandId:string,input:z.infer<typeof questionSetInput>) {
   const questions=questionSetInput.parse(input).questions;
   this.db.prepare("INSERT OR IGNORE INTO question_sets VALUES (?,?,?,?,?,'open',NULL,?,NULL)").run(id,botId,commandId,JSON.stringify(questions),JSON.stringify(questions.map(()=>null)),randomUUID());
