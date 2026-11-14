@@ -62,3 +62,11 @@ test('Slack Settings activation recovers process exits before and after the dura
   }finally{child?.kill('SIGKILL');await app?.close();rmSync(dir,{recursive:true,force:true});}
  }
 });
+
+test('a Settings activation error after ready fences delivery and requires an explicit retry',async()=>{
+ const dir=mkdtempSync(join(tmpdir(),'staf-settings-error-')),path=join(dir,'instance.sqlite');let app,port,token,starts=0,fail=true;
+ const transport={identify:async()=>({teamId:'T123',botUserId:'B123'}),verifyDestination:async(_tokens,config)=>({channelId:config.channelId}),start:async(_tokens,_receive,status)=>{starts++;status?.('connected');return ()=>{};},post:async()=>{throw Error('Unexpected delivery');}};
+ const start=async()=>{app=startInstance(path,0,{dataDir:dir,env:{},slackTransport:transport},{slackSettingsActivation:stage=>{if(fail && stage==='committed')throw Error('Synthetic error');}});port=await app.listen();};
+ const call=async(route,body)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});return [response.status,await response.json()];};
+ try{await start();token=(await call('/api/pair',{code:app.code}))[1].token;const bot=(await call('/api/bots',{name:'Agent',provider:'live',model:'fixture'}))[1];assert.equal((await call('/api/plugins/slack/connect',{confirm:true,appToken:'xapp-settings-error',botToken:'xoxb-settings-error',teamId:'T123',userId:'U123',channelId:'D123',botId:bot.id}))[0],200);await call('/api/plugins/slack/access',{botId:bot.id,enabled:true});assert.notEqual((await call('/api/plugins/slack/enable',{}))[0],200);assert.equal((await call('/api/plugins'))[1].find(item=>item.id==='slack').status,'connection failed');assert.equal(starts,1);fail=false;await app.close();app=undefined;await start();await new Promise(resolve=>setTimeout(resolve,100));assert.equal(starts,1);assert.equal((await call('/api/plugins'))[1].find(item=>item.id==='slack').status,'activation interrupted');assert.equal((await call('/api/plugins/slack/enable',{}))[0],200);assert.equal(starts,2);}finally{await app?.close();rmSync(dir,{recursive:true,force:true});}
+});
