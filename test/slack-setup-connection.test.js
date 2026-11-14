@@ -198,7 +198,7 @@ test('guided reconnect with uncertain commit stays fenced after restart until ow
 });
 
 test('guided reconnect recovers abrupt process exits at every transaction boundary',async()=>{
- for(const point of ['attached','begun','grants-revoked','secret-config-written','first-secret-written','credentials-written','plugin-config-written','before-commit','after-commit','setup-socket-started']){
+ for(const point of ['attached','begun','grants-revoked','secret-config-written','first-secret-written','credentials-written','plugin-config-written','before-commit','after-commit','setup-socket-started','setup-completed']){
   const dir=mkdtempSync(join(tmpdir(),'staf-guided-crash-')),path=join(dir,'instance.sqlite');let app,child,restoredDir;
   try{
    child=fork('test/fixtures/slack-guided-transition-child.mjs',[path,point],{stdio:['ignore','ignore','ignore','ipc']});
@@ -210,6 +210,7 @@ test('guided reconnect recovers abrupt process exits at every transaction bounda
    const call=async(route,body)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${setup.token}`,...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});return [response.status,await response.json()];};
    const plugin=(await call('/api/plugins'))[1].find(item=>item.id==='slack'),grants=(await call('/api/secret-grants'))[1];
    if(point==='after-commit' || point==='setup-socket-started'){assert.equal(plugin.setupRecoveryPending,true);assert.equal(plugin.reconnectUncertain,true);assert.notDeepEqual(grants,setup.before);await app.close();app=undefined;restoredDir=mkdtempSync(join(tmpdir(),'staf-guided-restore-'));cpSync(dir,restoredDir,{recursive:true});chmodSync(join(restoredDir,'secrets'),0o700);app=startInstance(join(restoredDir,'instance.sqlite'),0,{dataDir:restoredDir,env:{},slackTransport:transport});port=await app.listen();assert.equal((await call('/api/plugins'))[1].find(item=>item.id==='slack').setupRecoveryPending,true);assert.deepEqual((await call('/api/secret-grants'))[1],grants);assert.equal((await call('/api/plugins/slack/recover-setup',{confirm:true}))[0],200);assert.equal((await call('/api/plugins'))[1].find(item=>item.id==='slack').enabled,false);}
+   else if(point==='setup-completed'){assert.notDeepEqual(grants,setup.before);assert.ok(!plugin.enabled || plugin.reconnectUncertain,'interrupted work must not resume its Slack socket');}
    else {assert.deepEqual(grants,setup.before,point);assert.equal(plugin.setupRecoveryPending,false,point);assert.equal(plugin.enabled,false,point);}
    assert.equal(starts,0,point);for(const value of ['xapp-original-fixture','xoxb-original-fixture','xapp-new-fixture','xoxb-new-fixture'])assert.equal(readFileSync(path).includes(Buffer.from(value)),false,point);
   }finally{if(child)child.kill('SIGKILL');await app?.close();rmSync(dir,{recursive:true,force:true});if(restoredDir)rmSync(restoredDir,{recursive:true,force:true});}

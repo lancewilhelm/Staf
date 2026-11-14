@@ -1340,7 +1340,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
           await startSlackConnection(checkClient,true);
           try{checkClient();}catch(error){const current=instance.plugins.connection();if(bound && current?.revision===bound.revision){stopSlackConnection();instance.plugins.disconnect();for(const grant of applied){const parsed=z.object({name:z.string(),revision:z.string(),integration:z.enum(['slack.app','slack.bot']),destination:z.string(),version:z.string()}).parse(grant);secretRequests.revoke(parsed);}}throw error;}
           stage('setup-socket-started');
-          const status=slackStatus;secretRequests.completeSlackTransition(request.id,status);return json(200,{status});
+          const status=slackStatus;secretRequests.completeSlackTransition(request.id,status);stage('setup-completed');return json(200,{status});
         } catch(error) {if(error instanceof CredentialTransitionUncertain)fenceTransition('slack');if(transitionFences.has('slack') || secretRequests.pendingSlackTransition()){transitionFences.add('slack');stopSlackConnection();slackStatus='Slack setup interrupted. Restart Staf and review the connection.';}try{secretRequests.finishSlackSetup(request.id,'failed','failed');}catch{/* Restart recovers the durable transition. */}if(error instanceof CredentialTransitionUncertain || error instanceof CredentialTransitionFailed)throw error;throw Error('Slack setup failed');}
       }
       if(req.method==='GET' && req.url==='/api/question-sets')return json(200,instance.questionSets.list());
