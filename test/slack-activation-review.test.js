@@ -5,6 +5,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fork} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
+import {DatabaseSync} from 'node:sqlite';
 import {startInstance} from '../dist/instance-service.js';
 
 test('Slack Settings refuses a DM that is not the approved user’s DM',async()=>{
@@ -52,7 +53,7 @@ test('a killed setup never auto-activates across any durable startup boundary',a
 });
 
 test('Slack Settings activation recovers process exits before and after the durable ready state',async()=>{
- for(const stage of ['intent','enabled','socket-open','committed']){
+ for(const stage of ['intent','enabled','atomic-commit','socket-open','committed']){
   const dir=mkdtempSync(join(tmpdir(),'staf-settings-crash-')),path=join(dir,'instance.sqlite');let child,app,starts=0;
   try{child=fork(fileURLToPath(new URL('./fixtures/slack-settings-activation-child.mjs',import.meta.url)),[path,stage],{stdio:['ignore','ignore','ignore','ipc']});const exited=new Promise(resolve=>child.once('exit',resolve));const {token}=await new Promise((resolve,reject)=>{child.once('message',resolve);child.once('error',reject);child.once('exit',code=>reject(Error(`Fixture exited early: ${code}`)));});assert.equal(await exited,73,stage);child=undefined;
    const transport={identify:async()=>({teamId:'T123',botUserId:'B123'}),verifyDestination:async(_tokens,config)=>({channelId:config.channelId}),start:async(_tokens,_receive,status)=>{starts++;status?.('connected');return ()=>{};},post:async()=>{throw Error('Unexpected delivery');}};
@@ -60,6 +61,18 @@ test('Slack Settings activation recovers process exits before and after the dura
    const plugin=(await call('/api/plugins'))[1].find(item=>item.id==='slack');if(stage==='committed'){for(let n=0;n<100 && starts===0;n++)await new Promise(resolve=>setTimeout(resolve,10));assert.equal(starts,1,stage);}else {assert.equal(starts,0,stage);if(plugin.enabled)assert.equal(plugin.status,'activation interrupted',stage);assert.equal((await call('/api/plugins/slack/enable',{}))[0],200,stage);assert.equal(starts,1,stage);}
    for(const value of ['xapp-settings-fixture','xoxb-settings-fixture'])assert.equal(readFileSync(path).includes(Buffer.from(value)),false,stage);
   }finally{child?.kill('SIGKILL');await app?.close();rmSync(dir,{recursive:true,force:true});}
+ }
+});
+
+test('Slack Settings activation rolls back its fence and enablement together',async()=>{
+ for(const stage of ['intent','enabled']){
+  const dir=mkdtempSync(join(tmpdir(),'staf-activation-atomic-')),path=join(dir,'instance.sqlite');let starts=0;
+  const slackTransport={identify:async()=>({teamId:'T123',botUserId:'B123'}),verifyDestination:async(_tokens,config)=>({channelId:config.channelId}),start:async(_tokens,_receive,status)=>{starts++;status?.('connected');return ()=>{};},post:async()=>{}};
+  const app=startInstance(path,0,{dataDir:dir,env:{},slackTransport},{slackSettingsActivation:point=>{if(point===stage)throw Error('Synthetic transaction failure');}});
+  try{const port=await app.listen();let token;const call=async(route,body)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});return [response.status,await response.json()];};
+   token=(await call('/api/pair',{code:app.code}))[1].token;const bot=(await call('/api/bots',{name:'Agent',provider:'live',model:'fixture'}))[1];assert.equal((await call('/api/plugins/slack/connect',{confirm:true,appToken:'xapp-synthetic',botToken:'xoxb-synthetic',teamId:'T123',userId:'U123',channelId:'D123',botId:bot.id}))[0],200);assert.notEqual((await call('/api/plugins/slack/enable',{}))[0],200);
+   assert.equal((await call('/api/plugins'))[1].find(item=>item.id==='slack').enabled,false,stage);const db=new DatabaseSync(join(dir,'secrets','credentials.sqlite'));try{assert.equal(db.prepare('SELECT count(*) AS n FROM slack_activation').get().n,0,stage);}finally{db.close();}assert.equal(starts,0,stage);
+  }finally{await app.close();rmSync(dir,{recursive:true,force:true});}
  }
 });
 

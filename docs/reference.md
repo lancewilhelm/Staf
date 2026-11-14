@@ -656,8 +656,10 @@ The service checks that Slack returns the selected DM for the selected user
 using `conversations.open` with `prevent_creation` and the `im:write` bot scope.
 The result distinguishes connecting, connected, reconnecting and failure; the
 action cannot succeed before the Socket Mode WebSocket opens. Grants and binding
-commit together. An interrupted activation remains fenced until the owner keeps
-it disabled and reviews the connection; unfinished requests are not replayed.
+commit together. Settings activation also commits its pending fence and enabled
+state in the same attached transaction. An interrupted activation remains fenced
+until the owner keeps it disabled and reviews the connection; unfinished requests
+are not replayed.
 See [Slack setup](usage.md#slack-plugin).
 
 
