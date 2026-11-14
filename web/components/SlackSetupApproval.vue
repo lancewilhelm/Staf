@@ -9,7 +9,7 @@ const agent=computed(()=>state.value.bots.find(bot=>bot.id===props.item.botId)?.
 async function decide(decision:'confirm'|'dismiss') {
  busy.value=true;error.value='';
  try {await app.slackSetupDecision(props.item.id,decision,props.item.approval,confirmDisplacements.value);}
- catch {error.value='Setup could not be completed. Refresh and review the current request before retrying.';}
+ catch {error.value='Setup could not be completed. Check Slack and Named secrets in Settings. If permissions, approvals, or a selected secret changed, dismiss this request and ask the agent to start setup again.';}
  finally {busy.value=false;}
 }
 </script>

@@ -611,6 +611,20 @@ values before normal retention and model delivery; this does not cover arbitrary
 encodings, unknown values, historical records, or messages already sent.
 See [secret requests](usage.md#secret-requests) for storage and backup limits.
 
+`setup_slack` accepts nonsecret `teamId`, `userId`, and `channelId`; the agent
+comes from the originating work. The service creates separate protected app and
+bot token requests and exposes the resulting exact destination, secret versions,
+current binding and Slack grant-review snapshot as a `slack-setup` inbox item.
+`POST /api/slack-setup/ID/confirm` takes the exact `approval` object and requires
+`confirmDisplacements: true` when the review lists existing grants. `/dismiss`
+takes the same approval. Confirmation rechecks the client, work, agent, binding,
+secret selections and reviewed grant state before identification and commit.
+The result distinguishes connecting, connected, reconnecting and failure; a
+verified socket does not verify the user or DM IDs. Restart interrupts an
+unfinished request without replay. The secret-grant update and instance binding
+are separate transactions: after a failure the owner must inspect both, since
+new grants can remain while the old binding is disabled. See [Slack setup](usage.md#slack-plugin).
+
 
 ### Native process API
 

@@ -39,7 +39,9 @@ export function slackSetupCapability(hooks:{
     const bot=await request('bot');if(!bot)return 'Slack setup was not completed: bot token request was skipped or dismissed.';
     hooks.check(work);
     if(!hooks.secrets.selection(`${action.id}-app`) || !hooks.secrets.selection(`${action.id}-bot`))throw new ActionFailed('A selected secret changed; start a new Slack setup attempt.');
-    return await hooks.confirm({config:{...input,botId:work.botId},app,bot},work,action);
+    const result=await hooks.confirm({config:{...input,botId:work.botId},app,bot},work,action);
+    if(result==='failed' || result==='connection failed')throw new ActionFailed('Slack setup failed. Check the connection status before trying again.');
+    return result==='dismissed'?'Slack setup dismissed.':`Slack setup status: ${result}.`;
    } finally {if(!work.signal.aborted)hooks.resume(work);}
   },visibleResult:value=>value,
  };

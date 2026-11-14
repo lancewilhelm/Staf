@@ -18,7 +18,7 @@ test('Slack setup requests two protected secrets and passes only their exact rev
   [request]=secrets.list();assert.match(request.purpose,/Slack bot/);
   secrets.add({name:'Existing bot',purpose:'Synthetic bot',value:'xoxb-synthetic-bot'});
   const saved=secrets.names().find(item=>item.name==='Existing bot');secrets.select(request.id,saved.name,saved.revision);
-  assert.equal(await result,'Connection pending');assert.equal(pauses,0);
+  assert.equal(await result,'Slack setup status: Connection pending.');assert.equal(pauses,0);
   assert.deepEqual(approval.config,{...input,botId:'agent'});assert.deepEqual(approval.bot,{name:saved.name,revision:saved.revision});
   assert.ok(!JSON.stringify(approval).includes('synthetic-app'));assert.ok(!JSON.stringify(approval).includes('synthetic-bot'));
  } finally {secrets.close();rmSync(dir,{recursive:true,force:true});}

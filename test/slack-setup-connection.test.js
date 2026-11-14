@@ -4,22 +4,22 @@ import {mkdtempSync,readFileSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {DatabaseSync} from 'node:sqlite';
-import {startInstance} from './fixtures/controlled-instance.mjs';
+import {startInstance} from '../dist/instance-service.js';
 
-async function fixture({identity={teamId:'T123',botUserId:'B123'},identify,prepare}={}){
+async function fixture({identity={teamId:'T123',botUserId:'B123'},identify,prepare,slackSetupBinding,startError=false,startHook,appValue='xapp-synthetic-journey'}={}){
  const dir=mkdtempSync(join(tmpdir(),'staf-slack-journey-')),path=join(dir,'instance.sqlite'),model=[],starts=[];
- const slackTransport={identify:identify??(async()=>identity),start:async(tokens,_receive,status,_interact,assertAuthority)=>{assertAuthority();starts.push({...tokens});status?.('connected');return ()=>{};},post:async()=>{}};
+ const slackTransport={identify:identify??(async()=>identity),start:async(tokens,_receive,status,_interact,assertAuthority)=>{assertAuthority();starts.push({...tokens});await startHook?.();assertAuthority();if(startError)throw Error('Synthetic socket failure');status?.('connected');return ()=>{};},post:async()=>{}};
  const providerFactory=async()=>({name:'fixture',capabilities:{toolCalls:true},async complete(messages){model.push(JSON.stringify(messages));return messages.at(-1).role==='tool'?{role:'assistant',content:'Finished'}:{role:'assistant',content:null,tool_calls:[{id:'setup',type:'function',function:{name:'setup_slack',arguments:JSON.stringify({teamId:'T123',userId:'U123',channelId:'D123'})}}]};}});
- const options={dataDir:dir,env:{},slackTransport,providerFactory};let app=startInstance(path,0,options),port=await app.listen(),token;
+ const options={dataDir:dir,env:{},slackTransport,providerFactory},dependencies={slackSetupBinding};let app=startInstance(path,0,options,dependencies),port=await app.listen(),token;
  const call=async(route,body,credential=token)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{...(credential?{Authorization:`Bearer ${credential}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});return [response.status,await response.json()];};
  const until=async fn=>{for(let n=0;n<500;n++){const value=await fn();if(value)return value;await new Promise(resolve=>setTimeout(resolve,10));}throw Error('Timed out');};
  token=(await call('/api/pair',{code:app.code},''))[1].token;const bot=(await call('/api/bots',{name:'Agent',provider:'live',model:'fixture-offline',toolMode:'direct'}))[1];
  await prepare?.(call,bot);
  await call('/api/commands',{id:'setup',botId:bot.id,content:'Help set up Slack'});
- const appRequest=await until(async()=>(await call('/api/inbox'))[1].find(item=>item.kind==='secret'));await call(`/api/secret-requests/${appRequest.id}/save`,{value:'xapp-synthetic-journey'});
+ const appRequest=await until(async()=>(await call('/api/inbox'))[1].find(item=>item.kind==='secret'));await call(`/api/secret-requests/${appRequest.id}/save`,{value:appValue});
  const botRequest=await until(async()=>(await call('/api/inbox'))[1].find(item=>item.kind==='secret'&&item.id!==appRequest.id));await call(`/api/secret-requests/${botRequest.id}/save`,{value:'xoxb-synthetic-journey'});
  const request=await until(async()=>(await call('/api/inbox'))[1].find(item=>item.kind==='slack-setup'));
- return {get app(){return app;},bot,call,dir,model,path,request,starts,token,until,restart:async()=>{await app.close();app=startInstance(path,0,options);port=await app.listen();},close:async()=>{await app.close();rmSync(dir,{recursive:true,force:true});}};
+ return {get app(){return app;},bot,call,dir,model,path,request,starts,token,until,restart:async()=>{await app.close();app=startInstance(path,0,options,dependencies);port=await app.listen();},close:async()=>{await app.close();rmSync(dir,{recursive:true,force:true});}};
 }
 
 test('owner confirmation connects the exact Slack binding using two scoped managed secrets',async()=>{
@@ -42,6 +42,26 @@ test('existing Slack grants require explicit review and displacement confirmatio
   const before=(await f.call('/api/secret-grants'))[1];assert.deepEqual(before,f.request.approval.grantReview.grants);
   assert.equal((await f.call(`/api/slack-setup/${f.request.id}/confirm`,{approval:f.request.approval,confirmDisplacements:true}))[0],200);
   const after=(await f.call('/api/secret-grants'))[1];assert.equal(after.length,2);assert.ok(after.every(grant=>!before.some(old=>old.name===grant.name)));
+ }finally{await f.close();}
+});
+
+test('an invalid selected app token cannot displace grants or dispatch Slack identification',async()=>{
+ let identifications=0;const f=await fixture({prepare:existingSlack,appValue:'not-a-slack-app-token',identify:async()=>{identifications++;return {teamId:'T123',botUserId:'B123'};}});try{
+  const before=(await f.call('/api/secret-grants'))[1];assert.equal(identifications,1);
+  assert.notEqual((await f.call(`/api/slack-setup/${f.request.id}/confirm`,{approval:f.request.approval,confirmDisplacements:true}))[0],200);
+  assert.equal(identifications,1);assert.deepEqual((await f.call('/api/secret-grants'))[1],before);assert.equal(f.starts.length,0);
+ }finally{await f.close();}
+});
+
+test('approving one agent preserves another agent’s Slack access',async()=>{
+ let other;
+ const f=await fixture({prepare:async(call,bot)=>{await existingSlack(call,bot);other=(await call('/api/bots',{name:'Other agent',provider:'live',model:'fixture-offline'}))[1];await call('/api/plugins/slack/access',{botId:other.id,enabled:true});}});try{
+  assert.equal(f.request.approval.authority.agentAccess,false);
+  assert.equal((await f.call(`/api/slack-setup/${f.request.id}/confirm`,{approval:f.request.approval,confirmDisplacements:true}))[0],200);
+  assert.equal((await f.call('/api/plugins'))[1].find(item=>item.id==='slack').agentAccess,true);
+  const review=(await f.call('/api/secret-setup-review?integration=slack'))[1];
+  assert.equal((await f.call('/api/plugins/slack/connect',{confirm:true,reviewedVersion:review.version,confirmDisplacements:true,appToken:'xapp-next-synthetic',botToken:'xoxb-next-synthetic',teamId:'T123',userId:'U123',channelId:'D123',botId:other.id}))[0],200);
+  assert.equal((await f.call('/api/plugins'))[1].find(item=>item.id==='slack').agentAccess,true);
  }finally{await f.close();}
 });
 
@@ -88,6 +108,15 @@ test('a workspace mismatch fails without binding or starting Slack',async()=>{
  }finally{await f.close();}
 });
 
+test('a socket failure is reported as failure rather than a verified connection',async()=>{
+ const f=await fixture({startError:true});try{
+  const response=await f.call(`/api/slack-setup/${f.request.id}/confirm`,{approval:f.request.approval});assert.equal(response[0],200);assert.equal(response[1].status,'connection failed');
+  const command=await f.until(async()=>{const item=(await f.call('/api/commands/setup'))[1];return item.state!=='pending'&&item;});assert.equal(command.workActions.find(item=>item.summary==='Set up Slack with owner confirmation')?.state,'failed');
+  assert.equal((await f.call('/api/plugins'))[1].find(item=>item.id==='slack').status,'connection failed');
+  await f.restart();await f.until(async()=>(await f.call('/api/plugins'))[1].find(item=>item.id==='slack').status==='connection failed');assert.equal(f.starts.length,2);
+ }finally{await f.close();}
+});
+
 test('a changed destination and an interrupted work item cannot approve setup',async()=>{
  let identifies=0;const f=await fixture({identify:async()=>{identifies++;return {teamId:'T123',botUserId:'B123'};}});try{
   const changed={...f.request.approval,config:{...f.request.approval.config,channelId:'D456'}};
@@ -109,14 +138,37 @@ test('revoking the approving browser during Slack identification prevents bindin
  }finally{release?.();await f.close();}
 });
 
+test('revoking the approving browser while the socket is starting disconnects the pending setup',async()=>{
+ let entered,release;const started=new Promise(resolve=>{entered=resolve;}),gate=new Promise(resolve=>{release=resolve;});
+ const f=await fixture({startHook:async()=>{entered();await gate;}});try{
+  const second=(await f.call('/api/pair',{code:f.app.issueCode()},''))[1].token;
+  const pending=f.call(`/api/slack-setup/${f.request.id}/confirm`,{approval:f.request.approval});await started;
+  const clients=(await f.call('/api/clients',undefined,second))[1],first=clients.find(item=>!item.current);await f.call(`/api/clients/${first.id}/revoke`,{},second);
+  release();assert.notEqual((await pending)[0],200);
+  const plugin=(await f.call('/api/plugins',undefined,second))[1].find(item=>item.id==='slack');assert.equal(plugin.connected,false);assert.deepEqual((await f.call('/api/secret-grants',undefined,second))[1],[]);
+  await f.restart();assert.equal((await f.call('/api/plugins',undefined,second))[1].find(item=>item.id==='slack').enabled,false);assert.equal(f.starts.length,1);
+ }finally{release?.();await f.close();}
+});
+
 test('a managed grant transaction failure rolls back both grants and does not connect on restart',async()=>{
  const f=await fixture();try{
   const db=new DatabaseSync(join(f.dir,'secrets','credentials.sqlite'));
   try {db.exec("CREATE TRIGGER fail_slack_bot_grant BEFORE INSERT ON secret_grants WHEN NEW.integration='slack.bot' BEGIN SELECT RAISE(ABORT,'synthetic grant failure'); END");}finally{db.close();}
   assert.notEqual((await f.call(`/api/slack-setup/${f.request.id}/confirm`,{approval:f.request.approval}))[0],200);
   assert.deepEqual((await f.call('/api/secret-grants'))[1],[]);assert.equal(f.starts.length,0);
-  const command=await f.until(async()=>{const item=(await f.call('/api/commands/setup'))[1];return item.state!=='pending'&&item;});assert.equal(command.state,'completed');assert.ok(f.model.some(item=>item.includes('Slack setup failed')));
+  const command=await f.until(async()=>{const item=(await f.call('/api/commands/setup'))[1];return item.state!=='pending'&&item;});assert.equal(command.state,'completed');assert.ok(f.model.some(item=>item.includes('Slack setup failed')));assert.equal(command.workActions.find(item=>item.summary==='Set up Slack with owner confirmation')?.state,'failed');
   assert.equal((await f.call('/api/plugins'))[1].find(item=>item.id==='slack').connected,false);
   await f.restart();assert.equal((await f.call('/api/plugins'))[1].find(item=>item.id==='slack').connected,false);assert.equal(f.starts.length,0);
+ }finally{await f.close();}
+});
+
+test('an injected plugin binding failure leaves Slack disabled and is reported as failed across restart',async()=>{
+ const f=await fixture({prepare:existingSlack,slackSetupBinding:()=>{throw Error('Synthetic plugin binding failure');}});try{
+  const old=f.request.approval.grantReview.grants;
+  assert.notEqual((await f.call(`/api/slack-setup/${f.request.id}/confirm`,{approval:f.request.approval,confirmDisplacements:true}))[0],200);
+  const after=(await f.call('/api/secret-grants'))[1];assert.equal(after.length,2);assert.ok(after.every(grant=>!old.some(item=>item.name===grant.name)));
+  const command=await f.until(async()=>{const item=(await f.call('/api/commands/setup'))[1];return item.state!=='pending'&&item;});assert.equal(command.workActions.find(item=>item.summary==='Set up Slack with owner confirmation')?.state,'failed');
+  const plugin=(await f.call('/api/plugins'))[1].find(item=>item.id==='slack');assert.equal(plugin.enabled,false);assert.equal(f.starts.length,0);
+  await f.restart();const restored=(await f.call('/api/plugins'))[1].find(item=>item.id==='slack');assert.equal(restored.enabled,false);assert.equal(f.starts.length,0);
  }finally{await f.close();}
 });

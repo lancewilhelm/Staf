@@ -66,7 +66,7 @@ import { usageText } from './usage.js';
 import { loadOpenRouterKey, saveOpenRouterKey, disconnectOpenRouter } from './openrouter-credential.js';
 
 /** Trusted in-process dependencies, never parsed from configuration or requests. */
-export type InstanceDependencies={hostWork?:{recheck:()=>void;files:typeof fileCapabilities;start:(manager:NativeProcesses,work:import('./work-actions.js').WorkContext,action:import('./work-actions.js').ActionIdentity,input:Parameters<NativeProcesses['start']>[2])=>Promise<unknown>};scratchExecutor?:typeof executeShellSandbox};
+export type InstanceDependencies={hostWork?:{recheck:()=>void;files:typeof fileCapabilities;start:(manager:NativeProcesses,work:import('./work-actions.js').WorkContext,action:import('./work-actions.js').ActionIdentity,input:Parameters<NativeProcesses['start']>[2])=>Promise<unknown>};scratchExecutor?:typeof executeShellSandbox;slackSetupBinding?:(commit:()=>void)=>void};
 export function startInstance(path: string, port = 0, options: {dataDir?: string; publicOrigin?: string; maintenanceToken?:string; env?: Environment; enableCollaboration?: boolean; enableReusableApprovals?: boolean; localBootstrapToken?: string; authNow?:()=>number; authLifetimeMs?:number; webDependencies?:WebDependencies; searchTransport?:SearchTransport; shellExecutor?:typeof executeShellSandbox; modelRequest?:typeof fetch; authHooks?: {prepare:typeof prepareDirectLogin; complete:typeof completeDirectLogin; authorizationUrl?:typeof authorizationUrl}; slackTransport?:SlackTransport; gmailRequest?:typeof fetch; gmailPollIntervalMs?:number; inboxNow?:()=>number; providerFactory?: (profile: {provider:string; model:string | null; reasoning:string | null; instructions:string; chatId:string}, instructions:string) => Promise<Provider>} = {},dependencies:InstanceDependencies={}) {
   assertDatasetAvailable(path,options.maintenanceToken);
   const selectionCatalogs=new Map<string,ModelCatalog>();
@@ -1300,7 +1300,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
         const request=secretRequests.slackSetups().find(item=>item.id===slackSetupDecision[1]);if(!request)throw Error('Slack setup unavailable');
         const input=z.strictObject({approval:slackSetupApprovalSchema,confirmDisplacements:z.boolean().optional()}).parse(value),approval=input.approval;
         if(JSON.stringify(approval)!==JSON.stringify(request.approval))throw Error('Slack setup changed');
-        if(slackSetupDecision[2]==='dismiss') {if(!secretRequests.finishSlackSetup(request.id,'dismissed','Slack setup dismissed.'))throw Error('Slack setup changed');return json(200,{status:'dismissed'});}
+        if(slackSetupDecision[2]==='dismiss') {if(!secretRequests.finishSlackSetup(request.id,'dismissed','dismissed'))throw Error('Slack setup changed');return json(200,{status:'dismissed'});}
         if(approval.grantReview.grants.length && input.confirmDisplacements!==true)throw Error('Confirm replacement of the reviewed Slack grants');
         const config=slackConfigSchema.parse(approval.config),destination=slackDestination(config);
         const check=()=>{
@@ -1319,13 +1319,13 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
           if(identity.teamId!==config.teamId || identity.botUserId===config.userId)throw Error('Slack identity does not match');
           stopSlackConnection();if(instance.plugins.connection()?.enabled)instance.plugins.setEnabled(false);
           secretRequests.replaceSlackGrants({reviewedVersion:approval.grantReview.version,destination,app:approval.app,bot:approval.bot,confirmDisplacements:input.confirmDisplacements===true});
-          instance.plugins.connect(config);instance.plugins.setAccess(config.botId,true);instance.plugins.setEnabled(true);
+          const bind=()=>{instance.plugins.connect(config);};if(dependencies.slackSetupBinding)dependencies.slackSetupBinding(bind);else bind();instance.plugins.setAccess(config.botId,true);instance.plugins.setEnabled(true);
           const bound=instance.plugins.connection(),applied=secretRequests.grants().filter(grant=>grant.destination===destination && (grant.integration==='slack.app' || grant.integration==='slack.bot'));
           const checkClient=()=>{if(!instance.authorized(token))throw Error('Client authorization changed');instance.assertWorkAuthority(request.work);};
           await startSlackConnection(checkClient);
           try{checkClient();}catch(error){const current=instance.plugins.connection();if(bound && current?.revision===bound.revision){stopSlackConnection();instance.plugins.disconnect();for(const grant of applied){const parsed=z.object({name:z.string(),revision:z.string(),integration:z.enum(['slack.app','slack.bot']),destination:z.string(),version:z.string()}).parse(grant);secretRequests.revoke(parsed);}}throw error;}
-          const status=slackStatus;secretRequests.finishSlackSetup(request.id,'completed',`Slack setup status: ${status}.`);return json(200,{status});
-        } catch {secretRequests.finishSlackSetup(request.id,'failed','Slack setup failed or was interrupted. Check the connection status before trying again.');throw Error('Slack setup failed');}
+          const status=slackStatus;secretRequests.finishSlackSetup(request.id,'completed',status);return json(200,{status});
+        } catch {secretRequests.finishSlackSetup(request.id,'failed','failed');throw Error('Slack setup failed');}
       }
       if(req.method==='GET' && req.url==='/api/question-sets')return json(200,instance.questionSets.list());
       const questionSetMatch=req.url?.match(/^\/api\/question-sets\/([\w-]+)\/(draft|submit|dismiss)$/);

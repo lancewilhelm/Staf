@@ -400,6 +400,23 @@ Incoming Slack messages matching recognized credential patterns or known values
 are rejected before work or model dispatch, with only a generic notice retained.
 This cannot remove the message from Slack or detect every credential.
 
+The `setup_slack` work action captures only Slack IDs. Two separate protected
+requests bind saved or selected secret names to their exact revisions. A durable
+review presents the agent, destination, existing connection and current Slack
+grants; replacing any grants requires a separate explicit confirmation. The
+service checks the paired client, originating work, agent and connection
+revisions, secret selections, and durable grant-review version before Slack
+identification and again after it returns. Both new grants replace the reviewed
+Slack grants in one secret-store transaction. A previous active connection is
+disabled before grants are changed; binding and enabling occur afterward in the
+instance database. A failure between those separate databases can leave the new
+grants saved while the connection is disabled or unconfigured. The action reports
+failure, does not replay the setup, and the owner should inspect the connection
+and grants; durable cross-store recovery remains separate work. A restart leaves
+an unfinished review interrupted. Connection status comes from the Slack
+transport; identifying the bot's workspace does not verify the user or DM IDs.
+These paths use synthetic Slack and model fixtures, not live account verification.
+
 ### Native process slice
 
 `NativeProcesses` owns host child handles independently of the guest worker.

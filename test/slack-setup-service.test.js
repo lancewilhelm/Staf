@@ -65,3 +65,21 @@ test('protected Slack requests and dismissal work in all tool modes and backgrou
   assert.ok(!JSON.stringify(model).includes('xapp-synthetic-'));assert.ok(!JSON.stringify(model).includes('xoxb-synthetic-'));assert.ok(!readFileSync(path).includes(Buffer.from('synthetic-')));
  } finally {await app.close();rmSync(dir,{recursive:true,force:true});}
 });
+
+test('optional ordinary task questions lead into the protected Slack connection journey',async()=>{
+ const dir=mkdtempSync(join(tmpdir(),'staf-slack-questions-')),path=join(dir,'db'),model=[];
+ const questions=[{kind:'text',prompt:'Workspace ID?'},{kind:'text',prompt:'User ID?'},{kind:'text',prompt:'DM ID?'},{kind:'text',prompt:'Anything else?'}];
+ const app=startInstance(path,0,{dataDir:dir,env:{},slackTransport:{identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async(_tokens,_receive,status)=>{status?.('connected');return ()=>{};},post:async()=>{}},providerFactory:async()=>({name:'fixture',capabilities:{toolCalls:true},async complete(messages){model.push(JSON.stringify(messages));const results=messages.filter(item=>item.role==='tool');if(!results.length)return {role:'assistant',content:null,tool_calls:[{id:'questions',type:'function',function:{name:'ask_questions',arguments:JSON.stringify({questions})}}]};if(results.length===1)return {role:'assistant',content:null,tool_calls:[{id:'setup',type:'function',function:{name:'setup_slack',arguments:JSON.stringify({teamId:'T123',userId:'U123',channelId:'D123'})}}]};return {role:'assistant',content:'Done'};}})});
+ try {
+  const port=await app.listen();let token;
+  const call=async(route,body)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});const value=await response.json();assert.ok(response.ok,JSON.stringify(value));return value;};
+  const until=async fn=>{for(let n=0;n<500;n++){const value=await fn();if(value)return value;await new Promise(resolve=>setTimeout(resolve,10));}throw Error('Timed out');};
+  token=(await call('/api/pair',{code:app.code})).token;const bot=await call('/api/bots',{name:'Agent',provider:'live',model:'fixture',toolMode:'direct'});await call('/api/tasks',{id:'questions',botId:bot.id,objective:'Set up Slack'});
+  const question=await until(async()=>(await call('/api/question-sets')).find(item=>item.workId==='questions'));
+  await call(`/api/question-sets/${question.id}/draft`,{answers:[{choices:[],writeIn:'T123'},{choices:[],writeIn:'U123'},{choices:[],writeIn:'D123'},null]});await call(`/api/question-sets/${question.id}/submit`,{});
+  const first=await until(async()=>(await call('/api/inbox')).find(item=>item.kind==='secret'&&item.work.id==='questions'));await call(`/api/secret-requests/${first.id}/save`,{value:'xapp-question-synthetic'});
+  const second=await until(async()=>(await call('/api/inbox')).find(item=>item.kind==='secret'&&item.work.id==='questions'&&item.id!==first.id));await call(`/api/secret-requests/${second.id}/save`,{value:'xoxb-question-synthetic'});
+  const approval=await until(async()=>(await call('/api/inbox')).find(item=>item.kind==='slack-setup'&&item.work.id==='questions'));assert.equal((await call(`/api/slack-setup/${approval.id}/confirm`,{approval:approval.approval})).status,'connected');
+  const task=await until(async()=>{const item=await call('/api/tasks/questions');return ['completed','failed'].includes(item.state)&&item;});assert.equal(task.state,'completed');assert.ok(model.some(text=>text.includes('T123')&&text.includes('skipped')));assert.ok(!JSON.stringify(model).includes('xapp-question-synthetic'));assert.ok(!JSON.stringify(model).includes('xoxb-question-synthetic'));
+ } finally {await app.close();rmSync(dir,{recursive:true,force:true});}
+});
