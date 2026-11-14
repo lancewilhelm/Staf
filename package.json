@@ -39,6 +39,7 @@
     "test/fixtures/echo-provider.mjs",
     "test/fixtures/legacy-agent.mjs",
     "test/fixtures/controlled-instance.mjs",
+    "test/fixtures/gmail-guided-ui.mjs",
     "test/fixtures/session-v1.json",
     "docs/*.md",
     "tsconfig.json",

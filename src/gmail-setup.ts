@@ -1,6 +1,8 @@
 import {z} from 'zod';
 import {questionSetInput} from './question-sets.js';
 
+export const gmailSetupActionInput=z.strictObject({});
+
 /** Service-defined prompts keep the protected step and the approved Google use bound together. */
 export const gmailSetupQuestions=questionSetInput.parse({questions:[
  {kind:'text',prompt:'What Gmail address should Staf connect?'},

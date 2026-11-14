@@ -933,8 +933,8 @@ Connecting Gmail alone does not authorize sending email to a model. The opt-in i
 To use guided setup, first complete the Google Cloud preparation in step 1 below.
 In a paired Staf browser on the loopback address, ask a tool-capable agent to
 help set up Gmail. In its question set, enter the Gmail address and desktop
-client ID, then save or select the client secret in the protected step. Choose
-optional Google scopes only if wanted. Each answer can be skipped; saving the
+client ID, then save or select the client secret in the protected step. You can give a new value a distinct name to keep
+an earlier saved secret. Choose optional Google scopes only if wanted. Each answer can be skipped; saving the
 secret is independent and does not authorize its use. Select **Review Gmail
 connection** and check the account, client ID, secret name, Google destinations,
 scopes, and any existing uses shown as being replaced. Confirm to begin Google
