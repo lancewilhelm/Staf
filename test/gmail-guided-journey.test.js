@@ -135,3 +135,8 @@ test('reconnecting with optional scopes skipped retains previously authorized se
 test('dismissing an unstarted Gmail setup records dismissal and keeps its saved secret',async()=>{
  const f=await fixture();try{const route=`/api/question-sets/${f.q.id}`,result=await f.call(route+'/dismiss',{});assert.equal(result.status,200);assert.equal(result.value.result.gmailSetup,'dismissed');const request=(await f.call('/api/question-sets')).value.find(item=>item.id===f.q.id);assert.equal(request.gmailSetup,'dismissed');assert.ok((await f.call('/api/secrets')).value.some(item=>item.name==='Gmail OAuth client secret'));assert.equal(f.google.length,0);}finally{await f.close();}
 });
+
+
+test('a secret recognized after an ordinary draft was saved is rejected on submission',async()=>{
+ const f=await fixture();try{const route=`/api/question-sets/${f.q.id}`;assert.equal((await f.call('/api/secrets/add',{name:'Newly recognized account',purpose:'Synthetic fixture',value:'owner@example.test'})).status,200);assert.notEqual((await f.call(route+'/submit',{})).status,200);assert.equal((await f.call('/api/question-sets')).value.find(item=>item.id===f.q.id).state,'open');assert.equal((await f.call(route+'/draft',{answers:[null,null,null,null]})).status,200);const submitted=await f.call(route+'/submit',{});assert.equal(submitted.status,200);await wait(async()=>(await f.call('/api/question-sets')).value.find(item=>item.id===f.q.id).continuationState==='completed');assert.ok(!JSON.stringify(f.seen).includes('owner@example.test'));}finally{await f.close();}
+});
