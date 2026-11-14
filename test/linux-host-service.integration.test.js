@@ -20,13 +20,14 @@ test('configured service runs file and terminal work inside the Linux boundary',
   seen.push(JSON.stringify(messages));if(messages.at(-1)?.role==='tool')return {role:'assistant',content:'done'};
   const guest=profile.toolMode==='code';return {role:'assistant',content:null,tool_calls:[{id:'effect',type:'function',function:{name:guest?'code_mode':planned.name,arguments:JSON.stringify(guest?{source:`return await capabilities.${planned.name}(${JSON.stringify(planned.input)});`}:planned.input)}}]};
  }})});
- let token,port;
+ let token,port,cleanupWorkspace;
  const call=async(path,body)=>{const response=await fetch(`http://127.0.0.1:${port}${path}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});const value=await response.json();assert.ok(response.ok,JSON.stringify(value));return value;};
  try {
   port=await app.listen();token=(await call('/api/pair',{code:app.code})).token;
   for(const mode of ['direct','hybrid','code']) {
    const bot=await call('/api/bots',{name:mode,provider:'live',model:'fixture-offline',toolMode:mode});let sequence=0;
    const run=async(name,input)=>{planned={name,input};const id=`service-${mode}-${++sequence}`;await call('/api/commands',{id,botId:bot.id,content:'Run controlled action'});const command=await wait(async()=>{const value=await call('/api/commands/'+id);return value.state!=='pending'&&value;});assert.equal(command.state,'completed');assert.equal(command.workActions.length,1);assert.equal(command.workActions[0].state,'succeeded',JSON.stringify(command));return id;};
+   cleanupWorkspace=async()=>{const id=await run('terminal_run',{command:`rm -f '${name}'-*`,retain:true});const process=await wait(async()=>(await call('/api/processes')).find(item=>item.work.id===id && item.outputComplete));assert.equal(process.exitCode,0,'Workspace fixture cleanup failed');};
    const file=name+'-'+mode;
    await run('file_write',{path:file,content:'ordinary fixture'});await run('file_read',{path:`/workspace/${file}`,offset:0,limit:64});
    await run('file_read',{path:`/srv/staf-workspace/${file}`,offset:0,limit:64});
@@ -46,8 +47,12 @@ test('configured service runs file and terminal work inside the Linux boundary',
     assert.match(text,/ordinary env:unset/);assert.equal(process.cwd,'/workspace');assert.equal(process.exitCode,0);assert.ok(!text.includes(secret));
    }
    const cleanup=await run('terminal_run',{command:`rm -f '${file}' '${link}'`,retain:true});
-   await wait(async()=>(await call('/api/processes')).find(item=>item.work.id===cleanup && item.outputComplete));
+   const cleaned=await wait(async()=>(await call('/api/processes')).find(item=>item.work.id===cleanup && item.outputComplete));
+   assert.equal(cleaned.exitCode,0,'Workspace fixture cleanup failed');
   }
   assert.ok(seen.every(message=>!message.includes(secret)));
- } finally {await app.close();rmSync(dir,{recursive:true,force:true});}
+ } finally {
+  if(cleanupWorkspace){try{await cleanupWorkspace();}catch{/* Preserve the original failure; an operator may need to remove disposable fixtures. */}}
+  try{await app.close();}finally{rmSync(dir,{recursive:true,force:true});}
+ }
 });

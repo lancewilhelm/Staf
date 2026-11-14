@@ -195,7 +195,7 @@ boundary works. A preflight only checks the service's policy and setup checks;
 it does not prove the launcher can run. Failures must be investigated rather
 than interpreted as successful isolation. The tests normally remove their own
 files; after a failed or interrupted run, an administrator may need to remove
-only the `staf-boundary-*`, `staf-pty-boundary-*`, or `staf-task-*` fixtures
+only the `staf-boundary-*`, `staf-pty-boundary-*`, `staf-fixture-*`, or `staf-task-*` fixtures
 from the disposable workspace after inspecting them.
 
 The guard suite attempts synthetic private-file and transformed reads, inherited
