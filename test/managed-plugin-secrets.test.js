@@ -128,22 +128,32 @@ test('plugin reconnection names and fences displaced approvals',async()=>{
  } finally {await app?.close();rmSync(dir,{recursive:true,force:true});}
 });
 
-test('revoked grant versions survive a service restart and stopped-data restore',async()=>{
- const dir=mkdtempSync(join(tmpdir(),'staf-grant-service-')),backup=mkdtempSync(join(tmpdir(),'staf-grant-service-backup-'));let app,port,token;
- const options={dataDir:dir,env:{},slackTransport:{verifyDestination:async(_tokens,config)=>({channelId:config.channelId}),identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async(_tokens,_receive,status)=>{status?.('connected');return ()=>{};},post:async()=>{}}};
+test('stopped-data restore preserves grant versions and can reinstate later revocations',async()=>{
+ const dir=mkdtempSync(join(tmpdir(),'staf-grant-service-')),backup=mkdtempSync(join(tmpdir(),'staf-grant-service-backup-')),startedWith=[];let app,port,token;
+ const options={dataDir:dir,env:{},slackTransport:{verifyDestination:async(_tokens,config)=>({channelId:config.channelId}),identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async(tokens,_receive,status)=>{startedWith.push(tokens);status?.('connected');return ()=>{};},post:async()=>{}}};
  const start=async()=>{app=startInstance(join(dir,'instance.sqlite'),0,options);port=await app.listen();};
  const call=async(route,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});return [r.status,await r.json()];};
  try {
   await start();token=(await call('/api/pair',{code:app.code}))[1].token;const bot=(await call('/api/bots',{name:'Agent',provider:'live',model:'fixture'}))[1];
   await call('/api/plugins/slack/connect',{confirm:true,appToken:'xapp-backup-service',botToken:'xoxb-backup-service',teamId:'T123',userId:'U123',channelId:'D123',botId:bot.id});
+  await call('/api/plugins/slack/access',{botId:bot.id,enabled:true});assert.equal((await call('/api/plugins/slack/enable',{}))[0],200);
+  // Preserve agent revision symlinks as a full stopped-data backup does.
+  await app.close();app=undefined;cpSync(dir,join(backup,'original'),{recursive:true,verbatimSymlinks:true});chmodSync(join(backup,'original','secrets'),0o700);await start();
   const old=(await call('/api/secret-grants'))[1].find(item=>item.integration==='slack.app');await call('/api/secret-grants/revoke',{...old,confirm:true});
   const revoked=(await call('/api/secret-grant-targets'))[1].find(item=>item.integration==='slack.app');assert.equal(revoked.current,null);assert.notEqual(revoked.version,old.version);
-  await app.close();app=undefined;cpSync(dir,join(backup,'data'),{recursive:true});chmodSync(join(backup,'data','secrets'),0o700);
+  await app.close();app=undefined;cpSync(dir,join(backup,'data'),{recursive:true,verbatimSymlinks:true});chmodSync(join(backup,'data','secrets'),0o700);
   await start();const afterRestart=(await call('/api/secret-grant-targets'))[1].find(item=>item.integration==='slack.app');assert.deepEqual(afterRestart,revoked);
   const approve={name:old.name,revision:old.revision,integration:old.integration,destination:old.destination,version:revoked.version,previous:null,confirmDisplacement:false,confirm:true};assert.equal((await call('/api/secret-grants/grant',approve))[0],200);
-  await app.close();app=undefined;rmSync(dir,{recursive:true});cpSync(join(backup,'data'),dir,{recursive:true});chmodSync(join(dir,'secrets'),0o700);
+  await app.close();app=undefined;rmSync(dir,{recursive:true,verbatimSymlinks:true});cpSync(join(backup,'data'),dir,{recursive:true,verbatimSymlinks:true});chmodSync(join(dir,'secrets'),0o700);
   await start();const restored=(await call('/api/secret-grant-targets'))[1].find(item=>item.integration==='slack.app');assert.deepEqual(restored,revoked);
   assert.equal((await call('/api/secret-grants/revoke',{...old,confirm:true}))[0],400);
+  await app.close();app=undefined;rmSync(dir,{recursive:true,verbatimSymlinks:true});cpSync(join(backup,'original'),dir,{recursive:true,verbatimSymlinks:true});chmodSync(join(dir,'secrets'),0o700);
+  startedWith.length=0;await start();assert.deepEqual((await call('/api/secret-grants'))[1].find(item=>item.integration==='slack.app'),old);
+  assert.equal((await call('/api/bots'))[1].find(item=>item.id===bot.id).name,'Agent');
+  for(let i=0;i<100 && !startedWith.length;i++)await new Promise(resolve=>setTimeout(resolve,10));
+  assert.ok(startedWith.length,'restored Slack connection did not start');
+  assert.equal(startedWith.at(-1).appToken,'xapp-backup-service');assert.equal(startedWith.at(-1).botToken,'xoxb-backup-service');
+  assert.ok(!JSON.stringify((await call('/api/secrets'))[1]).includes('xapp-backup-service'));
  } finally {await app?.close();rmSync(dir,{recursive:true,force:true});rmSync(backup,{recursive:true,force:true});}
 });
 

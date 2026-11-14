@@ -415,6 +415,40 @@ the synthetic loopback callback printed in the terminal, not the Google link.
 Refresh the setup status and submit the set. This uses synthetic Google and model
 responses; it does not establish live Google or Linux isolation behavior.
 
+## Review guided setup and protected requests
+
+On the integration branch, stop any other launcher using the same data and port,
+then run `corepack pnpm dev`. Use the existing paired browser at
+`http://127.0.0.1:3210/` and an agent with a connected, tool-capable model.
+In chat, ask the agent to help set up an unconnected Gmail or Slack plugin.
+For a fresh setup, follow the prerequisites in the [Gmail](usage.md#gmail-plugin)
+or [Slack](usage.md#slack-plugin) guide; choosing a real account and provider
+is optional and can send data to those services. Enter credentials only in the
+protected Staf controls. Expect a masked field and an explicit save, then review
+the named secrets, account or workspace, user, DM, and destinations before
+confirming use. Gmail also requires completing Google's authorization. A saved
+secret alone is not a connection; check the observed result in the request and
+plugin settings. Agent and model permissions remain separate.
+
+Ask for a set containing choices and a written answer. Navigate forward and
+back, leave one unanswered, and submit; expect the chosen answers and a skipped
+state in the continuation. For a background task, expect its question indicator
+in Staf. Restart while a task is waiting: its draft should remain, but the
+interrupted task must not resume automatically. Inspect any prior external effect
+before starting a new attempt. In **Settings → Named secrets**, review a saved
+name and its approvals; replacing or deleting it requires confirmation and
+revokes its use approvals. Do not replace or delete credentials needed by an
+existing connection just to exercise the controls.
+
+For controlled offline coverage, run `node test/browser/guided-slack-smoke.mjs`,
+`node test/browser/guided-gmail-smoke.mjs`,
+`node test/browser/gmail-authorization-history-smoke.mjs`, and
+`node test/browser/background-questions-smoke.mjs` after the build. These use
+disposable local data and synthetic providers. They do not establish live
+account behavior or Linux process isolation. The full instance backup and
+restore procedure, including restored secret approvals, is in the
+[native installation guide](native-linux-installation.md#back-up-before-updating).
+
 For docs-only changes, report the relevant documentation checks instead of
 requiring an application launch.
 
