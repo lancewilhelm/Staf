@@ -9,7 +9,7 @@ const until=async fn=>{for(let i=0;i<200;i++){const result=await fn();if(result)
 
 test('credential-like Slack messages are not sent to the model or stored in ordinary records',async()=>{
  const dir=mkdtempSync(join(tmpdir(),'staf-slack-credential-')),path=join(dir,'db'),seen=[],posts=[];let receive;
- const slackTransport={identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async(_tokens,handler)=>{receive=handler;return ()=>{};},post:async(_tokens,message)=>{posts.push(message);}};
+ const slackTransport={verifyDestination:async(_tokens,config)=>({channelId:config.channelId}),identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async(_tokens,handler,status)=>{status?.('connected');receive=handler;return ()=>{};},post:async(_tokens,message)=>{posts.push(message);}};
  const providerFactory=async()=>({name:'fixture',capabilities:{toolCalls:false},complete:async messages=>{seen.push(JSON.stringify(messages));return {role:'assistant',content:'reply'};}});
  const app=startInstance(path,0,{env:{},slackTransport,providerFactory});
  try {
@@ -26,7 +26,7 @@ test('credential-like Slack messages are not sent to the model or stored in ordi
 
 test('Slack DM is approved, durable and delivered once, while plugin controls retain configuration',async()=>{
  const dir=mkdtempSync(join(tmpdir(),'staf-slack-')),path=join(dir,'db'),modelInputs=[];let receive,connections=0,posts=[];
- const slackTransport={identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async(_tokens,handler)=>{connections++;receive=handler;return ()=>{receive=undefined}},post:async(_tokens,message)=>{posts.push(message)}};
+ const slackTransport={verifyDestination:async(_tokens,config)=>({channelId:config.channelId}),identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async(_tokens,handler,status)=>{status?.('connected');connections++;receive=handler;return ()=>{receive=undefined}},post:async(_tokens,message)=>{posts.push(message)}};
  const providerFactory=async()=>({name:'fixture',capabilities:{toolCalls:false,incrementalText:false},complete:async messages=>{modelInputs.push(JSON.stringify(messages));return {role:'assistant',content:'Fixture reply'};}});
  let app=startInstance(path,0,{env:{},slackTransport,providerFactory}),port=await app.listen();
  const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body===undefined?'GET':'POST',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body===undefined?{}:{'Content-Type':'application/json'})},...(body===undefined?{}:{body:JSON.stringify(body)})});return [r.status,await r.json()]};
@@ -60,7 +60,7 @@ test('revoking agent access cancels pending work and an uncertain send is never 
  const waitForModel=new Promise(resolve=>{started=resolve});
  const gate=new Promise(resolve=>{release=resolve});let hold=true;
  const providerFactory=async()=>({name:'fixture',capabilities:{toolCalls:false,incrementalText:false},complete:async()=>{started();if(hold)await gate;return {role:'assistant',content:'private reply'}}});
- const slackTransport={identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async(_tokens,handler)=>{receive=handler;return ()=>{receive=undefined}},post:async()=>{posts++;throw Error('ambiguous network result')}};
+ const slackTransport={verifyDestination:async(_tokens,config)=>({channelId:config.channelId}),identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async(_tokens,handler,status)=>{status?.('connected');receive=handler;return ()=>{receive=undefined}},post:async()=>{posts++;throw Error('ambiguous network result')}};
  let app=startInstance(path,0,{env:{},slackTransport,providerFactory}),port=await app.listen();
  const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body===undefined?'GET':'POST',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body===undefined?{}:{'Content-Type':'application/json'})},...(body===undefined?{}:{body:JSON.stringify(body)})});return [r.status,await r.json()]};
  try{
@@ -80,7 +80,7 @@ test('revoking agent access cancels pending work and an uncertain send is never 
 test('restart fences a reply whose Slack dispatch was still in flight',async()=>{
  const dir=mkdtempSync(join(tmpdir(),'staf-slack-flight-')),path=join(dir,'db');let receive,posts=0,release;
  const pending=new Promise(resolve=>{release=resolve});
- const slackTransport={identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async(_tokens,handler)=>{receive=handler;return ()=>{receive=undefined}},post:async()=>{posts++;await pending;}};
+ const slackTransport={verifyDestination:async(_tokens,config)=>({channelId:config.channelId}),identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async(_tokens,handler,status)=>{status?.('connected');receive=handler;return ()=>{receive=undefined}},post:async()=>{posts++;await pending;}};
  const providerFactory=async()=>({name:'fixture',capabilities:{toolCalls:false,incrementalText:false},complete:async()=>({role:'assistant',content:'reply'})});
  let app=startInstance(path,0,{env:{},slackTransport,providerFactory}),port=await app.listen();
  const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body===undefined?'GET':'POST',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body===undefined?{}:{'Content-Type':'application/json'})},...(body===undefined?{}:{body:JSON.stringify(body)})});return [r.status,await r.json()]};
@@ -97,7 +97,7 @@ test('restart fences a reply whose Slack dispatch was still in flight',async()=>
 test('an in-flight reconnect cannot undo a later owner disconnect',async()=>{
  const dir=mkdtempSync(join(tmpdir(),'staf-slack-connect-race-'));let release,started,hold=false;
  const waiting=new Promise(resolve=>{started=resolve}),gate=new Promise(resolve=>{release=resolve});
- const slackTransport={identify:async()=>{if(hold){started();await gate;}return {teamId:'T123',botUserId:'B123'}},start:async()=>()=>{},post:async()=>{}};
+ const slackTransport={verifyDestination:async(_tokens,config)=>({channelId:config.channelId}),identify:async()=>{if(hold){started();await gate;}return {teamId:'T123',botUserId:'B123'}},start:async(_tokens,_receive,status)=>{status?.('connected');return ()=>{};},post:async()=>{}};
  const app=startInstance(join(dir,'db'),0,{env:{},slackTransport}),port=await app.listen();
  const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body===undefined?'GET':'POST',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body===undefined?{}:{'Content-Type':'application/json'})},...(body===undefined?{}:{body:JSON.stringify(body)})});return [r.status,await r.json()]};
  try{
@@ -112,7 +112,7 @@ test('an in-flight reconnect cannot undo a later owner disconnect',async()=>{
 
 test('ordinary Slack conversation can ask and answer in the same thread',async()=>{
  const dir=mkdtempSync(join(tmpdir(),'staf-slack-questions-'));let receive;const posts=[];const requests=[];
- const slackTransport={identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async(_tokens,handler)=>{receive=handler;return ()=>{}},post:async(_tokens,message)=>{posts.push(message)}};
+ const slackTransport={verifyDestination:async(_tokens,config)=>({channelId:config.channelId}),identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async(_tokens,handler,status)=>{status?.('connected');receive=handler;return ()=>{}},post:async(_tokens,message)=>{posts.push(message)}};
  const providerFactory=async()=>({name:'synthetic',capabilities:{toolCalls:true},async complete(messages,offers,opts){requests.push({messages,offers,input:opts.currentUserInput});return {role:'assistant',content:opts.currentUserInput==='Start'?'Which color do you prefer?':'I will use blue.'};}});
  const app=startInstance(join(dir,'db'),0,{env:{},slackTransport,providerFactory}),port=await app.listen();
  const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});return [r.status,await r.json()]};
