@@ -952,8 +952,8 @@ selecting, or clearing its secret.
 
 If an existing connection lacks managed credentials, you can review and reconnect
 the same account here without disconnecting it. The review shows the existing
-connection and any use approvals that the new setup replaces. If saved scopes
-are unavailable, choose the Google permissions explicitly. Staf disables an
+connection and any use approvals that the new setup replaces. If the saved scope record is missing or unreadable, choose the Google permissions
+explicitly before reviewing the reconnect. Staf disables an
 active connection before changing its client-secret approval, and the reconnected
 account starts disabled. Existing agent and model permissions remain in place.
 Legacy credential files remain untouched and are not imported.

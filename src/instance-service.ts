@@ -609,7 +609,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
     if(expectedConnection===undefined) {if(current?.connected && credentialsAvailable)throw Error('Gmail is already connected');}
     else if(JSON.stringify(connection)!==JSON.stringify(expectedConnection))throw Error('Gmail connection changed; review the setup again');
     const existingConfig=current && !request.draft[3]?.choices.length ? secretRequests.getConfig('gmail',gmailDestination(parsed.email)) : undefined;
-    let prior:{sendEnabled:boolean;modifyEnabled:boolean}|undefined;if(existingConfig!==undefined){try{prior=z.strictObject({sendEnabled:z.boolean(),modifyEnabled:z.boolean()}).parse(JSON.parse(existingConfig));}catch{throw Error('Saved Gmail scopes are unavailable. Choose the desired Google permissions explicitly before reviewing.');}}
+    let prior:{sendEnabled:boolean;modifyEnabled:boolean}|undefined;if(current && !request.draft[3]?.choices.length){try{prior=z.strictObject({sendEnabled:z.boolean(),modifyEnabled:z.boolean()}).parse(JSON.parse(existingConfig ?? 'null'));}catch{throw Error('Saved Gmail scopes are unavailable. Choose the desired Google permissions explicitly before reviewing.');}}
     const input=prior?{...parsed,...prior}:parsed;
     return {request,input,selection,connection,credentialsAvailable};
   }
