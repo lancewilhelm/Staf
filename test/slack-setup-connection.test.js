@@ -177,12 +177,12 @@ test('an injected plugin binding failure preserves the reviewed grants across re
 
 test('guided reconnect rolls back every precommit fault with grant versions intact',async()=>{
  for(const point of ['attached','begun','grants-revoked','secret-config-written','first-secret-written','credentials-written','plugin-config-written','before-commit']){
-  const f=await fixture({prepare:existingSlack,credentialTransition:(_kind,stage)=>{if(stage===point)throw Error('Synthetic fault');}});try{
+  const f=await fixture({prepare:async(call,bot)=>{await existingSlack(call,bot);await call('/api/plugins/slack/access',{botId:bot.id,enabled:true});await call('/api/plugins/slack/enable',{});},credentialTransition:(_kind,stage)=>{if(stage===point)throw Error('Synthetic fault');}});try{
    const before=(await f.call('/api/plugins'))[1].find(item=>item.id==='slack'),grants=(await f.call('/api/secret-grants'))[1];f.inject();
    assert.notEqual((await f.call(`/api/slack-setup/${f.request.id}/confirm`,{approval:f.request.approval,confirmDisplacements:true}))[0],200,point);
    assert.deepEqual((await f.call('/api/secret-grants'))[1],grants,point);
-   assert.deepEqual((await f.call('/api/plugins'))[1].find(item=>item.id==='slack').config,before.config,point);
-   await f.restart();assert.deepEqual((await f.call('/api/secret-grants'))[1],grants,point);
+   const current=(await f.call('/api/plugins'))[1].find(item=>item.id==='slack');assert.deepEqual(current.config,before.config,point);assert.equal(current.enabled,true,point);assert.equal(f.starts.at(-1).appToken,'xapp-old-synthetic',point);
+   await f.restart();assert.deepEqual((await f.call('/api/secret-grants'))[1],grants,point);assert.equal((await f.call('/api/plugins'))[1].find(item=>item.id==='slack').enabled,true,point);
   }finally{await f.close();}
  }
 });
