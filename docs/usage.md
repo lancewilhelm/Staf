@@ -954,7 +954,10 @@ authenticated setup context. If a new secret changes a pending model request,
 Staf stops that request; retry after reviewing the context. If redaction crosses
 a setup-result boundary, Staf stops the turn to avoid sending a stale status.
 Text stored before it was recognized as a secret may remain in older records and
-backups. A later
+backups. Encoded output checks may reject safe historical pages. Running terminal capture
+stops retaining new bytes when the known-secret set changes and reports incomplete
+output. The checks do not yet cover every transformed or unattributed fragment,
+including arbitrary scratch output and older receipts. A later
 revocation can make credentials unavailable without erasing the
 earlier success, but cannot recall input already sent to a model. Available credentials do not verify Google access
 or grant an agent or model permission. If the agent's settings change during

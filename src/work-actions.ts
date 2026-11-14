@@ -7,6 +7,7 @@ import type { Json } from './code-mode/json.js';
 import type { ToolMode } from './tool-mode.js';
 import type { ToolDefinition } from './types.js';
 import {z} from 'zod';
+import {assertEncodedResult} from './encoded-results.js';
 
 export const workActionsSchema = `
 CREATE TABLE IF NOT EXISTS work_action_state (kind TEXT NOT NULL, work_id TEXT NOT NULL, used INTEGER NOT NULL DEFAULT 0, closed TEXT, epoch INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(kind,work_id));
@@ -91,6 +92,9 @@ type ErasedCapability = {
 /** One instance owns this coordinator and its registry. Callers cannot choose action IDs. */
 export class WorkActionService {
   private readonly capabilities=new Map<string,ErasedCapability>();
+  private secretGeneration:()=>number=()=>0;
+  private secretValues:()=>readonly string[]=()=>[];
+  setSecretGeneration(get:()=>number,values:()=>readonly string[]=()=>[]):void {this.secretGeneration=get;this.secretValues=values;}
   private readonly queues=new Map<string,Promise<void>>();
   private readonly queueDepth=new Map<string,number>();
   private readonly journal:ActionJournal;
@@ -106,7 +110,8 @@ export class WorkActionService {
   private privateCapabilityAllowed(context:WorkContext,name:string) {return ['gmail_search','gmail_read','gmail_reply','gmail_modify'].includes(name) || (context.work.kind==='task' && (name==='ask_questions' || name==='ask_owner'));}
   private readonly closures=new Map<string,{controller:AbortController;refs:number}>();
   private readonly completedHopParents=new Set<string>();
-  private readonly readReceipts=new Map<string,{work:string;value:Json}>();
+  private readonly readReceipts=new Map<string,{work:string;value:Json;generation:number;encoded:boolean}>();
+  private readonly encodedResultGenerations=new Map<string,number>();
   private safeResult(value:Json):Json {
     if(typeof value==='string')return this.inputRedactor(value);
     if(Array.isArray(value))return value.map(item=>this.safeResult(item));
@@ -179,9 +184,10 @@ export class WorkActionService {
   private accounted(action:ActionRecord):boolean {return action.state==='succeeded' || (action.state==='uncertain' && this.resolved(action.id));}
   manifest(context:WorkContext):RecoveryManifest {const records=this.records(context).map(item=>item.action);return {actions:records.slice(-32),resolutions:records.filter(action=>this.resolved(action.id)).map(action=>action.id),truncated:records.length>32,instructions:'Resume a completed action by ID. Read receipts expire when work ends. A paired owner can reconcile supported changes with service evidence. A matching completed or resolved change still requires a repeat challenge.'};}
   private retainedResult(id:string):Json|undefined {
-    const read=this.readReceipts.get(id);if(read)return structuredClone(read.value);
-    const saved=this.db.prepare('SELECT private_result FROM work_action_invocations WHERE action_id=? AND private_result IS NOT NULL LIMIT 1').get(id);
-    return typeof saved?.private_result==='string'?jsonValue.parse(JSON.parse(saved.private_result)):undefined;
+    const read=this.readReceipts.get(id);if(read){if(read.encoded && read.generation!==this.secretGeneration())throw Error('Known secrets changed after encoded output was produced');assertEncodedResult(read.value,this.inputRedactor);return structuredClone(read.value);}
+    const saved=this.db.prepare('SELECT capability,private_result FROM work_action_invocations WHERE action_id=? AND private_result IS NOT NULL LIMIT 1').get(id);
+    if(saved?.capability==='run_scratch_shell' && this.encodedResultGenerations.get(id)!==this.secretGeneration())return undefined;
+    if(typeof saved?.private_result!=='string')return undefined;const value=jsonValue.parse(JSON.parse(saved.private_result));if(saved.capability==='run_scratch_shell')assertEncodedResult(value,this.inputRedactor,true,this.secretValues());return value;
   }
   beginRecovery(context:WorkContext):RecoveryManifest {
     this.admit(context,true);this.db.prepare('UPDATE work_action_state SET epoch=epoch+1 WHERE kind=? AND work_id=?').run(context.work.kind,context.work.id);return this.manifest(context);
@@ -223,6 +229,11 @@ export class WorkActionService {
   }
   isSkillExecution(id:string,callId:string):boolean {
     return !!this.db.prepare("SELECT 1 FROM code_executions e JOIN work_action_invocations i ON i.kind=e.kind AND i.work_id=e.work_id AND json_extract(i.source,'$.kind')='guest' AND json_extract(i.source,'$.executionId')=e.id WHERE e.id=? AND e.call_id=? AND i.capability='select_skill' LIMIT 1").get(id,callId);
+  }
+  encodedCodeCall(context:WorkContext,callId:string):boolean|null {
+    const rows=this.db.prepare(`SELECT e.id FROM code_executions e WHERE e.call_id=? AND ((e.kind='command' AND EXISTS (SELECT 1 FROM commands c WHERE c.id=e.work_id AND c.bot_id=?)) OR (e.kind='task' AND EXISTS (SELECT 1 FROM task_attempts t WHERE t.id=e.work_id AND t.bot_id=?)))`).all(callId,context.botId,context.botId);
+    if(!rows.length)return null;
+    return rows.some(row=>!!this.db.prepare("SELECT 1 FROM work_action_invocations i JOIN action_journal a ON a.id=i.action_id WHERE json_extract(i.source,'$.kind')='guest' AND json_extract(i.source,'$.executionId')=? AND i.capability IN ('file_read','terminal_read','run_scratch_shell') AND a.state='succeeded' LIMIT 1").get(String(row.id)));
   }
   inspect(work:WorkRef) {
     const executions=this.db.prepare('SELECT id,response_id AS responseId,call_id AS callId,source,source_hash AS sourceHash,outcome,result FROM code_executions WHERE kind=? AND work_id=? ORDER BY rowid').all(work.kind,work.id);
@@ -365,10 +376,12 @@ export class WorkActionService {
     try {this.admit(context);cap.check(input,context,action);claim?.start();this.journal.startInInstanceTransaction(prepared.permit,this.db,{id:actionId,fingerprint,work:context.work});this.db.exec('COMMIT');this.journal.finalizeInstanceStart(prepared.permit);}
     catch(error){this.db.exec('ROLLBACK');this.journal.cancel(actionId);if(error instanceof ActionDeferred)return {kind:'blocked',reason:this.inputRedactor(error.message)};this.close(context,'authority');return {kind:'blocked',reason:context.signal.aborted?'Work stopped':'Action could not start'};}
     let output:Json;let visible:string;
+    const outputGeneration=this.secretGeneration();
     try {output=await cap.execute(input,context,action);if(Buffer.byteLength(encoded(output))>cap.maxResultBytes)throw Error('Result exceeds the limit');visible=route!=='direct' && description.effect==='read'?'Read completed':this.inputRedactor(cap.visible(output)).slice(0,16000);} catch(error) {if(!this.completedHopParents.has(actionId))this.journal.finish(actionId,error instanceof ActionFailed || error instanceof ActionDenied?'failed':'uncertain',error instanceof ActionFailed?this.inputRedactor(error.safeResult).slice(0,16000):error instanceof ActionDenied?'Action denied':'Outcome unknown');if(error instanceof ActionDenied){this.close(context,'denied');return {kind:'blocked',reason:'Action denied'};}this.admit(context,true);cap.check(input,context,action);return {kind:'status',action:this.journal.get(actionId)!};}
+    try {if(['file_read','terminal_read','run_scratch_shell'].includes(request.name)){if(this.secretGeneration()!==outputGeneration)throw Error('Secret state changed');assertEncodedResult(output,this.inputRedactor,request.name==='run_scratch_shell',request.name==='run_scratch_shell'?this.secretValues():[]);}} catch {if(!this.completedHopParents.has(actionId))this.journal.finish(actionId,description.effect==='read'?'failed':'uncertain','Encoded action result cannot be retained safely');return {kind:'blocked',reason:'Encoded action result cannot be retained safely'};}
     const safeOutput=this.safeResult(output);
-    if(description.effect==='read')this.readReceipts.set(actionId,{work:encoded(context.work),value:structuredClone(safeOutput)});
-    else this.db.prepare('UPDATE work_action_invocations SET private_result=? WHERE action_id=?').run(encoded(safeOutput),actionId);
+    if(description.effect==='read')this.readReceipts.set(actionId,{work:encoded(context.work),value:structuredClone(safeOutput),generation:this.secretGeneration(),encoded:['file_read','terminal_read'].includes(request.name)});
+    else {this.db.prepare('UPDATE work_action_invocations SET private_result=? WHERE action_id=?').run(encoded(safeOutput),actionId);if(request.name==='run_scratch_shell')this.encodedResultGenerations.set(actionId,this.secretGeneration());}
     if(!this.completedHopParents.has(actionId))this.journal.finish(actionId,'succeeded',visible);
     this.admit(context,true);cap.check(input,context,action);
     cap.releaseResult?.(output,context);
@@ -386,6 +399,7 @@ export class WorkActions {
   isPrivate() {return this.service.isPrivate(this.context);}
   assertPrivateDisclosure() {this.service.assertPrivateDisclosure(this.context);}
   isSkillExecution(id:string,callId:string) {return this.service.isSkillExecution(id,callId);}
+  encodedCodeCall(callId:string) {return this.service.encodedCodeCall(this.context,callId);}
   invoke(request:{source:InvocationSource;name:string;input:unknown;intent:ActionIntent}) {return this.service.invoke(this.context,request);}
   beginRecovery() {return this.service.beginRecovery(this.context);}
   manifest() {return this.service.manifest(this.context);}

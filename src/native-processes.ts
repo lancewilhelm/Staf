@@ -43,6 +43,10 @@ export class NativeProcesses {
   private readonly live=new Map<string,Live>();
   private readonly interactions=new Map<string,{tail:Promise<void>;pending:number}>();
   private closing=false;
+  private outputGuard:(bytes:Buffer,partial:boolean)=>void=()=>{};
+  private secretGeneration:()=>number=()=>0;
+  setSecretGeneration(get:()=>number):void {this.secretGeneration=get;}
+  setOutputGuard(guard:(bytes:Buffer,partial:boolean)=>void):void {this.outputGuard=guard;}
   constructor(private readonly db:DatabaseSync,private readonly outputFilter:()=>ByteRedactor=()=>byteStreamRedactor({})) {
     db.exec("UPDATE native_processes SET state='unknown' WHERE state IN ('starting','running','stopping')");
   }
@@ -65,14 +69,15 @@ export class NativeProcesses {
     if(cursor>next)throw Error('Output cursor is beyond the observed output');
     const rows=this.db.prepare('SELECT cursor,stream,data FROM native_process_output WHERE process_id=? AND cursor>=? ORDER BY cursor').all(id,Math.max(cursor,first));
     let bytes=0,pageNext=Math.max(cursor,first);
-    const chunks=[];
+    const chunks=[];const observed=new Map<string,Buffer[]>();
     for(const row of rows) {
       if(!(row.data instanceof Uint8Array))throw Error('Invalid stored process output');
       const data=Buffer.from(row.data);if(bytes+data.length>nativeProcessLimits.pageBytes)break;
-      bytes+=data.length;pageNext=Number(row.cursor)+1;
+      bytes+=data.length;pageNext=Number(row.cursor)+1;const stream=String(row.stream),prior=observed.get(stream)??[];prior.push(data);observed.set(stream,prior);
       let text:string|null=null;try{text=new TextDecoder('utf-8',{fatal:true}).decode(data);}catch{/* Base64 preserves bytes that are not a complete UTF-8 chunk. */}
       chunks.push({cursor:row.cursor,stream:row.stream,data:data.toString('base64'),text});
     }
+    const partial=cursor>0 || first>0 || pageNext<next || !process.outputComplete;for(const data of observed.values())this.outputGuard(Buffer.concat(data),partial);
     return {processId:id,process,encoding:'base64',redaction:'known-credentials',gap:cursor<first,firstCursor:first,nextCursor:pageNext,observedCursor:next,hasMore:pageNext<next,chunks,limits:nativeProcessLimits};
   }
   private append(id:string,stream:'stdout'|'stderr'|'terminal',buffer:Buffer) {
@@ -102,17 +107,18 @@ export class NativeProcesses {
     this.db.prepare("INSERT INTO native_processes (id,bot_id,work_kind,work_id,action_id,cwd,mode,state,created_ms) VALUES (?,?,?,?,?,?,?,'starting',?)").run(id,work.botId,work.work.kind,work.work.id,action.id,cwd,input.mode,Date.now());
     this.db.prepare('UPDATE native_processes SET retained=?,cols=?,rows=? WHERE id=?').run(input.retain?1:0,input.cols??null,input.rows??null,id);
     let done!:()=>void;const finished=new Promise<void>(resolve=>{done=resolve;});
-    const filters=new Map<'stdout'|'stderr'|'terminal',ByteRedactor>();let flushed=false;
-    const flush=()=>{if(flushed)return;flushed=true;for(const [stream,filter] of filters)this.append(id,stream,filter.finish());};
+    const filters=new Map<'stdout'|'stderr'|'terminal',ByteRedactor>();let flushed=false,outputFenced=false;const initialGeneration=this.secretGeneration();
+    const retain=(stream:'stdout'|'stderr'|'terminal',data:Buffer)=>{if(!data.length)return;if(this.secretGeneration()!==initialGeneration){outputFenced=true;return;}this.append(id,stream,data);};
+    const flush=()=>{if(flushed)return;flushed=true;for(const [stream,filter] of filters)retain(stream,filter.finish());};
     const lifetime=work.workSignal??work.signal;
     const abort=()=>{this.stop(id);};let live!:Live;
     const observers:ProcessObservers={
       started:pid=>{this.db.prepare("UPDATE native_processes SET state=CASE WHEN stop_requested=1 THEN 'stopping' ELSE 'running' END,pid=? WHERE id=?").run(pid,id);if(lifetime.aborted || this.get(id)?.stopRequested)this.stop(id);},
-      output:(stream,data)=>{const filter=filters.get(stream)??this.outputFilter();filters.set(stream,filter);this.append(id,stream,filter.write(data));},
+      output:(stream,data)=>{if(this.secretGeneration()!==initialGeneration){outputFenced=true;return;}const filter=filters.get(stream)??this.outputFilter();filters.set(stream,filter);retain(stream,filter.write(data));},
       failed:()=>{this.db.prepare("UPDATE native_processes SET state='failed' WHERE id=?").run(id);},
       exited:(code,signal)=>{this.db.prepare("UPDATE native_processes SET exit_code=?,exit_signal=? WHERE id=?").run(code,signal,id);},
       lost:()=>{flush();if(live.timer)clearTimeout(live.timer);lifetime.removeEventListener('abort',abort);this.live.delete(id);this.db.prepare("UPDATE native_processes SET state='unknown' WHERE id=?").run(id);done();},
-      closed:(code,signal)=>{flush();if(live.timer)clearTimeout(live.timer);lifetime.removeEventListener('abort',abort);this.live.delete(id);this.db.prepare("UPDATE native_processes SET state=CASE WHEN state='failed' THEN 'failed' ELSE 'exited' END,exit_code=?,exit_signal=?,output_complete=1 WHERE id=?").run(code,signal,id);done();},
+      closed:(code,signal)=>{flush();if(live.timer)clearTimeout(live.timer);lifetime.removeEventListener('abort',abort);this.live.delete(id);this.db.prepare("UPDATE native_processes SET state=CASE WHEN state='failed' THEN 'failed' ELSE 'exited' END,exit_code=?,exit_signal=?,output_complete=? WHERE id=?").run(code,signal,outputFenced?0:1,id);done();},
     };
     let handle:ProcessHandle;
     try {handle=input.backend.launch(cwd,observers);} catch(error){this.db.prepare("UPDATE native_processes SET state='failed' WHERE id=?").run(id);throw error;}

@@ -592,7 +592,14 @@ fresh status in a transient message copy, after provider initialization and any
 adapter preflight. At dispatch, built-in adapters refresh the messages and check
 the complete model-bound payload against the current secret redactor. If a new
 secret would change it, the call fails before sending. The check includes
-instructions, tool schemas, model settings, and replay. At preparation, tool
+instructions, tool schemas, model settings, and replay. Structured file and
+terminal results are decoded and checked again before replay and session writes.
+If known secrets change during a turn with encoded output, the turn is fenced.
+Running terminal capture stops retaining new bytes after a secret change and
+reports incomplete output. Historical structured pages use conservative
+boundary checks, which can reject safe output. Earlier durable output is not
+erased. The checks do not establish safety for every transformed or unattributed
+fragment, including arbitrary scratch output and older receipts. At preparation, tool
 descriptions are redacted; an offer is omitted if its identity or schema keys
 contain a known secret. Stored checkpoints are redacted again before writing; reasoning replay that cannot be retained safely
 causes the write to fail. A later revocation or newly recognized secret cannot
@@ -616,8 +623,8 @@ other notices and owner text. The service renews proofs only when it redacts
 already authenticated content. If redaction crosses an authenticated result
 boundary, the turn fails before provider dispatch instead of losing the result
 identity. The service binds a new result only when its exact structured span
-remains valid through persistence. An altered or truncated result without valid
-evidence does not create provenance; other text is not replaced. Older signed
+remains valid through persistence. A service-signed setup identity with unverifiable content fails closed; an
+untrusted or unrelated message does not create provenance; other text is not replaced. Older signed
 turns without a result span remain usable when their full content verifies.
 Isolated
 helpers do not inherit the parent's chat; separately approved helper text does

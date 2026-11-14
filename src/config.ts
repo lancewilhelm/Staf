@@ -44,7 +44,7 @@ export async function loadEnvironment(path: string, shell: Environment = process
 }
 
 /** Redact known credential values before output or conversation persistence. */
-function credentialValues(env: Environment): string[] {
+export function credentialValues(env: Environment): string[] {
   return credentialEnvironmentNames.map(name => env[name])
     .filter((value): value is string => typeof value === 'string' && value.length > 0);
 }

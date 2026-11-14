@@ -1527,11 +1527,15 @@ export class Instance {
   }
   private gmailSetupAuthentication(botId:string,session:Session,turn:NonNullable<Session['turns']>[number]) {
     const provenance=turn.gmailSetup,message=session.messages[turn.start];
-    if(!provenance || message?.role!=='user' || message.stafMessageId!=='command-user-'+provenance.continuationId || !this.db.prepare('SELECT 1 FROM question_sets q JOIN gmail_setup_requests g ON g.question_id=q.id WHERE q.id=? AND q.bot_id=? AND q.continuation_id=?').get(provenance.questionId,botId,provenance.continuationId) || provenance.proof!==this.gmailTurnProof(botId,session.id,provenance.questionId,provenance.continuationId,message.stafMessageId))return null;
+    if(!provenance || message?.role!=='user' || message.stafMessageId!=='command-user-'+provenance.continuationId || provenance.proof!==this.gmailTurnProof(botId,session.id,provenance.questionId,provenance.continuationId,message.stafMessageId))return null;
+    if(!this.db.prepare('SELECT 1 FROM question_sets q JOIN gmail_setup_requests g ON g.question_id=q.id WHERE q.id=? AND q.bot_id=? AND q.continuation_id=?').get(provenance.questionId,botId,provenance.continuationId))throw Error('Cannot safely authenticate the Gmail setup result');
     const full=provenance.contentProof===this.gmailTurnProof(botId,session.id,provenance.questionId,provenance.continuationId,message.stafMessageId,message.content);
     const result=provenance.result;
     const segment=!!result && result.end<=message.content.length && result.proof===this.gmailResultProof(botId,session.id,provenance.questionId,provenance.continuationId,message.stafMessageId,result.start,result.end,message.content.slice(result.start,result.end));
-    return full || segment ? {message,provenance,full,segment} : null;
+    // A service-signed identity is meaningful even if its content proofs no
+    // longer verify. Do not silently downgrade that turn to ordinary text.
+    if(!full && !segment)throw Error('Cannot safely authenticate the Gmail setup result');
+    return {message,provenance,full,segment};
   }
   private gmailNoticeAuthentication(botId:string,session:Session,turn:NonNullable<Session['turns']>[number]) {
     const notice=turn.gmailNotice,message=session.messages[turn.start];
