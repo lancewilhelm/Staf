@@ -459,7 +459,7 @@ Schema 53 stores main-chat question definitions, drafts, resolution, the origina
 include a list of choices; ordinary questions accept a write-in. Paired clients can
 inspect `GET /api/question-sets`, save an entire draft with
 `POST /api/question-sets/ID/draft`, and resolve it through `submit` or `dismiss`.
-A protected step is saved or selected separately with `POST /api/question-sets/ID/secret/INDEX/save|select`; its value goes directly to the secret store; a new value may use an owner-chosen name. The instance database retains only its saved, skipped, or unavailable status. Saving a step does not grant its use, and a deleted or replaced selection becomes unavailable. The service validates choices and retains explicit skipped results. The same
+A protected step is saved or selected separately with `POST /api/question-sets/ID/secret/INDEX/save|select|clear`; its value goes directly to the secret store; a new value may use an owner-chosen name. Clearing a selection keeps the saved value. The instance database retains only its saved, skipped, or unavailable status. Saving a step does not grant its use, and a deleted or replaced selection becomes unavailable. The service validates choices and retains explicit skipped results. The same
 resolution is idempotent; a different resolution cannot replace it.
 
 A completed origin permits a new, correlated continuation. A reserved command

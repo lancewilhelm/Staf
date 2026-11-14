@@ -593,7 +593,8 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
     else if(request.workKind!=='command' || request.originState!=='completed')throw Error('Gmail setup work was interrupted');
     const input=parseGmailSetupDraft(request.draft),selection=secretRequests.questionStepSelection(id,2);
     if(!selection)throw Error('Save or select the client secret first');
-    if(redact(input.email)!==input.email || redact(input.clientId)!==input.clientId)throw Error('Gmail account and client ID cannot contain a known secret');
+    const rawEmail=request.draft[0]?.writeIn??'',rawClientId=request.draft[1]?.writeIn??'';
+    if(redact(rawEmail)!==rawEmail || redact(rawClientId)!==rawClientId || redact(input.email)!==input.email || redact(input.clientId)!==input.clientId)throw Error('Gmail account and client ID cannot contain a known secret');
     const current=instance.plugins.gmailConnection();if(current && (current.connected || current.accountId!==input.email))throw Error('Gmail is already connected or a different account is configured');
     return {request,input,selection};
   }
@@ -1356,7 +1357,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
         },settled:state=>{guidedGmailUrls.delete(id);if(state!=='connected')instance.questionSets.setGmailSetup(id,state);}});guidedGmailUrls.set(id,result.url);return json(200,result);}catch(error){instance.questionSets.setGmailSetup(id,'failed');throw error;}
       }
       if(req.method==='GET' && req.url==='/api/question-sets'){reconcileGuidedGmailStatus();return json(200,instance.questionSets.list().map(request=>({...request,secretStatuses:request.questions.map((question,index)=>question.kind==='secret'?secretRequests.questionStepStatus(request.id,index):null),secretSelections:request.questions.map((question,index)=>question.kind==='secret'?secretRequests.questionStepSelection(request.id,index)??null:null)})));}
-      const questionSecret=req.url?.match(/^\/api\/question-sets\/([\w-]+)\/secret\/(\d+)\/(save|select)$/);
+      const questionSecret=req.url?.match(/^\/api\/question-sets\/([\w-]+)\/secret\/(\d+)\/(save|select|clear)$/);
       if(req.method==='POST' && questionSecret?.[1] && questionSecret[2] && questionSecret[3]) {
         const request=instance.questionSets.list().find(item=>item.id===questionSecret[1]),index=Number(questionSecret[2]),question=request?.questions[index];
         if(!instance.authorized(token))return json(401,{error:'Unauthorized'});
@@ -1364,6 +1365,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
         if(request.workKind==='task')instance.assertWorkAuthority({kind:'task',id:request.workId});
         else if(request.originState==='pending')instance.assertWorkAuthority({kind:'command',id:request.workId});
         else if(request.originState!=='completed')throw Error('Interrupted work cannot accept a secret');
+        if(questionSecret[3]==='clear') {const input=z.strictObject({name:z.string().min(1).max(120),revision:z.string().uuid()}).parse(value);if(request.gmailSetup==='connected')throw Error('Connected setup cannot be changed');secretRequests.clearQuestionStep({questionId:request.id,step:index,...input});if(request.gmailSetup==='authorizing')gmailAuth.cancel();return json(200,{status:'skipped'});}
         if(questionSecret[3]==='save') {
           const input=z.strictObject({value:z.string().min(1).max(16000).refine(text=>!text.includes('\0')),name:z.string().trim().min(1).max(120).optional()}).parse(value),name=input.name??question.name;
           if(redact(name)!==name || containsUnsafeWebUrl(name) || name.includes(input.value) || JSON.stringify({questions:request.questions,draft:request.draft}).includes(JSON.stringify(input.value).slice(1,-1)))throw Error('Secret appears in question metadata or ordinary answers');
