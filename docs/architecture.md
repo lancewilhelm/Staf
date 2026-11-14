@@ -594,9 +594,10 @@ sending. An adapter that performs asynchronous preparation must call the supplie
 `refreshMessages` callback at its own dispatch boundary. A later revocation
 cannot recall input already sent to a provider.
 
-A task that captures a Gmail setup continuation or its assistant reply also
-receives current status. The task snapshot marks those message identities for
-that agent, retaining the mark across retries and partial context retention.
+A task that captures a Gmail setup continuation, its assistant reply, or a
+related task outcome also receives current status. The task snapshot marks those
+message identities for that agent, retaining the mark across retries and partial
+context retention.
 Older snapshots with message IDs use the source chat to recover the mark when
 possible. Isolated helpers do not inherit the parent's chat. Separately approved
 helper text does not establish provenance for a paraphrased Gmail claim or grant

@@ -500,7 +500,8 @@ fresh `gmailConnectionAtDelivery` after provider initialization and adapter
 preflight. This value is added to a transient request copy, not the saved
 question result. Tasks that retain the originating agent's setup conversation
 receive the current status too, including scheduled tasks and retries. Captured
-message identities preserve this association when other context is shortened.
+message identities also preserve it for related task outcome notices and when
+other context is shortened.
 Older task snapshots can recover it when their message IDs and source chat remain
 available. Isolated helpers do not inherit another agent's setup conversation.
 Older delivery snapshots are removed from replay; a truncated result is omitted

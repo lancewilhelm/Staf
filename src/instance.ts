@@ -1,5 +1,5 @@
 import {isProviderId} from './provider-ids.js';
-import {QuestionSets,questionSetSchema,taskQuestionSetSchema} from './question-sets.js';
+import {QuestionSets,capturedTaskConversation,questionSetSchema,taskQuestionSetSchema,type CapturedTaskMessage} from './question-sets.js';
 import {parseToolMode,type ToolMode} from './tool-mode.js';
 import {InstanceCore} from './instance-core.js';
 import {ProviderDefaultsStore} from './provider-choices.js';
@@ -1349,7 +1349,7 @@ export class Instance {
     const row=this.db.prepare('SELECT a.profile,a.context,a.state,a.limit_ms AS limitMs,t.objective FROM task_attempts a JOIN tasks t ON t.id=a.task_id WHERE a.id=?').get(id);
     if (!row || row.state !== 'queued' || typeof row.profile !== 'string' || typeof row.context !== 'string') throw Error('Task is not queued');
     const profile=parseCapturedProfile(JSON.parse(row.profile));
-    const context=JSON.parse(row.context) as Array<{id?:string;role:string;content:string;isNotice:number;gmailSetupContext?:boolean}>;
+    const context=JSON.parse(row.context) as CapturedTaskMessage[];
     return {profile,context,objective:String(row.objective),limitMs:Number(row.limitMs)};
   }
   private taskAnnouncement(botId:string,content:string) { const id=randomUUID();this.db.prepare("INSERT INTO messages VALUES (?, ?, 'assistant', ?, (SELECT COALESCE(MAX(seq),0)+1 FROM messages WHERE bot_id=?))").run(id,botId,content,botId);this.db.prepare("INSERT INTO task_notices (message_id,bot_id) VALUES (?,?)").run(id,botId); }
@@ -1432,7 +1432,16 @@ export class Instance {
     try {const next=this.finishTask(id,state,outcome,disclosureId);this.db.exec('COMMIT');return next;}
     catch(error){this.db.exec('ROLLBACK');if(disclosureId)this.interruptDisclosure(disclosureId);throw error;}
   }
-  private taskContext(botId:string) {const gmailIds=this.questionSets.gmailChatMessageIds(botId);return this.db.prepare('SELECT m.id,m.role,m.content,EXISTS(SELECT 1 FROM task_notices n WHERE n.message_id=m.id) AS isNotice FROM messages m WHERE m.bot_id=? AND NOT EXISTS(SELECT 1 FROM gmail_private_messages p WHERE p.message_id=m.id) ORDER BY m.seq').all(botId).map(row=>typeof row.id==='string' && gmailIds.has(row.id)?{...row,gmailSetupContext:true}:row);}
+  private taskContext(botId:string) {
+    const gmailIds=this.questionSets.gmailChatMessageIds(botId);
+    const taskNotices=this.db.prepare(`SELECT m.id,a.id AS attempt_id,a.context FROM task_notices n JOIN messages m ON m.id=n.message_id JOIN task_attempts a ON a.bot_id=n.bot_id AND m.content='Task '||a.id||' '||a.state||': '||a.outcome WHERE n.bot_id=? AND a.state IN ('completed','failed','stopped') ORDER BY m.seq`).all(botId);
+    const taskQuestion=this.db.prepare("SELECT 1 FROM task_question_sets q JOIN gmail_setup_requests g ON g.question_id=q.id WHERE q.attempt_id=? AND q.state<>'open'");
+    for(const notice of taskNotices) {
+      if(typeof notice.id!=='string' || typeof notice.attempt_id!=='string' || typeof notice.context!=='string')continue;
+      try {const context:unknown=JSON.parse(notice.context);if(taskQuestion.get(notice.attempt_id) || Array.isArray(context) && capturedTaskConversation(context,gmailIds).capturedGmailSetup)gmailIds.add(notice.id);}catch{/* A damaged earlier snapshot cannot establish provenance. */}
+    }
+    return this.db.prepare('SELECT m.id,m.role,m.content,EXISTS(SELECT 1 FROM task_notices n WHERE n.message_id=m.id) AS isNotice FROM messages m WHERE m.bot_id=? AND NOT EXISTS(SELECT 1 FROM gmail_private_messages p WHERE p.message_id=m.id) ORDER BY m.seq').all(botId).map(row=>typeof row.id==='string' && gmailIds.has(row.id)?{...row,gmailSetupContext:true}:row);
+  }
   messages(botId: string) { return this.db.prepare('SELECT id, role, content FROM messages WHERE bot_id=? ORDER BY seq').all(botId); }
   hasBot(botId:string) {return !!this.botIdentity(botId);}
   command(id: string) { const row=this.db.prepare('SELECT c.id,c.bot_id AS botId,c.content,c.state,c.error,p.profile AS capturedProfile FROM commands c LEFT JOIN command_profiles p ON p.command_id=c.id WHERE c.id=?').get(id);if(!row)return undefined;const {capturedProfile,...command}=row;return {id:command.id,botId:command.botId,content:command.content,state:command.state,error:command.error,toolMode:parseToolModeFromProfile(capturedProfile)}; }

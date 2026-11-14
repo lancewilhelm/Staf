@@ -1,6 +1,7 @@
 import {randomUUID} from 'node:crypto';
 import {DatabaseSync} from 'node:sqlite';
 import {z} from 'zod';
+import type {Message} from './types.js';
 
 const text=z.string().trim().min(1).max(1000);
 const choices=z.array(text).min(1).max(12).refine(values=>new Set(values).size===values.length,{message:'Choices must be distinct'});
@@ -25,13 +26,26 @@ export const taskQuestionSetSchema=`CREATE TABLE IF NOT EXISTS task_question_set
 );`;
 export const gmailConnectionNotice='Credential status reflects locally saved grants, not Google access or agent and model permissions. Earlier authorization may refer to a different account.';
 export type GmailConnectionStatus={status:'credentials_available'|'credentials_unavailable'|'disconnected'|'unknown';enabled:boolean|null};
+export type CapturedTaskMessage={id?:string;role:string;content:string;isNotice:number;gmailSetupContext?:boolean};
+export function capturedTaskConversation(context:CapturedTaskMessage[],gmailIds:Set<string>) {
+ const messages:Message[]=[],notices:string[]=[],markers:boolean[]=[];let markedNotice=false;
+ for(const item of context) {
+  const marked=item.gmailSetupContext===true || (typeof item.id==='string' && gmailIds.has(item.id));
+  if(item.isNotice){notices.push(item.content);markedNotice ||= marked;continue;}
+  if(item.role==='user'){if(messages.at(-1)?.role==='user'){messages.pop();markers.pop();}messages.push({role:'user',content:item.content});markers.push(marked);}
+  else if(item.role==='assistant' && messages.at(-1)?.role==='user'){messages.push({role:'assistant',content:item.content});markers.push(marked);}
+ }
+ if(messages.at(-1)?.role==='user'){messages.pop();markers.pop();}
+ return {messages,notices,capturedGmailSetup:markedNotice || markers.some(Boolean)};
+}
+
 export class QuestionSets {
  constructor(private db:DatabaseSync) {}
  gmailChatMessageIds(botId:string):Set<string> {
   const ids=new Set<string>();
-  const questions=this.db.prepare(`SELECT u.id,u.seq FROM question_sets q JOIN gmail_setup_requests g ON g.question_id=q.id JOIN commands c ON c.id=q.continuation_id AND c.state='completed' JOIN messages u ON u.id='command-user-'||q.continuation_id AND u.bot_id=q.bot_id WHERE q.bot_id=? AND q.state<>'open'`).all(botId);
+  const questions=this.db.prepare(`SELECT q.continuation_id,u.seq FROM question_sets q JOIN gmail_setup_requests g ON g.question_id=q.id JOIN commands c ON c.id=q.continuation_id AND c.state='completed' LEFT JOIN messages u ON u.id='command-user-'||q.continuation_id AND u.bot_id=q.bot_id WHERE q.bot_id=? AND q.state<>'open'`).all(botId);
   const next=this.db.prepare(`SELECT m.id,m.role FROM messages m WHERE m.bot_id=? AND m.seq>? AND NOT EXISTS(SELECT 1 FROM task_notices n WHERE n.message_id=m.id) ORDER BY m.seq LIMIT 1`);
-  for(const question of questions) {if(typeof question.id!=='string' || typeof question.seq!=='number')continue;ids.add(question.id);const answer=next.get(botId,question.seq);if(answer?.role==='assistant' && typeof answer.id==='string')ids.add(answer.id);}
+  for(const question of questions) {if(typeof question.continuation_id!=='string')continue;ids.add('command-user-'+question.continuation_id);if(typeof question.seq!=='number')continue;const answer=next.get(botId,question.seq);if(answer?.role==='assistant' && typeof answer.id==='string')ids.add(answer.id);}
   return ids;
  }
  create(id:string,botId:string,commandId:string,input:z.infer<typeof questionSetInput>) {
