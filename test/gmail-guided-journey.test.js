@@ -12,7 +12,7 @@ const wait=async fn=>{for(let i=0;i<400;i++){const value=await fn();if(value)ret
 const secret='synthetic-client-secret-81283',refresh='synthetic-refresh-token-71293';
 
 async function fixture(mode='direct',extra={}) {
- const dir=mkdtempSync(join(tmpdir(),'staf-guided-gmail-')),path=join(dir,'instance.sqlite'),seen=[],google=[];mkdirSync(join(dir,'auth'));const legacy=Buffer.from(JSON.stringify({email:'legacy@example.test',clientId:'legacy-client',clientSecret:'synthetic-legacy-client-secret',refreshToken:'synthetic-legacy-refresh-token'}));writeFileSync(join(dir,'auth','gmail.json'),legacy);
+ const dir=mkdtempSync(join(tmpdir(),'staf-guided-gmail-')),path=join(dir,'instance.sqlite'),seen=[],google=[];mkdirSync(join(dir,'auth'));const legacy=Buffer.from(JSON.stringify({email:extra.legacyEmail??'legacy@example.test',clientId:'legacy-client',clientSecret:'synthetic-legacy-client-secret',refreshToken:'synthetic-legacy-refresh-token'}));writeFileSync(join(dir,'auth','gmail.json'),legacy);
  const options={dataDir:dir,env:{},gmailPollIntervalMs:3600000,gmailRequest:async(url,options={})=>{google.push({url:String(url),body:String(options.body??'')});if(extra.google)return extra.google(url,options);return new URL(url).hostname==='oauth2.googleapis.com'?Response.json({access_token:'synthetic-access-token-7415',refresh_token:refresh,scope:'https://www.googleapis.com/auth/gmail.readonly',token_type:'Bearer'}):Response.json({emailAddress:'owner@example.test',historyId:'100'});},providerFactory:async()=>({name:'synthetic',capabilities:{toolCalls:true},async complete(messages,_tools,opts){seen.push(JSON.stringify(messages));const turn=messages.slice(messages.findLastIndex(item=>item.role==='user')+1);if((extra.task || opts.currentUserInput==='Set up Gmail')&&!turn.some(item=>item.role==='tool')){const guest=mode==='code';return {role:'assistant',content:null,tool_calls:[{id:'setup',type:'function',function:guest?{name:'code_mode',arguments:JSON.stringify({source:'return await capabilities.guide_gmail_setup({});'})}:{name:'guide_gmail_setup',arguments:'{}'}}]};}return {role:'assistant',content:'Done'};}})};
  const dependencies={credentialTransition:extra.credentialTransition};let app=startInstance(path,0,options,dependencies),port=await app.listen(),token;
  const call=async(route,body,auth=token)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{...(auth?{Authorization:`Bearer ${auth}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});const value=await response.json();return {status:response.status,value};};
@@ -57,6 +57,16 @@ test('guided Gmail keeps reviewed grants and connection on each precommit fault 
    assert.ok(!readFileSync(f.path).includes(Buffer.from(secret)));assert.ok(!readFileSync(f.path).includes(Buffer.from(refresh)));
   }finally{store?.close();await f.close();}
  }
+});
+
+test('a failed reviewed reconnect preserves a connected legacy-only Gmail configuration and permissions',async()=>{
+ let fault='before-commit';const f=await fixture('direct',{legacyEmail:'owner@example.test',credentialTransition:(kind,stage)=>{if(kind==='gmail' && stage===fault)throw Error('Synthetic failure');}});try{
+  await f.restart(()=>{const instance=new Instance(f.path);instance.plugins.gmailConnect({email:'owner@example.test',clientId:'legacy-client'},'90');instance.plugins.gmailSetAccess(f.bot.id,true);instance.plugins.gmailSetModelAccess(f.bot.id,'live','fixture',true);instance.plugins.gmailSetWorkModelAccess(f.bot.id,'live','fixture',true);instance.plugins.gmailSetEnabled(true);instance.close();});
+  const route=`/api/question-sets/${f.q.id}`,review=await f.call(route+'/gmail-preview');assert.equal(review.status,200,JSON.stringify(review.value));const before=(await f.call('/api/plugins')).value.find(item=>item.id==='gmail'),grants=(await f.call('/api/secret-grants')).value;
+  const start=await f.call(route+'/gmail-start',{...review.value,confirm:true,confirmDisplacements:false});assert.equal(start.status,200,JSON.stringify(start.value));assert.equal((await fetch(callback(start.value.url))).status,400);
+  const after=(await f.call('/api/plugins')).value.find(item=>item.id==='gmail');assert.deepEqual(after.config,before.config);assert.equal(after.connected,true);assert.equal(after.enabled,true);assert.deepEqual(after.agentAccessIds,before.agentAccessIds);assert.deepEqual(after.modelAccess,before.modelAccess);assert.deepEqual(after.workModelAccess,before.workModelAccess);assert.deepEqual((await f.call('/api/secret-grants')).value,grants);assert.deepEqual(readFileSync(join(f.dir,'auth','gmail.json')),f.legacy);
+  fault=null;await f.restart();assert.equal((await f.call('/api/plugins')).value.find(item=>item.id==='gmail').enabled,true);assert.deepEqual((await f.call('/api/secret-grants')).value,grants);assert.deepEqual(readFileSync(join(f.dir,'auth','gmail.json')),f.legacy);
+ }finally{await f.close();}
 });
 
 test('guided Gmail recovers abrupt exits at each credential transaction boundary',async()=>{
