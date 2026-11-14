@@ -595,14 +595,15 @@ sending. An adapter that performs asynchronous preparation must call the supplie
 cannot recall input already sent to a provider.
 
 A task that captures a Gmail setup continuation, its assistant reply, or a
-related task outcome also receives current status. The task snapshot marks those
-message identities for that agent, retaining the mark across retries and partial
-context retention.
-Older snapshots with message IDs use the source chat to recover the mark when
-possible. Isolated helpers do not inherit the parent's chat. Separately approved
-helper text does not establish provenance for a paraphrased Gmail claim or grant
-the helper access to Gmail status. Truncated prior setup results are omitted from
-the transient provider input rather than replaying a stale status.
+related task outcome also receives current status. The instance records those
+message identities and marks captured task snapshots for that agent. Chat turns
+carry a service-signed identity bound to their stored message. These records
+survive retries and partial context retention. The service never infers identity
+from a prefix in user or model text. Legacy snapshots without trustworthy
+identity do not acquire provenance from their content. An altered signed setup
+turn is replaced in transient input by the service-recorded outcome. Isolated
+helpers do not inherit the parent's chat; separately approved helper text does
+not grant access to Gmail status.
 
 That status does not verify Google access or agent and model permissions. Older results
 whose success was already overwritten cannot be reconstructed. The OAuth attempt

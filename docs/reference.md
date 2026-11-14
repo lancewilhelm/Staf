@@ -498,14 +498,16 @@ Google access or imply agent or model permission. Submitted and dismissed result
 include `gmailConnectionAtResolution`. Each relevant model request receives a
 fresh `gmailConnectionAtDelivery` after provider initialization and adapter
 preflight. This value is added to a transient request copy, not the saved
-question result. Tasks that retain the originating agent's setup conversation
-receive the current status too, including scheduled tasks and retries. Captured
-message identities also preserve it for related task outcome notices and when
-other context is shortened.
-Older task snapshots can recover it when their message IDs and source chat remain
-available. Isolated helpers do not inherit another agent's setup conversation.
-Older delivery snapshots are removed from replay; a truncated result is omitted
-from the transient request. The retained resolution stays unchanged. Both snapshots describe the current account, which
+question result. Schema 58 records service-owned message and task-notice
+identities and signs the corresponding chat-turn provenance. Tasks that retain
+the originating agent's setup conversation receive current status, including
+scheduled tasks and retries. Retained provenance survives shortened task context
+and a shifted or shortened signed chat turn. The service uses identity records,
+not matching user or model text, to decide when to refresh. An older snapshot
+without trustworthy identity is not attributed by its text. An altered signed
+setup turn is replaced in transient input by its recorded outcome; the retained
+resolution stays unchanged. Isolated helpers do not inherit another agent's
+setup conversation. Both snapshots describe the current account, which
 may differ from an earlier authorized account. A connection can change after a
 request is sent, and already transmitted model input cannot be recalled. The reviewed client approval is
 used for the attempt; durable grants, authorization history and the connection

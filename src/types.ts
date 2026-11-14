@@ -16,7 +16,7 @@ export type AssistantMessage = (
   | { role: 'assistant'; content: string; tool_calls?: ToolCall[] }
   | { role: 'assistant'; content?: string | null; tool_calls: ToolCall[] }) & { usage?: UsageReport; responseReplay?: {provider:'codex-direct';model:string;items:ResponseReplayItem[]} };
 export type Message =
-  | { role: 'user'; content: string }
+  | { role: 'user'; content: string; stafMessageId?:string }
   | AssistantMessage
   | { role: 'tool'; tool_call_id: string; content: string };
 export interface ToolParameter { type: string; description?: string; properties?: Record<string, ToolParameter>; items?: ToolParameter; required?: string[]; enum?: string[]; additionalProperties?: false; }
@@ -55,7 +55,7 @@ export interface Session {
   version: 1;
   /** Missing on older files; earlier attribution is not invented. Message indexes are end-exclusive. */
   usage?: UsageObservation[];
-  turns?: { start: number; end: number; provider: string }[];
+  turns?: { start: number; end: number; provider: string; gmailSetup?: {questionId:string;continuationId:string;proof:string;contentProof:string}; gmailNotice?: {commandId:string;noticeId:string;proof:string;contentProof:string} }[];
   id: string;
   provider: string | null;
   messages: Message[];

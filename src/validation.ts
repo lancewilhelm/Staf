@@ -39,7 +39,7 @@ export function isAssistantMessage(value: unknown): value is AssistantMessage {
 function isMessage(value: unknown): value is Message {
   if (!isRecord(value)) return false;
   if (value.role === 'assistant') return isAssistantMessage(value);
-  if (value.role === 'user') return typeof value.content === 'string';
+  if (value.role === 'user') return typeof value.content === 'string' && (value.stafMessageId===undefined || typeof value.stafMessageId==='string' && value.stafMessageId.length<=200);
   return value.role === 'tool' && typeof value.content === 'string' && typeof value.tool_call_id === 'string';
 }
 function isEvent(value: unknown): value is RuntimeEvent {
@@ -71,10 +71,13 @@ export function validSession(value: unknown, id: string, options: { allowPairedT
       if (!isRecord(turn) || !Number.isInteger(turn.start) || !Number.isInteger(turn.end) ||
           typeof turn.start !== 'number' || typeof turn.end !== 'number' || turn.start < previousEnd ||
           turn.end <= turn.start || turn.end > value.messages.length || typeof turn.provider !== 'string' ||
-          value.messages[turn.start]?.role !== 'user' || value.messages[turn.end - 1]?.role !== 'assistant') return false;
+          value.messages[turn.start]?.role !== 'user' || value.messages[turn.end - 1]?.role !== 'assistant' ||
+          (turn.gmailSetup !== undefined && (!isRecord(turn.gmailSetup) || typeof turn.gmailSetup.questionId !== 'string' || typeof turn.gmailSetup.continuationId !== 'string' || typeof turn.gmailSetup.proof !== 'string' || !/^[a-f0-9]{64}$/.test(turn.gmailSetup.proof) || typeof turn.gmailSetup.contentProof !== 'string' || !/^[a-f0-9]{64}$/.test(turn.gmailSetup.contentProof))) ||
+          (turn.gmailNotice !== undefined && (!isRecord(turn.gmailNotice) || typeof turn.gmailNotice.commandId !== 'string' || typeof turn.gmailNotice.noticeId !== 'string' || typeof turn.gmailNotice.proof !== 'string' || !/^[a-f0-9]{64}$/.test(turn.gmailNotice.proof) || typeof turn.gmailNotice.contentProof !== 'string' || !/^[a-f0-9]{64}$/.test(turn.gmailNotice.contentProof)))) return false;
       previousEnd = turn.end;
     }
   }
+  const serviceIds=value.messages.flatMap(message=>message.role==='user' && typeof message.stafMessageId==='string'?[message.stafMessageId]:[]);if(new Set(serviceIds).size!==serviceIds.length)return false;
   let expected: Message['role'] = 'user';
   let pending: string[] = [];
   let previous: Message['role'] | undefined;
