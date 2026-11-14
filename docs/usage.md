@@ -1131,7 +1131,7 @@ To set up your own Slack app:
 
 1. Create an app in the desired workspace, enable Socket Mode, and create an
    app-level token with `connections:write`. Under OAuth & Permissions add the
-   bot scopes `im:history` and `chat:write`; under Event Subscriptions subscribe
+   bot scopes `im:history`, `im:write`, and `chat:write`; under Event Subscriptions subscribe
    the bot to `message.im`. Enable **Interactivity** for the approval buttons.
    Install the app in the workspace. Enable the Messages
    tab and allow users to send messages if Slack presents that setting.
@@ -1151,10 +1151,14 @@ To set up your own Slack app:
    Alternatively, use **Settings → Plugins → Slack** without a model: enter the
    tokens, IDs and an existing active agent, choose **Connect and approve**, then
    explicitly **Allow agent access** and **Enable**.
-   Staf checks the bot token's workspace with Slack; the identity check does not
-   prove that the supplied user and DM IDs are correct.
-   A connected status means the Socket Mode WebSocket opened, not that a DM
-   has been tested. An app token or Slack settings error may require correcting
+   Staf checks the bot token's workspace and uses Slack's
+   [`conversations.open`](https://docs.slack.dev/reference/methods/conversations.open/)
+   with the approved user and `prevent_creation` to verify that the returned
+   one-person DM ID matches the supplied DM. `im:write` is required for this
+   check; reinstall the app if you add that scope. Staf does not create a new DM
+   as part of verification.
+   A connected status means the Socket Mode WebSocket opened after that check;
+   it does not mean a message was delivered. An app token or Slack settings error may require correcting
    the setup and enabling again.
 4. Send a harmless test DM from the approved user. The agent's response should
    appear in that DM, or in the originating thread for a threaded message.
@@ -1167,7 +1171,10 @@ their delivery waits until the same approved destination and agent are enabled a
 saved Slack tokens, while preserving the tokens, binding, and history. Delete saved configuration
 removes the binding and agent access as well. These actions do not uninstall the
 Slack app or revoke tokens at Slack. Reconnect requires the tokens again. Tokens
-are separate named secrets in the managed store. Old `auth/slack.json` files are
+are separate named secrets in the managed store. Existing configurations are
+rechecked before receiving or sending; a missing scope, failed check, or
+interrupted activation blocks delivery. Use **Retry connection** after reviewing
+and correcting the configuration. Old `auth/slack.json` files are
 left untouched and are not used. If guided setup fails after replacing approvals,
 the new approvals may remain while the connection is disabled. Inspect **Named
 secrets** and the Slack connection before retrying; Staf does not automatically

@@ -413,8 +413,14 @@ instance database. A failure between those separate databases can leave the new
 grants saved while the connection is disabled or unconfigured. The action reports
 failure, does not replay the setup, and the owner should inspect the connection
 and grants; durable cross-store recovery remains separate work. A restart leaves
-an unfinished review interrupted. Connection status comes from the Slack
-transport; identifying the bot's workspace does not verify the user or DM IDs.
+an unfinished review interrupted. Before any delivery, including after restart,
+Staf checks the bot workspace and compares the selected DM ID to the one returned
+by `conversations.open` for the selected user with `prevent_creation`; this needs
+the bot's `im:write` scope. A durable activation fence blocks automatic startup
+when setup is interrupted before the socket opens and the activation is committed.
+Socket startup succeeds only after the WebSocket opens; an interrupted activation
+requires a new owner-initiated retry. Connection status belongs to the exact
+generation and binding that was verified.
 These paths use synthetic Slack and model fixtures, not live account verification.
 
 ### Native process slice
