@@ -55,7 +55,7 @@ export interface Session {
   version: 1;
   /** Missing on older files; earlier attribution is not invented. Message indexes are end-exclusive. */
   usage?: UsageObservation[];
-  turns?: { start: number; end: number; provider: string; gmailSetup?: {questionId:string;continuationId:string;proof:string;contentProof:string}; gmailNotice?: {commandId:string;noticeId:string;proof:string;contentProof:string} }[];
+  turns?: { start: number; end: number; provider: string; gmailSetup?: {questionId:string;continuationId:string;proof:string;contentProof:string;result?:{start:number;end:number;proof:string}}; gmailNotice?: {commandId:string;noticeId:string;proof:string;contentProof:string} }[];
   id: string;
   provider: string | null;
   messages: Message[];

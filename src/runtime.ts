@@ -31,6 +31,7 @@ interface TurnOptions {
   signal?: AbortSignal;
   preserveObservedAfterAbort?: boolean;
   redact?: (text: string) => string;
+  redactSession?: (session: Session, redact: (text: string) => string) => Session;
   memory?: (ownerInput:string) => string[];
   skills?: SkillAccess | SkillTracker;
   beforeProvider?:()=>void;
@@ -45,10 +46,10 @@ export const tools: ToolDefinition[] = [{ type: 'function', function: {
 } }];
 
 // Transport-independent loop: providers see messages; clients receive persisted events.
-export async function runTurn({ session, store, provider, text, emit = () => {}, responseProgress, maxSteps = 4, clock = () => new Date().toISOString(), authorizeClock, actions, clockUnavailable, redact = text => text, signal, preserveObservedAfterAbort = false, task, memory, requestText, skills, beforeProvider, prepareProviderMessages, toolsDisabled = false }: TurnOptions): Promise<void> {
+export async function runTurn({ session, store, provider, text, emit = () => {}, responseProgress, maxSteps = 4, clock = () => new Date().toISOString(), authorizeClock, actions, clockUnavailable, redact = text => text, signal, preserveObservedAfterAbort = false, task, memory, requestText, skills, beforeProvider, prepareProviderMessages, redactSession, toolsDisabled = false }: TurnOptions): Promise<void> {
   text = redact(text);
   if (!text.trim()) throw new Error('Message cannot be empty');
-  const history = redactValue(session, redact);
+  const history = redactSession ? redactSession(session, redact) : redactValue(session, redact);
   if (!isDeepStrictEqual(session.messages.map(m => m.role === 'assistant' ? m.responseReplay?.items.filter(item => item.type === 'reasoning') : undefined), (history as Session).messages?.map(m => m.role === 'assistant' ? m.responseReplay?.items.filter(item => item.type === 'reasoning') : undefined))) throw new Error('Cannot safely preserve provider replay');
   if (!validSession(history, session.id)) throw new Error('Cannot safely redact the saved conversation');
   let messages = structuredClone(history.messages);

@@ -26,7 +26,7 @@ import { checkedSearchOrigin, checkedSearchQuery } from './searxng-search.js';
 import { checkedOwnerWebUrl } from './web-reader.js';
 import { scratchLimits } from './shell-sandbox.js';
 import { WorkActionService, workActionsSchema, type ActionIdentity } from './work-actions.js';
-import type { ByteRedactor } from './config.js';
+import {redactValue, type ByteRedactor} from './config.js';
 import { NativeProcesses, nativeProcessSchema } from './native-processes.js';
 import { ApprovalGrants, approvalGrantSchema, type GrantBoundary } from './approval-grants.js';
 import { PluginStore, pluginSchema, slackWorkSchema, slackOutcomeReviewSchema, type SlackConfig } from './plugins.js';
@@ -1522,10 +1522,51 @@ export class Instance {
   private gmailTurnProof(botId:string,sessionId:string,questionId:string,continuationId:string,messageId:string,content?:string) {return createHmac('sha256',this.fingerprintKey).update(JSON.stringify(['gmail-setup-turn',botId,sessionId,questionId,continuationId,messageId,content ?? null])).digest('hex');}
   private gmailNoticeProof(botId:string,sessionId:string,commandId:string,noticeId:string,messageId:string,content?:string) {return createHmac('sha256',this.fingerprintKey).update(JSON.stringify(['gmail-notice-turn',botId,sessionId,commandId,noticeId,messageId,content ?? null])).digest('hex');}
   private gmailCommandNotice(botId:string,commandId:string) {const row=this.db.prepare('SELECT n.message_id FROM command_notices c JOIN gmail_task_notices n ON n.message_id=c.message_id WHERE c.command_id=? AND n.bot_id=? LIMIT 1').get(commandId,botId);return typeof row?.message_id==='string'?row.message_id:null;}
+  private gmailResultProof(botId:string,sessionId:string,questionId:string,continuationId:string,messageId:string,start:number,end:number,content:string) {
+    return createHmac('sha256',this.fingerprintKey).update(JSON.stringify(['gmail-setup-result',botId,sessionId,questionId,continuationId,messageId,start,end,content])).digest('hex');
+  }
+  private gmailSetupAuthentication(botId:string,session:Session,turn:NonNullable<Session['turns']>[number]) {
+    const provenance=turn.gmailSetup,message=session.messages[turn.start];
+    if(!provenance || message?.role!=='user' || message.stafMessageId!=='command-user-'+provenance.continuationId || !this.db.prepare('SELECT 1 FROM question_sets q JOIN gmail_setup_requests g ON g.question_id=q.id WHERE q.id=? AND q.bot_id=? AND q.continuation_id=?').get(provenance.questionId,botId,provenance.continuationId) || provenance.proof!==this.gmailTurnProof(botId,session.id,provenance.questionId,provenance.continuationId,message.stafMessageId))return null;
+    const full=provenance.contentProof===this.gmailTurnProof(botId,session.id,provenance.questionId,provenance.continuationId,message.stafMessageId,message.content);
+    const result=provenance.result;
+    const segment=!!result && result.end<=message.content.length && result.proof===this.gmailResultProof(botId,session.id,provenance.questionId,provenance.continuationId,message.stafMessageId,result.start,result.end,message.content.slice(result.start,result.end));
+    return full || segment ? {message,provenance,full,segment} : null;
+  }
+  private gmailNoticeAuthentication(botId:string,session:Session,turn:NonNullable<Session['turns']>[number]) {
+    const notice=turn.gmailNotice,message=session.messages[turn.start];
+    return !!notice && message?.role==='user' && message.stafMessageId==='command-user-'+notice.commandId && this.gmailCommandNotice(botId,notice.commandId)===notice.noticeId && notice.proof===this.gmailNoticeProof(botId,session.id,notice.commandId,notice.noticeId,message.stafMessageId) && notice.contentProof===this.gmailNoticeProof(botId,session.id,notice.commandId,notice.noticeId,message.stafMessageId,message.content);
+  }
   gmailSessionProvenance(botId:string,session:Session) {
-    const valid:Array<{index:number;questionId?:string;changed:boolean}>=[];
-    for(const turn of session.turns ?? []) {const message=session.messages[turn.start],provenance=turn.gmailSetup,notice=turn.gmailNotice;if(provenance){const row=this.db.prepare("SELECT 1 FROM question_sets q JOIN gmail_setup_requests g ON g.question_id=q.id WHERE q.id=? AND q.bot_id=? AND q.continuation_id=?").get(provenance.questionId,botId,provenance.continuationId);if(row && message?.role==='user' && message.stafMessageId==='command-user-'+provenance.continuationId && provenance.proof===this.gmailTurnProof(botId,session.id,provenance.questionId,provenance.continuationId,message.stafMessageId))valid.push({index:turn.start,questionId:provenance.questionId,changed:provenance.contentProof!==this.gmailTurnProof(botId,session.id,provenance.questionId,provenance.continuationId,message.stafMessageId,message.content)});}if(notice && message?.role==='user' && message.stafMessageId==='command-user-'+notice.commandId && this.gmailCommandNotice(botId,notice.commandId)===notice.noticeId && notice.proof===this.gmailNoticeProof(botId,session.id,notice.commandId,notice.noticeId,message.stafMessageId) && notice.contentProof===this.gmailNoticeProof(botId,session.id,notice.commandId,notice.noticeId,message.stafMessageId,message.content))valid.push({index:turn.start,changed:false});}
+    const valid:Array<{index:number;questionId?:string}>=[];
+    for(const turn of session.turns ?? []) {
+      const setup=this.gmailSetupAuthentication(botId,session,turn);
+      if(setup)valid.push({index:turn.start,questionId:setup.provenance.questionId});
+      if(this.gmailNoticeAuthentication(botId,session,turn))valid.push({index:turn.start});
+    }
     return {valid};
+  }
+  // Only the service-controlled redaction of already authenticated content may
+  // renew its proofs. Never infer provenance from the text being redacted.
+  redactChatSession(botId:string,session:Session,redact:(text:string)=>string):Session {
+    const stripped={...session,messages:session.messages.map(message=>{if(message.role!=='user')return message;const {stafMessageId:_,...rest}=message;return rest;}),turns:session.turns?.map(({gmailSetup:_,gmailNotice:__,...turn})=>turn)};
+    const redacted=redactValue(stripped,redact);
+    if(!validSession(redacted,session.id))throw Error('Cannot safely redact the saved conversation');
+    for(const [index,turn] of (session.turns ?? []).entries()) {
+      const setup=this.gmailSetupAuthentication(botId,session,turn),notice=this.gmailNoticeAuthentication(botId,session,turn),output=redacted.messages[turn.start],original=session.messages[turn.start],outTurn=redacted.turns?.[index];
+      if((!setup && !notice) || !outTurn || output?.role!=='user' || original?.role!=='user' || output.content!==redact(original.content))continue;
+      const messageId=original.stafMessageId!;
+      output.stafMessageId=messageId;
+      if(setup){
+        const p=setup.provenance;
+        let result:typeof p.result;
+        if(setup.segment && p.result){const before=redact(original.content.slice(0,p.result.start)),body=redact(original.content.slice(p.result.start,p.result.end)),after=redact(original.content.slice(p.result.end));if(before+body+after===output.content){const start=before.length,end=start+body.length;result={start,end,proof:this.gmailResultProof(botId,session.id,p.questionId,p.continuationId,messageId,start,end,body)};}}
+        outTurn.gmailSetup={questionId:p.questionId,continuationId:p.continuationId,proof:p.proof,contentProof:setup.full?this.gmailTurnProof(botId,session.id,p.questionId,p.continuationId,messageId,output.content):p.contentProof,...(result?{result}:{})};
+      }
+      if(notice && turn.gmailNotice){const p=turn.gmailNotice;outTurn.gmailNotice={...p,contentProof:this.gmailNoticeProof(botId,session.id,p.commandId,p.noticeId,messageId,output.content)};}
+    }
+    if(!validSession(redacted,session.id))throw Error('Cannot safely preserve conversation provenance');
+    return redacted;
   }
   commandSkills(id:string) { return this.db.prepare('SELECT event FROM command_skill_activity WHERE command_id=? ORDER BY rowid').all(id).map(item=>{ const event=JSON.parse(String(item.event)); if (typeof event.name === 'string') event.name=this.redactSkill(event.name); if (typeof event.digest === 'string' && event.sourceDigest === undefined) { event.sourceDigest=event.digest; delete event.digest; } return event; }); }
   commandSkillLoaded(id:string,event:object) { this.db.prepare('INSERT INTO command_skill_activity VALUES (?,?)').run(id,JSON.stringify(event)); }
@@ -1625,7 +1666,7 @@ export class Instance {
       this.db.exec('COMMIT');
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
   }
-  saveExecution(id: string, session: Session, success: boolean) {
+  saveExecution(id: string, session: Session, success: boolean, resultRange?:{start:number;end:number;content:string}) {
     this.db.exec('BEGIN IMMEDIATE');
     try {
       const command = this.command(id);
@@ -1639,7 +1680,7 @@ export class Instance {
         stored={...session,messages,turns:[...turns.slice(0,-1),{...turn,end:messages.length}]};
       }
       const question=this.db.prepare('SELECT question_id FROM gmail_question_messages WHERE message_id=? AND bot_id=?').get('command-user-'+id,command.botId),gmailNotice=this.gmailCommandNotice(command.botId,id);
-      if(success && (typeof question?.question_id==='string' || gmailNotice)){const turn=stored.turns?.at(-1),message=turn && stored.messages[turn.start];if(!turn || message?.role!=='user')throw Error('Gmail turn provenance unavailable');const messageId='command-user-'+id,messages=[...stored.messages];messages[turn.start]={...message,stafMessageId:messageId};let tagged={...turn};if(typeof question?.question_id==='string'){const proof=this.gmailTurnProof(command.botId,stored.id,question.question_id,id,messageId),contentProof=this.gmailTurnProof(command.botId,stored.id,question.question_id,id,messageId,message.content);tagged={...tagged,gmailSetup:{questionId:question.question_id,continuationId:id,proof,contentProof}};}if(gmailNotice){const proof=this.gmailNoticeProof(command.botId,stored.id,id,gmailNotice,messageId),contentProof=this.gmailNoticeProof(command.botId,stored.id,id,gmailNotice,messageId,message.content);tagged={...tagged,gmailNotice:{commandId:id,noticeId:gmailNotice,proof,contentProof}};}stored={...stored,messages,turns:[...(stored.turns ?? []).slice(0,-1),tagged]};}
+      if(success && (typeof question?.question_id==='string' || gmailNotice)){const turn=stored.turns?.at(-1),message=turn && stored.messages[turn.start];if(!turn || message?.role!=='user')throw Error('Gmail turn provenance unavailable');const messageId='command-user-'+id,messages=[...stored.messages];messages[turn.start]={...message,stafMessageId:messageId};let tagged={...turn};if(typeof question?.question_id==='string'){const proof=this.gmailTurnProof(command.botId,stored.id,question.question_id,id,messageId),contentProof=this.gmailTurnProof(command.botId,stored.id,question.question_id,id,messageId,message.content);const result=resultRange && resultRange.content===message.content && resultRange.start>=0 && resultRange.end>=resultRange.start && resultRange.end<=message.content.length ? {start:resultRange.start,end:resultRange.end,proof:this.gmailResultProof(command.botId,stored.id,question.question_id,id,messageId,resultRange.start,resultRange.end,message.content.slice(resultRange.start,resultRange.end))} : undefined;tagged={...tagged,gmailSetup:{questionId:question.question_id,continuationId:id,proof,contentProof,...(result?{result}:{})}};}if(gmailNotice){const proof=this.gmailNoticeProof(command.botId,stored.id,id,gmailNotice,messageId),contentProof=this.gmailNoticeProof(command.botId,stored.id,id,gmailNotice,messageId,message.content);tagged={...tagged,gmailNotice:{commandId:id,noticeId:gmailNotice,proof,contentProof}};}stored={...stored,messages,turns:[...(stored.turns ?? []).slice(0,-1),tagged]};}
       this.db.prepare('INSERT INTO sessions VALUES (?,?) ON CONFLICT(bot_id) DO UPDATE SET session=excluded.session').run(command.botId,JSON.stringify(stored));
       if (success) {
         const answer=session.messages.at(-1);

@@ -600,8 +600,14 @@ message identities and marks captured task snapshots for that agent. Chat turns
 carry a service-signed identity bound to their stored message. These records
 survive retries and partial context retention. The service never infers identity
 from a prefix in user or model text. Legacy snapshots without trustworthy
-identity do not acquire provenance from their content. An altered signed setup
-turn is replaced in transient input by the service-recorded outcome. Isolated
+identity do not acquire provenance from their content. The setup result has its own authenticated span within a turn, separate from
+other notices and owner text. The service renews proofs only when it redacts
+already authenticated content. If redaction crosses a result boundary or changes
+the message during provider initialization, the service retains only the
+verified whole-turn proof; it cannot then recognize a later partial result. An
+altered or truncated result without valid evidence does not create provenance; other text is not replaced. Older signed
+turns without a result span remain usable when their full content verifies.
+Isolated
 helpers do not inherit the parent's chat; separately approved helper text does
 not grant access to Gmail status.
 
