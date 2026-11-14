@@ -228,3 +228,12 @@ test('a successful direct reconnect replaces the old guided activation origin',a
   const plugin=(await f.call('/api/plugins'))[1].find(item=>item.id==='slack');assert.equal(plugin.reconnectUncertain,false);assert.equal(plugin.setupRecoveryPending,false);assert.equal(plugin.enabled,true);await f.until(()=>f.starts.some(tokens=>tokens.appToken==='xapp-direct-fixture'));
  }finally{await f.close();}
 });
+
+for(const state of ['connecting','completed'])test(`upgrading an older ${state} guided connection fences interrupted work before starting Slack`,async()=>{
+ const f=await fixture({prepare:async(call,bot)=>{await existingSlack(call,bot);await call('/api/plugins/slack/access',{botId:bot.id,enabled:true});await call('/api/plugins/slack/enable',{});}});try{
+  const started=f.starts.length;
+  await f.restart(()=>{const db=new DatabaseSync(join(f.dir,'secrets','credentials.sqlite'));try{db.exec('DROP TABLE credential_transition_pending; DROP TABLE slack_activation_origin');db.prepare('UPDATE slack_setup_approvals SET state=? WHERE id=?').run(state,f.request.id);}finally{db.close();}if(state==='completed'){const instance=new DatabaseSync(f.path);try{instance.prepare("UPDATE commands SET state='pending' WHERE id='setup'").run();}finally{instance.close();}}});
+  const plugin=(await f.call('/api/plugins'))[1].find(item=>item.id==='slack');assert.equal(plugin.setupRecoveryPending,true);assert.equal(plugin.reconnectUncertain,true);assert.equal(f.starts.length,started);
+  assert.equal((await f.call('/api/plugins/slack/recover-setup',{confirm:true}))[0],200);assert.equal((await f.call('/api/plugins'))[1].find(item=>item.id==='slack').enabled,false);
+ }finally{await f.close();}
+});
