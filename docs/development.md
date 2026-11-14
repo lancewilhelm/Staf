@@ -398,6 +398,15 @@ message to trigger a request. Use synthetic values only. This specialized
 fixture can also receive `try terminal` to demonstrate the current fail-closed
 host-terminal result. It does not exercise a Linux isolation boundary or a live
 provider.
+
+For a disposable guided Slack check, run `corepack pnpm run build` and then
+`node test/fixtures/slack-setup-ui.mjs`. Open its printed address and pair using
+the printed code. Create an agent with provider `live` and model `fixture-offline`,
+then send any message. Save `xapp-synthetic-app` and `xoxb-synthetic-bot` in the
+two protected requests, review the `T123` / `U123` / `D123` destination and agent,
+and approve. The synthetic transport reports connected in Slack settings. Stop
+the fixture with Ctrl-C to remove its disposable data. This check does not use a
+live model or Slack account and does not demonstrate Linux isolation.
 For docs-only changes, report the relevant documentation checks instead of
 requiring an application launch.
 

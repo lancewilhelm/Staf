@@ -603,11 +603,27 @@ supported roles are `gmail.client`, `gmail.refresh`,
 approvals. Existing agent and client checks still apply at their respective
 boundaries. The grant APIs never return a saved value.
 The browser's recognizable-pattern warning is client-side; it is not an API
-validation guarantee. It blocks flagged chat and question submissions and omits
+validation guarantee. Incoming Slack messages also receive a service-side check
+for recognized patterns and known values before model dispatch. Neither check
+detects every secret or removes a message already sent to Slack. The browser blocks flagged chat and question submissions and omits
 flagged written answers from draft saves. Action results are filtered for known
 values before normal retention and model delivery; this does not cover arbitrary
 encodings, unknown values, historical records, or messages already sent.
 See [secret requests](usage.md#secret-requests) for storage and backup limits.
+
+`setup_slack` accepts nonsecret `teamId`, `userId`, and `channelId`; the agent
+comes from the originating work. The service creates separate protected app and
+bot token requests and exposes the resulting exact destination, secret versions,
+current binding and Slack grant-review snapshot as a `slack-setup` inbox item.
+`POST /api/slack-setup/ID/confirm` takes the exact `approval` object and requires
+`confirmDisplacements: true` when the review lists existing grants. `/dismiss`
+takes the same approval. Confirmation rechecks the client, work, agent, binding,
+secret selections and reviewed grant state before identification and commit.
+The result distinguishes connecting, connected, reconnecting and failure; a
+verified socket does not verify the user or DM IDs. Restart interrupts an
+unfinished request without replay. The secret-grant update and instance binding
+are separate transactions: after a failure the owner must inspect both, since
+new grants can remain while the old binding is disabled. See [Slack setup](usage.md#slack-plugin).
 
 
 ### Native process API
@@ -662,7 +678,7 @@ configuration without tokens, connection state, agent access, recent event
 outcomes, and recent task delivery states (`pending`, `sending`, `sent`, or
 `uncertain`). `sent` records Slack acceptance, not a human read. `POST /api/plugins/slack/connect` accepts `appToken`, `botToken`,
 `teamId`, `userId`, `channelId`, `botId`, and `confirm: true`; it validates the bot token against
-the workspace. Both tokens must satisfy the managed-secret limit of 16,000 characters; invalid tokens are rejected before changing the connection. `POST /api/plugins/slack/access` takes `botId` and `enabled`.
+the workspace. Both tokens must satisfy the managed-secret limit of 16,000 characters; tokens that fail this limit or the format check are rejected before changing the connection. `POST /api/plugins/slack/access` takes `botId` and `enabled`.
 The `enable`, `disable`, `disconnect`, and `delete-config` endpoints take empty
 objects. Connections are instance-owned and keyed by service account identity;
 this slice exposes one Slack account. Tokens remain host-local and are never
