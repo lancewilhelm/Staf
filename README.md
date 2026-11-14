@@ -16,6 +16,10 @@ staf settings set-defaults codex MODEL_ID
 staf
 ```
 
+File reads, terminal output, and scratch commands have an additional
+fail-closed restriction once Staf has observed a credential; see
+[managed-secret limitations](docs/usage.md#secret-requests).
+
 The terminal starts a local shared instance in `~/.staf/terminal-instance` when needed and reconnects to its
 persistent main chat. On a fresh instance, first run `staf settings set-defaults codex MODEL_ID` with your chosen provider and model. Type `show settings` or `/help`.
 `/quit` closes the terminal client while the instance continues. See the [terminal setup

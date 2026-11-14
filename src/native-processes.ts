@@ -44,6 +44,8 @@ export class NativeProcesses {
   private readonly interactions=new Map<string,{tail:Promise<void>;pending:number}>();
   private closing=false;
   private outputGuard:(bytes:Buffer,partial:boolean)=>void=()=>{};
+  private outputAuthority:(id:string)=>void=()=>{};
+  setOutputAuthority(check:(id:string)=>void):void {this.outputAuthority=check;}
   private secretGeneration:()=>number=()=>0;
   setSecretGeneration(get:()=>number):void {this.secretGeneration=get;}
   setOutputGuard(guard:(bytes:Buffer,partial:boolean)=>void):void {this.outputGuard=guard;}
@@ -64,6 +66,7 @@ export class NativeProcesses {
   }
   output(id:string,cursor=0) {
     const process=this.get(id);if(!process)throw Error('Process not found');
+    this.outputAuthority(id);
     if(!Number.isSafeInteger(cursor)||cursor<0)throw Error('Invalid output cursor');
     const first=Number(process.firstCursor),next=Number(process.nextCursor);
     if(cursor>next)throw Error('Output cursor is beyond the observed output');
@@ -108,13 +111,14 @@ export class NativeProcesses {
     this.db.prepare('UPDATE native_processes SET retained=?,cols=?,rows=? WHERE id=?').run(input.retain?1:0,input.cols??null,input.rows??null,id);
     let done!:()=>void;const finished=new Promise<void>(resolve=>{done=resolve;});
     const filters=new Map<'stdout'|'stderr'|'terminal',ByteRedactor>();let flushed=false,outputFenced=false;const initialGeneration=this.secretGeneration();
-    const retain=(stream:'stdout'|'stderr'|'terminal',data:Buffer)=>{if(!data.length)return;if(this.secretGeneration()!==initialGeneration){outputFenced=true;return;}this.append(id,stream,data);};
+    const current=()=>{try{if(this.secretGeneration()===initialGeneration)return true;}catch{/* Fence output if secret state cannot be verified. */}outputFenced=true;return false;};
+    const retain=(stream:'stdout'|'stderr'|'terminal',data:Buffer)=>{if(!data.length || !current())return;this.append(id,stream,data);};
     const flush=()=>{if(flushed)return;flushed=true;for(const [stream,filter] of filters)retain(stream,filter.finish());};
     const lifetime=work.workSignal??work.signal;
     const abort=()=>{this.stop(id);};let live!:Live;
     const observers:ProcessObservers={
       started:pid=>{this.db.prepare("UPDATE native_processes SET state=CASE WHEN stop_requested=1 THEN 'stopping' ELSE 'running' END,pid=? WHERE id=?").run(pid,id);if(lifetime.aborted || this.get(id)?.stopRequested)this.stop(id);},
-      output:(stream,data)=>{if(this.secretGeneration()!==initialGeneration){outputFenced=true;return;}const filter=filters.get(stream)??this.outputFilter();filters.set(stream,filter);retain(stream,filter.write(data));},
+      output:(stream,data)=>{if(!current())return;const filter=filters.get(stream)??this.outputFilter();filters.set(stream,filter);retain(stream,filter.write(data));},
       failed:()=>{this.db.prepare("UPDATE native_processes SET state='failed' WHERE id=?").run(id);},
       exited:(code,signal)=>{this.db.prepare("UPDATE native_processes SET exit_code=?,exit_signal=? WHERE id=?").run(code,signal,id);},
       lost:()=>{flush();if(live.timer)clearTimeout(live.timer);lifetime.removeEventListener('abort',abort);this.live.delete(id);this.db.prepare("UPDATE native_processes SET state='unknown' WHERE id=?").run(id);done();},

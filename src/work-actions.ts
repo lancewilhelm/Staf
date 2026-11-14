@@ -94,7 +94,11 @@ export class WorkActionService {
   private readonly capabilities=new Map<string,ErasedCapability>();
   private secretGeneration:()=>number=()=>0;
   private secretValues:()=>readonly string[]=()=>[];
-  setSecretGeneration(get:()=>number,values:()=>readonly string[]=()=>[]):void {this.secretGeneration=get;this.secretValues=values;}
+  private secretStateUncertain:()=>boolean=()=>false;
+  setSecretGeneration(get:()=>number,values:()=>readonly string[]=()=>[],uncertain:()=>boolean=()=>false):void {this.secretGeneration=get;this.secretValues=values;this.secretStateUncertain=uncertain;}
+  private readonly opaqueCapabilities=new Set(['file_read','file_search','terminal_run','terminal_read','run_scratch_shell']);
+  private readonly dataCapabilities=new Set(['file_read','file_search','terminal_run','terminal_read','run_scratch_shell','read_web','search_web','gmail_search','gmail_read','memory_search','memory_read','select_skill']);
+  private readonly sharedSinks=new Set(['file_write','file_edit','terminal_run','terminal_write','run_scratch_shell','memory_remember','memory_update']);
   private readonly queues=new Map<string,Promise<void>>();
   private readonly queueDepth=new Map<string,number>();
   private readonly journal:ActionJournal;
@@ -123,6 +127,45 @@ export class WorkActionService {
     private readonly active:(work:WorkRef)=>void, private readonly budget=32, private readonly deferred:(work:WorkRef)=>boolean=()=>false,private readonly inputRedactor:(value:string)=>string=value=>value,private readonly precedingCommands:(work:WorkRef)=>string[]=()=>[]) {
     this.journal=new ActionJournal(db);
     this.db.exec("UPDATE work_action_invocations SET private_result=NULL WHERE private_result IS NOT NULL AND CASE WHEN json_valid(description) THEN json_extract(description,'$.effect')='read' ELSE 0 END");
+  }
+  private taintProof(botId:string,generation:number):string {return createHmac('sha256',this.key).update(JSON.stringify(['agent-output-taint',botId,generation])).digest('hex');}
+  private taint(botId:string):number|undefined {
+    const row=this.db.prepare('SELECT generation,proof FROM agent_output_taint WHERE bot_id=?').get(botId);
+    if(!row || typeof row.generation!=='number' || !Number.isSafeInteger(row.generation) || row.generation< -2 || typeof row.proof!=='string' || row.proof!==this.taintProof(botId,row.generation))throw Error('Earlier output has unverifiable secret state; start a new agent conversation');
+    if(row.generation===-2)return undefined;
+    if(row.generation<0)throw Error('Earlier output has unverifiable secret state; start a new agent conversation');
+    return row.generation;
+  }
+  private sharedTaint():number|undefined {
+    const row=this.db.prepare('SELECT generation,proof FROM shared_output_taint WHERE id=1').get();
+    if(!row || typeof row.generation!=='number' || !Number.isSafeInteger(row.generation) || row.generation< -2 || typeof row.proof!=='string' || row.proof!==this.taintProof('shared',row.generation))throw Error('Earlier shared output has unverifiable secret state');
+    if(row.generation===-2){
+      const prior=this.db.prepare(`SELECT 1 FROM work_action_invocations r JOIN action_journal ar ON ar.id=r.action_id JOIN work_action_invocations w ON w.rowid>r.rowid AND w.action_id<>r.action_id JOIN action_journal aw ON aw.id=w.action_id WHERE r.capability IN ('file_read','file_search','terminal_run','terminal_read','run_scratch_shell','read_web','search_web','gmail_search','gmail_read','memory_search','memory_read','select_skill') AND ar.state IN ('succeeded','uncertain') AND w.capability IN ('file_write','file_edit','terminal_run','terminal_write','run_scratch_shell','memory_remember','memory_update') AND aw.state IN ('succeeded','uncertain') AND COALESCE((SELECT bot_id FROM commands WHERE r.kind='command' AND id=r.work_id),(SELECT bot_id FROM task_attempts WHERE r.kind='task' AND id=r.work_id))=COALESCE((SELECT bot_id FROM commands WHERE w.kind='command' AND id=w.work_id),(SELECT bot_id FROM task_attempts WHERE w.kind='task' AND id=w.work_id)) LIMIT 1`).get();
+      if(prior)throw Error('Earlier shared output has unverifiable secret state');return undefined;
+    }
+    if(row.generation<0)throw Error('Earlier shared output has unverifiable secret state');
+    return row.generation;
+  }
+  private markSharedTaint():void {
+    const prior=this.sharedTaint(),generation=this.secretGeneration();if(prior!==undefined && prior!==generation)throw Error('Earlier shared output predates the current secret state');
+    if(prior===undefined)this.db.prepare('UPDATE shared_output_taint SET generation=?,proof=? WHERE id=1 AND generation=-2').run(generation,this.taintProof('shared',generation));
+    if(this.sharedTaint()!==generation)throw Error('Shared output state changed');
+  }
+  assertAgentTaint(botId:string):void {
+    const current=this.secretGeneration(),shared=this.sharedTaint();if(shared!==undefined && shared!==current)throw Error('Earlier shared output predates the current secret state');
+    const generation=this.taint(botId);
+    if(generation===undefined){
+      const prior=this.db.prepare(`SELECT 1 FROM work_action_invocations i JOIN action_journal a ON a.id=i.action_id WHERE i.capability IN ('file_read','file_search','terminal_run','terminal_read','run_scratch_shell','read_web','search_web','gmail_search','gmail_read','memory_search','memory_read','select_skill') AND a.state IN ('succeeded','uncertain') AND ((i.kind='command' AND EXISTS(SELECT 1 FROM commands c WHERE c.id=i.work_id AND c.bot_id=?)) OR (i.kind='task' AND EXISTS(SELECT 1 FROM task_attempts t WHERE t.id=i.work_id AND t.bot_id=?))) LIMIT 1`).get(botId,botId);
+      if(prior || this.db.prepare('SELECT 1 FROM native_processes WHERE bot_id=? LIMIT 1').get(botId))throw Error('Earlier output has unverifiable secret state; start a new agent conversation');
+    }else if(generation!==current)throw Error('Earlier output predates the current secret state; start a new agent conversation');
+  }
+  markAgentTaint(botId:string):void {
+    this.assertAgentTaint(botId);const generation=this.secretGeneration(),prior=this.taint(botId);
+    if(prior===undefined)this.db.prepare('UPDATE agent_output_taint SET generation=?,proof=? WHERE bot_id=? AND generation=-2').run(generation,this.taintProof(botId,generation),botId);
+    this.assertAgentTaint(botId);if(this.taint(botId)!==generation)throw Error('Output state changed');
+  }
+  inheritAgentTaint(sourceBotId:string,targetBotId:string):void {
+    this.assertAgentTaint(sourceBotId);if(this.taint(sourceBotId)!==undefined)this.markAgentTaint(targetBotId);
   }
   register<I,O>(capability:Capability<I,O>):void {
     if (!capability.name || capability.name==='code_mode' || this.capabilities.has(capability.name) || capability.definition.function.name!==capability.name) throw Error('Invalid or duplicate capability');
@@ -162,6 +205,7 @@ export class WorkActionService {
   private digest(value:string):string {return createHmac('sha256',this.key).update(value).digest('hex');}
   private state(work:WorkRef) {const recovery=(work.kind==='task' && !!this.db.prepare('SELECT 1 FROM task_attempts WHERE id=? AND predecessor IS NOT NULL').get(work.id)) || this.precedingCommands(work).length>0;this.db.prepare('INSERT OR IGNORE INTO work_action_state(kind,work_id,epoch) VALUES (?,?,?)').run(work.kind,work.id,recovery?1:0);return this.db.prepare('SELECT used,closed,epoch FROM work_action_state WHERE kind=? AND work_id=?').get(work.kind,work.id)!;}
   private admit(context:WorkContext, allowPending=false):void {
+    this.assertAgentTaint(context.botId);
     const state=this.state(context.work);if (typeof state.closed==='string') throw Error(`Action admission closed: ${state.closed}`);
     try {context.signal.throwIfAborted();this.active(context.work);this.workCheck(context.work);} catch(error) {this.close(context,context.signal.aborted?'stopped':'authority');throw error;}
     if(!allowPending && this.deferred(context.work)) throw new ActionDeferred('Owner input is pending');
@@ -222,9 +266,11 @@ export class WorkActionService {
     return id;
   }
   updateExecution(context:WorkContext,id:string,result:string):void {
+    this.assertAgentTaint(context.botId);
     this.db.prepare("UPDATE code_executions SET result=? WHERE id=? AND kind=? AND work_id=? AND outcome='running'").run(result,id,context.work.kind,context.work.id);
   }
   finishExecution(context:WorkContext,id:string,outcome:string,result:string|null):void {
+    if(result!==null)this.assertAgentTaint(context.botId);
     this.db.prepare("UPDATE code_executions SET outcome=?,result=? WHERE id=? AND kind=? AND work_id=? AND outcome='running'").run(outcome,result,id,context.work.kind,context.work.id);
   }
   isSkillExecution(id:string,callId:string):boolean {
@@ -368,6 +414,7 @@ export class WorkActionService {
       this.db.exec('COMMIT');
     } catch(error){this.db.exec('ROLLBACK');throw error;}
     if(prepared.kind!=='created')throw Error('New action already exists');
+    if(this.opaqueCapabilities.has(request.name) && (this.secretGeneration()>0 || this.secretStateUncertain())){this.journal.cancel(actionId);return {kind:'blocked',reason:'Output withheld because known secrets prevent safe disclosure'};}
     const action=Object.freeze({id:actionId,fingerprint});let claim:void|AuthorityClaim=undefined;
     try {cap.check(input,context);claim=await cap.authorize(input,context,action);this.admit(context);cap.check(input,context,action);}
     catch(error){claim?.release();this.journal.cancel(actionId);if(error instanceof ActionRevision)return {kind:'revision-requested',direction:this.inputRedactor(error.direction)};if(error instanceof ActionDeferred)return {kind:'blocked',reason:this.inputRedactor(error.message)};const reason=context.signal.aborted?'Work stopped':error instanceof ActionDenied?'Action denied':'Action authorization failed';this.close(context,'authority');return {kind:'blocked',reason};}
@@ -377,8 +424,13 @@ export class WorkActionService {
     catch(error){this.db.exec('ROLLBACK');this.journal.cancel(actionId);if(error instanceof ActionDeferred)return {kind:'blocked',reason:this.inputRedactor(error.message)};this.close(context,'authority');return {kind:'blocked',reason:context.signal.aborted?'Work stopped':'Action could not start'};}
     let output:Json;let visible:string;
     const outputGeneration=this.secretGeneration();
-    try {output=await cap.execute(input,context,action);if(Buffer.byteLength(encoded(output))>cap.maxResultBytes)throw Error('Result exceeds the limit');visible=route!=='direct' && description.effect==='read'?'Read completed':this.inputRedactor(cap.visible(output)).slice(0,16000);} catch(error) {if(!this.completedHopParents.has(actionId))this.journal.finish(actionId,error instanceof ActionFailed || error instanceof ActionDenied?'failed':'uncertain',error instanceof ActionFailed?this.inputRedactor(error.safeResult).slice(0,16000):error instanceof ActionDenied?'Action denied':'Outcome unknown');if(error instanceof ActionDenied){this.close(context,'denied');return {kind:'blocked',reason:'Action denied'};}this.admit(context,true);cap.check(input,context,action);return {kind:'status',action:this.journal.get(actionId)!};}
+    const priorTaint=this.taint(context.botId);
+    if(this.opaqueCapabilities.has(request.name) && (this.secretGeneration()>0 || this.secretStateUncertain())){this.journal.finish(actionId,'failed','Output withheld because known secrets prevent safe disclosure');return {kind:'blocked',reason:'Output withheld because known secrets prevent safe disclosure'};}
+    if(this.dataCapabilities.has(request.name))this.markAgentTaint(context.botId);
+    if(priorTaint!==undefined && this.sharedSinks.has(request.name))this.markSharedTaint();
+    try {output=await cap.execute(input,context,action);if(Buffer.byteLength(encoded(output))>cap.maxResultBytes)throw Error('Result exceeds the limit');visible=this.opaqueCapabilities.has(request.name)?'Action completed; output is not retained in activity.':route!=='direct' && description.effect==='read'?'Read completed':this.inputRedactor(cap.visible(output)).slice(0,16000);} catch(error) {try {this.assertAgentTaint(context.botId);} catch {if(!this.completedHopParents.has(actionId))this.journal.finish(actionId,description.effect==='read'?'failed':'uncertain','Output withheld because the secret state changed');throw Error('Output withheld because the secret state changed');}if(!this.completedHopParents.has(actionId))this.journal.finish(actionId,error instanceof ActionFailed || error instanceof ActionDenied?'failed':'uncertain',error instanceof ActionFailed?this.inputRedactor(error.safeResult).slice(0,16000):error instanceof ActionDenied?'Action denied':'Outcome unknown');if(error instanceof ActionDenied){this.close(context,'denied');return {kind:'blocked',reason:'Action denied'};}this.admit(context,true);cap.check(input,context,action);return {kind:'status',action:this.journal.get(actionId)!};}
     try {if(['file_read','terminal_read','run_scratch_shell'].includes(request.name)){if(this.secretGeneration()!==outputGeneration)throw Error('Secret state changed');assertEncodedResult(output,this.inputRedactor,request.name==='run_scratch_shell',request.name==='run_scratch_shell'?this.secretValues():[]);}} catch {if(!this.completedHopParents.has(actionId))this.journal.finish(actionId,description.effect==='read'?'failed':'uncertain','Encoded action result cannot be retained safely');return {kind:'blocked',reason:'Encoded action result cannot be retained safely'};}
+    try {this.assertAgentTaint(context.botId);} catch(error) {if(!this.completedHopParents.has(actionId))this.journal.finish(actionId,description.effect==='read'?'failed':'uncertain','Output withheld because the secret state changed');throw error;}
     const safeOutput=this.safeResult(output);
     if(description.effect==='read')this.readReceipts.set(actionId,{work:encoded(context.work),value:structuredClone(safeOutput),generation:this.secretGeneration(),encoded:['file_read','terminal_read'].includes(request.name)});
     else {this.db.prepare('UPDATE work_action_invocations SET private_result=? WHERE action_id=?').run(encoded(safeOutput),actionId);if(request.name==='run_scratch_shell')this.encodedResultGenerations.set(actionId,this.secretGeneration());}
@@ -396,6 +448,7 @@ export class WorkActions {
   dispose() {if(!this.disposed){this.disposed=true;this.release();}}
   offers(route:'direct'|'guest') {return this.service.offers(this.context,route);}
   recognizes(name:string) {return this.service.recognizes(name);}
+  assertTaint() {this.service.assertAgentTaint(this.context.botId);}
   isPrivate() {return this.service.isPrivate(this.context);}
   assertPrivateDisclosure() {this.service.assertPrivateDisclosure(this.context);}
   isSkillExecution(id:string,callId:string) {return this.service.isSkillExecution(id,callId);}

@@ -20,6 +20,7 @@ export const secretValueSchema=z.string().min(1).max(16000).refine(value=>!value
 /** Separate store: ordinary instance records never contain the submitted value. */
 export class SecretRequests {
  private db?:DatabaseSync;
+ private identity?:{dev:number;ino:number};
  private readonly memoryPath=`file:staf-secrets-${randomUUID()}?mode=memory&cache=shared`;
  private readonly waiters=new Map<string,(outcome:Outcome|'interrupted')=>void>();
  private readonly slackSetupWaiters=new Map<string,(outcome:string)=>void>();
@@ -41,9 +42,20 @@ export class SecretRequests {
   try {
   db.exec('PRAGMA journal_mode=DELETE; PRAGMA secure_delete=ON; BEGIN IMMEDIATE');
   const legacyTransitions=!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='credential_transition_pending'").get();
+  const newGeneration=!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='secret_generation'").get(),newExternal=!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='secret_external_state'").get();
   db.exec(`
    CREATE TABLE IF NOT EXISTS secret_requests(id TEXT PRIMARY KEY,bot_id TEXT NOT NULL,work_kind TEXT NOT NULL,work_id TEXT NOT NULL,name TEXT NOT NULL,purpose TEXT NOT NULL,destination TEXT,state TEXT NOT NULL);
    CREATE TABLE IF NOT EXISTS secrets(name TEXT PRIMARY KEY,value TEXT NOT NULL);
+   CREATE TABLE IF NOT EXISTS secret_generation(id INTEGER PRIMARY KEY CHECK(id=1),generation INTEGER NOT NULL CHECK(generation>=0 AND generation<9007199254740991));
+   ${newGeneration ? "INSERT INTO secret_generation VALUES (1,0);" : ""}
+   CREATE TABLE IF NOT EXISTS secret_observations(digest TEXT PRIMARY KEY CHECK(length(digest)=64));
+   CREATE TABLE IF NOT EXISTS secret_external_state(id INTEGER PRIMARY KEY CHECK(id=1),digest TEXT NOT NULL CHECK(length(digest) IN (0,64)));
+   ${newExternal ? "INSERT INTO secret_external_state VALUES (1,'');" : ""}
+   CREATE TRIGGER IF NOT EXISTS secret_generation_insert AFTER INSERT ON secrets BEGIN UPDATE secret_generation SET generation=generation+1 WHERE id=1; END;
+   CREATE TRIGGER IF NOT EXISTS secret_generation_update AFTER UPDATE ON secrets BEGIN UPDATE secret_generation SET generation=generation+1 WHERE id=1; END;
+   CREATE TRIGGER IF NOT EXISTS secret_generation_delete AFTER DELETE ON secrets BEGIN UPDATE secret_generation SET generation=generation+1 WHERE id=1; END;
+   CREATE TRIGGER IF NOT EXISTS secret_generation_observe AFTER INSERT ON secret_observations BEGIN UPDATE secret_generation SET generation=generation+1 WHERE id=1; END;
+   CREATE TRIGGER IF NOT EXISTS secret_generation_external AFTER UPDATE ON secret_external_state WHEN OLD.digest<>'' AND OLD.digest<>NEW.digest BEGIN UPDATE secret_generation SET generation=generation+1 WHERE id=1; END;
    CREATE TABLE IF NOT EXISTS secret_metadata(name TEXT PRIMARY KEY,purpose TEXT,revision TEXT NOT NULL);
    CREATE TABLE IF NOT EXISTS question_secret_selections(question_id TEXT NOT NULL,step INTEGER NOT NULL,secret_name TEXT NOT NULL,secret_revision TEXT NOT NULL,PRIMARY KEY(question_id,step));
    CREATE TABLE IF NOT EXISTS secret_selections(request_id TEXT PRIMARY KEY,secret_name TEXT NOT NULL,secret_revision TEXT NOT NULL);
@@ -63,8 +75,12 @@ export class SecretRequests {
   for(const row of db.prepare('SELECT integration,destination FROM secret_grants WHERE NOT EXISTS (SELECT 1 FROM secret_grant_states s WHERE s.integration=secret_grants.integration AND s.destination=secret_grants.destination)').all())db.prepare('INSERT OR IGNORE INTO secret_grant_states VALUES (?,?,?)').run(String(row.integration),String(row.destination),randomUUID());
   db.exec('COMMIT');
   }catch(error){if(db.isTransaction)db.exec('ROLLBACK');db.close();throw error;}
+  if(!this.memory){const stat=lstatSync(path);this.identity={dev:stat.dev,ino:stat.ino};}
   this.db=db;return db;
  }
+ generation():number {const db=this.open(true);if(!this.memory){const stat=lstatSync(join(this.root,'secrets','credentials.sqlite'));if(!this.identity || !stat.isFile() || stat.isSymbolicLink() || (stat.mode&0o077)!==0 || stat.nlink!==1 || stat.dev!==this.identity.dev || stat.ino!==this.identity.ino)throw Error('Secret generation unavailable');}const row=db.prepare('SELECT generation FROM secret_generation WHERE id=1').get(),value=row?.generation;if(typeof value!=='number' || !Number.isSafeInteger(value) || value<0)throw Error('Secret generation unavailable');return value;}
+ syncExternal(digest:string):void {if(!/^[a-f0-9]{64}$/.test(digest))throw Error('Invalid external secret state');const db=this.open(true),row=db.prepare('SELECT digest FROM secret_external_state WHERE id=1').get();if(typeof row?.digest!=='string' || (row.digest!=='' && !/^[a-f0-9]{64}$/.test(row.digest)))throw Error('External secret state unavailable');db.prepare('UPDATE secret_external_state SET digest=? WHERE id=1 AND digest<>?').run(digest,digest);}
+ observe(digest:string):void {if(!/^[a-f0-9]{64}$/.test(digest))throw Error('Invalid secret observation');this.open(true).prepare('INSERT OR IGNORE INTO secret_observations VALUES (?)').run(digest);}
  attachment():{path:string;memory:boolean} {this.open(true);if(this.memory)return {path:this.memoryPath,memory:true};const dir=join(this.root,'secrets'),path=join(dir,'credentials.sqlite'),directory=lstatSync(dir),file=lstatSync(path);if(!directory.isDirectory() || directory.isSymbolicLink() || (directory.mode & 0o077)!==0 || !file.isFile() || file.isSymbolicLink() || (file.mode & 0o077)!==0 || file.nlink!==1)throw Error('Secret store unavailable');return {path,memory:false};}
  installForPlugin(db:DatabaseSync,input:{integrations:readonly SecretIntegration[];entries:Array<{integration:SecretIntegration;destination:string;name:string;purpose:string;value:string}>;config?:{integration:string;destination:string;value:string}},stage:(stage:CredentialTransitionStage)=>void):void {
   if(!db.isTransaction)throw Error('Credential transaction required');
@@ -173,5 +189,5 @@ export class SecretRequests {
   } catch(error){db.exec('ROLLBACK');throw error;}
   this.waiters.get(id)?.(decision);return decision;
  }
- close():void {this.db?.close();this.db=undefined;}
+ close():void {this.db?.close();this.db=undefined;this.identity=undefined;}
 }

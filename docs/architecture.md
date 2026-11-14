@@ -592,15 +592,26 @@ fresh status in a transient message copy, after provider initialization and any
 adapter preflight. At dispatch, built-in adapters refresh the messages and check
 the complete model-bound payload against the current secret redactor. If a new
 secret would change it, the call fails before sending. The check includes
-instructions, tool schemas, model settings, and replay. Structured file and
-terminal results are decoded and checked again before replay and session writes.
-If known secrets change during a turn with encoded output, the turn is fenced.
-Running terminal capture stops retaining new bytes after a secret change and
-reports incomplete output. Historical structured pages use conservative
-boundary checks, which can reject safe output. Earlier durable output is not
-erased. The checks do not establish safety for every transformed or unattributed
-fragment, including arbitrary scratch output and older receipts. At preparation, tool
-descriptions are redacted; an offer is omitted if its identity or schema keys
+instructions, tool schemas, model settings, and replay. The separate credential
+store maintains a durable generation advanced in the same transaction as managed-secret mutations, plus keyed observations of
+supported external credential sources. An authenticated per-agent taint binds
+file, terminal, scratch, web, Gmail, memory and skill action output to that
+generation. Dispatch, guest extraction, task/helper propagation, output capture and durable saves recheck
+the boundary. A generation change fences affected work; a tainted shared write
+also fences other agents. Unverifiable older output fails closed. While any
+secret has been observed, file reads and searches, terminal starts and reads,
+and scratch commands are blocked before execution: decoding or matching encodings cannot prove arbitrary guest
+transformations safe. There is no individual output-disclosure approval or
+owner-facing taint reset. Whole-dataset rollback and privileged store tampering
+are outside the monotonicity guarantee; previously persisted data is not erased.
+The boundary does not lock out separate processes or uncoordinated external-file
+writers between a check and a dispatch or save.
+Authorized web, Gmail, memory and skill results remain available, but their
+arbitrary transformations of already-known secrets are not reliably detected.
+Other integrations and arbitrary owner or model text also lack that guarantee.
+Running terminal capture stops
+retaining bytes after a secret change and reports incomplete output. At
+preparation, tool descriptions are redacted; an offer is omitted if its identity or schema keys
 contain a known secret. Stored checkpoints are redacted again before writing; reasoning replay that cannot be retained safely
 causes the write to fail. A later revocation or newly recognized secret cannot
 recall input already sent to a provider.

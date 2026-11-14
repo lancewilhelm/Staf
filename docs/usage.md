@@ -760,7 +760,7 @@ Background tasks use their captured mode for eligible registered capabilities, i
 
 When the experimental Linux boundary is enabled and its checks pass, file calls use its approved workspace. File results use `/workspace` paths, which terminal commands can also use. The equivalent `/srv/staf-workspace` host paths are accepted. Otherwise file calls are blocked before execution. A working directory alone is not a sandbox.
 
-An external writer can still race the hash check and write; it is not an atomic filesystem compare-and-swap. Failed effects that cannot be determined are recorded as uncertain and require reconciliation, not automatic replay. The paired action records and CLI status expose outcomes. Inputs that cannot be retained under the instance redaction rules are rejected rather than substituted. File reads check surrounding bytes for complete known credentials, including credentials split across page boundaries; a page near a credential may also be rejected. Pattern-recognized tokens are checked back to their boundary; a read fails if the boundary cannot be established within the bounded lookback, including for very long benign tokens. Unknown or deliberately transformed secrets may still appear in output or retained history.
+An external writer can still race the hash check and write; it is not an atomic filesystem compare-and-swap. Failed effects that cannot be determined are recorded as uncertain and require reconciliation, not automatic replay. The paired action records and CLI status expose outcomes. Inputs that cannot be retained under the instance redaction rules are rejected rather than substituted. File reads also check surrounding bytes for complete recognizable credentials and reject pages whose token boundaries cannot be established. These checks cannot identify arbitrary transforms. When any supported secret has been observed, or the secret state cannot be checked, Staf withholds file reads and searches, native terminal starts and reads, and scratch-shell execution. This also applies after deletion: arbitrary output could encode a previously known value. Other authorized tools and ordinary chat remain subject to their permissions and the taint fence described below.
 
 If recovery is fenced after an opaque or uncertain change, inspect the action
 and resource first. The paired CLI supports
@@ -851,6 +851,28 @@ applicable tool results and action records before model delivery. The filter is
 a secondary safeguard: unknown, encoded, fragmented, or transformed secrets
 can escape it. Existing records, backups, and data already sent elsewhere are
 not erased. Use protected entry rather than relying on detection or filtering.
+
+A durable secret-state generation tracks additions, replacements, deletions, and
+observed changes to supported credential sources. File, terminal, scratch, web,
+Gmail, memory, and skill action output acquired before that state changes taints the originating agent. After a
+change, Staf stops later model dispatch and new output persistence from that
+agent; taint follows approved helper disclosures and shared writes. A shared
+write can consequently fence other agents too. Legacy or unverifiable output
+state also fails closed. Existing output and backups are not erased, and there
+is currently no owner-facing way to clear this fence or approve an individual
+output. Creating another agent does not bypass a shared-output fence. This is a
+substantial limitation, including for otherwise harmless files and commands.
+
+The boundary covers the listed Staf-managed action outputs when the secret state
+changes. It does not prove that already-known secrets cannot be transformed by
+authorized web, Gmail, memory, or skill content, nor that unrelated integrations,
+external programs, provider output, or ordinary owner text cannot contain transformed credentials. A complete
+rollback of both local databases, or privileged modification of service data,
+is not detectable as a monotonic history. A separate writer can also change a
+credential source between the service's check and dispatch or persistence; no
+cross-process lock covers that interval. Use one service and coordinated writers
+for a dataset. Do not rely on text filtering to
+protect secrets from such sources.
 
 Named values are unencrypted in `secrets/credentials.sqlite` beside the instance
 database, with owner-only directory and file permissions. In-memory instances

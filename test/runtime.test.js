@@ -201,7 +201,7 @@ test('registered action outcomes that do not complete are reported as unsuccessf
   ]) {
     const {store,session}=await fixture(t);
     const definition={type:'function',function:{name:'fixture_action',description:'Fixture',parameters:{type:'object',properties:{},additionalProperties:false}}};
-    const actions={context:{mode:'direct'},isPrivate:()=>false,closedReason:()=>null,offers:route=>route==='direct'?[structuredClone(definition)]:[],recognizes:name=>name==='fixture_action',invoke:async()=>result};
+    const actions={context:{mode:'direct'},assertTaint:()=>{},isPrivate:()=>false,closedReason:()=>null,offers:route=>route==='direct'?[structuredClone(definition)]:[],recognizes:name=>name==='fixture_action',invoke:async()=>result};
     const provider={name:'fixture',complete:async messages=>messages.at(-1).role==='tool'?{role:'assistant',content:'done'}:{role:'assistant',content:null,tool_calls:[{id:'call',function:{name:'fixture_action',arguments:'{}'}}]}};
     await runTurn({store,session,provider,actions,text:'exercise'});
     assert.equal(session.events.find(event=>event.type==='tool_result').success,false);

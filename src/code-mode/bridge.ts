@@ -19,7 +19,7 @@ export async function runCode(input:{actions:WorkActions;responseId:string;callI
   const receipts=new Map<string,Json>(), emitted:Json[]=[];
   const initialGeneration=input.secretGeneration?.();let encodedReceipt=false;
   const assertReceiptGeneration=()=>{if(encodedReceipt && initialGeneration!==undefined && input.secretGeneration?.()!==initialGeneration)throw Error('Known secrets changed after encoded output was produced');};
-  const persist=()=>{assertReceiptGeneration();assertEncodedResult(emitted,redact,true);actions.updateExecution(id,JSON.stringify({emitted}));};
+  const persist=()=>{actions.assertTaint();assertReceiptGeneration();assertEncodedResult(emitted,redact,true);actions.updateExecution(id,JSON.stringify({emitted}));};
   let outputBytes=0, cachedBytes=0, fatal:string|undefined,ownerRevision:string|undefined;
   const pending=new Set<Promise<unknown>>();
   let taskQuestionPending=false;
@@ -31,6 +31,7 @@ export async function runCode(input:{actions:WorkActions;responseId:string;callI
     if(taskQuestionPending && message.type==='call')return Promise.resolve({ok:false as const,error:'Owner input is pending'});
     if(isQuestion)taskQuestionPending=true;
     const operation=(async()=>{
+    actions.assertTaint();
     if(fatal || actions.context.signal.aborted) return {ok:false as const,error:'Work stopped or closed'};
     try {
       input.ensureSkills?.();
@@ -72,7 +73,7 @@ export async function runCode(input:{actions:WorkActions;responseId:string;callI
   try {actions.assertPrivateDisclosure();} catch {fatal='Gmail permission changed before model disclosure';actions.close('authority');}
   let result:Json={emitted};
   if(end.outcome==='return' && !fatal) {try {result={emitted,value:keep(end.value)};} catch { /* limit closed admission */ }}
-  try {assertReceiptGeneration();assertEncodedResult(result,redact,true);} catch {actions.finishExecution(id,'closed',null);throw Error('Encoded action result cannot be retained safely');}
+  try {actions.assertTaint();assertReceiptGeneration();assertEncodedResult(result,redact,true);} catch {actions.finishExecution(id,'closed',null);throw Error('Encoded action result cannot be retained safely');}
   actions.finishExecution(id,fatal?'closed':end.outcome,JSON.stringify(result));
   if(fatal==='Action denied' && !actions.context.workSignal.aborted) return JSON.stringify({executionId:id,outcome:'denied',notice:'Action denied. No further actions are admitted for this work.'});
   if(fatal) throw Error(fatal);

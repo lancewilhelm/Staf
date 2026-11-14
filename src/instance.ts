@@ -37,7 +37,7 @@ import {CredentialTransitionFailed,CredentialTransitionUncertain,type Credential
 const clockAction: Action = { capability:'clock', operation:'read', resource:'utc', effect:'read', limits:{}, risk:'safe' };
 const clockBoundary = { enabledCapabilities:['clock'], actions:[clockAction] };
 const modes: ApprovalMode[] = ['ask-every-time','ask-for-risky-actions','never-ask'];
-export const INSTANCE_SCHEMA_VERSION = 58;
+export const INSTANCE_SCHEMA_VERSION = 59;
 const MAINTENANCE_VERSION = 2147483647;
 
 export const starterSoul = "You are an assistant working for the owner. Be clear and candid. Distinguish observations from assumptions. Follow the owner's role instructions and work within the permissions and task scope granted to you.";
@@ -271,6 +271,16 @@ export class Instance {
     if(version < 44) this.db.exec(`CREATE TABLE IF NOT EXISTS memory_sensitivity (id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL, mode TEXT NOT NULL CHECK(mode IN ('model','review-all')), terms TEXT NOT NULL);
       INSERT OR IGNORE INTO memory_sensitivity VALUES (1,1,'model','["medical","health","diagnosis","medication","therapy","sexual","financial","password"]');
       CREATE TABLE IF NOT EXISTS sensitive_memory_proposals (id TEXT PRIMARY KEY, bot_id TEXT NOT NULL REFERENCES bots(id), work_kind TEXT NOT NULL CHECK(work_kind IN ('command','task')), work_id TEXT NOT NULL, scope TEXT NOT NULL CHECK(scope IN ('bot','user')), operation TEXT NOT NULL CHECK(operation IN ('create','update')), target_id TEXT, target_version INTEGER, text TEXT, fingerprint TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('pending','confirmed','denied')), CHECK((state='pending' AND text IS NOT NULL) OR (state<>'pending' AND text IS NULL)));`);
+    if(version < 59) this.db.exec(`CREATE TABLE IF NOT EXISTS agent_output_taint (bot_id TEXT PRIMARY KEY, generation INTEGER NOT NULL, proof TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS shared_output_taint (id INTEGER PRIMARY KEY CHECK(id=1),generation INTEGER NOT NULL,proof TEXT NOT NULL);
+      INSERT OR IGNORE INTO agent_output_taint SELECT DISTINCT COALESCE(c.bot_id,t.bot_id),-1,'legacy' FROM work_action_invocations i LEFT JOIN commands c ON i.kind='command' AND c.id=i.work_id LEFT JOIN task_attempts t ON i.kind='task' AND t.id=i.work_id JOIN action_journal a ON a.id=i.action_id WHERE COALESCE(c.bot_id,t.bot_id) IS NOT NULL AND i.capability IN ('file_read','file_search','terminal_run','terminal_read','run_scratch_shell','read_web','search_web','gmail_search','gmail_read','memory_search','memory_read','select_skill') AND a.state IN ('started','succeeded','uncertain');
+      INSERT OR IGNORE INTO agent_output_taint SELECT DISTINCT bot_id,-1,'legacy' FROM native_processes;
+      INSERT OR IGNORE INTO shared_output_taint SELECT 1,-1,'legacy' WHERE EXISTS (
+        SELECT 1 FROM work_action_invocations r JOIN action_journal ar ON ar.id=r.action_id JOIN work_action_invocations w ON w.rowid>r.rowid AND w.action_id<>r.action_id JOIN action_journal aw ON aw.id=w.action_id
+        WHERE r.capability IN ('file_read','file_search','terminal_run','terminal_read','run_scratch_shell','read_web','search_web','gmail_search','gmail_read','memory_search','memory_read','select_skill') AND ar.state IN ('started','succeeded','uncertain')
+          AND w.capability IN ('file_write','file_edit','terminal_run','terminal_write','run_scratch_shell','memory_remember','memory_update') AND aw.state IN ('started','succeeded','uncertain')
+          AND COALESCE((SELECT bot_id FROM commands WHERE r.kind='command' AND id=r.work_id),(SELECT bot_id FROM task_attempts WHERE r.kind='task' AND id=r.work_id))=COALESCE((SELECT bot_id FROM commands WHERE w.kind='command' AND id=w.work_id),(SELECT bot_id FROM task_attempts WHERE w.kind='task' AND id=w.work_id))
+      );`);
     if (!maintenanceToken) this.db.exec(`PRAGMA user_version=${INSTANCE_SCHEMA_VERSION}`);
     for (const row of this.db.prepare("SELECT id,bot_id FROM task_attempts WHERE state IN ('queued','running','stopping','waiting') ORDER BY rowid").all()) {
       if (typeof row.id !== 'string' || typeof row.bot_id !== 'string') throw Error('Invalid interrupted task');
@@ -285,6 +295,16 @@ export class Instance {
     const key = this.db.prepare("SELECT value FROM instance_secrets WHERE name='command-fingerprint'").get()?.value;
     if (!(key instanceof Uint8Array) || key.length !== 32) throw Error('Invalid instance fingerprint key');
     this.fingerprintKey = key;
+    if(version<59){
+      const proof=createHmac('sha256',this.fingerprintKey).update(JSON.stringify(['agent-output-taint','shared',-2])).digest('hex');this.db.prepare('INSERT OR IGNORE INTO shared_output_taint VALUES (1,-2,?)').run(proof);
+      for(const bot of this.db.prepare('SELECT id,chat_id FROM bots').all()){
+        if(typeof bot.id!=='string' || typeof bot.chat_id!=='string')throw Error('Invalid legacy agent');
+        if(this.db.prepare('SELECT 1 FROM agent_output_taint WHERE bot_id=?').get(bot.id))continue;
+        const saved=this.db.prepare('SELECT session FROM sessions WHERE bot_id=?').get(bot.id);let uncertain=false;
+        if(typeof saved?.session==='string'){try{const session:unknown=JSON.parse(saved.session);uncertain=!validSession(session,bot.chat_id) || session.messages.some(message=>message.role==='assistant' && (message.tool_calls??[]).some(call=>['file_read','file_search','terminal_run','terminal_read','run_scratch_shell','read_web','search_web','gmail_search','gmail_read','memory_search','memory_read','select_skill','code_mode'].includes(call.function.name)));}catch{uncertain=true;}}
+        if(uncertain)this.db.prepare("INSERT INTO agent_output_taint VALUES (?,-1,'legacy')").run(bot.id);else this.initializeAgentTaint(bot.id);
+      }
+    }
     const datasetKey=this.db.prepare("SELECT value FROM instance_secrets WHERE name='dataset-identity'").get()?.value;
     if(datasetKey!==undefined && (!(datasetKey instanceof Uint8Array)||datasetKey.length!==32))throw Error('Invalid dataset identity key');
     this.datasetKey=datasetKey ?? key;
@@ -296,6 +316,7 @@ export class Instance {
     try { this.resumeDemoMigration(); } catch {}
     } catch (error) { this.db.close(); if(this.temporaryConfigRoot)rmSync(this.temporaryConfigRoot,{recursive:true,force:true}); throw error; }
   }
+  private initializeAgentTaint(botId:string) {const proof=createHmac('sha256',this.fingerprintKey).update(JSON.stringify(['agent-output-taint',botId,-2])).digest('hex');this.db.prepare('INSERT INTO agent_output_taint VALUES (?,-2,?)').run(botId,proof);}
   private bindWork(work:WorkRef, botId:string) {
     if (!/^[a-zA-Z0-9_-]+$/.test(botId)) throw Error('Invalid agent identity for working directory');
     const directory=join(this.agentRoot,botId,'work');
@@ -303,6 +324,7 @@ export class Instance {
     this.db.prepare('INSERT OR IGNORE INTO work_bindings VALUES (?,?,?,?)').run(work.kind,work.id,botId,directory);
   }
   gmailHistory(transport?:GmailHistoryTransport,assertAuthority:()=>void=()=>{}) {return new GmailHistory(this.db,transport,assertAuthority);}
+  secretObservation(value:string) {return createHmac('sha256',this.fingerprintKey).update(JSON.stringify(['secret-observation',value])).digest('hex');}
   inboxSenderKey(accountId:string,botId:string,sender:string) {return createHmac('sha256',this.fingerprintKey).update(JSON.stringify([accountId,botId,sender.trim().toLocaleLowerCase()])).digest('hex');}
   gmailWorkIdentity(work:WorkRef) {
     const row=work.kind==='command' ? this.db.prepare("SELECT c.bot_id,p.profile FROM commands c JOIN command_profiles p ON p.command_id=c.id WHERE c.id=? AND c.state='pending'").get(work.id) : this.db.prepare("SELECT bot_id,profile FROM task_attempts WHERE id=? AND state='running'").get(work.id);
@@ -617,7 +639,7 @@ export class Instance {
       const id=randomUUID(), chatId=randomUUID(), defaults=this.creationDefaults();
       if (!defaults.provider) throw Error('Choose a creation-default provider and model in Settings first, or run staf settings set-defaults PROVIDER MODEL.');
       this.configs.publish(id,{name:'Staf',description:'',provider:defaults.provider,model:defaults.model,reasoning:defaults.reasoning,toolMode:defaults.toolMode,instructions:starterSoul},false);
-      this.db.prepare('INSERT INTO bots VALUES (?, ?, ?, ?, ?, ?, ?)').run(id,chatId,'','',defaults.provider,null,null);
+      this.db.prepare('INSERT INTO bots VALUES (?, ?, ?, ?, ?, ?, ?)').run(id,chatId,'','',defaults.provider,null,null);this.initializeAgentTaint(id);
       this.db.prepare('INSERT INTO bot_profiles (bot_id,revision,soul,archived) VALUES (?, 1, ?, 0)').run(id,'');
       this.db.prepare('INSERT INTO main_bot VALUES (1,?)').run(id);
       const bot=this.bot(id); this.db.exec('COMMIT'); return bot;
@@ -974,7 +996,7 @@ export class Instance {
       const chosenModel=input.model !== undefined ? input.model : (input.provider===undefined?defaults.model:first?.model??advertisedModel??null);
       const chosenReasoning=input.reasoning !== undefined ? input.reasoning : (input.provider===undefined?defaults.reasoning:first?.reasoning??null);
       this.configs.publish(id,{name:input.name,description:'',provider,model:chosenModel,reasoning:chosenReasoning,toolMode:input.toolMode??defaults.toolMode,instructions:input.instructions,providerChoices:{[provider]:{model:chosenModel,reasoning:chosenReasoning}},image},false);
-      this.db.prepare('INSERT INTO bots VALUES (?, ?, ?, ?, ?, ?, ?)').run(id, chatId, '', '', provider, null, null);
+      this.db.prepare('INSERT INTO bots VALUES (?, ?, ?, ?, ?, ?, ?)').run(id, chatId, '', '', provider, null, null);this.initializeAgentTaint(id);
       this.db.prepare('INSERT INTO bot_profiles (bot_id,revision,soul,archived) VALUES (?, 1, ?, 0)').run(id, '');
       if(input.operationId && digest) this.db.prepare('INSERT INTO bot_creation_operations VALUES (?,?,?)').run(input.operationId,digest,id);
       this.db.exec('COMMIT');
@@ -1136,6 +1158,7 @@ export class Instance {
         if (this.db.prepare('SELECT digest FROM task_fingerprints WHERE attempt_id=?').get(input.id)?.digest !== digest) throw new BotConflict('Task command ID conflict');
         return {kind:'existing' as const, attempt:existing};
       }
+      this.workActions().assertAgentTaint(input.botId);
       const bot = this.bot(input.botId);
       if (!bot) throw Error('Agent not found');
       if (bot.provider==='demo' && this.db.prepare('SELECT 1 FROM demo_migration WHERE id=1').get()) throw new BotConflict('Demo migration is incomplete for this agent. Repair its configuration and reload creation defaults.');
@@ -1202,6 +1225,7 @@ export class Instance {
     const assignmentId=String(assignment.id),parentId=String(assignment.parent_attempt_id),helper=String(assignment.helper_bot_id),requester=String(assignment.requester_bot_id),id=randomUUID();
     this.db.exec('BEGIN IMMEDIATE');try {
       this.assertNoPendingParentInput(parentId,requester);
+      this.workActions().inheritAgentTaint(helper,requester);
       this.consumeDisclosure(disclosureId,{parentAttemptId:parentId,senderBotId:helper,recipientBotId:requester,kind:'question',content:question});
       const request=this.db.prepare("SELECT id FROM collaboration_messages WHERE assignment_id=? AND kind='request'").get(assignmentId);if(typeof request?.id !== 'string')throw Error('Request not found');
       const digest=createHmac('sha256',this.fingerprintKey).update(JSON.stringify([id,question])).digest('hex');
@@ -1220,6 +1244,7 @@ export class Instance {
     const digest=createHmac('sha256',this.fingerprintKey).update(JSON.stringify([assignmentId,questionId,answer])).digest('hex');
     this.db.exec('BEGIN IMMEDIATE');try {
       this.assertNoPendingParentInput(parentId,parent.botId);
+      this.workActions().inheritAgentTaint(parent.botId,helper);
       const existing=!!this.db.prepare('SELECT 1 FROM collaboration_messages WHERE id=?').get(id);
       if(!existing)this.consumeDisclosure(disclosureId,{parentAttemptId:parentId,senderBotId:parent.botId,recipientBotId:helper,kind:'answer',content:answer});
       else this.interruptDisclosure(disclosureId);
@@ -1245,6 +1270,7 @@ export class Instance {
       if (!parent || parent.state !== 'running') throw new BotConflict('Parent task is not running');
       const helper=this.bot(input.helperBotId);
       if (!helper || helper.archived || helper.id === parent.botId) throw new BotConflict('Helper is unavailable');
+      this.workActions().inheritAgentTaint(parent.botId,helper.id);
       if (this.db.prepare("SELECT 1 FROM commands WHERE bot_id=? AND state='pending'").get(input.helperBotId)) throw new BotConflict('Helper is busy');
       const objective=`${input.objective}\n\nAssignment context:\n${input.context}`;
       this.assertNoPendingParentInput(input.parentAttemptId,parent.botId);
@@ -1287,6 +1313,7 @@ export class Instance {
       }
       if(!['queued','running','stopping'].includes(previous.state)) throw new BotConflict('Task is no longer active');
       if(this.db.prepare("SELECT 1 FROM task_attempts WHERE bot_id=? AND state='waiting'").get(previous.botId)) throw new BotConflict('A replacement is already waiting');
+      this.workActions().assertAgentTaint(previous.botId);
       const bot=this.bot(previous.botId);if(!bot || bot.archived) throw new BotConflict('Agent unavailable');
       const taskId=randomUUID();this.db.prepare('INSERT INTO tasks VALUES (?,?,?)').run(taskId,previous.botId,visibleObjective);
       this.db.prepare("INSERT INTO task_attempts (id,task_id,bot_id,predecessor,profile,context,state,limit_ms) VALUES (?,?,?,?,?,?,'waiting',?)").run(input.id,taskId,previous.botId,input.predecessor,JSON.stringify({...bot,core:this.core().content}),JSON.stringify(this.taskContext(previous.botId)),input.limitMs);
@@ -1396,6 +1423,7 @@ export class Instance {
     const store=new CollaborationStore(this.db);
     if (!active) {if (assignment.state === 'active') store.finish({assignmentId,botId:requester,state:'cancelled'});this.taskEvent(helperAttemptId,{type:'collaboration_late',assignmentId,parentAttemptId:parentId});return;}
     if (active) this.assertNoPendingParentInput(parentId,requester);
+    if (active) this.workActions().inheritAgentTaint(helper,requester);
     if (active) this.consumeDisclosure(disclosureId ?? '',{parentAttemptId:parentId,senderBotId:helper,recipientBotId:requester,kind:state === 'completed' ? 'result' : 'failure',content:body});
     store.append({assignmentId,botId:helper,toBotId:requester,id:key('message'),commandId:key('message-command'),fingerprint:key(body),kind:state === 'completed' ? 'result' : 'failure',inReplyTo:request.id,body,...(!active ? {late:true} : {})});
     if (active) {

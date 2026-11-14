@@ -559,7 +559,14 @@ where persistence succeeds.
 
 Agent host-file calls fail closed by default. On Linux they can use the
 explicitly configured, unverified host boundary described in
-[credential isolation](credential-isolation.md).
+[credential isolation](credential-isolation.md). Even when that boundary is configured, file reads and
+searches, terminal starts and reads, and scratch-shell execution are withheld
+once a supported credential has been observed, or if its state is unavailable.
+An output captured earlier is bound to a durable secret generation; after a
+change, affected dispatch and new persistence fail closed. Taint follows approved
+helper context and shared writes, and older unverifiable output is fenced. There
+is no approval or reset for this fence. See [usage](usage.md#secret-requests)
+for limitations and other sources of transformed output.
 
 `file_read({path, offset?, limit?})` returns at most 32,768 bytes (default 8,192) and returns base64 data, byte offset, size, next offset and, for files up to 1 MiB, a SHA-256. `file_write({path, content})` writes UTF-8. `file_edit({path, expectedHash, oldText, newText})` requires valid UTF-8, a file at most 1 MiB, the current hash and one exact match. `file_search({path, query, offset?, limit?})` returns byte offsets in a file, scanning up to 65,536 bytes per page, or matching names in a single directory. A page has at most 100 matches; a directory over 10,000 entries is rejected. Paths are at most 4,096 characters; write content is at most 131,072 UTF-16 code units, each edit string at most 65,536, and search queries at most 1,024. The shared 256 KiB serialized invocation limit also applies. Follow `nextOffset` until null. Concurrent host changes can invalidate a page or race an edit; the hash check is not an atomic compare-and-swap.
 
