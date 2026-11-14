@@ -44,8 +44,6 @@ export class NativeProcesses {
   private readonly interactions=new Map<string,{tail:Promise<void>;pending:number}>();
   private closing=false;
   private outputGuard:(bytes:Buffer,partial:boolean)=>void=()=>{};
-  private outputAuthority:(id:string)=>void=()=>{};
-  setOutputAuthority(check:(id:string)=>void):void {this.outputAuthority=check;}
   private secretGeneration:()=>number=()=>0;
   setSecretGeneration(get:()=>number):void {this.secretGeneration=get;}
   setOutputGuard(guard:(bytes:Buffer,partial:boolean)=>void):void {this.outputGuard=guard;}
@@ -66,7 +64,6 @@ export class NativeProcesses {
   }
   output(id:string,cursor=0) {
     const process=this.get(id);if(!process)throw Error('Process not found');
-    this.outputAuthority(id);
     if(!Number.isSafeInteger(cursor)||cursor<0)throw Error('Invalid output cursor');
     const first=Number(process.firstCursor),next=Number(process.nextCursor);
     if(cursor>next)throw Error('Output cursor is beyond the observed output');

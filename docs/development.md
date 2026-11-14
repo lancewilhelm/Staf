@@ -407,12 +407,6 @@ two protected requests, review the `T123` / `U123` / `D123` destination and agen
 and approve. The synthetic transport reports connected in Slack settings. Stop
 the fixture with Ctrl-C to remove its disposable data. This check does not use a
 live model or Slack account and does not demonstrate Linux isolation.
-For the synthetic output-review browser journey, run `corepack pnpm run build`
-then `node test/browser/output-recovery-smoke.mjs`. It exercises a controlled
-service and synthetic output; its injected host boundary is a fixture and does
-not verify Linux isolation. The review creates a separate fresh agent only for
-a supported stale-agent case; it does not recover shared or unverifiable output.
-
 For a disposable guided Gmail check, build and run
 `node test/fixtures/gmail-guided-ui.mjs`. It prints a local address, pairing code,
 and synthetic values. Create an agent with provider `live` and model

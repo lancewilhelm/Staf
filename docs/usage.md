@@ -760,7 +760,7 @@ Background tasks use their captured mode for eligible registered capabilities, i
 
 When the experimental Linux boundary is enabled and its checks pass, file calls use its approved workspace. File results use `/workspace` paths, which terminal commands can also use. The equivalent `/srv/staf-workspace` host paths are accepted. Otherwise file calls are blocked before execution. A working directory alone is not a sandbox.
 
-An external writer can still race the hash check and write; it is not an atomic filesystem compare-and-swap. Failed effects that cannot be determined are recorded as uncertain and require reconciliation, not automatic replay. The paired action records and CLI status expose outcomes. Inputs that cannot be retained under the instance redaction rules are rejected rather than substituted. File reads also check surrounding bytes for complete recognizable credentials and reject pages whose token boundaries cannot be established. These checks cannot identify arbitrary transforms. When any supported secret has been observed, or the secret state cannot be checked, Staf withholds file reads and searches, native terminal starts and reads, and scratch-shell execution. This also applies after deletion: arbitrary output could encode a previously known value. Other authorized tools and ordinary chat remain subject to their permissions and the taint fence described below.
+An external writer can still race the hash check and write; it is not an atomic filesystem compare-and-swap. Failed effects that cannot be determined are recorded as uncertain and require reconciliation, not automatic replay. The paired action records and CLI status expose outcomes. Inputs that cannot be retained under the instance redaction rules are rejected rather than substituted. File reads check surrounding bytes for complete known credentials, including credentials split across page boundaries; a page near a credential may also be rejected. Pattern-recognized tokens are checked back to their boundary; a read fails if the boundary cannot be established within the bounded lookback, including for very long benign tokens. Unknown or deliberately transformed secrets may still appear in output or retained history.
 
 If recovery is fenced after an opaque or uncertain change, inspect the action
 and resource first. The paired CLI supports
@@ -850,41 +850,10 @@ Known saved and supported environment credential values are filtered from
 applicable tool results and action records before model delivery. The filter is
 a secondary safeguard: unknown, encoded, fragmented, or transformed secrets
 can escape it. Existing records, backups, and data already sent elsewhere are
-not erased. Use protected entry rather than relying on detection or filtering.
-
-A durable secret-state generation tracks additions, replacements, deletions, and
-observed changes to supported credential sources. File, terminal, scratch, web,
-Gmail, memory, and skill action output acquired before that state changes taints the originating agent. After a
-change, Staf stops later model dispatch and new output persistence from that
-agent; taint follows approved helper disclosures and shared writes. A shared
-write can consequently fence other agents too. Legacy or unverifiable output
-state also fails closed. Existing output and backups are not erased. In
-Settings, **Output safety review** shows the selected agent's status and safe
-action identities and states, without displaying captured output. Those actions
-may be related; the existing record does not identify the exact output. When
-shared state is blocked, the review also lists bounded candidate shared actions
-across agents, without their inputs or outputs. If its own
-output is stale, shared output remains current, all work has settled, and no
-action outcome is unresolved, the owner may confirm a separate fresh agent.
-It uses current creation defaults; it does not copy the old conversation,
-tasks, or integration permissions, and it cannot resume an old action. The
-original agent and its records stay intact. This does not clear the old fence,
-and a shared or unverifiable fence has no safe recovery yet. A new agent does
-not bypass a shared-output fence. These restrictions can block otherwise
-harmless files, commands, and unrelated agents.
-
-The boundary covers the listed Staf-managed action outputs when the secret state
-changes. It does not prove that already-known secrets cannot be transformed by
-authorized web, Gmail, memory, or skill content, nor that unrelated integrations,
-external programs, provider output, or ordinary owner text cannot contain transformed credentials. A complete
-rollback of both local databases, or privileged modification of service data,
-is not detectable as a monotonic history. Restoring an earlier instance backup
-can also forget that a fresh agent was created; inspect the restored agent list
-and request a new review after recovery. A separate writer can also change a
-credential source between the service's check and dispatch or persistence; no
-cross-process lock covers that interval. Use one service and coordinated writers
-for a dataset. Do not rely on text filtering to
-protect secrets from such sources.
+not erased. Credential changes by the service are rechecked before dispatch and
+persistence. A separate same-user process can modify a credential source between
+checks; Staf does not lock out uncoordinated external writers. Protect the host
+and backups, and use protected entry rather than relying on detection or filtering.
 
 Named values are unencrypted in `secrets/credentials.sqlite` beside the instance
 database, with owner-only directory and file permissions. In-memory instances
@@ -988,10 +957,14 @@ authenticated setup context. If a new secret changes a pending model request,
 Staf stops that request; retry after reviewing the context. If redaction crosses
 a setup-result boundary, Staf stops the turn to avoid sending a stale status.
 Text stored before it was recognized as a secret may remain in older records and
-backups. Encoded output checks may reject safe historical pages. Running terminal capture
-stops retaining new bytes when the known-secret set changes and reports incomplete
-output. The checks do not yet cover every transformed or unattributed fragment,
-including arbitrary scratch output and older receipts. A later
+backups. Staf checks its structured file and process bytes against current known
+values before replay and storage. When an earlier encoded result cannot be checked
+safely, Staf omits that tool result from later replay while keeping the surrounding
+conversation. A secret change during an in-flight encoded result can stop that
+turn; retry after review. Running terminal capture stops retaining new bytes when
+the known-secret set changes and reports incomplete output. These safeguards do
+not detect every transformation or unknown secret, including split or reassembled
+scratch output. A later
 revocation can make credentials unavailable without erasing the
 earlier success, but cannot recall input already sent to a model. Available credentials do not verify Google access
 or grant an agent or model permission. If the agent's settings change during

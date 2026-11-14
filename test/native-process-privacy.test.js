@@ -29,17 +29,14 @@ test('terminal input changed by credential redaction never starts or enters the 
  }finally{if(!closed)await app.close();rmSync(dir,{recursive:true,force:true});}
 });
 
-test('terminal output is withheld before execution when credentials are known',async()=>{
+test('terminal output redacts credentials across byte chunks before storage and both API encodings',async()=>{
  const dir=mkdtempSync(join(tmpdir(),'staf-native-output-private-')),path=join(dir,'db');
- const secret='synthetic-native-unicode-é';let mode;
- const app=startInstance(path,0,{env:{OPENROUTER_API_KEY:secret},providerFactory:async()=>({name:'fixture',capabilities:{toolCalls:true},async complete(messages){return messages.at(-1).role==='tool'?{role:'assistant',content:'done'}:mode==='direct'?tool('terminal_run',{retain:true,command:'printf fixture'}):tool('code_mode',{source:'return await capabilities.terminal_run({retain:true,command:"printf fixture"});'});}})});
- let closed=false;try{const call=await paired(app);for(mode of ['direct','hybrid','code']){const bot=await call('/api/bots',{provider:'live',model:'fixture-offline',name:mode,toolMode:mode}),id='output-'+mode;await call('/api/commands',{id,botId:bot.id,content:'Run fixture'});const c=await until(async()=>{const value=await call('/api/commands/'+id);return value.state!=='pending'&&value;});assert.equal(c.state,'completed');assert.equal(c.workActions[0].state,'cancelled');assert.deepEqual(await call('/api/processes'),[]);}
- await app.close();closed=true;const db=new DatabaseSync(path,{readOnly:true});try{assert.equal(db.prepare('SELECT count(*) AS n FROM native_process_output').get().n,0);}finally{db.close();}
+ const secret=['synthetic','native','unicode','é'].join('-'),bytes=[...Buffer.from(secret)],half=bytes.length-1;
+ const script=`process.stdout.write(Buffer.from(${JSON.stringify([0,255,...bytes.slice(0,half)])})); setTimeout(()=>{process.stdout.write(Buffer.from(${JSON.stringify([...bytes.slice(half),10])}));process.stderr.write(Buffer.from(${JSON.stringify(bytes)}));},40);`;
+ const command=JSON.stringify(process.execPath)+' -e '+"'"+script+"'";let mode;
+ const app=startInstance(path,0,{env:{OPENROUTER_API_KEY:secret},providerFactory:async()=>({name:'fixture',capabilities:{toolCalls:true},async complete(messages){return messages.at(-1).role==='tool'?{role:'assistant',content:'done'}:mode==='direct'?tool('terminal_run',{retain:true,command}):tool('code_mode',{source:`return await capabilities.terminal_run({retain:true,command:${JSON.stringify(command)}});`});}})});
+ let closed=false;
+ try{const call=await paired(app);for(mode of ['direct','hybrid','code']){const bot=await call('/api/bots',{provider:'live',model:'fixture-offline',name:mode,toolMode:mode}),id='output-'+mode;await call('/api/commands',{id,botId:bot.id,content:'Run fixture'});await until(async()=>{const c=await call('/api/commands/'+id);return c.state!=='pending'&&c;});const process=await until(async()=> (await call('/api/processes')).find(p=>p.work.id===id&&p.outputComplete));const page=await call(`/api/processes/${process.id}/output`);assert.equal(JSON.stringify(page).includes(secret),false);for(const stream of ['stdout','stderr']){const actual=Buffer.concat(page.chunks.filter(c=>c.stream===stream).map(c=>Buffer.from(c.data,'base64')));assert.equal(actual.includes(Buffer.from(secret)),false);assert.deepEqual(actual,stream==='stdout'?Buffer.concat([Buffer.from([0,255]),Buffer.from('[REDACTED]\n')]):Buffer.from('[REDACTED]'));}}
+  await app.close();closed=true;const db=new DatabaseSync(path,{readOnly:true});try{for(const process of db.prepare('SELECT id FROM native_processes').all())for(const stream of ['stdout','stderr']){const stored=Buffer.concat(db.prepare('SELECT data FROM native_process_output WHERE process_id=? AND stream=? ORDER BY cursor').all(process.id,stream).map(row=>Buffer.from(row.data)));assert.deepEqual(stored,stream==='stdout'?Buffer.concat([Buffer.from([0,255]),Buffer.from('[REDACTED]\n')]):Buffer.from('[REDACTED]'));}}finally{db.close();}
  }finally{if(!closed)await app.close();rmSync(dir,{recursive:true,force:true});}
-});
-
-test('byte redaction preserves binary output while filtering split Unicode credentials',async()=>{
- const {byteStreamRedactor}=await import('../dist/config.js');const secret='synthetic-native-unicode-é',bytes=Buffer.from(secret),filter=byteStreamRedactor({OPENROUTER_API_KEY:secret});
- const actual=Buffer.concat([filter.write(Buffer.concat([Buffer.from([0,255]),bytes.subarray(0,bytes.length-1)])),filter.write(Buffer.concat([bytes.subarray(bytes.length-1),Buffer.from('\n')])),filter.finish()]);
- assert.deepEqual(actual,Buffer.concat([Buffer.from([0,255]),Buffer.from('[REDACTED]\n')]));
 });

@@ -395,7 +395,8 @@ known values from result strings, keys, visible outcomes, and retained change
 results before release to callers or normal records. The paired browser checks
 recognizable formats locally before chat and question submission; flagged
 question text is omitted from draft saves. Unknown and transformed values may
-escape filtering, and historical records are not rewritten.
+escape filtering. Older records and backups are not erased; an unsafe historical
+encoded tool result is omitted when its conversation is next replayed and saved.
 Incoming Slack messages matching recognized credential patterns or known values
 are rejected before work or model dispatch, with only a generic notice retained.
 This cannot remove the message from Slack or detect every credential.
@@ -592,37 +593,21 @@ fresh status in a transient message copy, after provider initialization and any
 adapter preflight. At dispatch, built-in adapters refresh the messages and check
 the complete model-bound payload against the current secret redactor. If a new
 secret would change it, the call fails before sending. The check includes
-instructions, tool schemas, model settings, and replay. The separate credential
-store maintains a durable generation advanced in the same transaction as managed-secret mutations, plus keyed observations of
-supported external credential sources. An authenticated per-agent taint binds
-file, terminal, scratch, web, Gmail, memory and skill action output to that
-generation. Dispatch, guest extraction, task/helper propagation, output capture and durable saves recheck
-the boundary. A generation change fences affected work; a tainted shared write
-also fences other agents. Unverifiable older output fails closed. While any
-secret has been observed, file reads and searches, terminal starts and reads,
-and scratch commands are blocked before execution: decoding or matching encodings cannot prove arbitrary guest
-transformations safe. The paired output review exposes only bounded action IDs,
-work kinds, capability names and states; shared-state review includes bounded
-candidate actions across agents. These candidates do not identify the exact
-source, and the review never returns retained payloads.
-A review version binds the agent, its taint and shared state, live and uncertain
-work, secret generation, agent revision, and creation defaults. An explicit
-confirmation can create an independent fresh agent only for verified stale
-agent output while shared state is current and work and uncertain effects are
-settled. The creation operation is idempotent for that reviewed version. It
-copies no conversation, tasks, action receipts, or integration grants, and does
-not change the old fence. Unknown and shared-stale histories cannot be cleared
-by this workflow. There is no individual output-disclosure approval or
-taint reset. Whole-dataset rollback and privileged store tampering
-are outside the monotonicity guarantee; previously persisted data is not erased.
-The boundary does not lock out separate processes or uncoordinated external-file
-writers between a check and a dispatch or save.
-Authorized web, Gmail, memory and skill results remain available, but their
-arbitrary transformations of already-known secrets are not reliably detected.
-Other integrations and arbitrary owner or model text also lack that guarantee.
-Running terminal capture stops
-retaining bytes after a secret change and reports incomplete output. At
-preparation, tool descriptions are redacted; an offer is omitted if its identity or schema keys
+instructions, tool schemas, model settings, and replay. Structured file and
+terminal results are decoded and checked again before replay and session writes.
+The credential store advances a durable generation on secret mutations; an
+in-flight turn with encoded file or process output is fenced if that generation
+changes before release. Terminal capture stops retaining new bytes after a change
+and reports incomplete output. Historical structured output is rechecked against
+current known values, including partial pages and interleaved process streams;
+unsafe or unverifiable tool results are omitted from later replay and session
+saves without removing unrelated conversation text. Structured bytes are checked
+before text redaction can obscure their encoding tag; a new result is withheld
+if redaction would make that tag unverifiable. Earlier durable records and
+backups are not erased. The checks do not establish safety for every transformed
+or unattributed fragment, including arbitrary scratch output. They do not prove
+a platform isolation boundary. At preparation, tool
+descriptions are redacted; an offer is omitted if its identity or schema keys
 contain a known secret. Stored checkpoints are redacted again before writing; reasoning replay that cannot be retained safely
 causes the write to fail. A later revocation or newly recognized secret cannot
 recall input already sent to a provider.

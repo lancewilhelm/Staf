@@ -1,7 +1,9 @@
 import type {Message, RuntimeEvent} from './types.js';
 
 const encodedActions=new Set(['file_read','terminal_read','code_mode','run_scratch_shell']);
-const fixedToolResults=new Set(['Previously loaded skill content is not reloaded in this turn. Select an available skill again if needed.','Tool error: arguments cannot be retained faithfully under the instance redaction rules.','Tool not executed: action admission is closed.','Tool not executed because owner input is pending.','Tool not executed after private Gmail data was read in this turn.','Tool error: capability is not offered for this work','Tool not executed: task stopped or failed.']);
+export const omittedEncodedOutput='Earlier tool output omitted because it cannot be safely checked against current credentials.';
+const fixedToolResults=new Set([omittedEncodedOutput,'Previously loaded skill content is not reloaded in this turn. Select an available skill again if needed.','Tool error: arguments cannot be retained faithfully under the instance redaction rules.','Tool not executed: action admission is closed.','Tool not executed because owner input is pending.','Tool not executed after private Gmail data was read in this turn.','Tool error: capability is not offered for this work','Tool not executed: task stopped or failed.']);
+const isFixedToolResult=(content:string,redact:(text:string)=>string):boolean=>fixedToolResults.has(content) || content===redact(omittedEncodedOutput);
 function guestPayload(value:unknown):unknown {if(!value || typeof value!=='object' || Array.isArray(value))return value;const record=value as Record<string,unknown>;return {emitted:record.emitted,value:record.value};}
 
 export function assertCurrentBytes(bytes:Buffer,redact:(text:string)=>string,secrets:readonly string[],partial:boolean):void {
@@ -19,73 +21,81 @@ export function assertEncodedResult(value:unknown,redact:(text:string)=>string,s
   };
   const inspect=(item:unknown,depth:number):void=>{
     if(depth>32)throw Error('Encoded action result cannot be checked safely');
-    if(scanStrings && typeof item==='string')for(const match of item.matchAll(/[A-Za-z0-9+/]{2,}={0,2}/g)){
-      const run=match[0].replace(/=+$/,'');
-      for(let offset=0;offset<4 && offset<run.length;offset++){
-        const length=run.length-offset;if(length<2)continue;
-        const bytes=Buffer.from(run.slice(offset,offset+length),'base64'),decoded=bytes.toString('utf8');if(run.length>=16)checkPartial(bytes);
-        if(redact(decoded)!==decoded)throw Error('Encoded action result contains a known secret');
-      }
-    }
     if(scanStrings && typeof item==='string' && /^[\[{]/.test(item)){try{const nested:unknown=JSON.parse(item);inspect(nested,depth+1);}catch(error){if(!(error instanceof SyntaxError))throw error;}}
     if(Array.isArray(item)){for(const child of item)inspect(child,depth+1);return;}
     if(!item || typeof item!=='object')return;
     const record=item as Record<string,unknown>;
     if(record.encoding==='base64'){
-      const values=typeof record.data==='string'?[record.data]:Array.isArray(record.chunks)?record.chunks.map(chunk=>chunk && typeof chunk==='object' ? (chunk as Record<string,unknown>).data : undefined):[];
-      if(!values.length && record.data!==undefined)throw Error('Encoded action result cannot be checked safely');
-      const buffers:Buffer[]=[];
-      for(const text of values){if(typeof text!=='string' || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(text))throw Error('Encoded action result cannot be checked safely');buffers.push(Buffer.from(text,'base64'));}
-      const bytes=Buffer.concat(buffers),decoded=bytes.toString('utf8');if(Array.isArray(record.chunks) || typeof record.offset!=='number' || record.offset>0 || record.nextOffset!==null)checkPartial(bytes);if(redact(decoded)!==decoded)throw Error('Encoded action result contains a known secret');
+      const hasData=record.data!==undefined,hasChunks=record.chunks!==undefined;if(hasData===hasChunks || (hasData && typeof record.data!=='string') || (hasChunks && !Array.isArray(record.chunks)))throw Error('Encoded action result cannot be checked safely');
+      const parts=typeof record.data==='string'?[{stream:'',data:record.data}]:Array.isArray(record.chunks)?record.chunks.map(chunk=>chunk && typeof chunk==='object' ? chunk as Record<string,unknown> : {}):[];
+      const streams=new Map<string,Buffer[]>();
+      for(const part of parts){const text=part.data,stream=part.stream===undefined?'':part.stream;if(typeof text!=='string' || typeof stream!=='string' || (Array.isArray(record.chunks) && !['stdout','stderr','terminal'].includes(stream)) || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(text))throw Error('Encoded action result cannot be checked safely');const values=streams.get(stream)??[];values.push(Buffer.from(text,'base64'));streams.set(stream,values);}
+      for(const values of streams.values()){const bytes=Buffer.concat(values),decoded=bytes.toString('utf8');if(Array.isArray(record.chunks) || typeof record.offset!=='number' || record.offset>0 || record.nextOffset!==null)checkPartial(bytes);if(redact(decoded)!==decoded)throw Error('Encoded action result contains a known secret');}
     }
     for(const child of Object.values(record))inspect(child,depth+1);
   };
   inspect(value,0);
 }
 
-export function assertEncodedMessages(messages:Message[],redact:(text:string)=>string,historicalThrough=0,secrets:readonly string[]=[],guestCall?:(id:string)=>boolean|null):void {
+/** Omit only unsafe historical capability payloads; ordinary messages stay intact. */
+export function omitUnsafeHistoricalMessages(messages:Message[],historicalThrough:number,redact:(text:string)=>string,secrets:readonly string[],guestCall?:(id:string)=>boolean|null):Message[] {
+  const calls=new Map<string,string>();
+  return messages.map((message,index)=>{
+    if(message.role==='assistant')for(const call of message.tool_calls??[])calls.set(call.id,call.function.name);
+    if(index>=historicalThrough || message.role!=='tool' || isFixedToolResult(message.content,redact))return message;
+    const name=calls.get(message.tool_call_id);if(!name || !encodedActions.has(name))return message;
+    let value:unknown;try{value=JSON.parse(message.content);}catch{if(secrets.length && (name==='file_read' || name==='terminal_read' || name==='code_mode'))return {...message,content:redact(omittedEncodedOutput)};value=message.content;}
+    if((name==='file_read' || name==='terminal_read') && value && typeof value==='object' && !Array.isArray(value)){const record=value as Record<string,unknown>;if(record.encoding!=='base64' && !['status','blocked','repeat-required','revision-requested'].includes(String(record.kind)))return {...message,content:redact(omittedEncodedOutput)};}
+    if(name==='code_mode' && guestCall?.(message.tool_call_id)!==false && (redact('encoding')!=='encoding' || redact('base64')!=='base64'))return {...message,content:redact(omittedEncodedOutput)};
+    try{assertEncodedResult(name==='code_mode'?guestPayload(value):value,redact,['code_mode','run_scratch_shell'].includes(name),secrets);return message;}catch{return {...message,content:redact(omittedEncodedOutput)};}
+  });
+}
+export function omitUnsafeHistoricalEvents(events:RuntimeEvent[],historicalThrough:number,redact:(text:string)=>string,secrets:readonly string[],guestCall?:(id:string)=>boolean|null):RuntimeEvent[] {
+  return events.map((event,index)=>{
+    if(index>=historicalThrough || event.type!=='tool_result' || !encodedActions.has(event.name) || isFixedToolResult(event.content,redact))return event;
+    let value:unknown;try{value=JSON.parse(event.content);}catch{return !secrets.length || event.name==='run_scratch_shell'?event:{...event,content:redact(omittedEncodedOutput)};}
+    if((event.name==='file_read' || event.name==='terminal_read') && event.success && value && typeof value==='object' && !Array.isArray(value) && (value as Record<string,unknown>).encoding!=='base64')return {...event,content:redact(omittedEncodedOutput)};
+    if(event.name==='code_mode' && guestCall?.(event.id)!==false && (redact('encoding')!=='encoding' || redact('base64')!=='base64'))return {...event,content:redact(omittedEncodedOutput)};
+    try{assertEncodedResult(event.name==='code_mode'?guestPayload(value):value,redact,['code_mode','run_scratch_shell'].includes(event.name),secrets);return event;}catch{return {...event,content:redact(omittedEncodedOutput)};}
+  });
+}
+
+export function assertEncodedMessages(messages:Message[],redact:(text:string)=>string,historicalThrough=0,secrets:readonly string[]=[]):void {
   const calls=new Map<string,string>();
   for(const [index,message] of messages.entries()){
     if(message.role==='assistant')for(const call of message.tool_calls??[])calls.set(call.id,call.function.name);
     if(message.role==='tool' && encodedActions.has(calls.get(message.tool_call_id)??'')){
-      if(fixedToolResults.has(message.content))continue;
+      if(isFixedToolResult(message.content,redact))continue;
       let value:unknown;try{value=JSON.parse(message.content);}catch{value=message.content;}
-      const name=calls.get(message.tool_call_id);if(name==='code_mode' && guestCall?.(message.tool_call_id)===false)continue;assertEncodedResult(name==='code_mode'?guestPayload(value):value,redact,['code_mode','run_scratch_shell'].includes(name??''),index<historicalThrough?secrets:[]);
+      const name=calls.get(message.tool_call_id);assertEncodedResult(name==='code_mode'?guestPayload(value):value,redact,['code_mode','run_scratch_shell'].includes(name??''),index<historicalThrough?secrets:[]);
     }
   }
 }
-export function assertEncodedEvents(events:RuntimeEvent[],redact:(text:string)=>string,historicalThrough=0,secrets:readonly string[]=[],guestCall?:(id:string)=>boolean|null):void {
+export function assertEncodedEvents(events:RuntimeEvent[],redact:(text:string)=>string,historicalThrough=0,secrets:readonly string[]=[]):void {
   for(const [index,event] of events.entries())if(event.type==='tool_result' && encodedActions.has(event.name)){
     let value:unknown;try{value=JSON.parse(event.content);}catch{continue;}
-    if(event.name==='code_mode' && guestCall?.(event.id)===false)continue;assertEncodedResult(event.name==='code_mode'?guestPayload(value):value,redact,['code_mode','run_scratch_shell'].includes(event.name),index<historicalThrough?secrets:[]);
+    assertEncodedResult(event.name==='code_mode'?guestPayload(value):value,redact,['code_mode','run_scratch_shell'].includes(event.name),index<historicalThrough?secrets:[]);
   }
 }
 
 /** Conservative in-flight fence when the set of known secrets has changed. */
-export function assertEncodedGeneration(messages:Message[],changed:boolean):void {
+export function assertEncodedGeneration(messages:Message[],changed:boolean,historicalThrough=0):void {
   if(!changed)return;
   const calls=new Map<string,string>();
-  const candidate=(value:unknown):boolean=>{
-    if(typeof value==='string')return value.length>=8 && /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value);
-    if(Array.isArray(value))return value.some(candidate);
-    if(value && typeof value==='object'){const record=value as Record<string,unknown>;return record.encoding==='base64' || Object.values(record).some(candidate);}
-    return false;
-  };
-  for(const message of messages){
+  for(const [index,message] of messages.entries()){
     if(message.role==='assistant')for(const call of message.tool_calls??[])calls.set(call.id,call.function.name);
-    if(message.role!=='tool')continue;
+    if(index<historicalThrough || message.role!=='tool' || fixedToolResults.has(message.content))continue;
     const name=calls.get(message.tool_call_id);
     if(name==='file_read'||name==='terminal_read')throw Error('Known secrets changed after encoded output was produced');
-    if(name==='code_mode'||name==='run_scratch_shell'){let value:unknown;try{value=JSON.parse(message.content);}catch{if(name!=='run_scratch_shell')throw Error('Encoded action result cannot be checked safely');value=message.content;}if(candidate(name==='code_mode'?guestPayload(value):value))throw Error('Known secrets changed after encoded output was produced');}
   }
 }
 
-/** A transformed guest result cannot be decoded reliably from its text. */
-export function assertHistoricalGuestResults(messages:Message[],historicalThrough:number,hasSecrets:boolean,changed:boolean,encodedCall:(id:string)=>boolean|null):void {
+/** Guest code can transform a fresh encoded receipt; fence it only while the turn is in flight. */
+export function assertPendingGuestResults(messages:Message[],historicalThrough:number,changed:boolean,encodedCall:(id:string)=>boolean|null):void {
   const calls=new Map<string,string>();
   for(const [index,message] of messages.entries()){
     if(message.role==='assistant')for(const call of message.tool_calls??[])calls.set(call.id,call.function.name);
     if(message.role!=='tool' || calls.get(message.tool_call_id)!=='code_mode' || fixedToolResults.has(message.content))continue;
-    if(((index<historicalThrough && hasSecrets) || changed) && encodedCall(message.tool_call_id)!==false)throw Error('Encoded guest result cannot be safely replayed after secret changes');
+    if(index>=historicalThrough && changed && encodedCall(message.tool_call_id)!==false)throw Error('Encoded guest result cannot be safely replayed after secret changes');
   }
 }

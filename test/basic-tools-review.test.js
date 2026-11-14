@@ -41,13 +41,13 @@ test('random file pages reject credentials crossing either byte boundary in ever
           await f.call('/api/commands',{id,botId:bot.id,content:JSON.stringify({path,offset:7+relative,limit:1})});
           const work=await f.wait(id);
           assert.equal(work.state,'completed',work.error);assert.equal(work.workActions.length,1);
-          assert.equal(work.workActions[0].state,'cancelled');
+          assert.equal(work.workActions[0].state,'failed');assert.match(work.workActions[0].result,/cannot be retained safely/);
           if(mode!=='direct')assert.equal(work.codeExecutions[0].outcome,'error');
         }
       }
       const id='safe-'+mode;await f.call('/api/commands',{id,botId:bot.id,content:JSON.stringify({path:safe,offset:2,limit:4})});
-      const work=await f.wait(id);assert.equal(work.workActions[0].state,'cancelled');
-      if(mode!=='direct')assert.equal(work.codeExecutions[0].outcome,'error');
+      const work=await f.wait(id);assert.equal(work.workActions[0].state,'succeeded');
+      if(mode!=='direct')assert.equal(Buffer.from(work.codeExecutions[0].result.value.data,'base64').toString(),'dina');
     }
     assert.equal(JSON.stringify(seen).includes(secret),false);
   } finally {await f.app.close();rmSync(directory,{recursive:true,force:true});}

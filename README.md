@@ -16,9 +16,9 @@ staf settings set-defaults codex MODEL_ID
 staf
 ```
 
-File reads, terminal output, and scratch commands have an additional
-fail-closed restriction once Staf has observed a credential; see
-[managed-secret limitations and output review](docs/usage.md#secret-requests).
+Known-value output filtering is a secondary safeguard, not proof of credential
+isolation or detection of arbitrary transformed secrets. See the [isolation
+requirements](docs/credential-isolation.md) for platform limits.
 
 The terminal starts a local shared instance in `~/.staf/terminal-instance` when needed and reconnects to its
 persistent main chat. On a fresh instance, first run `staf settings set-defaults codex MODEL_ID` with your chosen provider and model. Type `show settings` or `/help`.
