@@ -584,8 +584,13 @@ managed credentials can be reconnected only to the same account; the reviewed
 connection snapshot prevents a stale review from replacing a later connection.
 Agent and model permissions are retained. Protected
 secret changes require the captured agent revision, and stale requests require a
-new setup. Question dismissal and the actual Gmail outcome are recorded separately.
-The OAuth attempt rechecks client, request, agent revision, grant identity and
+new setup. The service records an observed authorization success in the same
+instance transaction as the plugin connection. Revocation or a later failed
+attempt cannot erase that evidence. It computes credential availability separately
+for the current account at resolution and again when delivering the result. That
+status does not verify Google access or agent and model permissions. Older results
+whose success was already overwritten cannot be reconstructed. The OAuth attempt
+rechecks client, request, agent revision, grant identity and
 version, connection revision, and nonsecret fields at dispatch and before commit.
 The selected client secret is authorized for the exchange, while prior grants
 remain until the selected grant, refresh token, plugin binding and setup result

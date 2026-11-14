@@ -1,5 +1,5 @@
 import {isProviderId} from './provider-ids.js';
-import {questionSetInput} from './question-sets.js';
+import {gmailConnectionNotice,questionSetInput} from './question-sets.js';
 import {gmailSetupActionInput,gmailSetupQuestions,parseGmailSetupDraft} from './gmail-setup.js';
 import {registerSkillCapability, skillTracker, skillWorkKey, type SkillTracker} from './skill-actions.js';
 import { z } from 'zod';
@@ -128,6 +128,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
   function loadSlackTokens(_root:string):{appToken:string;botToken:string}|undefined {const c=instance.plugins.connection(),tokens=loadSlackTokensRaw(),v=verifiedSlack;return c?.enabled && c.connected && tokens && v && !secretRequests.pendingSlackTransition() && !secretRequests.slackActivationFenced() && slackActivationWorkState()==='ready' && slackStatus==='connected' && v.generation===slackGeneration && v.revision===c.revision && v.appToken===tokens.appToken && v.botToken===tokens.botToken?tokens:undefined;}
   let gmailHealth='Not checked';
   const guidedGmailUrls=new Map<string,string>();
+  let uncertainGuidedGmailId:string|undefined;
   const gmailChecks=new Set<AbortController>();
   const stopGmailChecks=()=>{for(const controller of gmailChecks)controller.abort();};
   const gmailAuth=new GmailAuth(options.gmailRequest ?? fetch,token=>instance.authorized(token),()=>JSON.stringify([instance.plugins.gmailConnection()?.revision??null,setupReview('gmail').version]),(credential,historyId)=>{
@@ -592,14 +593,13 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
   registerMemoryCapabilities(instance,workActions,redact);
   registerTaskCapabilities(workActions,taskActionHooks,redact);
   const slackContext=(work:WorkContext)=>work.work.kind==='command' ? slackCommands.get(work.work.id) : undefined;
-  function reconcileGuidedGmailStatus() {
-    if(transitionFences.has('gmail') || credentialTransitionUnsafe)return;
-    for(const request of instance.questionSets.list()) {
-      if(request.state!=='open' || request.gmailSetup!=='connected')continue;
-      let available=false;
-      try {const input=parseGmailSetupDraft(request.draft),selection=secretRequests.questionStepSelection(request.id,2),connection=instance.plugins.gmailConnection(),credential=loadGmailCredential(dataDir),destination=gmailDestination(input.email);available=!!selection && !!connection?.connected && connection.accountId===input.email && connection.config.clientId===input.clientId && !!credential && secretRequests.grants().some(grant=>grant.integration==='gmail.client' && grant.destination===destination && grant.name===selection.name && grant.revision===selection.revision);}catch {/* An unavailable store or invalid input cannot establish a connection. */}
-      if(!available)instance.questionSets.setGmailSetup(request.id,'failed');
-    }
+  function gmailConnectionStatus():import('./question-sets.js').GmailConnectionStatus {
+    if(transitionFences.has('gmail') || credentialTransitionUnsafe)return {status:'unknown',enabled:null};
+    try {const connection=instance.plugins.gmailConnection();if(!connection?.connected)return {status:'disconnected',enabled:false};const credential=loadGmailCredential(dataDir);return {status:credential && credential.email===connection.accountId && credential.clientId===connection.config.clientId?'credentials_available':'credentials_unavailable',enabled:connection.enabled};}
+    catch{return {status:'unknown',enabled:null};}
+  }
+  function questionResultAtDelivery(request:ReturnType<typeof instance.questionSets.list>[number]) {
+    return request.gmailSetup && request.result ? {...request.result,gmailAuthorization:request.gmailAuthorization,gmailConnectionAtDelivery:gmailConnectionStatus(),gmailConnectionNotice} : request.result;
   }
   function gmailSetupStale(request:{id:string;botId:string;gmailSetup:string|null;state:string}):boolean {
     if(!request.gmailSetup || request.state!=='open')return false;
@@ -636,7 +636,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
     instance.questionSets.createTask(requestId,botId,id,input);if(gmailSetup){const bot=instance.bot(botId);if(!bot || bot.archived)throw Error('Agent unavailable');instance.questionSets.createGmailSetup(requestId,bot.revision);}
     const timer=taskTimers.get(id);timer?.pause();
     const cancelGmail=()=>{if(gmailSetup && instance.questionSets.gmailSetup(requestId)==='authorizing')gmailAuth.cancel();};signal.addEventListener('abort',cancelGmail,{once:true});
-    try {for(;;){signal.throwIfAborted();instance.assertWorkAuthority({kind:'task',id});workActions.assertPrivateDisclosure(instance.workContext({kind:'task',id},signal));const request=instance.questionSets.list().find(item=>item.id===requestId && item.workKind==='task' && item.workId===id);if(!request)throw new ActionFailed('Question request unavailable');if(request.state!=='open')return JSON.stringify(request.result);await new Promise<void>(resolve=>setTimeout(resolve,100));}}
+    try {for(;;){signal.throwIfAborted();instance.assertWorkAuthority({kind:'task',id});workActions.assertPrivateDisclosure(instance.workContext({kind:'task',id},signal));const request=instance.questionSets.list().find(item=>item.id===requestId && item.workKind==='task' && item.workId===id);if(!request)throw new ActionFailed('Question request unavailable');if(request.state!=='open')return JSON.stringify(questionResultAtDelivery(request));await new Promise<void>(resolve=>setTimeout(resolve,100));}}
     finally {signal.removeEventListener('abort',cancelGmail);if(!signal.aborted)timer?.resume();}
   }
   const questionCapability:Capability<z.infer<typeof questionSetInput>,string>={
@@ -655,7 +655,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
     parseInput:value=>gmailSetupActionInput.parse(value),parseResult:value=>z.string().parse(value),
     describe:()=>({summary:'Guide Gmail setup',resource:'paired owner',effect:'change'}),
     eligible:work=>work.work.kind==='task' ? taskActionHooks.has(work.work.id) : !slackContext(work),check:(_input,work)=>{instance.assertWorkAuthority(work.work);if(slackContext(work))throw Error('Gmail setup is available in Staf');},authorize:async()=>{},
-    execute:async(_input,work,identity)=>{if(work.work.kind==='command'){instance.questionSets.create(identity.id,work.botId,work.work.id,gmailSetupQuestions);const bot=instance.bot(work.botId);if(!bot || bot.archived)throw Error('Agent unavailable');instance.questionSets.createGmailSetup(identity.id,bot.revision);return 'Gmail setup questions are pending. The account is not connected yet.';}return waitForTaskQuestions(work.work.id,work.botId,identity.id,gmailSetupQuestions,work.signal,true);},visibleResult:value=>value,
+    execute:async(_input,work,identity)=>{if(work.work.kind==='command'){instance.questionSets.create(identity.id,work.botId,work.work.id,gmailSetupQuestions);const bot=instance.bot(work.botId);if(!bot || bot.archived)throw Error('Agent unavailable');instance.questionSets.createGmailSetup(identity.id,bot.revision);return 'Gmail setup questions are pending. Authorization has not been completed for this request.';}return waitForTaskQuestions(work.work.id,work.botId,identity.id,gmailSetupQuestions,work.signal,true);},visibleResult:value=>value,
   };
   workActions.register(guidedGmail);
   const startSlackTask:Capability<Record<string,never>,string>={
@@ -945,7 +945,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
     for(const request of instance.questionSets.queued()) {
       if(!request.continuationId)continue;
       const instruction=request.state==='dismissed' ? 'The owner dismissed this request. Acknowledge the dismissal without further action.' : 'This is new, owner-authorized direction. Continue the work using currently available tools and permissions. Do not repeat actions from the originating work.';
-      const content=`Owner response to question set ${request.id}, requested in earlier chat ${request.workId}:\n${JSON.stringify(request.result)}\n${instruction}`;
+      const content=`Owner response to question set ${request.id}, requested in earlier chat ${request.workId}:\n${JSON.stringify(questionResultAtDelivery(request))}\n${instruction}`;
       const visible=request.state==='dismissed'?'Dismissed question set.':`Submitted answers:\n${request.questions.map((q,i)=>{const a=request.draft[i];const answer=a ? [...a.choices,...(a.writeIn.trim()?[a.writeIn]:[])].join(', ') : '';return `${i+1}. ${q.prompt} ${q.kind==='secret' ? String(request.result?.answers?.[i]?.status ?? 'skipped') : answer || 'Skipped'}`;}).join('\n')}`;
       try {const result=submitCommand({id:request.continuationId,botId:request.botId,content,visibleContent:visible,continuation:true});if(result.kind!=='busy')instance.questionSets.deliveryError(request.id,null);} catch {instance.questionSets.deliveryError(request.id,'The follow-up could not start. Check that the agent is active and its settings are valid.');}
     }
@@ -1413,10 +1413,10 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
         try {const result=gmailAuth.start(token,origin,{...setup.input,clientSecret},{assertAuthority,commit:(credential,historyId)=>{
           assertAuthority();knownKeys.add(credential.clientSecret);knownKeys.add(credential.refreshToken);
           const stage=(point:CredentialTransitionStage)=>dependencies.credentialTransition?.('gmail',point);
-          try {instance.atomicCredentialTransition(secretRequests.attachment(),db=>{secretRequests.installGuidedGmail(db,{questionId:id,selection:setup.selection,destination,reviewedVersion:review.version,clientVersion:clientTarget.version,refreshVersion:refreshTarget.version,refreshName:`Gmail refresh token ${randomUUID()}`,refreshValue:credential.refreshToken,email:credential.email,sendEnabled:credential.sendEnabled===true,modifyEnabled:credential.modifyEnabled===true},stage);instance.plugins.gmailConnect({email:credential.email,clientId:credential.clientId},historyId,id);stage('plugin-config-written');},stage);}catch(error){if(error instanceof CredentialTransitionUncertain){fenceTransition('gmail');gmailHealth=error.message;throw error;}throw new CredentialTransitionFailed();}stopGmailWork();gmailHealth='Connected';
+          try {instance.atomicCredentialTransition(secretRequests.attachment(),db=>{secretRequests.installGuidedGmail(db,{questionId:id,selection:setup.selection,destination,reviewedVersion:review.version,clientVersion:clientTarget.version,refreshVersion:refreshTarget.version,refreshName:`Gmail refresh token ${randomUUID()}`,refreshValue:credential.refreshToken,email:credential.email,sendEnabled:credential.sendEnabled===true,modifyEnabled:credential.modifyEnabled===true},stage);instance.plugins.gmailConnect({email:credential.email,clientId:credential.clientId},historyId,id);stage('plugin-config-written');},stage);}catch(error){if(error instanceof CredentialTransitionUncertain){uncertainGuidedGmailId=id;fenceTransition('gmail');gmailHealth=error.message;throw error;}throw new CredentialTransitionFailed();}stopGmailWork();gmailHealth='Connected';
         },settled:state=>{guidedGmailUrls.delete(id);if(state!=='connected' && !credentialTransitionUnsafe)instance.questionSets.setGmailSetup(id,state);}});guidedGmailUrls.set(id,result.url);return json(200,result);}catch(error){if(!credentialTransitionUnsafe)instance.questionSets.setGmailSetup(id,'failed');throw error;}
       }
-      if(req.method==='GET' && req.url==='/api/question-sets'){reconcileGuidedGmailStatus();return json(200,instance.questionSets.list().map(request=>({...request,...(transitionFences.has('gmail') && request.gmailSetup && ['authorizing','connected'].includes(request.gmailSetup)?{gmailSetup:'interrupted'}:{}),secretStatuses:request.questions.map((question,index)=>question.kind==='secret'?secretRequests.questionStepStatus(request.id,index):null),secretSelections:request.questions.map((question,index)=>question.kind==='secret'?secretRequests.questionStepSelection(request.id,index)??null:null),gmailSetupStale:gmailSetupStale(request)})));}
+      if(req.method==='GET' && req.url==='/api/question-sets'){return json(200,instance.questionSets.list().map(request=>({...request,...(request.id===uncertainGuidedGmailId?{gmailSetup:'interrupted',gmailAuthorization:'unknown'}:{}),gmailConnection:request.gmailSetup?gmailConnectionStatus():null,secretStatuses:request.questions.map((question,index)=>question.kind==='secret'?secretRequests.questionStepStatus(request.id,index):null),secretSelections:request.questions.map((question,index)=>question.kind==='secret'?secretRequests.questionStepSelection(request.id,index)??null:null),gmailSetupStale:gmailSetupStale(request)})));}
       const questionSecret=req.url?.match(/^\/api\/question-sets\/([\w-]+)\/secret\/(\d+)\/(save|select|clear)$/);
       if(req.method==='POST' && questionSecret?.[1] && questionSecret[2] && questionSecret[3]) {
         const request=instance.questionSets.list().find(item=>item.id===questionSecret[1]),index=Number(questionSecret[2]),question=request?.questions[index];
@@ -1427,7 +1427,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
         if(request.workKind==='task')instance.assertWorkAuthority({kind:'task',id:request.workId});
         else if(request.originState==='pending')instance.assertWorkAuthority({kind:'command',id:request.workId});
         else if(request.originState!=='completed')throw Error('Interrupted work cannot accept a secret');
-        if(questionSecret[3]==='clear') {const input=z.strictObject({name:z.string().min(1).max(120),revision:z.string().uuid()}).parse(value);if(request.gmailSetup==='connected')throw Error('Connected setup cannot be changed');secretRequests.clearQuestionStep({questionId:request.id,step:index,...input});if(request.gmailSetup==='authorizing')gmailAuth.cancel();return json(200,{status:'skipped'});}
+        if(questionSecret[3]==='clear') {const input=z.strictObject({name:z.string().min(1).max(120),revision:z.string().uuid()}).parse(value);if(request.gmailSetup==='connected' && gmailConnectionStatus().status==='credentials_available')throw Error('Connected setup cannot be changed');secretRequests.clearQuestionStep({questionId:request.id,step:index,...input});if(request.gmailSetup==='authorizing')gmailAuth.cancel();return json(200,{status:'skipped'});}
         if(questionSecret[3]==='save') {
           const input=z.strictObject({value:z.string().min(1).max(16000).refine(text=>!text.includes('\0')),name:z.string().trim().min(1).max(120).optional()}).parse(value),name=input.name??question.name;
           if(redact(name)!==name || containsUnsafeWebUrl(name) || name.includes(input.value) || JSON.stringify({questions:request.questions,draft:request.draft}).includes(JSON.stringify(input.value).slice(1,-1)))throw Error('Secret appears in question metadata or ordinary answers');
@@ -1480,8 +1480,8 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
         const id=questionSetMatch[1],operation=questionSetMatch[2];
         const request=instance.questionSets.list().find(item=>item.id===id);
         if(request?.workKind==='task' && request.originState==='running'){const work={kind:'task' as const,id:request.workId};instance.assertWorkAuthority(work);workActions.assertPrivateDisclosure(instance.workContext(work,new AbortController().signal));}
-        if(operation==='draft') {const encoded=JSON.stringify(value.answers);if(!encoded || encoded.length>12000 || redact(encoded)!==encoded || containsUnsafeWebUrl(encoded))throw Error('Answers cannot be retained safely');const changed=!!request && encoded!==JSON.stringify(request.draft);if(changed && request?.gmailSetup==='connected')throw Error('Connected Gmail setup answers cannot be changed; give new direction');if(changed && request?.gmailSetup==='authorizing')gmailAuth.cancel();instance.questionSets.draft(id,value.answers);return json(200,{saved:true});}
-        if(operation==='submit' || operation==='dismiss') {if(operation==='submit' && request){const encoded=JSON.stringify({questions:request.questions,draft:request.draft});if(redact(encoded)!==encoded || containsUnsafeWebUrl(encoded))throw Error('Answers cannot be retained safely');}if(request?.gmailSetup==='authorizing')gmailAuth.cancel();if(request?.gmailSetup==='connected')reconcileGuidedGmailStatus();const result=instance.questionSets.finish(id,operation,index=>secretRequests.questionStepStatus(id,index));dispatchQuestionContinuations();return json(200,result);}
+        if(operation==='draft') {const encoded=JSON.stringify(value.answers);if(!encoded || encoded.length>12000 || redact(encoded)!==encoded || containsUnsafeWebUrl(encoded))throw Error('Answers cannot be retained safely');const changed=!!request && encoded!==JSON.stringify(request.draft);if(changed && request?.gmailSetup==='connected' && gmailConnectionStatus().status==='credentials_available')throw Error('Connected Gmail setup answers cannot be changed; give new direction');if(changed && request?.gmailSetup==='authorizing')gmailAuth.cancel();instance.questionSets.draft(id,value.answers);return json(200,{saved:true});}
+        if(operation==='submit' || operation==='dismiss') {if(operation==='submit' && request){const encoded=JSON.stringify({questions:request.questions,draft:request.draft});if(redact(encoded)!==encoded || containsUnsafeWebUrl(encoded))throw Error('Answers cannot be retained safely');}if(request?.gmailSetup==='authorizing')gmailAuth.cancel();const result=instance.questionSets.finish(id,operation,index=>secretRequests.questionStepStatus(id,index),request?.gmailSetup?gmailConnectionStatus():undefined);dispatchQuestionContinuations();return json(200,result);}
       }
       if(req.method==='GET' && req.url==='/api/inbox') {
         const questions=instance.openQuestions().map(q=>({kind:'question',id:q.id,botId:q.botId,attemptId:q.attemptId,text:q.text}));

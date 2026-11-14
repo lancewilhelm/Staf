@@ -945,10 +945,13 @@ and return to Staf. Refresh the status and submit the answers so the agent can
 report the observed result. A saved secret alone is not a connection. Submitting
 or dismissing while Google authorization is pending interrupts that attempt.
 Submitting without starting authorization records the setup as skipped. Dismissing
-questions after a successful connection leaves Gmail connected and tells the
-agent that the questions were dismissed and Gmail connected. If the agent's
-settings change during setup, start a new Gmail setup request before saving,
-selecting, or clearing its secret.
+questions does not undo a successful authorization. Staf records the observed
+authorization separately from the current Gmail credential status, and reports
+both to the agent. A later revocation can make credentials unavailable without
+erasing the earlier success. Available credentials do not verify Google access
+or grant an agent or model permission. If the agent's settings change during
+setup, start a new Gmail setup request before saving, selecting, or clearing its
+secret.
 
 If an existing connection lacks managed credentials, you can review and reconnect
 the same account here without disconnecting it. The review shows the existing

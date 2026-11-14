@@ -84,6 +84,7 @@ export class PluginStore {
    this.db.prepare("INSERT OR IGNORE INTO gmail_history VALUES (?,?,'ready',NULL)").run(config.email,historyId);
    this.db.prepare("INSERT INTO plugin_connections VALUES ('gmail',?,?,1,0,1) ON CONFLICT(plugin_id,account_id) DO UPDATE SET config=excluded.config,connected=1,enabled=0,revision=plugin_connections.revision+1").run(config.email,JSON.stringify(config));
    if(guidedSetupId && !this.db.prepare("UPDATE gmail_setup_requests SET state='connected' WHERE question_id=? AND state='authorizing'").run(guidedSetupId).changes)throw Error('Gmail setup authority changed');
+   if(guidedSetupId)this.db.prepare('INSERT OR IGNORE INTO gmail_setup_successes (question_id) VALUES (?)').run(guidedSetupId);
    this.db.exec('RELEASE SAVEPOINT gmail_connect');
   }catch(error){this.db.exec('ROLLBACK TO SAVEPOINT gmail_connect; RELEASE SAVEPOINT gmail_connect');throw error;}
   return this.gmailConnection();

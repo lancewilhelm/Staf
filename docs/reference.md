@@ -486,12 +486,23 @@ protected step mutations and Gmail review and authorization return `409` with
 `GET /api/question-sets/ID/gmail-authorization` URL is available only while
 authorization is pending. Submitting or dismissing during authorization
 interrupts it; submitting before authorization starts records a skipped setup.
-Dismissing questions after a connection records both the dismissal and the
-actual Gmail outcome. The reviewed client approval is used for the attempt;
-durable grants and the connection commit together after Google verification.
-A definite rollback retains earlier grants and configuration; an uncertain
-result requires restart and review. Restart interrupts an unfinished exchange
-without replay. The connected result requires a matching
+Schema 57 records successful guided authorization separately from the latest
+attempt state. `gmailAuthorization` is `previously_succeeded` when at least one
+attempt for the request succeeded, and `not_recorded` otherwise; during an
+uncertain commit the affected request reports `unknown` until restart. Migration
+preserves successes still marked connected; it cannot reconstruct successes
+that older versions had already overwritten. `gmailConnection` reports the current
+account's `credentials_available`, `credentials_unavailable`, `disconnected`,
+or `unknown` status and its enabled state. Available credentials do not verify
+Google access or imply agent or model permission. Submitted and dismissed results
+include `gmailConnectionAtResolution`; model delivery includes a fresh
+`gmailConnectionAtDelivery`. Both snapshots describe the current account, which
+may differ from an earlier authorized account. The reviewed client approval is
+used for the attempt; durable grants, authorization history and the connection
+commit together after Google verification. A definite rollback retains earlier
+grants and configuration; an uncertain result requires restart and review.
+Restart interrupts an unfinished exchange without replay. The connected result
+requires a matching
 Google profile and a successful plugin commit. No secret value is included in
 the question result. Existing agent/model access remains separate.
 
