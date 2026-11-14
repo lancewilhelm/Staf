@@ -28,7 +28,8 @@ function connect(){if(!setupReview.value)return;void action('connect',{...form.v
    <div class="provider-title"><h3>{{ plugin.name }}</h3><span class="badge">{{ plugin.enabled ? plugin.status : plugin.connected ? 'Disabled' : 'Not connected' }}</span></div>
    <p>{{ plugin.description }}</p>
    <p v-if="plugin.config">Workspace {{ plugin.config.teamId }} · User {{ plugin.config.userId }} · DM {{ plugin.config.channelId }}</p>
-   <p v-if="plugin.connected && !plugin.credentialsAvailable">Credentials or use approvals are unavailable. Reconnect Slack or approve the missing uses in Named secrets.</p>
+   <p v-if="plugin.reconnectUncertain" role="alert">The connection outcome is uncertain. Restart Staf, then review the connection before continuing.</p>
+   <p v-else-if="plugin.connected && !plugin.credentialsAvailable">Credentials or use approvals are unavailable. Reconnect Slack or approve the missing uses in Named secrets.</p>
    <p v-if="plugin.connected">Agent access: {{ plugin.agentAccess ? 'Allowed' : 'Not allowed' }}</p>
    <details class="saved-settings"><DisclosureSummary>{{ plugin.config ? 'Change connection' : 'Set up Slack' }}</DisclosureSummary>
     <p>Use a Slack app with Socket Mode and a bot token. Enter the IDs of the one workspace, user, and direct message you approve. <a href="https://docs.slack.dev/apis/events-api/using-socket-mode/" target="_blank" rel="noreferrer">Slack Socket Mode setup</a>.</p>
@@ -41,7 +42,7 @@ function connect(){if(!setupReview.value)return;void action('connect',{...form.v
      <label>Agent<select v-model="form.botId" required><option value="" disabled>Choose an agent</option><option v-for="bot in state.bots.filter(item=>!item.archived)" :key="bot.id" :value="bot.id">{{ bot.name }}</option></select></label>
      <p>Connecting approves these tokens for https://slack.com/api and the selected workspace, user, and DM. Socket Mode connects to a Slack-provided address at wss://slack.com or a slack.com subdomain. Agent access is a separate decision.</p>
      <p v-if="setupReview?.grants.length">Connecting replaces these existing approvals: {{ setupReview.grants.map(grant=>grant.name+' ('+grant.integration+')').join(', ') }}.</p>
-     <button :disabled="busy || !setupReview">{{ setupReview?.grants.length?'Connect and replace approvals':'Connect and approve' }}</button>
+     <button :disabled="busy || !setupReview || plugin.reconnectUncertain">{{ setupReview?.grants.length?'Connect and replace approvals':'Connect and approve' }}</button>
     </form>
    </details>
    <div v-if="plugin.connected && plugin.config" class="row">

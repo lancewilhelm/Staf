@@ -5,6 +5,7 @@ import {z} from 'zod';
 import type {WorkRef} from './action-journal.js';
 import {containsUnsafeWebUrl} from './web-reader.js';
 import {createHash,randomUUID} from 'node:crypto';
+import type {CredentialTransitionStage} from './credential-transition.js';
 
 export const secretRequestInput=z.strictObject({name:z.string().trim().min(1).max(120),purpose:z.string().trim().min(1).max(500),destination:z.string().trim().min(1).max(300).optional()}).refine(input=>Object.values(input).every(value=>!containsUnsafeWebUrl(value)));
 type Input=z.infer<typeof secretRequestInput>;
@@ -17,13 +18,14 @@ export const secretValueSchema=z.string().min(1).max(16000).refine(value=>!value
 /** Separate store: ordinary instance records never contain the submitted value. */
 export class SecretRequests {
  private db?:DatabaseSync;
+ private readonly memoryPath=`file:staf-secrets-${randomUUID()}?mode=memory&cache=shared`;
  private readonly waiters=new Map<string,(outcome:Outcome|'interrupted')=>void>();
  constructor(private readonly root:string,private readonly memory:boolean) {
   if(!memory)try{lstatSync(join(root,'secrets','credentials.sqlite'));this.open(false);}catch(error){if(!(error instanceof Error && 'code' in error && error.code==='ENOENT'))throw Error('Secret store unavailable');}
  }
  private open(create:boolean):DatabaseSync {
   if(this.db)return this.db;
-  let path=':memory:';
+  let path=this.memoryPath;
   if(!this.memory) {
    const directory=join(this.root,'secrets');
    if(create)mkdirSync(directory,{mode:0o700,recursive:true});
@@ -45,6 +47,17 @@ export class SecretRequests {
   for(const row of db.prepare('SELECT name FROM secrets WHERE name NOT IN (SELECT name FROM secret_metadata)').all())db.prepare("INSERT INTO secret_metadata VALUES (?,(SELECT purpose FROM secret_requests WHERE name=? AND state='saved' ORDER BY rowid DESC LIMIT 1),?)").run(String(row.name),String(row.name),randomUUID());
   for(const row of db.prepare('SELECT integration,destination FROM secret_grants WHERE NOT EXISTS (SELECT 1 FROM secret_grant_states s WHERE s.integration=secret_grants.integration AND s.destination=secret_grants.destination)').all())db.prepare('INSERT OR IGNORE INTO secret_grant_states VALUES (?,?,?)').run(String(row.integration),String(row.destination),randomUUID());
   this.db=db;return db;
+ }
+ attachment():{path:string;memory:boolean} {this.open(true);if(this.memory)return {path:this.memoryPath,memory:true};const dir=join(this.root,'secrets'),path=join(dir,'credentials.sqlite'),directory=lstatSync(dir),file=lstatSync(path);if(!directory.isDirectory() || directory.isSymbolicLink() || (directory.mode & 0o077)!==0 || !file.isFile() || file.isSymbolicLink() || (file.mode & 0o077)!==0 || file.nlink!==1)throw Error('Secret store unavailable');return {path,memory:false};}
+ installForPlugin(db:DatabaseSync,input:{integrations:readonly SecretIntegration[];entries:Array<{integration:SecretIntegration;destination:string;name:string;purpose:string;value:string}>;config?:{integration:string;destination:string;value:string}},stage:(stage:CredentialTransitionStage)=>void):void {
+  if(!db.isTransaction)throw Error('Credential transaction required');
+  for(const entry of input.entries)secretValueSchema.parse(entry.value);
+  for(const integration of input.integrations){for(const row of db.prepare('SELECT destination FROM credential_transition.secret_grant_states WHERE integration=?').all(integration))db.prepare('UPDATE credential_transition.secret_grant_states SET version=? WHERE integration=? AND destination=?').run(randomUUID(),integration,String(row.destination));db.prepare('DELETE FROM credential_transition.secret_grants WHERE integration=?').run(integration);}
+  stage('grants-revoked');
+  if(input.config)db.prepare('INSERT INTO credential_transition.secret_integration_config VALUES (?,?,?) ON CONFLICT(integration,destination) DO UPDATE SET config=excluded.config').run(input.config.integration,input.config.destination,input.config.value);
+  stage('secret-config-written');
+  for(const [index,item] of input.entries.entries()){const revision=randomUUID();db.prepare('INSERT INTO credential_transition.secrets VALUES (?,?)').run(item.name,item.value);db.prepare('INSERT INTO credential_transition.secret_metadata VALUES (?,?,?)').run(item.name,item.purpose,revision);db.prepare('INSERT INTO credential_transition.secret_grant_states VALUES (?,?,?) ON CONFLICT(integration,destination) DO UPDATE SET version=excluded.version').run(item.integration,item.destination,randomUUID());db.prepare('INSERT INTO credential_transition.secret_grants VALUES (?,?,?,?) ON CONFLICT(integration,destination) DO UPDATE SET name=excluded.name,revision=excluded.revision').run(item.name,revision,item.integration,item.destination);if(index===0)stage('first-secret-written');}
+  stage('credentials-written');
  }
  values():string[] {return this.db ? this.db.prepare('SELECT value FROM secrets').all().map(row=>String(row.value)) : [];}
  names() {if(!this.db)return [];return this.db.prepare("SELECT s.name,m.purpose,m.revision,(SELECT r.destination FROM secret_requests r WHERE r.name=s.name AND r.state='saved' ORDER BY r.rowid DESC LIMIT 1) AS destination FROM secrets s JOIN secret_metadata m ON m.name=s.name ORDER BY s.name").all();}
