@@ -16,10 +16,10 @@ export type AssistantMessage = (
   | { role: 'assistant'; content: string; tool_calls?: ToolCall[] }
   | { role: 'assistant'; content?: string | null; tool_calls: ToolCall[] }) & { usage?: UsageReport; responseReplay?: {provider:'codex-direct';model:string;items:ResponseReplayItem[]} };
 export type Message =
-  | { role: 'user'; content: string }
+  | { role: 'user'; content: string; stafMessageId?:string }
   | AssistantMessage
   | { role: 'tool'; tool_call_id: string; content: string };
-export interface ToolParameter { type: string; description?: string; properties?: Record<string, ToolParameter>; required?: string[]; enum?: string[]; additionalProperties?: false; }
+export interface ToolParameter { type: string; description?: string; properties?: Record<string, ToolParameter>; items?: ToolParameter; required?: string[]; enum?: string[]; additionalProperties?: false; }
 export interface ToolDefinition {
   type: 'function';
   function: {
@@ -37,7 +37,7 @@ export type ProviderEvent =
   | { type: 'message'; message: AssistantMessage }
   | { type: 'text_delta'; text: string }
   | { type: 'error'; message: string };
-export interface ProviderCallOptions { signal?: AbortSignal; currentUserInput?: string }
+export interface ProviderCallOptions { signal?: AbortSignal; currentUserInput?: string; refreshMessages?: () => Message[]; assertSafePayload?: (payload: unknown) => void }
 export interface Provider {
   name: string;
   capabilities: ProviderCapabilities;
@@ -55,7 +55,7 @@ export interface Session {
   version: 1;
   /** Missing on older files; earlier attribution is not invented. Message indexes are end-exclusive. */
   usage?: UsageObservation[];
-  turns?: { start: number; end: number; provider: string }[];
+  turns?: { start: number; end: number; provider: string; gmailSetup?: {questionId:string;continuationId:string;proof:string;contentProof:string;result?:{start:number;end:number;proof:string}}; gmailNotice?: {commandId:string;noticeId:string;proof:string;contentProof:string} }[];
   id: string;
   provider: string | null;
   messages: Message[];

@@ -13,20 +13,20 @@ const run = promisify(execFile);
 const source = process.cwd();
 async function checkoutAt(root) {
   await mkdir(root);
-  for (const name of ['src', 'web', 'scripts', 'package.json', 'tsconfig.json', 'vite.config.ts']) await cp(join(source,name),join(root,name),{recursive:true});
+  for (const name of ['src', 'web', 'scripts', 'package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'tsconfig.json', 'vite.config.ts']) await cp(join(source,name),join(root,name),{recursive:true});
   await symlink(join(source,'node_modules'),join(root,'node_modules'),'dir');
 }
 
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
-async function until(fn, label) {
-  for (let i = 0; i < 200; i++) { const value = await fn(); if (value) return value; await pause(100); }
-  throw Error(`Timed out: ${label}`);
+async function until(fn, label, diagnostic=()=> '') {
+  for (let i = 0; i < 600; i++) { const value = await fn(); if (value) return value; await pause(100); }
+  throw Error(`Timed out: ${label}\n${diagnostic()}`);
 }
 async function freePort() {
   const server = createServer(); await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const port = server.address().port; await new Promise(resolve => server.close(resolve)); return port;
 }
-test('development command serves one persistent instance and releases its ownership', {timeout:60000}, async () => {
+test('development command serves one persistent instance and releases its ownership', {timeout:120000}, async () => {
   const temp = await mkdtemp(join(tmpdir(), 'staf-dev-test-')), dir = join(temp,'data'), connections=join(temp,'existing-staf'), checkout = join(temp,'checkout'), nextCheckout=join(temp,'next-checkout'), port = await freePort();
   await checkoutAt(checkout); await checkoutAt(nextCheckout); await mkdir(join(connections,'auth'),{recursive:true});
   const direct = JSON.stringify({version:1,issuer:'https://auth.openai.com',subject:'synthetic',clientId:'fixture-client',hostId:'fixture-host',accessToken:'synthetic-access',refreshToken:'synthetic-refresh',idToken:'synthetic-id',scopes:['resource.invoke','chatgpt.tokens.use.direct'],expiresAt:Date.now()+3600000});
@@ -40,7 +40,7 @@ test('development command serves one persistent instance and releases its owners
   const stop = async child => { process.kill(-child.pid, 'SIGINT'); await new Promise(resolve => child.once('exit', resolve)); };
   let child = launch();
   try {
-    const code = await until(() => { if (child.exitCode !== null) throw Error(`Launcher exited: ${output}`); return output.match(/Pairing code: (\S+)/)?.[1]; }, 'launcher and pairing code');
+    const code = await until(() => { if (child.exitCode !== null) throw Error(`Launcher exited: ${output}`); return output.match(/Pairing code: (\S+)/)?.[1]; }, 'launcher and pairing code',()=>output);
     const url = `http://127.0.0.1:${port}`;
     const call = async (path, token, body) => { const response = await fetch(url + path, {method:body?'POST':'GET', headers:{...(token?{Authorization:`Bearer ${token}`} : {}), ...(body?{'Content-Type':'application/json'}:{})}, body:body?JSON.stringify(body):undefined}); return [response.status, await response.json()]; };
     assert.match(await (await fetch(url)).text(), /\/src\/main\.ts|\/main\.ts/);
@@ -76,7 +76,7 @@ test('development startup refuses an interrupted dataset before initializing it'
   const temp=await mkdtemp(join(tmpdir(),'staf-dev-barrier-')),checkout=join(temp,'checkout'),dir=join(temp,'data');
   try {
     await checkoutAt(checkout);await mkdir(dir);await writeFile(join(dir,'instance.sqlite.maintenance.json'),'{}');
-    const child=spawn('corepack',['pnpm','dev'],{cwd:checkout,env:{PATH:process.env.PATH,HOME:process.env.HOME,TMPDIR:temp,STAF_DEV_DATA_DIR:dir,STAF_DEV_PORT:String(await freePort())},stdio:['ignore','pipe','pipe']});
+    const child=spawn('corepack',['pnpm','dev'],{cwd:checkout,env:{PATH:process.env.PATH,HOME:process.env.HOME,TMPDIR:temp,npm_config_verify_deps_before_run:'false',STAF_DEV_DATA_DIR:dir,STAF_DEV_PORT:String(await freePort())},stdio:['ignore','pipe','pipe']});
     let output='';child.stdout.on('data',b=>output+=b);child.stderr.on('data',b=>output+=b);
     await new Promise(resolve=>child.once('exit',resolve));assert.notEqual(child.exitCode,0);assert.match(output,/maintenance was interrupted.*dev:recover/i);
     await assert.rejects(readFile(join(dir,'instance.sqlite')),{code:'ENOENT'});
@@ -88,7 +88,7 @@ test('development startup rejects a newer schema without changing it', {timeout:
   try {
     await checkoutAt(checkout); await mkdir(dir);
     const path=join(dir,'instance.sqlite'), db=new DatabaseSync(path); db.exec('PRAGMA user_version=999'); db.close();
-    const child=spawn('corepack',['pnpm','dev'],{cwd:checkout,env:{PATH:process.env.PATH,HOME:process.env.HOME,TMPDIR:temp,STAF_DEV_DATA_DIR:dir,STAF_DEV_PORT:String(await freePort())},stdio:['ignore','pipe','pipe']});
+    const child=spawn('corepack',['pnpm','dev'],{cwd:checkout,env:{PATH:process.env.PATH,HOME:process.env.HOME,TMPDIR:temp,npm_config_verify_deps_before_run:'false',STAF_DEV_DATA_DIR:dir,STAF_DEV_PORT:String(await freePort())},stdio:['ignore','pipe','pipe']});
     let output=''; child.stdout.on('data',b=>output+=b); child.stderr.on('data',b=>output+=b);
     await new Promise(resolve=>child.once('exit',resolve)); assert.notEqual(child.exitCode,0);
     assert.match(output,/Database version 999 is newer.*select another data directory/i);

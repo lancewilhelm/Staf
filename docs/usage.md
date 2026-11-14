@@ -3,6 +3,59 @@
 For the persistent, hot-reloading local browser workspace and a terminal paired
 to the same development instance, see [Run the development workspace](development.md#run-the-development-workspace). For a synthetic seed and explicit reset or recovery, see [Reset and recover development data](development.md#reset-and-recover-development-data).
 
+## Answer a question set
+
+A tool-capable agent can present a set of questions in main chat or a background task. Choose an
+answer, enter your own, or leave any question unanswered. For multiple-select
+questions, you can combine choices and a write-in. Use **Next**, **Back**, or a
+numbered question to move around. **Skip this question** clears its draft.
+Submit at any time, including with no answers; unanswered questions are sent as
+skipped. **Dismiss** declines the set. The chat remains available while it is
+open, and ordinary drafts are saved on the instance across browser refresh and
+service restart. Drafts may briefly be unsaved while a network request is in
+progress; errors appear beside the controls. If another client saves first, Staf
+keeps your unsaved answers on screen and reports a conflict. Choose **Load saved
+answers** to use the other draft, or **Replace saved answers with mine** to
+explicitly save yours. If the set was already resolved, copy any unsaved answers
+before leaving.
+
+For main chat, Staf retains the submitted set as a new chat input, separate from later corrections.
+If the original response completed, Staf sends one correlated follow-up to the
+agent as new work. The follow-up can use tools under the current permissions,
+approvals, and scope. Staf blocks matching actions recorded in the original work.
+A dismissed request receives a reply without tools. If the original response
+was interrupted, stopped, or failed, Staf retains the answers without resuming
+it; inspect the prior work before giving new direction. A follow-up interrupted
+by restart is not automatically replayed. Simple questions in an ordinary Slack
+conversation can still be asked and answered in that conversation. Background
+task questions and answers stay in Staf, including for work started in Slack.
+A set can also include a protected secret step. Save or select a named secret
+there independently of submitting the other answers. The input is masked until
+you reveal it, and saved values are not shown. Skipping or dismissing the rest
+of the set does not delete a saved secret. Saving does not authorize its use. If
+the selected secret is replaced or deleted before submission, select it again.
+Interrupted work cannot accept a new protected entry; start a reviewed new attempt.
+Avoid putting credentials in ordinary answers; detection is incomplete.
+
+A waiting task pauses its execution limit while you answer. Other chats and tasks remain available. The agent sidebar shows a count when questions need attention. Open the task in its agent's conversation to answer or dismiss the set.
+
+After a restart or stop, the questions and drafts remain available, but the interrupted attempt does not resume. Submit or dismiss the set, inspect the prior task and any uncertain effects, then choose **Start a new attempt** if appropriate. A new attempt retains the original objective, receives the resolved answers separately, and checks prior action records and current permissions. Scheduled attempts also retain their original occurrence and require its review before retry. It cannot establish whether every external effect occurred.
+
+Gmail-private or Gmail-scoped tasks cannot be retried or replaced, including through their earlier task lineage. Start fresh Gmail work under current authorization instead; do not copy private questions or answers into ordinary chat.
+
+This behavior has controlled synthetic service coverage, not live
+model or Slack acceptance. Availability depends on the selected model supporting
+tool calls; Direct, Hybrid, and Code Mode are supported.
+
+For a disposable manual check with no provider account or network model call,
+run `corepack pnpm run build` and then `node scripts/question-set-demo.mjs`.
+Open the printed local address, pair with its printed code, and send **Ask a
+set** to the synthetic agent. Submit the answers to see a new synthetic file
+action and its result. Type `r` and press Enter in the fixture terminal
+to restart the service with the same disposable data, then refresh the browser.
+Press Ctrl-C to stop it and remove that data. The fixture is separate from the
+normal persistent development workspace.
+
 ## Start the shared terminal
 
 Build and link the CLI once, then start it from your working directory:
@@ -297,7 +350,7 @@ Incremental output is available when the adapter supplies it; buffered adapters
 show progress and then the completed message. A failed or interrupted response
 remains labeled as incomplete.
 
-Pending chat and task approvals appear in the conversation. Explicit background tasks show their status, outcome and activity there; task questions are visible but answers still require the CLI or API. The workspace checks for updates while visible; it does not provide background notifications.
+Pending chat and task approvals appear in the conversation. Explicit background tasks show their status, outcome, activity, and question sets there. The workspace checks for updates while visible; it does not provide background notifications.
 
 Drafts and pending message IDs are stored in the browser's local journal.
 An agent's draft and pending submission recover automatically after reload or
@@ -498,7 +551,6 @@ pnpm start instance task-start http://127.0.0.1:3210 ~/.staf-client.json BOT_ID 
 pnpm start instance tasks http://127.0.0.1:3210 ~/.staf-client.json BOT_ID
 pnpm start instance task http://127.0.0.1:3210 ~/.staf-client.json ATTEMPT_ID
 pnpm start instance task-direct http://127.0.0.1:3210 ~/.staf-client.json ATTEMPT_ID 'Focus on the report'
-pnpm start instance task-answer http://127.0.0.1:3210 ~/.staf-client.json ATTEMPT_ID QUESTION_ID 'The report'
 pnpm start instance task-stop http://127.0.0.1:3210 ~/.staf-client.json ATTEMPT_ID
 pnpm start instance task-retry http://127.0.0.1:3210 ~/.staf-client.json ATTEMPT_ID
 pnpm start instance task-replace http://127.0.0.1:3210 ~/.staf-client.json ATTEMPT_ID 'Changed objective'
@@ -510,7 +562,7 @@ submission; do not silently submit again. The workspace polls while visible. On 
 unfinished work is marked interrupted and never restarts automatically. Existing
 databases get a private SQLite backup before the task schema migration.
 
-The selected task accepts explicit directions through `task-direct` or main chat with `direct task ATTEMPT_ID: your direction`. Use `stop task ATTEMPT_ID` in main chat to stop it. A request without a full attempt ID asks for clarification. Provider calls to `start_background_task` fail with no task started. Input is accepted first and applied at a subsequent safe boundary, with both statuses shown in Activity. A task may use the structured `ask_owner` tool to request clarification; answer the specific question ID with `task-answer`. Waiting for an answer does not consume the execution limit. Input is not approval for a tool action. Accepted but unapplied inputs remain visible after stop or restart. Adapters without tool-call support cannot request clarification.
+The selected task accepts explicit directions through `task-direct` or main chat with `direct task ATTEMPT_ID: your direction`. Use `stop task ATTEMPT_ID` in main chat to stop it. A request without a full attempt ID asks for clarification. Provider calls to `start_background_task` fail with no task started. Input is accepted first and applied at a subsequent safe boundary, with both statuses shown in Activity. A task may use `ask_owner` or `ask_questions` to request clarification in the Staf workspace. Waiting for an answer does not consume the execution limit. Input is not approval for a tool action. Accepted but unapplied inputs remain visible after stop or restart. Adapters without tool-call support cannot request clarification.
 
 The shared instance also supports separately permitted web reading, local search and scratch-only shell, as described below. A complete recovery workflow is not implemented. Browser task submission does not yet recover an uncertain request automatically. Provider cancellation and live execution require separate live verification.
 
@@ -530,7 +582,7 @@ separate from the up to five matches selected for a provider request.
 
 Each agent has separate memory. User memory is shared across agents. In main chat, explicit phrases such as “Remember that I like tea” save to the addressed agent. “Remember for all agents: I like tea” proposes shared user memory. The response shows the exact text and warns that all agents can retrieve it. Send `Confirm shared memory PROPOSAL_ID` to save that exact proposal, or `Cancel shared memory PROPOSAL_ID` to cancel it without saving memory. Cancellation removes the text from the active proposal, but the original message and proposal response remain in chat history and may be included in later model requests or task context. Cancellation does not erase backups or data already sent to a provider. The proposal is bound to the addressed agent and survives restart. Repeating confirmation cannot duplicate it. The acknowledgment names the scope. Ambiguous scope or missing content prompts a clarification without saving. Other supported save forms include “Please keep in mind that …”, “Save this for later: …”, and the prefixes “for this agent” or “in shared memory”. For inspection say “List memories in shared memory” or “List memories in this agent memory”. For a specific entry say “Correct memory MEMORY_ID version VERSION in this agent memory to NEW TEXT” or “Forget memory MEMORY_ID version VERSION in shared memory”. Edits and deletions require the exact ID, last observed version, and scope. Scoped save phrases require a colon after the scope; partial agent scopes and recognizable conflicting restrictions require clarification. Phrase recognition is deterministic and cannot reliably infer every implied restriction; review the scope before using shared memory. “Forget that …” asks for an ID and scope rather than guessing which entry to delete. Descriptive requests such as “What do you remember about tea?”, “Forget the memory about tea” and “Correct my memory about tea to coffee” show up to ten matching candidates with IDs and versions; they do not change memory. Unspecified scope means this agent. Add “in shared memory” to preview shared entries. Ambiguous, excluded or other-agent scopes require clarification. A preview does not select an entry or authorize mutation; use the exact ID, current version, scope and replacement text in a separate command. Other natural-language phrasing is not reliably recognized. Tool-capable models can use the memory actions described below. The earlier “bot” wording remains accepted in these chat phrases. CLI scope values such as `bot:BOT_ID` are unchanged.
 
-In chat and eligible tasks, a tool-capable model can search, read, remember, update, and forget within the existing agent and shared scopes. Set **Settings → Tools → Memory sensitivity** to allow model-classified ordinary changes or to review every model save and update. The default allows a model-classified ordinary change unless its text contains a configured sensitive term. Terms match case-insensitively anywhere in the text; add or remove terms in settings. A sensitive, uncertain or omitted classification requires review; an unrecognized value is rejected. A model can misclassify, and term matching misses synonyms and implicit details: choose **Review every model memory change** when this risk is unacceptable. The policy applies to model memory tools, not explicit owner memory commands or paired API and CLI changes. Native terminal and file access remain governed by their existing permissions and can write outside memory tools; these rules are not a filesystem sandbox.
+In chat and eligible tasks, a tool-capable model can search, read, remember, update, and forget within the existing agent and shared scopes. Set **Settings → Tools → Memory sensitivity** to allow model-classified ordinary changes or to review every model save and update. The default allows a model-classified ordinary change unless its text contains a configured sensitive term. Terms match case-insensitively anywhere in the text; add or remove terms in settings. A sensitive, uncertain or omitted classification requires review; an unrecognized value is rejected. A model can misclassify, and term matching misses synonyms and implicit details: choose **Review every model memory change** when this risk is unacceptable. The policy applies to model memory tools, not explicit owner memory commands or paired API and CLI changes. Agent native terminal and file access fail closed unless the experimental Linux boundary is configured and passes its checks; memory rules are not a filesystem sandbox.
 
 Open **Agent settings → View agent memory → Memory proposals** to inspect the exact text, scope and target version, then confirm or deny. A confirmed agent proposal saves or updates that agent's memory; a stale update fails and can be denied. A sensitive shared creation requires this review and then the existing separate `Confirm shared memory PROPOSAL_ID` in that agent's chat. The final confirmation checks the approved text and current authority again. Shared updates still use their existing authority, with sensitive review added. Pending proposals survive restart. Disabling memory or archiving the agent denies its pending sensitive proposals and cancels their pending shared confirmations; re-enabling does not restore them. A plugin-originated proposal cannot be confirmed after its captured plugin access changes. A denial or confirmation cannot be replayed. Settings changes do not retroactively reclassify already saved memories or pending proposals. Helpers and scheduled tasks remain ineligible for these memory actions. Deletion still uses the existing version checks.
 
@@ -614,6 +666,15 @@ Each search requires owner approval of the exact query and backend before dispat
 The backend and its upstream search engines may retain queries. Queries, results, snippets and model output may also be retained in chat, provider replay, Activity, and backups. Unknown secrets cannot be reliably detected. Search results are untrusted previews. Result URLs containing percent-encoded sequences or configured secrets are omitted, and Staf does not automatically open result pages. A later public-web read requires its own permissions and approvals. Tests use synthetic providers and a disposable local HTTP fixture; a real SearXNG deployment and live provider behavior have not been verified.
 
 ### Scratch-only shell
+
+On Linux, scratch-shell calls use the configured Docker daemon only after the
+image, daemon, container configuration, and in-container kernel state pass the
+checks described in [credential isolation](credential-isolation.md). Calls
+fail closed on other platforms or when a check fails. This backend has not yet
+been exercised against a real Linux daemon; its isolation is unverified.
+If container inspection fails before start, Staf removes the created container.
+If removal is confirmed, the action fails without a pending uncertain outcome.
+If removal cannot be confirmed, the outcome remains uncertain for review.
 
 Scratch shell is disabled by default. A paired owner must configure an absolute Docker CLI path, an absolute Unix daemon socket path and a pinned `sha256:` image ID, then enable instance and bot permission. Ordinary background tasks also require their own shell permission. Helpers cannot use it. A scheduled task may use only its captured exact command and Docker configuration, subject to an explicit task disable. Task permission readback distinguishes the owner override, inherited scope and effective access. The commands `instance shell-config URL CREDENTIAL_FILE`, `shell-config-set URL CREDENTIAL_FILE REVISION DOCKER_BINARY DOCKER_SOCKET IMAGE_ID`, `shell-permission URL CREDENTIAL_FILE SCOPE`, and `shell-permission-set URL CREDENTIAL_FILE SCOPE true|false` manage configuration and permissions. Use `- - -` to clear the configuration. Existing bot permissions and approval settings remain independent.
 
@@ -700,10 +761,10 @@ The terminal supports `staf settings set toolMode hybrid` and
 set `toolMode` in the existing agent profile JSON, or pass `--tool-mode` at
 creation. The paired defaults command accepts a final mode argument.
 
-In chat and eligible tasks, Direct offers the eligible clock, memory, configured search, web reading, scratch shell, skill selection, host file, and native process tools, Hybrid offers those individual tools and `code_mode`, and Code Mode offers `code_mode` with the same registered capabilities inside it. The code tool description lists eligible registered capability names and input schemas. Fabricated individual calls are rejected. Web reads require approval for each redirect target. Scratch commands continue to use the owner-configured Docker sandbox and its existing limits.
-Background tasks use their captured mode for eligible registered capabilities, including clock and task questions, discovery and helper exchanges. A helper uses its own captured mode; helper and scheduled-work restrictions still apply. Pending owner input defers queued actions until the task drains its inbox. Plain text does not start a guest. Settings edits apply to new work; an accepted task and its retries retain their captured profile and task context. Clock permissions and applicable approvals remain live.
+In chat and eligible tasks, Direct offers eligible individual tools, Hybrid offers those tools and `code_mode`, and Code Mode offers `code_mode` with the same registered capabilities inside it. The code tool description lists eligible registered capability names and input schemas. Fabricated individual calls are rejected. Web reads require approval for each redirect target. Agent host file and native process calls fail closed by default. The explicitly configured Linux host boundary is unverified; Linux scratch calls use separate Docker checks and do not expose a host workspace. Changing tool availability or approval settings does not bypass these restrictions.
+Background tasks use their captured mode for eligible registered capabilities, including clock and task questions, discovery and helper exchanges. A helper uses its own captured mode; helper and scheduled-work restrictions still apply. Pending owner input defers queued actions until it is handled. Plain text does not start a guest. Settings edits apply to new work; an accepted task and its retries retain their captured profile and task context. Clock permissions and applicable approvals remain live.
 
-File actions use the agent's stable `work` directory for relative paths. Absolute paths use the Staf service account's normal host access; the working directory is not a sandbox. `file_write` creates or replaces a UTF-8 file, and `file_read` returns base64 bytes, their offset, the file size, a `nextOffset` when more remains, and a SHA-256 for files up to 1 MiB. Use that hash with `file_edit` to replace exactly one matching UTF-8 string; changed hashes, missing matches and multiple matches fail. `file_search` finds literal UTF-8 bytes in a file or matching names in one directory. Follow `nextOffset` to continue. Directory search is not recursive. These actions do not create parent directories.
+When the experimental Linux boundary is enabled and its checks pass, file calls use its approved workspace. File results use `/workspace` paths, which terminal commands can also use. The equivalent `/srv/staf-workspace` host paths are accepted. Otherwise file calls are blocked before execution. A working directory alone is not a sandbox.
 
 An external writer can still race the hash check and write; it is not an atomic filesystem compare-and-swap. Failed effects that cannot be determined are recorded as uncertain and require reconciliation, not automatic replay. The paired action records and CLI status expose outcomes. Inputs that cannot be retained under the instance redaction rules are rejected rather than substituted. File reads check surrounding bytes for complete known credentials, including credentials split across page boundaries; a page near a credential may also be rejected. Pattern-recognized tokens are checked back to their boundary; a read fails if the boundary cannot be established within the bounded lookback, including for very long benign tokens. Unknown or deliberately transformed secrets may still appear in output or retained history.
 
@@ -741,15 +802,104 @@ and use a tool-capable provider to exercise the respective offer. This fixture
 uses synthetic provider responses and does not establish live-provider behavior.
 The broader basic-tools feature remains incomplete.
 
-### Native process slice
+## Secret requests
 
-Agents can call `terminal_run` with shell text and an optional `cwd`, and
-`terminal_read` with a process ID and optional output cursor. `terminal_stop`
-requests termination of an owned process. These operations run on the Staf
-host with the service account's environment and access. The captured agent work
-folder is the default; relative and absolute working paths are supported. They
-are offered directly in Direct and Hybrid and through Code Mode in Hybrid and
-Code. Existing scheduled and helper restrictions remain in force. Use `mode: "pty"` for a real terminal or the default `mode: "pipe"` for separate stdout/stderr. Set `retain: true` to keep a process after its accepted work completes; otherwise unfinished processes are stopped at work completion.
+A tool-capable agent may request a name, purpose, and intended destination in
+main chat or background work. Any currently paired browser can save, skip, or
+dismiss the request. The input is masked by default and can be revealed before
+saving; a saved value is never returned to the browser or model. The model gets
+only the outcome. A pending request survives a restart as interrupted: dismiss
+it and start a new attempt rather than replaying work. Saving neither enables a
+plugin nor authorizes a destination. You can select an existing named secret in
+a request. Settings lists nonsecret metadata and lets you add, replace, or delete
+a named secret without a model. The owner can approve an existing secret for a
+configured Gmail or Slack use and its displayed destination, or revoke that use.
+If that destination already uses another secret, review its name and explicitly
+confirm the replacement. Each approval or revocation uses the state shown during
+review. If another client changes it first, refresh and review again. Agent
+permissions remain separate. Replacement and deletion require confirmation
+and revoke the secret's use approvals. Settings lists affected integrations before
+the decision. A stale confirmation fails if the secret changed. Deletion does not
+revoke a provider credential, recall an in-flight request, or erase backups.
+
+Gmail and Slack require a fresh connection to the managed store. Staf does not
+import, use for connections, or delete old `auth/gmail.json` or `auth/slack.json`
+files. When readable, their values remain in the in-memory output filter. The
+files can still contain credentials and remain the owner's responsibility. A connection
+approval covers the displayed Google endpoints and Gmail account, or Slack's API
+and the selected workspace, user, and DM. Slack Socket Mode also connects to a
+Slack-provided WSS address at `slack.com` or a `slack.com` subdomain. A changed destination requires
+another approval. Gmail and Slack do not read credentials from environment variables.
+Other provider environment settings retain the precedence in the
+[configuration reference](reference.md#terminal-commands-and-environment). The
+shared instance's OpenRouter connection remains separate from named secrets and
+continues to ignore the host `OPENROUTER_API_KEY`.
+Gmail account and OAuth client ID fields must not contain known credential values.
+Staf checks them when authorization begins and again before saving the connection.
+
+The paired browser checks ordinary chat and written question answers for a few
+recognizable credential formats. It warns and blocks submission when one is
+found. Remove or correct the text; for a secret, ask the agent to create a
+protected request, or use the appropriate connection in Settings. An answer
+that triggers the warning stays in the current view and is omitted from saved
+question drafts; other answers can still be saved. Chat drafts remain in browser
+storage. Detection can miss credentials and can flag ordinary text. Other
+clients do not provide this browser warning, and Staf cannot retract a message
+already sent to Slack.
+
+For incoming Slack messages, Staf also blocks recognizable credential patterns
+and known saved values before sending the message to the model. It replies with
+a generic reminder to use protected entry. This is incomplete detection and
+cannot remove a message that Slack already received.
+
+Known saved and supported environment credential values are filtered from
+applicable tool results and action records before model delivery. The filter is
+a secondary safeguard: unknown, encoded, fragmented, or transformed secrets
+can escape it. Existing records, backups, and data already sent elsewhere are
+not erased. Credential changes by the service are rechecked before dispatch and
+persistence. A separate same-user process can modify a credential source between
+checks; Staf does not lock out uncoordinated external writers. Protect the host
+and backups, and use protected entry rather than relying on detection or filtering.
+
+Named values are unencrypted in `secrets/credentials.sqlite` beside the instance
+database, with owner-only directory and file permissions. In-memory instances
+keep the secret store in memory. The service
+account, host administrator, and anyone with a copy of the store can read them.
+Agent-accessible host execution and file tools fail closed unless the experimental
+Linux boundary is explicitly configured and its checks pass;
+this does not protect against pre-existing detached processes, other programs
+running as the service user, host administrators, or host compromise. Stop old
+agent processes before using the store. No Linux isolation or live provider
+acceptance has been demonstrated. Do not paste secrets into ordinary chat.
+
+A stopped full data-directory backup includes the secret store and its use
+approvals. Protect it like the original. Restoring an older backup can restore
+secrets and approvals later deleted or revoked. Review both after recovery.
+Development reset/restore snapshots do not include or restore this store; retain
+it separately when moving development data. No master password is required at restart.
+
+
+## Native process slice
+
+Agent calls to native processes fail closed unless the experimental Linux host
+boundary is configured and its checks pass. That boundary and the separate
+Docker scratch backend have not been verified on Linux. Paired owners can still
+inspect or stop previously recorded resources, but old detached processes may
+survive an upgrade and must be stopped separately before storing secrets. The
+following describes the older retained process implementation, not the isolated
+launcher; see [credential isolation](credential-isolation.md) for current setup.
+
+The retained implementation accepts shell text and an optional `cwd` through
+`terminal_run`, reads output with `terminal_read`, and requests termination with
+`terminal_stop`. It runs on the Staf host with the service account's access,
+which is why agent access is blocked. Its launch environment omits
+`OPENROUTER_API_KEY`, `STAF_API_KEY`, `OPENAI_API_KEY`, `CODEX_API_KEY`, and
+`LMSTUDIO_API_KEY`; other variables remain available. This omission is not a
+security boundary: commands and file tools can still reach files and other
+resources accessible to the service account, including credential files, and
+unknown credentials or aliases in the environment are not removed. A future
+backend must provide a verified boundary before restoring agent access.
+
 
 A paired owner can use `instance processes URL CREDENTIAL_FILE`,
 `instance process URL CREDENTIAL_FILE PROCESS_ID`,
@@ -768,9 +918,12 @@ A live supervisor retains control of the owned process group after the shell exi
 
 ### Interactive and retained processes
 
-`terminal_run({command, mode: "pty", retain: true, cols: 80, rows: 24})` starts an interactive process with a real terminal. PTY output merges stdout/stderr into the `terminal` stream. Pipe mode preserves separate streams. Use `terminal_write({processId, data})` to submit exact UTF-8 input, `terminal_eof({processId})` to close a pipe or send terminal Ctrl-D, and `terminal_resize({processId, cols, rows})` for a PTY. Ctrl-D is an input character whose meaning depends on the program; it does not permanently close a PTY. Dimensions must be 1–1000. Input submission does not prove the application consumed it.
+The retained implementation supports interactive PTY and pipe resources, but
+agent access to these actions is blocked as described above. PTY output merges
+stdout/stderr into the `terminal` stream. Pipe mode preserves separate streams.
+Input submission does not prove the application consumed it.
 
-Retained processes remain usable by later accepted work for the same agent, regardless of its selected calling style. Guest return, ordinary error and guest limits do not stop them. Active-work Stop terminates every process started by that work, including retained ones. Explicit process Stop, agent archive and instance shutdown also request termination. Restart retains records and output but cannot recover a lost live handle.
+Previously retained processes may still be visible to paired clients. Explicit process Stop, agent archive and instance shutdown request termination. Restart retains records and output but cannot recover a lost live handle.
 
 Paired clients use the process `/input`, `/eof` and `/resize` endpoints. CLI commands are `instance process-input URL CREDENTIAL_FILE PROCESS_ID TEXT`, `instance process-eof URL CREDENTIAL_FILE PROCESS_ID`, and `instance process-resize URL CREDENTIAL_FILE PROCESS_ID COLS ROWS`. Input is exact: include a newline when the program expects Enter. Chat process details provide Send line, Close input/Send Ctrl-D, resize, output and Stop controls.
 
@@ -780,11 +933,71 @@ The pinned node-pty 1.2.0-beta.17 dependency ships native bindings; source insta
 
 ## Gmail plugin
 
-Gmail is optional and starts disconnected. One account can be connected through
-**Settings → Plugins → Gmail**. The service records new message candidates and
+Gmail is optional and starts disconnected. One account can be connected in a
+guided conversation or through **Settings → Plugins → Gmail**. The service records new message candidates and
 lets a paired owner inspect them. An agent can search and read mail in chat only
 after both agent access and a separate, explicit model disclosure decision.
 Connecting Gmail alone does not authorize sending email to a model. The opt-in inbox assistant can assess new candidates and send scoped Slack updates. Optional Google scopes allow an agent to propose a reply or inbox change for approval in Slack.
+
+To use guided setup, first complete the Google Cloud preparation in step 1 below.
+In a paired Staf browser on the loopback address, ask a tool-capable agent to
+help set up Gmail. In its question set, enter the Gmail address and desktop
+client ID, then save or select the client secret in the protected step. You can give a new value a distinct name to keep
+an earlier saved secret. If a connection fails, **Choose a different secret** keeps
+the earlier value and lets you select or save another. For a reconnect, leaving the optional scope question blank retains the saved
+send and inbox scopes; choose **Read-only** to remove them. Each answer can be skipped; saving the
+secret is independent and does not authorize its use. Select **Review Gmail
+connection** and check the account, client ID, secret name, Google destinations,
+scopes, and any existing uses shown as being replaced. Confirm to begin Google
+authorization, open the authorization link, sign in to the intended account,
+and return to Staf. Refresh the status and submit the answers so the agent can
+report the observed result. A saved secret alone is not a connection. Submitting
+or dismissing while Google authorization is pending interrupts that attempt.
+Submitting without starting authorization records the setup as skipped. Dismissing
+questions does not undo a successful authorization. Staf records the observed
+authorization separately from the current Gmail credential status, and reports
+both to the agent. Staf refreshes the current status before each relevant model
+request, including a task that captures the earlier setup conversation. Redaction
+of a newly recognized secret preserves other notices and text while retaining
+authenticated setup context. If a new secret changes a pending model request,
+Staf stops that request; retry after reviewing the context. If redaction crosses
+a setup-result boundary, Staf stops the turn to avoid sending a stale status.
+Text stored before it was recognized as a secret may remain in older records and
+backups. Staf checks its structured file and process bytes against current known
+values before replay and storage. When an earlier encoded result cannot be checked
+safely, Staf omits that tool result from later replay while keeping the surrounding
+conversation. This includes earlier Code Mode results that received file or
+terminal bytes, because guest code can return base64 without its
+encoding tag. Earlier guest results without verifiable service provenance are
+also omitted; verified guest results without such output remain available. A secret change during an in-flight encoded result can stop that
+turn; retry after review. Failure activity omits unsafe encoded guest results while
+retaining the other recorded events. Running terminal capture stops retaining new bytes when
+the known-secret set changes and reports incomplete output. These safeguards do
+not detect every transformation or unknown secret, including split or reassembled
+scratch output. A later
+revocation can make credentials unavailable without erasing the
+earlier success, but cannot recall input already sent to a model. Available credentials do not verify Google access
+or grant an agent or model permission. If the agent's settings change during
+setup, start a new Gmail setup request before saving, selecting, or clearing its
+secret.
+
+If an existing connection lacks managed credentials, you can review and reconnect
+the same account here without disconnecting it. The review shows the existing
+connection and any use approvals that the new setup replaces. If the saved scope
+record is missing or unreadable, choose the Google permissions explicitly before
+reviewing the reconnect. The existing state remains until the new connection and
+approvals commit together; the reconnected
+account starts disabled. Existing agent and model permissions remain in place.
+Legacy credential files remain untouched and are not imported.
+
+A definite transaction failure retains the prior connection and approvals. If
+the outcome is uncertain, restart Staf and review Gmail status and named-secret
+uses before retrying. This flow does not enable Gmail or grant agent or model
+access. A new connection starts disabled.
+The guided service journey has controlled synthetic coverage, not a live Google
+or live model acceptance test. Linux credential isolation remains unverified.
+
+The equivalent Settings path remains available without a model:
 
 To prepare an owner-operated connection:
 
@@ -812,11 +1025,11 @@ To prepare an owner-operated connection:
    select **Allow Gmail inbox changes after explicit approval in Slack**.
    Reconnect and select the permissions you want if the existing connection
    lacks them. Select
-   **Begin Google authorization**, then **Open Google authorization**. Sign in
+   **Begin Google authorization and approve**, then **Open Google authorization**. Sign in
    to the intended account and grant the requested access. Google redirects to
    the local Staf callback. Return to Settings and refresh Gmail status. Staf
    checks that the Google profile email matches the address entered; the
-   connection starts disabled and agent access starts off.
+   connection starts disabled; a new account has no agent access. Existing access permissions are retained on reconnection.
 4. Choose **Enable** to start monitoring. To let an agent read mail, allow its
    access and separately confirm **Allow Gmail to** the displayed provider and
    model. That decision allows message text and search results to be sent to
@@ -959,16 +1172,16 @@ An agent must search again to use the mail in a later turn. This cannot recall
 content already sent to the explicitly allowed provider.
 
 Disable retains credentials, agent access and model disclosure settings.
-Disconnect disables the plugin and removes its local credentials, but retains
-account configuration and all permissions. Reconnecting the same account can
+Disconnect disables the plugin and revokes its local credential-use approvals,
+but retains the saved named secrets, account configuration, and agent permissions.
+Reconnecting the same account can
 therefore make an existing model permission usable again; revoke it separately
 if that is not wanted. Delete Gmail configuration removes all permissions.
 Neither action
 revokes the grant at Google; revoke it in Google account settings if desired.
 Reconnect requires the client secret and Google consent again. The client secret
-and refresh token are stored in host-local `auth/gmail.json` with restrictive
-permissions, outside SQLite and outside normal dataset backups. Protect the
-host and securely backed-up credentials; otherwise reconnect after restore.
+and refresh token are saved as separate named secrets in the managed store.
+Old `auth/gmail.json` files are left untouched and are not used.
 External apps in Google Testing mode with this scope generally receive refresh
 tokens that expire after seven days; Google can also revoke tokens for other
 reasons. See Google's [OAuth token expiration guidance](https://developers.google.com/identity/protocols/oauth2#expiration).
@@ -992,7 +1205,7 @@ To set up your own Slack app:
 
 1. Create an app in the desired workspace, enable Socket Mode, and create an
    app-level token with `connections:write`. Under OAuth & Permissions add the
-   bot scopes `im:history` and `chat:write`; under Event Subscriptions subscribe
+   bot scopes `im:history`, `im:write`, and `chat:write`; under Event Subscriptions subscribe
    the bot to `message.im`. Enable **Interactivity** for the approval buttons.
    Install the app in the workspace. Enable the Messages
    tab and allow users to send messages if Slack presents that setting.
@@ -1004,11 +1217,22 @@ To set up your own Slack app:
    [`message.im` reference](https://docs.slack.dev/reference/events/message.im/),
    and [`chat.postMessage` reference](https://docs.slack.dev/reference/methods/chat.postMessage/)
    describe the transport, scopes and reply behavior.
-3. In **Settings → Plugins → Slack**, enter the app-level and bot user tokens,
-   the IDs and an existing active agent. **Connect** checks the bot token's
-   workspace with Slack. Then explicitly **Allow agent access** and **Enable**.
-   A connected status means the Socket Mode WebSocket opened, not that a DM
-   has been tested. An app token or Slack settings error may require correcting
+3. In the main chat of the agent you want to bind, ask for help setting up Slack.
+   Provide the workspace, user, and DM IDs in conversation or optional questions.
+   Enter or select the app-level and bot user tokens in the two protected Staf
+   requests; do not paste tokens into chat or Slack. Review the displayed agent,
+   destination, secret versions, and any existing grants before confirming.
+   Alternatively, use **Settings → Plugins → Slack** without a model: enter the
+   tokens, IDs and an existing active agent, choose **Connect and approve**, then
+   explicitly **Allow agent access** and **Enable**.
+   Staf checks the bot token's workspace and uses Slack's
+   [`conversations.open`](https://docs.slack.dev/reference/methods/conversations.open/)
+   with the approved user and `prevent_creation` to verify that the returned
+   one-person DM ID matches the supplied DM. `im:write` is required for this
+   check; reinstall the app if you add that scope. Staf does not create a new DM
+   as part of verification.
+   A connected status means the Socket Mode WebSocket opened after that check;
+   it does not mean a message was delivered. An app token or Slack settings error may require correcting
    the setup and enabling again.
 4. Send a harmless test DM from the approved user. The agent's response should
    appear in that DM, or in the originating thread for a threaded message.
@@ -1017,23 +1241,27 @@ To set up your own Slack app:
 
 Disable stops the socket and cancels active Slack chat responses while retaining
 configuration, access, and history. Accepted Slack background tasks continue;
-their delivery waits until the same approved destination and agent are enabled again. Disconnect also removes the locally saved
-Slack tokens, while preserving the binding and history. Delete saved configuration
+their delivery waits until the same approved destination and agent are enabled again. Disconnect revokes the local use approvals for the
+saved Slack tokens, while preserving the tokens, binding, and history. Delete saved configuration
 removes the binding and agent access as well. These actions do not uninstall the
 Slack app or revoke tokens at Slack. Reconnect requires the tokens again. Tokens
-are stored as a host-local `auth/slack.json` file with restricted permissions;
-they are not returned to clients or included in the instance database. Protect
-host access and backups. Consult the backup instructions for which files are
-included; reconnect Slack after a restore unless the credential file was
-explicitly and securely restored.
+are separate named secrets in the managed store. Existing configurations are
+rechecked before receiving or sending; a missing scope, failed check, or
+interrupted activation blocks delivery. Use **Retry connection** after reviewing
+and correcting the configuration. Old `auth/slack.json` files are left untouched
+and are not used. A rolled-back reconnect keeps the previous connection and
+approvals. If the outcome is uncertain, restart Staf and review it. If guided
+setup was interrupted, choose **Keep disabled and review**, then inspect the Slack
+binding and **Named secrets** before enabling or reconnecting. Staf does not
+automatically replay the setup. Protect host access and backups.
 
 Ask the agent for work in a normal DM, for example, “Please investigate this
 and let me know what you find.” A tool-capable model can choose to start
 independent work; the service uses your original message as its objective and
-sends a receipt in that message's thread. For an update, direction, an answer,
-or Stop, reply in that same thread in ordinary language. Staf binds these actions
-to that thread's task. If there is no unique binding or open question, it asks
-for clarification and makes no change. If older work shares a thread, quote the
+sends a receipt in that message's thread. For an update, direction, or Stop,
+reply in that same thread in ordinary language. Staf binds these actions to that
+thread's task. If there is no unique binding, it asks for clarification and makes
+no change. If older work shares a thread, quote the
 full original request from the offered choices to identify it. Start a new
 top-level message for a new task. An agent can run one background task at a time.
 
@@ -1044,8 +1272,21 @@ in [issue #109](https://github.com/lancewilhelm/Staf/issues/109). A model that
 cannot call tools cannot use the natural-language task capabilities. Existing
 `work:` and ID-based controls remain available for diagnostics and older threads.
 
-Receipt, actual tool progress, questions and the terminal outcome are sent to
-the request's thread. A result does not require another DM. If Slack is disabled,
+Receipt, tool progress, and the terminal outcome are sent to the request's
+thread. Background questions and answers stay in Staf. If a task or its helper
+asked questions, Slack receives only the outcome state until you review the
+text in Staf. Open the task, edit the proposed outcome, check the displayed
+workspace, user, channel, and original thread, and select **Send reviewed
+outcome**. Remove questions and answers, including paraphrases and encoded
+details. Staf rejects some direct matches but cannot detect every disclosure.
+It sends only the exact text you confirm. A Gmail task also requires its
+current Gmail task authorization; Gmail clarification and action approvals
+remain separate.
+
+If access or the destination changes before dispatch, review again. If the
+original thread is unavailable, Staf cannot send the reviewed outcome. If a
+send has an uncertain result, check the thread; Staf will not resend it
+automatically. A result does not require another DM. If Slack is disabled,
 disconnected or rate limited, pending delivery is retained for the same
 workspace, user, channel and agent; reconnect and enable that same binding to
 resume. A confirmed Slack acceptance is not proof that a person read the message.

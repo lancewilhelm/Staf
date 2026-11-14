@@ -4,7 +4,7 @@ import {mkdtempSync,readFileSync,writeFileSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {DatabaseSync} from 'node:sqlite';
-import {startInstance} from './fixtures/controlled-instance.mjs';
+import {startControlledInstance as startInstance} from './fixtures/controlled-instance.mjs';
 import {Instance} from '../dist/instance.js';
 
 const tool=(name,args)=>({role:'assistant',content:null,tool_calls:[{id:'review',type:'function',function:{name,arguments:JSON.stringify(args)}}]});
@@ -212,8 +212,8 @@ test('file-write resolution verifies actual bytes and does not silently replay a
     const actions=registry.open({kind:'command',id:'file-resolve'},new AbortController().signal),input={path:'resolved.txt',content:'actual bytes'};
     const request=callId=>({source:{kind:'provider',responseId:'fixture',callId},name:'file_write',input,intent:{kind:'new'}});
     const first=await actions.invoke(request('first'));assert.equal(first.action.state,'uncertain');
-    assert.throws(()=>actions.reconcile(first.action.id,{sha256:'0'.repeat(64)}));
-    const sha256=createHash('sha256').update(input.content).digest('hex');actions.reconcile(first.action.id,{sha256});
+    await assert.rejects(()=>actions.reconcile(first.action.id,{sha256:'0'.repeat(64)}));
+    const sha256=createHash('sha256').update(input.content).digest('hex');await actions.reconcile(first.action.id,{sha256});
     const next=await actions.invoke(request('repeat'));assert.equal(next.kind,'repeat-required');assert.equal(writes,1);
     assert.equal(readFileSync(join(actions.context.workingDirectory,input.path),'utf8'),input.content);actions.dispose();
   } finally {instance.close();}

@@ -1,6 +1,7 @@
 import {createHash} from 'node:crypto';
 import {closeSync, constants, fstatSync, ftruncateSync, openSync, opendirSync, readSync, statSync, writeFileSync} from 'node:fs';
 import {resolve} from 'node:path';
+import {isDeepStrictEqual} from 'node:util';
 import {z} from 'zod';
 import {ActionFailed, type Capability, type WorkContext} from './work-actions.js';
 
@@ -28,10 +29,10 @@ function safeInput<T>(schema:z.ZodType<T>,value:unknown,redact:(value:string)=>s
 function boundedHash(fd:number,size:number):string|null {const bytes=Buffer.alloc(size+1);const count=readSync(fd,bytes,0,bytes.length,0);return count===size?hash(bytes.subarray(0,count)):null;}
 const patternLookbackBytes=65536;
 const isTokenByte=(byte:number|undefined):boolean=>byte!==undefined && ((byte>=65 && byte<=90) || (byte>=97 && byte<=122) || (byte>=48 && byte<=57) || byte===45 || byte===95);
-function readPage({fd,input,redact,overlap}:{fd:number;input:z.infer<typeof readInput>;redact:(value:string)=>string;overlap:number}):Buffer {
- const padding=overlap+4,start=Math.max(0,input.offset-Math.max(patternLookbackBytes,padding)),index=input.offset-start;
- const buffer=Buffer.alloc(index+input.limit+padding),count=readSync(fd,buffer,0,buffer.length,start);
- const page=buffer.subarray(index,Math.min(count,index+input.limit));
+export function validateFilePage({buffer,start,index,offset,limit,redact,overlap}:{buffer:Buffer;start:number;index:number;offset:number;limit:number;redact:(value:string)=>string;overlap:number}):Buffer {
+ const padding=overlap+4,count=buffer.length;
+ if(start!==Math.max(0,offset-Math.max(patternLookbackBytes,padding)) || index!==offset-start || buffer.length>index+limit+padding)throw new ActionFailed('File page cannot be retained safely');
+ const page=buffer.subarray(index,Math.min(count,index+limit));
  const nearby=buffer.subarray(Math.max(0,index-padding),count).toString('utf8');
  if(redact(nearby)!==nearby)throw new ActionFailed('File page cannot be retained safely');
  if(page.length && isTokenByte(page[0])) {
@@ -42,12 +43,17 @@ function readPage({fd,input,redact,overlap}:{fd:number;input:z.infer<typeof read
  }
  return page;
 }
+function readPage({fd,input,redact,overlap}:{fd:number;input:z.infer<typeof readInput>;redact:(value:string)=>string;overlap:number}):Buffer {
+ const padding=overlap+4,start=Math.max(0,input.offset-Math.max(patternLookbackBytes,padding)),index=input.offset-start;
+ const buffer=Buffer.alloc(index+input.limit+padding),count=readSync(fd,buffer,0,buffer.length,start);
+ return validateFilePage({buffer:buffer.subarray(0,count),start,index,offset:input.offset,limit:input.limit,redact,overlap});
+}
 function editBytes(fd:number):Buffer {const stat=fstatSync(fd);if(!stat.isFile())throw new ActionFailed('Path is not a regular file');if(stat.size>1048576)throw new ActionFailed('Edit file exceeds 1 MiB');const buffer=Buffer.alloc(1048577);let count=0;while(count<buffer.length){const read=readSync(fd,buffer,count,buffer.length-count,count);if(!read)break;count+=read;}if(count>1048576)throw new ActionFailed('Edit file exceeds 1 MiB');return buffer.subarray(0,count);}
 function definition(name:string,description:string,properties:Record<string,{type:string;description?:string;minimum?:number;maximum?:number}>,required:string[]) {return {type:'function' as const,function:{name,description,parameters:{type:'object' as const,properties,required,additionalProperties:false as const}}};}
 const pathProp={type:'string',description:'Relative to the captured working folder or an absolute host path.'};
 const numberProp={type:'integer',minimum:0};
 function base<I extends {path:string}>(name:string,definitionValue:ReturnType<typeof definition>,schema:z.ZodType<I>,effect:'read'|'change',redact:(value:string)=>string,allowed:(work:WorkContext)=>boolean,execute:(input:I,work:WorkContext)=>Promise<unknown>):Capability<I,z.infer<typeof result>> {
- return {name,definition:definitionValue,parseInput:value=>safeInput(schema,value,redact),parseResult:value=>result.parse(value),eligible:allowed,check:(_input,work)=>{if(!allowed(work))throw Error('File action is no longer authorized');},authorize:async()=>{},describe:(input,work)=>({summary:`${name} ${filename(work,input.path)}`,resource:filename(work,input.path),effect}),execute:async (input,work)=>result.parse(await execute(input,work)),visibleResult:()=>`${name} completed`};
+ return {name,definition:definitionValue,sameAction:(previous,next,work)=>{const {path:oldPath,...oldInput}=previous,{path:newPath,...newInput}=next;return filename(work,oldPath)===filename(work,newPath) && isDeepStrictEqual(oldInput,newInput);},parseInput:value=>safeInput(schema,value,redact),parseResult:value=>result.parse(value),eligible:allowed,check:(_input,work)=>{if(!allowed(work))throw Error('File action is no longer authorized');},authorize:async()=>{},describe:(input,work)=>({summary:`${name} ${filename(work,input.path)}`,resource:filename(work,input.path),effect}),execute:async (input,work)=>result.parse(await execute(input,work)),visibleResult:()=>`${name} completed`};
 }
 export function fileCapabilities(redact:(value:string)=>string,allowed:(work:WorkContext)=>boolean,readOverlap:()=>number) {
  const read=base('file_read',definition('file_read','Read a bounded page of actual file bytes, returned as base64. Follow nextOffset for more.',{path:pathProp,offset:numberProp,limit:{type:'integer',minimum:1,maximum:32768}},['path']),readInput,'read',redact,allowed,async(input,work)=>{

@@ -1,0 +1,85 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {mkdtempSync,rmSync,readFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {fork} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
+import {DatabaseSync} from 'node:sqlite';
+import {startInstance} from '../dist/instance-service.js';
+
+test('Slack Settings refuses a DM that is not the approved user’s DM',async()=>{
+ const dir=mkdtempSync(join(tmpdir(),'staf-slack-dm-review-'));let checks=0,starts=0;
+ const slackTransport={identify:async()=>({teamId:'T123',botUserId:'B123'}),verifyDestination:async()=>{checks++;return {channelId:'DOTHER'};},start:async()=>{starts++;return ()=>{};},post:async()=>{throw Error('Unexpected send');}};
+ const app=startInstance(join(dir,'instance.sqlite'),0,{dataDir:dir,env:{},slackTransport});
+ try{
+  const port=await app.listen();let token;const call=async(route,body)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});return [response.status,await response.json()];};
+  token=(await call('/api/pair',{code:app.code}))[1].token;const bot=(await call('/api/bots',{name:'Agent',provider:'live',model:'fixture'}))[1];
+  const [status]=await call('/api/plugins/slack/connect',{confirm:true,appToken:'xapp-synthetic',botToken:'xoxb-synthetic',teamId:'T123',userId:'U123',channelId:'D123',botId:bot.id});
+  assert.notEqual(status,200);assert.equal(checks,1);assert.equal(starts,0);assert.equal((await call('/api/plugins'))[1][0].connected,false);
+ }finally{await app.close();rmSync(dir,{recursive:true,force:true});}
+});
+
+test('Slack Settings fails closed when DM verification is unavailable',async()=>{
+ const dir=mkdtempSync(join(tmpdir(),'staf-slack-missing-scope-'));let starts=0;
+ const slackTransport={identify:async()=>({teamId:'T123',botUserId:'B123'}),verifyDestination:async()=>{throw Error('missing_scope');},start:async()=>{starts++;return ()=>{};},post:async()=>{throw Error('Unexpected send');}};
+ const app=startInstance(join(dir,'instance.sqlite'),0,{dataDir:dir,env:{},slackTransport});try{
+  const port=await app.listen();let token;const call=async(route,body)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});return [response.status,await response.json()];};
+  token=(await call('/api/pair',{code:app.code}))[1].token;const bot=(await call('/api/bots',{name:'Agent',provider:'live',model:'fixture'}))[1];
+  assert.notEqual((await call('/api/plugins/slack/connect',{confirm:true,appToken:'xapp-synthetic',botToken:'xoxb-synthetic',teamId:'T123',userId:'U123',channelId:'D123',botId:bot.id}))[0],200);assert.equal(starts,0);assert.equal((await call('/api/plugins'))[1][0].connected,false);
+ }finally{await app.close();rmSync(dir,{recursive:true,force:true});}
+});
+
+test('a killed setup never auto-activates across any durable startup boundary',async()=>{
+ for(const stage of ['intent','grants','bound','enabled','socket-open','committed']){
+  const dir=mkdtempSync(join(tmpdir(),'staf-slack-crash-')),path=join(dir,'instance.sqlite');let app,child,port,token,starts=0;
+  const call=async(route,body)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});return [response.status,await response.json()];};
+  const until=async fn=>{for(let n=0;n<500;n++){const result=await fn();if(result)return result;await new Promise(resolve=>setTimeout(resolve,10));}throw Error('Timed out');};
+  try {
+   child=fork(fileURLToPath(new URL('./fixtures/slack-activation-crash.mjs',import.meta.url)),[path,stage],{stdio:['ignore','ignore','ignore','ipc']});
+   const ready=await new Promise((resolve,reject)=>{child.once('message',resolve);child.once('error',reject);});port=ready.port;token=(await call('/api/pair',{code:ready.code}))[1].token;
+   const bot=(await call('/api/bots',{name:'Agent',provider:'live',model:'fixture',toolMode:'direct'}))[1];await call('/api/commands',{id:'setup',botId:bot.id,content:'Setup Slack'});
+   const first=await until(async()=>(await call('/api/inbox'))[1].find(item=>item.kind==='secret'));await call(`/api/secret-requests/${first.id}/save`,{value:'xapp-synthetic-crash'});
+   const second=await until(async()=>(await call('/api/inbox'))[1].find(item=>item.kind==='secret'&&item.id!==first.id));await call(`/api/secret-requests/${second.id}/save`,{value:'xoxb-synthetic-crash'});
+   const request=await until(async()=>(await call('/api/inbox'))[1].find(item=>item.kind==='slack-setup'));
+   const ended=new Promise(resolve=>child.once('exit',resolve));const pending=call(`/api/slack-setup/${request.id}/confirm`,{approval:request.approval}).catch(()=>null);await ended;await pending;child=undefined;
+   const slackTransport={identify:async()=>({teamId:'T123',botUserId:'B123'}),verifyDestination:async(_tokens,config)=>({channelId:config.channelId}),start:async(_tokens,_receive,status)=>{starts++;status?.('connected');return ()=>{};},post:async()=>{throw Error('Unexpected delivery');}};
+   app=startInstance(path,0,{dataDir:dir,env:{},slackTransport});port=await app.listen();await new Promise(resolve=>setTimeout(resolve,100));assert.equal(starts,0,stage);
+   const plugin=(await call('/api/plugins'))[1].find(item=>item.id==='slack');
+   if(plugin.connected){if(plugin.enabled)assert.equal(plugin.status,'activation interrupted',stage);if(plugin.setupRecoveryPending){assert.equal((await call('/api/plugins/slack/enable',{}))[0],409,stage);assert.equal((await call('/api/plugins/slack/recover-setup',{confirm:true}))[0],200,stage);}assert.equal((await call('/api/plugins/slack/enable',{}))[0],200,stage);assert.equal(starts,1,stage);}
+   assert.ok(!readFileSync(path).includes(Buffer.from('xapp-synthetic-crash')));assert.ok(!readFileSync(path).includes(Buffer.from('xoxb-synthetic-crash')));
+  } finally {child?.kill('SIGKILL');await app?.close();rmSync(dir,{recursive:true,force:true});}
+ }
+});
+
+test('Slack Settings activation recovers process exits before and after the durable ready state',async()=>{
+ for(const stage of ['intent','enabled','atomic-commit','socket-open','committed']){
+  const dir=mkdtempSync(join(tmpdir(),'staf-settings-crash-')),path=join(dir,'instance.sqlite');let child,app,starts=0;
+  try{child=fork(fileURLToPath(new URL('./fixtures/slack-settings-activation-child.mjs',import.meta.url)),[path,stage],{stdio:['ignore','ignore','ignore','ipc']});const exited=new Promise(resolve=>child.once('exit',resolve));const {token}=await new Promise((resolve,reject)=>{child.once('message',resolve);child.once('error',reject);child.once('exit',code=>reject(Error(`Fixture exited early: ${code}`)));});assert.equal(await exited,73,stage);child=undefined;
+   const transport={identify:async()=>({teamId:'T123',botUserId:'B123'}),verifyDestination:async(_tokens,config)=>({channelId:config.channelId}),start:async(_tokens,_receive,status)=>{starts++;status?.('connected');return ()=>{};},post:async()=>{throw Error('Unexpected delivery');}};
+   app=startInstance(path,0,{dataDir:dir,env:{},slackTransport:transport});const port=await app.listen();const call=async(route,body)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});return [response.status,await response.json()];};
+   const plugin=(await call('/api/plugins'))[1].find(item=>item.id==='slack');if(stage==='committed'){for(let n=0;n<100 && starts===0;n++)await new Promise(resolve=>setTimeout(resolve,10));assert.equal(starts,1,stage);}else {assert.equal(starts,0,stage);if(plugin.enabled)assert.equal(plugin.status,'activation interrupted',stage);assert.equal((await call('/api/plugins/slack/enable',{}))[0],200,stage);assert.equal(starts,1,stage);}
+   for(const value of ['xapp-settings-fixture','xoxb-settings-fixture'])assert.equal(readFileSync(path).includes(Buffer.from(value)),false,stage);
+  }finally{child?.kill('SIGKILL');await app?.close();rmSync(dir,{recursive:true,force:true});}
+ }
+});
+
+test('Slack Settings activation rolls back its fence and enablement together',async()=>{
+ for(const stage of ['intent','enabled']){
+  const dir=mkdtempSync(join(tmpdir(),'staf-activation-atomic-')),path=join(dir,'instance.sqlite');let starts=0;
+  const slackTransport={identify:async()=>({teamId:'T123',botUserId:'B123'}),verifyDestination:async(_tokens,config)=>({channelId:config.channelId}),start:async(_tokens,_receive,status)=>{starts++;status?.('connected');return ()=>{};},post:async()=>{}};
+  const app=startInstance(path,0,{dataDir:dir,env:{},slackTransport},{slackSettingsActivation:point=>{if(point===stage)throw Error('Synthetic transaction failure');}});
+  try{const port=await app.listen();let token;const call=async(route,body)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});return [response.status,await response.json()];};
+   token=(await call('/api/pair',{code:app.code}))[1].token;const bot=(await call('/api/bots',{name:'Agent',provider:'live',model:'fixture'}))[1];assert.equal((await call('/api/plugins/slack/connect',{confirm:true,appToken:'xapp-synthetic',botToken:'xoxb-synthetic',teamId:'T123',userId:'U123',channelId:'D123',botId:bot.id}))[0],200);assert.notEqual((await call('/api/plugins/slack/enable',{}))[0],200);
+   assert.equal((await call('/api/plugins'))[1].find(item=>item.id==='slack').enabled,false,stage);const db=new DatabaseSync(join(dir,'secrets','credentials.sqlite'));try{assert.equal(db.prepare('SELECT count(*) AS n FROM slack_activation').get().n,0,stage);}finally{db.close();}assert.equal(starts,0,stage);
+  }finally{await app.close();rmSync(dir,{recursive:true,force:true});}
+ }
+});
+
+test('a Settings activation error after ready fences delivery and requires an explicit retry',async()=>{
+ const dir=mkdtempSync(join(tmpdir(),'staf-settings-error-')),path=join(dir,'instance.sqlite');let app,port,token,starts=0,fail=true;
+ const transport={identify:async()=>({teamId:'T123',botUserId:'B123'}),verifyDestination:async(_tokens,config)=>({channelId:config.channelId}),start:async(_tokens,_receive,status)=>{starts++;status?.('connected');return ()=>{};},post:async()=>{throw Error('Unexpected delivery');}};
+ const start=async()=>{app=startInstance(path,0,{dataDir:dir,env:{},slackTransport:transport},{slackSettingsActivation:stage=>{if(fail && stage==='committed')throw Error('Synthetic error');}});port=await app.listen();};
+ const call=async(route,body)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});return [response.status,await response.json()];};
+ try{await start();token=(await call('/api/pair',{code:app.code}))[1].token;const bot=(await call('/api/bots',{name:'Agent',provider:'live',model:'fixture'}))[1];assert.equal((await call('/api/plugins/slack/connect',{confirm:true,appToken:'xapp-settings-error',botToken:'xoxb-settings-error',teamId:'T123',userId:'U123',channelId:'D123',botId:bot.id}))[0],200);await call('/api/plugins/slack/access',{botId:bot.id,enabled:true});assert.notEqual((await call('/api/plugins/slack/enable',{}))[0],200);assert.equal((await call('/api/plugins'))[1].find(item=>item.id==='slack').status,'connection failed');assert.equal(starts,1);fail=false;await app.close();app=undefined;await start();await new Promise(resolve=>setTimeout(resolve,100));assert.equal(starts,1);assert.equal((await call('/api/plugins'))[1].find(item=>item.id==='slack').status,'activation interrupted');assert.equal((await call('/api/plugins/slack/enable',{}))[0],200);assert.equal(starts,2);}finally{await app?.close();rmSync(dir,{recursive:true,force:true});}
+});

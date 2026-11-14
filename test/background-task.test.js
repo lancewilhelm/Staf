@@ -1,3 +1,4 @@
+import {questionFetch} from './fixtures/question-client.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -10,7 +11,7 @@ test('background task and chat run independently, retain activity, and survive r
   let release, entered; const gate=new Promise(r=>release=r), started=new Promise(r=>entered=r);
   const factory=async profile=>({name:'fixture',capabilities:{toolCalls:true,incrementalText:false,transport:'demo'},async complete(messages){if(profile.chatId==='attempt-one'){entered();await gate;return {role:'assistant',content:'background result',tool_calls:[{id:'late-clock',type:'function',function:{name:'clock',arguments:'{}'}}],usage:{scope:'request',status:'reported',source:'fixture',metrics:{input:7}}};}return {role:'assistant',content:'chat result'};}});
   let app=startInstance(path,0,{providerFactory:factory}),port=await app.listen();
-  const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return [r.status,await r.json()];};
+  const call=async(route,token,body)=>{const r=await questionFetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return [r.status,await r.json()];};
   const wait=async(route,token,predicate)=>{for(let i=0;i<200;i++){const v=(await call(route,token))[1];if(predicate(v))return v;await new Promise(r=>setTimeout(r,5));}throw Error('timed out');};
   try {
     const token=(await call('/api/pair','',{code:app.code}))[1].token, bot=(await call('/api/bots',token,{provider:'live',model:'fixture-offline',name:'A'}))[1];
@@ -40,7 +41,7 @@ test('failure retains tool activity and explicit retry survives interruption', a
     await new Promise(resolve=>{waiting=resolve;if(signal.aborted)resolve();else signal.addEventListener('abort',resolve,{once:true});});throw Error('cancelled');
   }});
   let app=startInstance(path,0,{providerFactory:factory}),port=await app.listen();
-  const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return [r.status,await r.json()];};
+  const call=async(route,token,body)=>{const r=await questionFetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return [r.status,await r.json()];};
   const wait=async(route,token,predicate)=>{for(let i=0;i<200;i++){const v=(await call(route,token))[1];if(predicate(v))return v;await new Promise(r=>setTimeout(r,5));}throw Error('timed out');};
   try {const token=(await call('/api/pair','',{code:app.code}))[1].token,bot=(await call('/api/bots',token,{provider:'live',model:'fixture-offline',name:'A'}))[1];
     await call('/api/tasks',token,{id:'failed-attempt',botId:bot.id,objective:'Inspect'});
@@ -64,7 +65,7 @@ test('replacement waits for settlement, preserves late text, and chat sees actua
    chats.push(structuredClone(messages));return {role:'assistant',content:'chat answer'};
  }});
  const app=startInstance(path,0,{providerFactory:factory});const port=await app.listen();
- const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return [r.status,await r.json()];};
+ const call=async(route,token,body)=>{const r=await questionFetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return [r.status,await r.json()];};
  const wait=async(route,token,predicate)=>{for(let i=0;i<200;i++){const v=(await call(route,token))[1];if(predicate(v))return v;await new Promise(r=>setTimeout(r,5));}throw Error('timed out');};
  try {const token=(await call('/api/pair','',{code:app.code}))[1].token,bot=(await call('/api/bots',token,{provider:'live',model:'fixture-offline',name:'A'}))[1];
   await call('/api/commands',token,{id:'before',botId:bot.id,content:'first chat'});await wait('/api/commands/before',token,c=>c.state==='completed');
@@ -108,7 +109,7 @@ test('explicit directions reach a held task in order, and an explicit clarificat
   return {role:'assistant',content:'finished'};
  }});
  const app=startInstance(path,0,{providerFactory:factory}),port=await app.listen();let closed=false;
- const call=async(route,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return [r.status,await r.json()];};
+ const call=async(route,body)=>{const r=await questionFetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return [r.status,await r.json()];};
  let token='';const wait=async(predicate)=>{for(let i=0;i<300;i++){const v=(await call('/api/tasks/task'))[1];if(predicate(v))return v;await new Promise(r=>setTimeout(r,5));}throw Error('timed out');};
  try {token=(await call('/api/pair',{code:app.code}))[1].token;const bot=(await call('/api/bots',{provider:'live',model:'fixture-offline',name:'A'}))[1];await call('/api/tasks',{id:'task',botId:bot.id,objective:'Inspect'});await started;
   const one={id:'one',kind:'direction',text:'First'},two={id:'two',kind:'direction',text:'Second'};
@@ -117,14 +118,14 @@ test('explicit directions reach a held task in order, and an explicit clarificat
   assert.equal((await call('/api/tasks/task/input',{...one,text:'Different'}))[0],400);
   assert.equal((await call('/api/tasks/task/input',two))[1].kind,'accepted');
   const detail=(await call('/api/tasks/task'))[1];assert.ok(detail.inbox.inputs.every(input=>!('digest' in input)));release();
-  const asking=await wait(t=>t.inbox.questions.some(q=>q.state==='open'));const question=asking.inbox.questions[0];assert.equal(asking.waitReason,'owner-input');assert.match(requests[1].at(-1).content,/First[\s\S]*Second/);
-  assert.equal((await call('/api/tasks/task/input',{id:'answer',kind:'answer',questionId:question.id,text:'report.txt'}))[1].kind,'accepted');
-  const done=await wait(t=>t.state==='completed');assert.equal(done.outcome,'finished');assert.match(requests[2].at(-1).content,/report.txt/);assert.deepEqual(done.inbox.inputs.map(i=>i.status),['applied','applied','applied']);
+  const asking=await wait(t=>t.waitReason==='owner-input');const question=(await call('/api/question-sets'))[1].find(q=>q.workId==='task');assert.ok(question);assert.equal(asking.waitReason,'owner-input');assert.match(requests[1].at(-1).content,/First[\s\S]*Second/);
+  assert.equal((await call(`/api/question-sets/${question.id}/draft`,{answers:[{choices:[],writeIn:'report.txt'}]}))[0],200);assert.equal((await call(`/api/question-sets/${question.id}/submit`,{}))[0],200);
+  const done=await wait(t=>t.state==='completed');assert.equal(done.outcome,'finished');assert.match(JSON.stringify(requests[2]),/report.txt/);assert.deepEqual(done.inbox.inputs.map(i=>i.status),['applied','applied']);
   assert.equal((await call('/api/tasks/task/input',{id:'late',kind:'direction',text:'too late'}))[0],400);
   await app.close();closed=true;const {DatabaseSync}=await import('node:sqlite');const db=new DatabaseSync(path);const session=JSON.parse(db.prepare('SELECT session FROM task_attempts WHERE id=?').get('task').session);db.close();
   const {validSession}=await import('../dist/validation.js');assert.ok(validSession(session,'task'));
-  const {responsesInput}=await import('../dist/codex-direct.js');const codex=responsesInput(requests[2],'fixture');assert.equal(codex.at(-2).type,'function_call_output');assert.match(codex.at(-1).content[0].text,/report.txt/);
-  const {openRouterProvider}=await import('../dist/providers.js');let outbound;const provider=openRouterProvider({OPENROUTER_API_KEY:'dummy'},'fixture',async (_url,init)=>{outbound=JSON.parse(init.body);return Response.json({choices:[{message:{role:'assistant',content:'ok'}}]});});await provider.complete(requests[2],[]);assert.equal(outbound.messages.at(-2).role,'tool');assert.match(outbound.messages.at(-1).content,/report.txt/);
+  const {responsesInput}=await import('../dist/codex-direct.js');const codex=responsesInput(requests[2],'fixture');assert.match(JSON.stringify(codex),/report.txt/);
+  const {openRouterProvider}=await import('../dist/providers.js');let outbound;const provider=openRouterProvider({OPENROUTER_API_KEY:'dummy'},'fixture',async (_url,init)=>{outbound=JSON.parse(init.body);return Response.json({choices:[{message:{role:'assistant',content:'ok'}}]});});await provider.complete(requests[2],[]);assert.match(JSON.stringify(outbound.messages),/report.txt/);
  }finally{release();if(!closed)await app.close();rmSync(dir,{recursive:true,force:true});}
 });
 
@@ -147,7 +148,7 @@ test('direction accepted during provider setup merges with objective before the 
  const dir=mkdtempSync(join(tmpdir(),'staf-setup-input-')),path=join(dir,'db');let release,entered,seen;const gate=new Promise(r=>release=r),started=new Promise(r=>entered=r);
  const factory=async()=>{entered();await gate;return {name:'fixture',capabilities:{toolCalls:true,incrementalText:false,transport:'demo'},async complete(messages){seen=structuredClone(messages);return {role:'assistant',content:'done'};}};};
  const app=startInstance(path,0,{providerFactory:factory}),port=await app.listen();let token='',closed=false;
- const call=async(route,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return await r.json();};
+ const call=async(route,body)=>{const r=await questionFetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return await r.json();};
  try{token=(await call('/api/pair',{code:app.code})).token;const bot=await call('/api/bots',{provider:'live',model:'fixture-offline',name:'A'});await call('/api/tasks',{id:'setup',botId:bot.id,objective:'Inspect'});await started;await call('/api/tasks/setup/input',{id:'input',kind:'direction',text:'focus here'});release();
   for(let i=0;i<200;i++){if((await call('/api/tasks/setup')).state==='completed')break;await new Promise(r=>setTimeout(r,5));}
   assert.equal(seen.length,1);assert.match(seen[0].content,/Inspect[\s\S]*focus here/);await app.close();closed=true;
@@ -158,7 +159,7 @@ test('direction accepted during provider setup merges with objective before the 
 test('execution limit remains the stopped outcome when a provider returns late', async () => {
  const dir=mkdtempSync(join(tmpdir(),'staf-task-limit-')),path=join(dir,'db');let release,entered;const gate=new Promise(r=>release=r),started=new Promise(r=>entered=r);
  const app=startInstance(path,0,{providerFactory:async()=>({name:'fixture',capabilities:{toolCalls:true},async complete(){entered();await gate;return {role:'assistant',content:'late timed output'};}})}),port=await app.listen();
- const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return r.json();};
+ const call=async(route,token,body)=>{const r=await questionFetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return r.json();};
  const wait=async(route,token,predicate)=>{for(let i=0;i<400;i++){const item=await call(route,token);if(predicate(item))return item;await new Promise(r=>setTimeout(r,5));}throw Error('timed out');};
  try {const token=(await call('/api/pair','',{code:app.code})).token,bot=await call('/api/bots',token,{provider:'live',model:'fixture-offline',name:'A'});await call('/api/tasks',token,{id:'limit',botId:bot.id,objective:'Wait',limitMs:1000});await started;
   await wait('/api/tasks/limit',token,t=>t.state==='stopping');release();const task=await wait('/api/tasks/limit',token,t=>t.state==='stopped');assert.equal(task.outcome,'Execution limit reached');assert.ok(task.activity.some(e=>e.type==='assistant_observed' && e.text==='late timed output'));

@@ -7,6 +7,7 @@ import type {IPty} from 'node-pty';
 import {z} from 'zod';
 import type {ProcessBackend} from './native-processes.js';
 import {ActionFailed} from './work-actions.js';
+import {agentProcessEnvironment} from './config.js';
 
 const observation=z.discriminatedUnion('type',[
  z.object({type:z.literal('ready'),token:z.string()}),z.object({type:z.literal('closed')}),z.object({type:z.literal('failed')}),
@@ -14,7 +15,7 @@ const observation=z.discriminatedUnion('type',[
 ]);
 
 /** The PTY child is a live group leader; termination goes over its private socket. */
-export function ptyBackend(command:string,cols:number,rows:number):ProcessBackend {
+export function ptyBackend(command:string,cols:number,rows:number,environment=agentProcessEnvironment(process.env)):ProcessBackend {
  return {launch:(cwd,observers)=>{
   const directory=mkdtempSync('/tmp/staf-pty-'),path=join(directory,'control'),token=randomUUID();
   let terminal:IPty|undefined,channel:Socket|undefined,authenticated=false,settled=false,detached=false,exitCode:number|null=null,exitSignal:string|null=null;
@@ -29,7 +30,7 @@ export function ptyBackend(command:string,cols:number,rows:number):ProcessBacken
   });
   server.once('error',()=>{observers.failed();cleanup(()=>observers.closed(null,null));});
   server.listen(path,()=>{void import('node-pty').then(({spawn})=>{
-   if(detached)return;terminal=spawn(process.execPath,[fileURLToPath(new URL('./native-process-supervisor.js',import.meta.url)),command],{cwd,env:{...process.env,STAF_NATIVE_PTY_SOCKET:path,STAF_NATIVE_PTY_TOKEN:token},name:'xterm-256color',cols,rows,encoding:null});
+   if(detached)return;terminal=spawn(process.execPath,[fileURLToPath(new URL('./native-process-supervisor.js',import.meta.url)),command],{cwd,env:{...environment,STAF_NATIVE_PTY_SOCKET:path,STAF_NATIVE_PTY_TOKEN:token},name:'xterm-256color',cols,rows,encoding:null});
    terminal.onData((data:unknown)=>{if(!detached){if(Buffer.isBuffer(data))observers.output('terminal',data);else if(typeof data==='string')observers.output('terminal',Buffer.from(data));}});
    terminal.onExit(()=>cleanup(()=>settled?observers.closed(exitCode,exitSignal):observers.lost()));
   }).catch(()=>{observers.failed();cleanup(()=>observers.closed(null,null));});});

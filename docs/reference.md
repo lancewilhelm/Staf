@@ -7,7 +7,9 @@ and stores development state in `~/.staf/development`. `STAF_DEV_DATA_DIR`
 explicitly selects another Staf instance directory outside the checkout;
 `STAF_DEV_CONNECTION_DIR` selects the connection store of an existing Staf
 instance without copying it; `STAF_DEV_PORT` selects another loopback port. The service inherits its launch
-environment. See [development](development.md#run-the-development-workspace)
+environment. `STAF_LINUX_HOST_EXECUTION=1` selects the experimental, unverified
+Linux host boundary only when its root-owned policy and checks succeed; see
+[credential isolation](credential-isolation.md). See [development](development.md#run-the-development-workspace)
 for ownership, pairing, reset, and schema recovery.
 
 ## Shared terminal
@@ -309,6 +311,10 @@ The shared instance schedule preview exposes `schedule-create`, `schedule-list`,
 
 ### Shared-instance scratch shell
 
+Scratch-shell calls require Linux and a configured Docker engine that passes
+the isolation checks. This backend has not been verified on Linux. Configuration
+and recovery controls remain available for existing records.
+
 `GET` and `POST /api/shell-config` inspect and revision-safely set the owner-selected Docker binary, Unix socket and pinned image ID. `GET` and `POST /api/shell-permissions/{instance|bot:ID|task:ID}` inspect or set an explicit boolean `enabled`; shell requires instance and bot permission, and tasks require task permission. Helpers are blocked; scheduled tasks may use only their captured exact command and Docker configuration, subject to explicit task disable. Task readback includes override, inherited scope, current effective access and command. `GET /api/shell-approvals` shows exact pending commands to paired clients; `POST /api/shell-approvals/ID/approve|deny` decides one. The runtime always supplies the fixed bounded scratch workspace; a model cannot select a host path or daemon. `GET /api/shell-uncertain` lists unresolved actions and recorded endpoint configurations. Endpoint string equality does not prove the binary or socket still identifies the same daemon; the owner must verify daemon identity independently. `POST /api/shell-actions/ID/review` requires acknowledgment `verified-daemon-identity-and-accepted-late-create-risk`; review does not perform cleanup or prove that a late create cannot materialize. Version 20 adds the scratch configuration, permissions, decision snapshots, durable serialization lock and review journal. See [usage](usage.md#scratch-only-shell) for process visibility, swap and retention limits.
 
 ### Scheduled exact web authorization
@@ -446,6 +452,88 @@ on disable, but an already dispatched effect may have reached its destination.
 Clock permission, web/search permissions, task scope and approvals remain
 independent and authoritative. Search still needs a configured backend.
 
+## Question sets
+
+Schema 53 stores main-chat question definitions, drafts, resolution, the originating command, and a continuation ID. Schema 54 adds task-bound question sets and drafts. `ask_questions` accepts up to
+12 optional single-choice, multiple-select, text, or protected secret steps. Choice questions
+include a list of choices; ordinary questions accept a write-in. Paired clients can
+inspect `GET /api/question-sets`, save an entire draft with
+`POST /api/question-sets/ID/draft`, and resolve it through `submit` or `dismiss`.
+Each request includes the `draftRevision` returned by the service as `revision`;
+the draft body also includes `answers`. A stale revision returns HTTP 409 without
+changing or resolving the draft. The client can load the latest draft or explicitly
+retry its own changes against the latest revision.
+A protected step is saved or selected separately with `POST /api/question-sets/ID/secret/INDEX/save|select|clear`; its value goes directly to the secret store; a new value may use an owner-chosen name. Clearing a selection keeps the saved value. The instance database retains only its saved, skipped, or unavailable status. Saving a step does not grant its use, and a deleted or replaced selection becomes unavailable. The service validates choices and retains explicit skipped results. The same
+resolution is idempotent; a different resolution cannot replace it.
+
+A completed origin permits a new, correlated continuation. A reserved command
+identity makes repeated delivery converge on one command. Interrupted origins
+and interrupted continuations are not automatically replayed. A submitted answer
+starts new work with the current tool mode, permissions, approvals, and scope.
+The action journal checks the originating question-work lineage before dispatch.
+It blocks matching prior actions and fences unresolved effects. A dismissal
+follow-up has no tool offers. Ordinary Slack chat continues as conversation.
+The structured main-chat capability is not offered to Slack commands. A task waits for its own question outcome without spending its execution limit. A restart or stop retains the request and draft without resuming the attempt. A paired client can resolve the retained request and initiate a new attempt after review. Current task authority is checked while waiting and before accepting an answer to an active attempt. Schema 62 binds explicit question retries to the predecessor and resolved question IDs. `POST /api/tasks/ID/question-retry` accepts a new attempt `id` and all resolved `questionIds` from that predecessor; the service retains the original objective and supplies those results separately under current authority. Scheduled retries retain their occurrence and require review and current schedule authority. Gmail-private and Gmail-scoped task lineages cannot be retried or replaced; start fresh authorized Gmail work. Task questions and answers are excluded from automatic Slack updates. A Slack-bound task with questions offers a separate owner review of its exact outcome text and original destination. Schema 55 records the approval with the current Slack and agent revisions and uses the existing delivery journal. A changed identity or authority blocks a pending approval. The owner may submit a new review when the original destination and authority are available. Ambiguous dispatch remains uncertain and is not replayed. The service rejects recognizable direct question or answer matches, but cannot detect every paraphrase or encoding. Gmail-private task outcomes also require current Gmail task authority; existing Gmail clarifications and action approvals remain separate. Secret values are not ordinary question answers.
+Known credentials and recognized OpenRouter key patterns are rejected from drafts,
+but detection is incomplete.
+
+Schema 56 adds service-owned guided Gmail request state. `guide_gmail_setup`
+creates the fixed mixed set in main chat or a task. A paired client can review
+`GET /api/question-sets/ID/gmail-preview` and confirm its exact returned review
+with `POST /api/question-sets/ID/gmail-start`. The review includes the current
+client and refresh grant versions, the uses that would be replaced, the current
+connection snapshot, and whether managed credentials are available. A connected
+account with unavailable credentials can be reviewed for same-account reconnection.
+The question set's `gmailSetupStale` field reports a changed agent revision;
+protected step mutations and Gmail review and authorization return `409` with
+`gmail_setup_stale` in that case. The in-memory
+`GET /api/question-sets/ID/gmail-authorization` URL is available only while
+authorization is pending. Submitting or dismissing during authorization
+interrupts it; submitting before authorization starts records a skipped setup.
+Schema 57 records successful guided authorization separately from the latest
+attempt state. `gmailAuthorization` is `previously_succeeded` when at least one
+attempt for the request succeeded, and `not_recorded` otherwise; during an
+uncertain commit the affected request reports `unknown` until restart. Migration
+preserves successes still marked connected; it cannot reconstruct successes
+that older versions had already overwritten. `gmailConnection` reports the current
+account's `credentials_available`, `credentials_unavailable`, `disconnected`,
+or `unknown` status and its enabled state. Available credentials do not verify
+Google access or imply agent or model permission. Submitted and dismissed results
+include `gmailConnectionAtResolution`. Each relevant model request receives a
+fresh `gmailConnectionAtDelivery` after provider initialization and adapter
+preflight. This value is added to a transient request copy, not the saved
+question result. Schema 58 records service-owned message and task-notice
+identities and signs the corresponding chat-turn provenance. Tasks that retain
+the originating agent's setup conversation receive current status, including
+scheduled tasks and retries. Retained provenance survives shortened task context
+and a shifted or shortened signed chat turn. The service uses identity records,
+not matching user or model text, to decide when to refresh. An older snapshot
+without trustworthy identity is not attributed by its text. An altered signed
+setup turn is replaced in transient input by its recorded outcome; the retained
+resolution stays unchanged. Isolated helpers do not inherit another agent's
+setup conversation. Both snapshots describe the current account, which
+may differ from an earlier authorized account. A connection can change after a
+request is sent, and already transmitted model input cannot be recalled. The reviewed client approval is
+used for the attempt; durable grants, authorization history and the connection
+commit together after Google verification. A definite rollback retains earlier
+grants and configuration; an uncertain result requires restart and review.
+Restart interrupts an unfinished exchange without replay. The connected result
+requires a matching
+Google profile and a successful plugin commit. No secret value is included in
+the question result. Existing agent/model access remains separate.
+
+Schema 61 accepts datasets written by the earlier output-safety checkpoints.
+Its agent and shared taint tables, if present, are left intact but are no longer
+used to block work. Existing conversations, grants, and agents remain in place.
+Structured file and process bytes are checked again before provider dispatch and
+session persistence; an unsafe historical tool result is omitted from replay.
+Code Mode results that received file or terminal bytes are omitted
+from later replay and new session/event saves, because their original encoded
+bytes may have been returned without an encoding tag. Older results without
+verifiable service provenance are also omitted; surrounding text is preserved.
+These checks are secondary to the isolation boundary and cannot detect every
+unknown or transformed secret.
+
 ## Saved tool mode contract
 
 `src/tool-mode.ts` exports `ToolMode` (`direct`, `hybrid`, or `code`) and
@@ -485,9 +573,24 @@ where persistence succeeds.
 
 ## Host file actions
 
+Agent host-file calls fail closed by default. On Linux they can use the
+explicitly configured, unverified host boundary described in
+[credential isolation](credential-isolation.md).
+
 `file_read({path, offset?, limit?})` returns at most 32,768 bytes (default 8,192) and returns base64 data, byte offset, size, next offset and, for files up to 1 MiB, a SHA-256. `file_write({path, content})` writes UTF-8. `file_edit({path, expectedHash, oldText, newText})` requires valid UTF-8, a file at most 1 MiB, the current hash and one exact match. `file_search({path, query, offset?, limit?})` returns byte offsets in a file, scanning up to 65,536 bytes per page, or matching names in a single directory. A page has at most 100 matches; a directory over 10,000 entries is rejected. Paths are at most 4,096 characters; write content is at most 131,072 UTF-16 code units, each edit string at most 65,536, and search queries at most 1,024. The shared 256 KiB serialized invocation limit also applies. Follow `nextOffset` until null. Concurrent host changes can invalidate a page or race an edit; the hash check is not an atomic compare-and-swap.
 
-Paths resolve against the captured working directory unless absolute and use ordinary host permissions. Inputs changed by redaction are rejected before journal preparation. Shared action admission, Stop, recovery, and uncertain-effect handling apply. Helper and scheduled task restrictions remain in force; task mode applies to eligible actions.
+With the Linux boundary, paths resolve against the approved workspace unless absolute. The file helper rejects paths outside it, symlinks, and nested mounts. The isolated execution account and its workspace permissions apply. Inputs changed by redaction are rejected before journal preparation. Shared action admission, Stop, recovery, and uncertain-effect handling apply. Helper and scheduled task restrictions remain in force; task mode applies to eligible actions.
+
+File tools return paths under `/workspace`, matching terminal commands. They also
+accept the equivalent paths under `/srv/staf-workspace`. Isolated terminal
+records use `/workspace` for the working directory. Recovery and question
+continuations treat equivalent file and terminal working-directory paths as the
+same action. For terminal replay protection, the same command and directory
+are treated as the same effect even when process options change. Resuming a
+particular terminal invocation still requires its original options. Invalid
+working directories are rejected before a new action is recorded. Historical
+terminal inputs are compared by their recorded structure even if a value later
+becomes a known secret; an unrecognizable historical input requires review.
 
 Random file pages check the complete known-credential overlap and up to 64 KiB
 of preceding token context (or the larger known-credential overlap). Recognized
@@ -531,7 +634,74 @@ invocation rows have no private payload; selected output and conversation histor
 remain retained. An expired read resume reports its completed status without
 re-executing it. A new read can fetch current data.
 
+### Secret request API
+
+`request_secret` accepts only `name`, `purpose`, and optional `destination`.
+`GET /api/inbox` exposes pending or interrupted request metadata to paired
+clients. `POST /api/secret-requests/ID/save` accepts `{ "value": "..." }`
+directly; `/skip` and `/dismiss` accept `{}`. Responses contain status only.
+`POST /api/secret-requests/ID/select` accepts a saved secret name and current
+revision. Saving or
+selecting checks the current client and originating work. Interrupted requests can
+be dismissed, but cannot accept a value or resume work. Duplicate names are
+rejected. `GET /api/secrets` returns metadata and an opaque revision only.
+`POST /api/secrets/add` accepts a name, purpose, and value; `/replace` accepts a
+name, current revision, value, and explicit confirmation; `/delete` accepts a
+name, current revision, and explicit confirmation. Stale revisions fail. No API
+returns saved values.
+`GET /api/secret-grants` lists approved secret names, revisions, integration roles,
+destinations, and grant-state versions. `GET /api/secret-grant-targets` lists the
+current version and existing approval, or `null`, for each connected Gmail and
+Slack destination. `POST /api/secret-grants/grant` and `/revoke` accept `name`,
+`revision`, `integration`, `destination`, `version`, and `confirm: true`.
+Approval also requires the reviewed `previous` approval or `null` and a boolean
+`confirmDisplacement`. Replacing another secret requires that boolean to be true.
+Each decision checks and changes the durable grant state atomically. Revoked and
+never-approved destinations retain state versions; stale decisions fail. Granting
+requires the current destination and a value valid for the selected role. The
+supported roles are `gmail.client`, `gmail.refresh`,
+`slack.app`, and `slack.bot`. Replacement and deletion revoke the secret's
+approvals. Existing agent and client checks still apply at their respective
+boundaries. The grant APIs never return a saved value.
+The browser's recognizable-pattern warning is client-side; it is not an API
+validation guarantee. Incoming Slack messages also receive a service-side check
+for recognized patterns and known values before model dispatch. Neither check
+detects every secret or removes a message already sent to Slack. The browser blocks flagged chat and question submissions and omits
+flagged written answers from draft saves. Action results are filtered for known
+values before normal retention and model delivery; this does not cover arbitrary
+encodings, unknown values, historical records, or messages already sent.
+See [secret requests](usage.md#secret-requests) for storage and backup limits.
+
+`setup_slack` accepts nonsecret `teamId`, `userId`, and `channelId`; the agent
+comes from the originating work. The service creates separate protected app and
+bot token requests and exposes the resulting exact destination, secret versions,
+current binding and Slack grant-review snapshot as a `slack-setup` inbox item.
+`POST /api/slack-setup/ID/confirm` takes the exact `approval` object and requires
+`confirmDisplacements: true` when the review lists existing grants. `/dismiss`
+takes the same approval. Confirmation rechecks the client, work, agent, binding,
+secret selections and reviewed grant state before identification and commit.
+The service checks that Slack returns the selected DM for the selected user
+using `conversations.open` with `prevent_creation` and the `im:write` bot scope.
+The result distinguishes connecting, connected, reconnecting and failure; the
+action cannot succeed before the Socket Mode WebSocket opens. Grants and binding
+commit together. Settings activation also commits its pending fence and enabled
+state in the same attached transaction. An interrupted activation remains fenced
+until the owner keeps it disabled and reviews the connection; unfinished requests
+are not replayed.
+See [Slack setup](usage.md#slack-plugin).
+
+
 ### Native process API
+
+Agent native-process and host-file calls fail closed unless the experimental
+Linux boundary is explicitly configured and passes its checks. This path and
+the separate Docker scratch backend remain unverified on Linux. Resource APIs
+remain available to paired owners for existing records.
+
+
+The isolated launcher receives a fixed minimal environment, and the guard closes
+extra descriptors before accepting a command. The older retained host supervisor
+only filters selected environment variables and is not an isolation boundary.
 
 Paired clients can list `GET /api/processes`, inspect `GET /api/processes/ID`,
 read `GET /api/processes/ID/output?cursor=N`, and request termination with
@@ -572,8 +742,8 @@ Paired clients use `GET /api/plugins` to inspect bundled definitions, Slack
 configuration without tokens, connection state, agent access, recent event
 outcomes, and recent task delivery states (`pending`, `sending`, `sent`, or
 `uncertain`). `sent` records Slack acceptance, not a human read. `POST /api/plugins/slack/connect` accepts `appToken`, `botToken`,
-`teamId`, `userId`, `channelId`, and `botId`; it validates the bot token against
-the workspace. `POST /api/plugins/slack/access` takes `botId` and `enabled`.
+`teamId`, `userId`, `channelId`, `botId`, and `confirm: true`; it validates the bot token against
+the workspace. Both tokens must satisfy the managed-secret limit of 16,000 characters; tokens that fail this limit or the format check are rejected before changing the connection. `POST /api/plugins/slack/access` takes `botId` and `enabled`.
 The `enable`, `disable`, `disconnect`, and `delete-config` endpoints take empty
 objects. Connections are instance-owned and keyed by service account identity;
 this slice exposes one Slack account. Tokens remain host-local and are never
@@ -581,8 +751,23 @@ returned. Slack-originated model turns can use the service-owned `start_slack_ta
 and `manage_slack_task` capabilities; thread and owner message identity are
 captured by the service, not supplied as tool arguments. See [Slack setup](usage.md#slack-plugin) for limits and recovery.
 
+Before reconnecting Gmail or Slack, `GET /api/secret-setup-review?integration=gmail`
+or `?integration=slack` returns a version and the existing approvals that setup
+would replace. If a prior grant state exists, the connection request must include
+the reviewed `reviewedVersion`. If an approval exists, it also requires
+`confirmDisplacements: true`. Setup rechecks the reviewed state before committing
+the connection. An older backup restores the grant state recorded in that backup.
+Persistent reconnects require both databases to support rollback journals and
+full synchronous writes. A definite transaction failure preserves the prior
+connection and grant versions; an uncertain result requires restart and review.
+`GET /api/plugins` exposes `reconnectUncertain` and, for Slack,
+`setupRecoveryPending`. After a guided setup is interrupted, the paired owner
+can call `POST /api/plugins/slack/recover-setup` with `confirm: true` to keep
+Slack disabled and clear the recovery fence before reviewing the configuration
+and approvals. This operation does not enable or replay the setup.
+
 Gmail uses `POST /api/plugins/gmail/start` with `email`, `clientId`,
-`clientSecret`, and optional booleans `sendEnabled` and `modifyEnabled`; it
+`clientSecret`, `confirm: true`, and optional booleans `sendEnabled` and `modifyEnabled`; it
 returns an authorization URL, not a credential. Both options default to false
 and request their respective Google scopes when true. Google
 returns to the loopback `/gmail/oauth/callback` with the one-time state and code.
@@ -615,8 +800,8 @@ agent access IDs, model access, task and Slack model access, `sendEnabled`,
 it never returns the client secret or refresh token. Older candidates are paged
 through `GET /api/plugins/gmail/arrivals?before=CURSOR` using `nextBefore`.
 There is one Gmail account in this implementation. The shared database keys
-connections and access by plugin and account. The local credential file is
-separate from SQLite. `gmail_search` and `gmail_read` are journaled read actions
+connections and access by plugin and account. Plugin secrets and approvals use a
+separate SQLite store. `gmail_search` and `gmail_read` are journaled read actions
 for explicitly permitted chat and task work in all three tool modes. A paired
 `POST /api/tasks` may include `gmailQuery`, a nonempty query of at most 500
 characters. The captured account, revision and exact query scope the attempt;

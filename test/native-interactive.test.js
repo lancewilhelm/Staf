@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { startInstance } from './fixtures/controlled-instance.mjs';
+import {startControlledInstance as startInstance} from './fixtures/controlled-instance.mjs';
 
 const tool=(name,args)=>({role:'assistant',content:null,tool_calls:[{id:'interactive',type:'function',function:{name,arguments:JSON.stringify(args)}}]});
 
@@ -87,7 +87,7 @@ test('archive stops retained resources using their live ownership',async()=>{con
 
 test('combined schema 35 upgrades retained-process metadata with a protected backup',async()=>{
  const {Instance}=await import('../dist/instance.js'),{DatabaseSync}=await import('node:sqlite'),{mkdtempSync,rmSync}=await import('node:fs'),{tmpdir}=await import('node:os'),{join}=await import('node:path');const directory=mkdtempSync(join(tmpdir(),'staf-interaction-upgrade-')),path=join(directory,'db');let instance;
- try{instance=new Instance(path);instance.close();instance=undefined;let db=new DatabaseSync(path);for(const name of ['retained','input_closed','input_bytes','cols','rows'])db.exec('ALTER TABLE native_processes DROP COLUMN '+name);db.exec('PRAGMA user_version=35');db.close();instance=new Instance(path);assert.ok(instance.migrationBackup);db=new DatabaseSync(instance.migrationBackup,{readOnly:true});assert.equal(db.prepare('PRAGMA user_version').get().user_version,35);assert.equal(db.prepare("SELECT count(*) AS n FROM pragma_table_info('native_processes') WHERE name='retained'").get().n,0);db.close();instance.close();instance=undefined;db=new DatabaseSync(path,{readOnly:true});assert.equal(db.prepare('PRAGMA user_version').get().user_version,52);assert.equal(db.prepare("SELECT count(*) AS n FROM pragma_table_info('native_processes') WHERE name IN ('retained','input_closed','input_bytes','cols','rows')").get().n,5);db.close();}
+ try{instance=new Instance(path);instance.close();instance=undefined;let db=new DatabaseSync(path);for(const name of ['retained','input_closed','input_bytes','cols','rows'])db.exec('ALTER TABLE native_processes DROP COLUMN '+name);db.exec('PRAGMA user_version=35');db.close();instance=new Instance(path);assert.ok(instance.migrationBackup);db=new DatabaseSync(instance.migrationBackup,{readOnly:true});assert.equal(db.prepare('PRAGMA user_version').get().user_version,35);assert.equal(db.prepare("SELECT count(*) AS n FROM pragma_table_info('native_processes') WHERE name='retained'").get().n,0);db.close();instance.close();instance=undefined;db=new DatabaseSync(path,{readOnly:true});assert.equal(db.prepare('PRAGMA user_version').get().user_version,62);assert.equal(db.prepare("SELECT count(*) AS n FROM pragma_table_info('native_processes') WHERE name IN ('retained','input_closed','input_bytes','cols','rows')").get().n,5);db.close();}
  finally{instance?.close();rmSync(directory,{recursive:true,force:true});}
 });
 

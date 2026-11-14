@@ -29,7 +29,26 @@ test('package excludes synthetic developer settings/auth/env and fresh extracted
  assert.equal(worker.status,0,worker.stdout+worker.stderr);
  assert.ok(listing.stdout.includes('package/dist/native-processes.js'));
  assert.ok(listing.stdout.includes('package/deploy/native-linux/lan-gateway.mjs'));
- const native=spawnSync(process.execPath,['--input-type=module','-e',`import {startInstance} from './dist/instance-service.js'; const app=startInstance(':memory:',0,{env:{},providerFactory:async()=>({name:'fixture',capabilities:{toolCalls:true},async complete(messages){return messages.at(-1).role==='tool'?{role:'assistant',content:'done'}:{role:'assistant',content:null,tool_calls:[{id:'run',type:'function',function:{name:'terminal_run',arguments:JSON.stringify({command:'test -t 0 && printf package-fixture',mode:'pty',retain:true})}}]};}})});const port=await app.listen();let token;async function call(path,body){const r=await fetch('http://127.0.0.1:'+port+path,{method:body?'POST':'GET',headers:{...(token?{Authorization:'Bearer '+token}:{}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});if(!r.ok)throw Error(await r.text());return r.json();}try{token=(await call('/api/pair',{code:app.code})).token;const bot=await call('/api/bots',{name:'package',provider:'live',model:'fixture-offline',toolMode:'direct'});await call('/api/commands',{id:'package',botId:bot.id,content:'Run fixture'});let process;for(let i=0;i<500;i++){process=(await call('/api/processes'))[0];if(process?.outputComplete)break;await new Promise(resolve=>setTimeout(resolve,10));}if(!process?.outputComplete)throw Error('process not complete');const page=await call('/api/processes/'+process.id+'/output');if(!page.chunks.some(chunk=>chunk.text==='package-fixture'))throw Error('output missing');}finally{await app.close();}`],{cwd:join(fresh,'package'),encoding:'utf8'});
+ // A fresh installation has no established host boundary. Exercise the
+ // packaged service and verify that it refuses the command before dispatch.
+ const native=spawnSync(process.execPath,['--input-type=module','-e',`
+  import {startInstance} from './dist/instance-service.js';
+  let toolResult='';
+  const app=startInstance(':memory:',0,{env:{},providerFactory:async()=>({name:'fixture',capabilities:{toolCalls:true},async complete(messages){
+   if(messages.at(-1).role==='tool'){toolResult=messages.at(-1).content;return {role:'assistant',content:'done'};}
+   return {role:'assistant',content:null,tool_calls:[{id:'run',type:'function',function:{name:'terminal_run',arguments:JSON.stringify({command:'printf package-fixture',mode:'pty',retain:true})}}]};
+  }})});
+  const port=await app.listen();let token;
+  async function call(path,body){const r=await fetch('http://127.0.0.1:'+port+path,{method:body?'POST':'GET',headers:{...(token?{Authorization:'Bearer '+token}:{}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});if(!r.ok)throw Error(await r.text());return r.json();}
+  try {
+   token=(await call('/api/pair',{code:app.code})).token;
+   const bot=await call('/api/bots',{name:'package',provider:'live',model:'fixture-offline',toolMode:'direct'});
+   await call('/api/commands',{id:'package',botId:bot.id,content:'Run fixture'});
+   let command;for(let i=0;i<500;i++){command=await call('/api/commands/package');if(command.state!=='pending')break;await new Promise(resolve=>setTimeout(resolve,10));}
+   if(command?.state!=='completed'||!/isolation is not established/.test(toolResult))throw Error('expected isolation refusal');
+   if((await call('/api/processes')).length!==0)throw Error('process was dispatched');
+  } finally {await app.close();}
+ `],{cwd:join(fresh,'package'),encoding:'utf8'});
  assert.equal(native.status,0,native.stdout+native.stderr);
  const data=join(root,'fresh-data');
  const shown=spawnSync(process.execPath,[join(fresh,'package','dist','cli.js'),'settings','defaults','--data-dir',data],{cwd:fresh,encoding:'utf8'});

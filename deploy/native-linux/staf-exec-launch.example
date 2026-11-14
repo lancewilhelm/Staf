@@ -1,0 +1,27 @@
+#!/bin/sh
+# EXAMPLE ONLY: do not install until the service boundary and Linux tests exist.
+# This file and every component of its installation path must be root-owned and
+# not writable by the service or execution account. It takes no arguments.
+set -eu
+[ "$#" -eq 0 ] || exit 125
+uid=$(/usr/bin/id -u)
+gid=$(/usr/bin/id -g)
+[ "$uid" -ne 0 ] && [ "$uid" -ne 65534 ] || exit 125
+[ "$gid" -ne 0 ] && [ "$gid" -ne 65534 ] || exit 125
+[ "$uid" = "$(/usr/bin/id -u staf-exec)" ] || exit 125
+[ "$gid" = "$(/usr/bin/id -g staf-exec)" ] || exit 125
+[ "$uid" != "$(/usr/bin/id -u staf-service)" ] || exit 125
+for service_group in $(/usr/bin/id -G staf-service); do
+  [ "$gid" != "$service_group" ] || exit 125
+done
+# Check before entering the user namespace, where unmapped groups can all look
+# like the same overflow group. The account must have no supplementary groups.
+[ "$(/usr/bin/id -G)" = "$gid" ] || exit 125
+exec /usr/bin/bwrap \
+  --unshare-user --disable-userns --unshare-pid --unshare-ipc --unshare-net --unshare-uts \
+  --new-session --die-with-parent --cap-drop ALL --uid 65534 --gid 65534 \
+  --clearenv --setenv PATH /usr/bin:/bin --setenv HOME /workspace --setenv TERM xterm-256color \
+  --ro-bind /usr /usr --symlink usr/bin /bin --symlink usr/lib /lib \
+  --symlink usr/lib64 /lib64 --proc /proc --dev /dev --tmpfs /tmp \
+  --bind /srv/staf-workspace /workspace --chdir /workspace \
+  -- /usr/lib/staf-exec/staf-exec-guard

@@ -26,6 +26,13 @@ test('tool round trip emits activity, persists and resumes provider context', as
   assert.match((await store.load(session.id)).messages.at(-1).content, /User turns saved: 2/);
 });
 
+test('legacy task tool output is filtered before model traffic and activity',async t=>{
+  const {store,session}=await fixture(t),secret='synthetic-task-result-secret',seen=[],events=[];
+  const provider={name:'fixture',capabilities:{toolCalls:true},complete:async messages=>{seen.push(JSON.stringify(messages));return messages.at(-1).role==='tool'?{role:'assistant',content:'done'}:{role:'assistant',content:null,tool_calls:[{id:'discover',type:'function',function:{name:'discover_bots',arguments:'{"query":"test"}'}}]};}};
+  await runTurn({store,session,provider,text:'Find help',redact:text=>text.replaceAll(secret,'[REDACTED]'),emit:event=>events.push(event),task:{drain:()=>[],hasPending:()=>false,finish:()=>true,clarify:async()=>'',discover:()=>`ordinary ${secret}`}});
+  assert.equal(JSON.stringify(seen).includes(secret),false);assert.equal(JSON.stringify(events).includes(secret),false);assert.match(JSON.stringify(seen),/ordinary \[REDACTED\]/);
+});
+
 test('provider failure and tool limit roll back persisted and in-memory turns', async t => {
   const { store, session } = await fixture(t);
   for (const provider of [

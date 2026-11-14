@@ -1,9 +1,16 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {startInstance} from './fixtures/controlled-instance.mjs';
+import {startControlledInstance as startInstance} from './fixtures/controlled-instance.mjs';
+import {ShellSandboxRejectedError} from '../dist/shell-sandbox.js';
 const image='sha256:'+'a'.repeat(64);
 const setup=async options=>{const app=startInstance(':memory:',0,options),port=await app.listen();const call=async(route,token,body)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return [response.status,await response.json()];};const wait=async fn=>{for(let i=0;i<200;i++){const result=await fn();if(result)return result;await new Promise(resolve=>setTimeout(resolve,5));}throw Error('timed out');};return {app,call,wait};};
 const configure=async(call,token,botId)=>{const config=(await call('/api/shell-config',token))[1];await call('/api/shell-config',token,{revision:config.revision,dockerBinary:'/usr/bin/docker',dockerSocket:'/tmp/synthetic-docker.sock',imageId:image});await call('/api/shell-permissions/instance',token,{enabled:true});await call(`/api/shell-permissions/bot:${botId}`,token,{enabled:true});};
+
+test('confirmed pre-start rejection releases scratch reservation',async()=>{
+ let calls=0;const shellExecutor=async()=>{throw new ShellSandboxRejectedError('Synthetic rejection');};
+ const providerFactory=async()=>({name:'fixture',capabilities:{toolCalls:true},async complete(){if(calls++===0)return {role:'assistant',content:null,tool_calls:[{id:'shell',type:'function',function:{name:'run_scratch_shell',arguments:JSON.stringify({command:'printf safe'})}}]};return {role:'assistant',content:'Done'};}});
+ const {app,call,wait}=await setup({env:{},providerFactory,shellExecutor});try{const token=(await call('/api/pair','',{code:app.code}))[1].token,bot=(await call('/api/bots',token,{provider:'live',model:'fixture-offline',name:'Owner'}))[1];await configure(call,token,bot.id);await call('/api/commands',token,{id:'rejected',botId:bot.id,content:'Run'});const pending=await wait(async()=>((await call('/api/shell-approvals',token))[1])[0]);await call(`/api/shell-approvals/${pending.id}/approve`,token,{});const result=await wait(async()=>{const value=(await call('/api/commands/rejected',token))[1];return value.state==='completed'?value:null;});assert.equal(result.shellActions[0].state,'failed');assert.deepEqual((await call('/api/shell-uncertain',token))[1],[]);const config=(await call('/api/shell-config',token))[1];assert.equal((await call('/api/shell-config',token,{...config,dockerSocket:'/tmp/changed.sock'}))[0],200);}finally{await app.close();}
+});
 
 test('scratch command requires exact approval and cannot receive a host workspace',async()=>{
  let calls=0,seen=[],toolText='';const secret='synthetic-known-secret';const shellExecutor=async request=>{seen.push(request);return {output:`hello ${secret}`,exitCode:0,outputComplete:true,stopped:'completed'};};

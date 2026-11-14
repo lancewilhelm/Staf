@@ -8,13 +8,14 @@ import SubmissionStatus from './SubmissionStatus.vue';
 import ChatComposer from './ChatComposer.vue';
 import BrandMark from './BrandMark.vue';
 import TaskConversation from './TaskConversation.vue';
+import QuestionSet from './QuestionSet.vue';
 import { nextChatMessage, type ChatEvent, type ChatWork, type ConversationTask, type Message, type ResponseProgress } from '../controller';
 const emit = defineEmits<{create: []; providers: []; settings: [id: string]}>();
 const { state: s } = useWorkspace();
 const selected = computed(() => s.value.bots.find(agent => agent.id === s.value.selected));
 const relevant = computed(() => s.value.inbox.filter(item => item.botId === s.value.selected));
 const submission = computed(() => s.value.draft.submission);
-const unmatched = computed(() => s.value.work.filter(work => submission.value?.id !== work.id && !s.value.messages.some(message => message.id === 'command-user-' + work.id) && (work.events.length || relevant.value.some(item => item.kind === 'approval' && item.work.kind === 'command' && item.work.id === work.id))));
+const unmatched = computed(() => s.value.work.filter(work => submission.value?.id !== work.id && !s.value.messages.some(message => message.id === 'command-user-' + work.id) && (work.events.length || relevant.value.some(item => item.kind !== 'question' && item.work.kind === 'command' && item.work.id === work.id))));
 type Row = {kind:'task';key:string;task:ConversationTask} | {kind:'user';key:string;text:string;commandId:string|null} | {kind:'response';key:string;commandId:string|null;message:Message|null;work:ChatWork|undefined;progress:ResponseProgress|null;optimistic:boolean};
 type ResponseRow=Extract<Row,{kind:'response'}>;
 function responseWork(row:ResponseRow):ChatWork|undefined {
@@ -92,6 +93,7 @@ function scroll(event: Event) {
                 <div class="who"><AgentImage :image="selected.image" :name="selected.name" />{{ selected.name }}{{ part.live && (row.message?.role === 'assistant_stopped' || row.progress?.state === 'stopped') ? ' · stopped' : '' }}<span v-if="part.live && ((!row.progress && row.optimistic) || (row.progress && ['accepted','running','stopping'].includes(row.progress.state)))" class="working-indicator" role="status" aria-label="Response in progress" /></div>
                 <ResponseText v-if="part.text" :text="part.text" />
               </div>
+              <QuestionSet v-for="request in s.questionSets.filter(item => item.workKind === 'command' && item.workId === row.commandId)" :key="request.id" :request="request" />
               <div v-if="row.progress && ['failed','interrupted'].includes(row.progress.state)" class="meta">Response {{ row.progress.state }}. {{ row.progress.error }}</div>
             </template>
           </div>

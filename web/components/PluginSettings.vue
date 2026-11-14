@@ -7,17 +7,18 @@ import GmailSettings from './GmailSettings.vue';
 
 const {app,state}=useWorkspace();
 type Plugin=Awaited<ReturnType<typeof app.plugins>>[number];
-const plugins=ref<Plugin[]>([]),busy=ref(false),status=ref(''),confirm=ref<'disconnect'|'delete-config'|null>(null);
+const plugins=ref<Plugin[]>([]),busy=ref(false),status=ref(''),confirm=ref<'disconnect'|'delete-config'|'recover-setup'|null>(null);
+const setupReview=ref<Awaited<ReturnType<typeof app.secretSetupReview>>|null>(null);
 const form=ref({appToken:'',botToken:'',teamId:'',userId:'',channelId:'',botId:''});
-async function refresh(){plugins.value=await app.plugins();const config=plugins.value.find(plugin=>plugin.id==='slack')?.config;if(config)form.value={...form.value,...config};}
+async function refresh(){[plugins.value,setupReview.value]=await Promise.all([app.plugins(),app.secretSetupReview('slack')]);const config=plugins.value.find(plugin=>plugin.id==='slack')?.config;if(config)form.value={...form.value,...config};}
 onMounted(()=>{void refresh().catch(()=>{status.value='Could not load plugins.';});});
-async function action(name:'connect'|'enable'|'disable'|'disconnect'|'delete-config'|'access',body:object={}) {
+async function action(name:'connect'|'enable'|'disable'|'disconnect'|'delete-config'|'access'|'recover-setup',body:object={}) {
  if(busy.value)return;busy.value=true;status.value='';
  try {await app.pluginAction(name,body);if(name==='connect'){form.value.appToken='';form.value.botToken='';}await refresh();status.value='Plugin settings updated.';}
  catch(error){status.value='Could not update plugin. Check its current status before retrying. '+String(error);}
  finally{busy.value=false;confirm.value=null;}
 }
-function connect(){void action('connect',{...form.value});}
+function connect(){if(!setupReview.value)return;void action('connect',{...form.value,confirm:true,reviewedVersion:setupReview.value.version,confirmDisplacements:setupReview.value.grants.length>0});}
 </script>
 <template>
  <section class="settings-section" aria-label="Plugins">
@@ -27,9 +28,13 @@ function connect(){void action('connect',{...form.value});}
    <div class="provider-title"><h3>{{ plugin.name }}</h3><span class="badge">{{ plugin.enabled ? plugin.status : plugin.connected ? 'Disabled' : 'Not connected' }}</span></div>
    <p>{{ plugin.description }}</p>
    <p v-if="plugin.config">Workspace {{ plugin.config.teamId }} · User {{ plugin.config.userId }} · DM {{ plugin.config.channelId }}</p>
+   <p v-if="plugin.setupRecoveryPending" role="alert">Slack setup was interrupted. Keep Slack disabled and review the saved connection and approvals before enabling it.</p>
+   <p v-else-if="plugin.reconnectUncertain" role="alert">The connection outcome is uncertain. Restart Staf, then review the connection before continuing.</p>
+   <button v-if="plugin.setupRecoveryPending" class="quiet" :disabled="busy" @click="confirm='recover-setup'">Keep disabled and review</button>
+   <p v-else-if="plugin.connected && !plugin.credentialsAvailable">Credentials or use approvals are unavailable. Reconnect Slack or approve the missing uses in Named secrets.</p>
    <p v-if="plugin.connected">Agent access: {{ plugin.agentAccess ? 'Allowed' : 'Not allowed' }}</p>
    <details class="saved-settings"><DisclosureSummary>{{ plugin.config ? 'Change connection' : 'Set up Slack' }}</DisclosureSummary>
-    <p>Use a Slack app with Socket Mode and a bot token. Enter the IDs of the one workspace, user, and direct message you approve. <a href="https://docs.slack.dev/apis/events-api/using-socket-mode/" target="_blank" rel="noreferrer">Slack Socket Mode setup</a>.</p>
+    <p>Use a Slack app with Socket Mode and a bot token with <code>im:write</code>. Staf verifies that the direct message belongs to the approved user before delivery. <a href="https://docs.slack.dev/apis/events-api/using-socket-mode/" target="_blank" rel="noreferrer">Slack Socket Mode setup</a>.</p>
     <form @submit.prevent="connect">
      <label>App-level token<input v-model="form.appToken" type="password" autocomplete="off" required /></label>
      <label>Bot user token<input v-model="form.botToken" type="password" autocomplete="off" required /></label>
@@ -37,11 +42,14 @@ function connect(){void action('connect',{...form.value});}
      <label>Approved user ID<input v-model.trim="form.userId" required /></label>
      <label>Direct message channel ID<input v-model.trim="form.channelId" required /></label>
      <label>Agent<select v-model="form.botId" required><option value="" disabled>Choose an agent</option><option v-for="bot in state.bots.filter(item=>!item.archived)" :key="bot.id" :value="bot.id">{{ bot.name }}</option></select></label>
-     <button :disabled="busy">Connect</button>
+     <p>Connecting approves these tokens for https://slack.com/api and the selected workspace, user, and DM. Socket Mode connects to a Slack-provided address at wss://slack.com or a slack.com subdomain. Agent access is a separate decision.</p>
+     <p v-if="setupReview?.grants.length">Connecting replaces these existing approvals: {{ setupReview.grants.map(grant=>grant.name+' ('+grant.integration+')').join(', ') }}.</p>
+     <button :disabled="busy || !setupReview || plugin.reconnectUncertain">{{ setupReview?.grants.length?'Connect and replace approvals':'Connect and approve' }}</button>
     </form>
    </details>
    <div v-if="plugin.connected && plugin.config" class="row">
     <button class="quiet" :disabled="busy" @click="action('access',{botId:plugin.config.botId,enabled:!plugin.agentAccess})">{{ plugin.agentAccess ? 'Revoke agent access' : 'Allow agent access' }}</button>
+    <button v-if="plugin.enabled && plugin.status!=='connected'" :disabled="busy" @click="action('enable')">Retry connection</button>
     <button :disabled="busy" @click="action(plugin.enabled ? 'disable' : 'enable')">{{ plugin.enabled ? 'Disable' : 'Enable' }}</button>
     <button class="quiet" :disabled="busy" @click="confirm='disconnect'">Disconnect</button>
    </div>
@@ -52,6 +60,6 @@ function connect(){void action('connect',{...form.value});}
   </div>
   <GmailSettings />
   <p role="status">{{ busy ? 'Updating plugin…' : status }}</p>
-  <ConfirmAction v-if="confirm" :title="confirm === 'disconnect' ? 'Disconnect Slack?' : 'Delete Slack configuration?'" :message="confirm === 'disconnect' ? 'This stops Slack and removes its saved tokens. The binding and history remain.' : 'This stops Slack, removes its tokens and saved binding. Message history remains.'" :action="confirm === 'disconnect' ? 'Disconnect' : 'Delete configuration'" @cancel="confirm=null" @confirm="action(confirm)" />
+  <ConfirmAction v-if="confirm" :title="confirm === 'recover-setup' ? 'Keep Slack disabled?' : confirm === 'disconnect' ? 'Disconnect Slack?' : 'Delete Slack configuration?'" :message="confirm === 'recover-setup' ? 'Slack will stay disabled while you review the saved connection and approvals.' : confirm === 'disconnect' ? 'This stops Slack and revokes use of its saved tokens. The tokens, binding, and history remain.' : 'This stops Slack and revokes use of its saved tokens and removes the binding. Tokens and message history remain.'" :action="confirm === 'recover-setup' ? 'Keep disabled' : confirm === 'disconnect' ? 'Disconnect' : 'Delete configuration'" @cancel="confirm=null" @confirm="action(confirm,confirm === 'recover-setup' ? {confirm:true} : {})" />
  </section>
 </template>

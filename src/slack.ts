@@ -10,12 +10,13 @@ export class SlackRateLimited extends Error {
 }
 export interface SlackTransport {
  identify(tokens:SlackTokens):Promise<{teamId:string;botUserId:string}>;
- start(tokens:SlackTokens,receive:(event:SlackEvent)=>Promise<void>,status?:(status:'connected'|'reconnecting')=>void,interact?:(interaction:SlackInteraction)=>Promise<void>):Promise<()=>void>;
+ verifyDestination(tokens:SlackTokens,config:{userId:string}):Promise<{channelId:string}>;
+ start(tokens:SlackTokens,receive:(event:SlackEvent)=>Promise<void>,status?:(status:'connected'|'reconnecting')=>void,interact?:(interaction:SlackInteraction)=>Promise<void>,assertAuthority?:()=>void,signal?:AbortSignal):Promise<()=>void>;
  post(tokens:SlackTokens,message:{channel:string;threadTs?:string;text:string;buttons?:SlackButton[]}):Promise<void|{messageTs:string}>;
 }
-const apiResult=z.object({ok:z.boolean(),team_id:z.string().optional(),user_id:z.string().optional(),url:z.string().optional(),ts:z.string().optional()});
+const apiResult=z.object({ok:z.boolean(),team_id:z.string().optional(),user_id:z.string().optional(),url:z.string().optional(),ts:z.string().optional(),channel:z.object({id:z.string().min(1)}).optional()});
 async function api(method:string,token:string,body:object) {
- const response=await fetch('https://slack.com/api/'+method,{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(body),signal:AbortSignal.timeout(15000)});
+ const response=await fetch('https://slack.com/api/'+method,{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(body),redirect:'error',signal:AbortSignal.timeout(15000)});
  if(response.status===429) {const raw=response.headers.get('retry-after'),seconds=raw && /^\d+(?:\.\d+)?$/.test(raw.trim())?Number(raw):NaN,ms=Math.ceil(seconds*1000);throw new SlackRateLimited(Number.isSafeInteger(ms) && ms>=0?ms:null);}
  if(!response.ok)throw Error('Slack request failed');
  const result=apiResult.parse(await response.json());if(!result.ok)throw Error('Slack rejected the request');return result;
@@ -25,14 +26,24 @@ const eventPayload=z.object({event_id:z.string(),team_id:z.string(),event:z.obje
 const interactionPayload=z.object({type:z.literal('block_actions'),team:z.object({id:z.string().min(1).max(200)}),user:z.object({id:z.string().min(1).max(200)}),channel:z.object({id:z.string().min(1).max(200)}),container:z.object({message_ts:z.string().min(1).max(200),channel_id:z.string().min(1).max(200)}),actions:z.tuple([z.object({type:z.literal('button'),action_id:z.string().min(1).max(255),value:z.string().min(1).max(2000)})])});
 export const slackTransport:SlackTransport={
  async identify(tokens){const result=await api('auth.test',tokens.botToken,{});if(!result.team_id || !result.user_id)throw Error('Slack identity unavailable');return {teamId:result.team_id,botUserId:result.user_id};},
- async start(tokens,receive,status,interact){
+ async verifyDestination(tokens,config){const result=await api('conversations.open',tokens.botToken,{users:config.userId,prevent_creation:true});if(!result.channel?.id)throw Error('Slack DM unavailable');return {channelId:result.channel.id};},
+ async start(tokens,receive,status,interact,assertAuthority=()=>{},signal){
   let stopped=false,socket:WebSocket|undefined,timer:ReturnType<typeof setTimeout>|undefined;
+  const stop=()=>{stopped=true;if(timer)clearTimeout(timer);socket?.close();};
+  const abort=()=>stop();signal?.addEventListener('abort',abort,{once:true});
   async function connect() {
-   const result=await api('apps.connections.open',tokens.appToken,{});if(!result.url)throw Error('Slack socket URL unavailable');
-   const url=new URL(result.url);if(url.protocol!=='wss:' || !(url.hostname==='slack.com' || url.hostname.endsWith('.slack.com')))throw Error('Invalid Slack socket URL');
-   if(stopped)return;
-   socket=new WebSocket(url);const current=socket;
-   current.addEventListener('open',()=>{if(!stopped)status?.('connected');});
+   assertAuthority();const result=await api('apps.connections.open',tokens.appToken,{});assertAuthority();if(!result.url)throw Error('Slack socket URL unavailable');
+   const url=new URL(result.url);if(url.protocol!=='wss:' || url.port!=='' || url.username || url.password || !(url.hostname==='slack.com' || url.hostname.endsWith('.slack.com')))throw Error('Invalid Slack socket URL');
+   if(stopped)throw Error('Slack connection stopped');
+   socket=new WebSocket(url);const current=socket;let socketOpened=false;
+   const opened=new Promise<void>((resolve,reject)=>{
+    const timeout=setTimeout(()=>finish(false),15000);
+    const cancelled=()=>finish(false);
+    const finish=(ok:boolean)=>{clearTimeout(timeout);signal?.removeEventListener('abort',cancelled);current.removeEventListener('open',onOpen);current.removeEventListener('close',onClose);if(ok)resolve();else reject(Error('Slack socket did not open'));};
+    const onOpen=()=>{try{if(stopped)throw Error('stopped');assertAuthority();finish(true);}catch{finish(false);}};
+    const onClose=()=>finish(false);
+    signal?.addEventListener('abort',cancelled,{once:true});current.addEventListener('open',onOpen);current.addEventListener('close',onClose);if(signal?.aborted)cancelled();
+   });
    current.addEventListener('message',message=>{
     let value:unknown;try{value=JSON.parse(String(message.data));}catch{return;}
     const parsed=envelope.safeParse(value);if(!parsed.success)return;
@@ -48,12 +59,13 @@ export const slackTransport:SlackTransport={
       } else if(current.readyState===WebSocket.OPEN)current.send(JSON.stringify({envelope_id:item.envelope_id}));
     } else if(item.envelope_id && current.readyState===WebSocket.OPEN)current.send(JSON.stringify({envelope_id:item.envelope_id}));
    });
-   current.addEventListener('close',()=>{if(!stopped)status?.('reconnecting');if(!stopped)timer=setTimeout(()=>{void connect().catch(retry);},3000);});
+   current.addEventListener('close',()=>{if(!stopped && socketOpened){status?.('reconnecting');timer=setTimeout(()=>{void connect().catch(retry);},3000);}});
    current.addEventListener('error',()=>current.close());
+   await opened;if(stopped || current.readyState!==WebSocket.OPEN)throw Error('Slack connection stopped');socketOpened=true;status?.('connected');
   }
   function retry(){if(!stopped)timer=setTimeout(()=>{void connect().catch(retry);},3000);}
-  try {await connect();} catch {if(!stopped){status?.('reconnecting');retry();}}
-  return ()=>{stopped=true;if(timer)clearTimeout(timer);socket?.close();};
+  try {await connect();}catch(error){stop();signal?.removeEventListener('abort',abort);throw error;}
+  return ()=>{stop();signal?.removeEventListener('abort',abort);};
  },
  async post(tokens,message){
   const buttons=z.array(z.strictObject({text:z.string().min(1).max(75),actionId:z.string().min(1).max(255),value:z.string().min(1).max(2000)})).min(1).max(5).optional().parse(message.buttons);

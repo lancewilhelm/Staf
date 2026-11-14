@@ -26,6 +26,7 @@ export function contextStatus(session: Session, settings: EffectiveSettings, pen
   const excludedReasoningItems=input.length-visibleInput.length;
   const payload=provider==='codex' ? JSON.stringify({instructions:chatSystemMessage.content,input:visibleInput,tools:tools.map(tool=>({type:'function',...tool.function}))})
     : JSON.stringify({messages:[chatSystemMessage,...messages.map(message=>{
+      if(message.role==='user'){const {stafMessageId:_,...visible}=message;return visible;}
       if(message.role!=='assistant')return message;
       const {usage,responseReplay,...visible}=message;
       return visible;

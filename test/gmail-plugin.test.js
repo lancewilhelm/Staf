@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync,rmSync,statSync} from 'node:fs';
+import {mkdtempSync,rmSync,statSync,readFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createHash} from 'node:crypto';
@@ -20,14 +20,16 @@ test('paired owner connects Gmail with PKCE, manages agent access, and retains s
   const token=(await call('/api/pair','',{code:app.code}))[1].token;
   const bot=(await call('/api/bots',token,{name:'Gmail agent',provider:'live',model:'fixture'}))[1];
   let gmail=(await call('/api/plugins',token))[1].find(x=>x.id==='gmail');assert.equal(gmail.connected,false);
-  const [status,attempt]=await call('/api/plugins/gmail/start',token,{email:'owner@example.test',clientId:'synthetic.apps.googleusercontent.com',clientSecret:'synthetic-secret'});assert.equal(status,200);
+  const [status,attempt]=await call('/api/plugins/gmail/start',token,{confirm:true,email:'owner@example.test',clientId:'synthetic.apps.googleusercontent.com',clientSecret:'synthetic-secret'});assert.equal(status,200);
   const authorization=new URL(attempt.url);assert.equal(authorization.origin,'https://accounts.google.com');assert.equal(authorization.searchParams.get('code_challenge_method'),'S256');
   const redirect=new URL(authorization.searchParams.get('redirect_uri'));redirect.searchParams.set('state',authorization.searchParams.get('state'));redirect.searchParams.set('code','synthetic-code');
   assert.equal((await fetch(redirect)).status,200);
   const exchange=new URLSearchParams(requests[0].options.body);assert.equal(createHash('sha256').update(exchange.get('code_verifier')).digest('base64url'),authorization.searchParams.get('code_challenge'));assert.equal(exchange.get('client_secret'),'synthetic-secret');
-  assert.equal(statSync(join(dir,'auth','gmail.json')).mode & 0o777,0o600);
+  assert.equal(statSync(join(dir,'secrets','credentials.sqlite')).mode & 0o777,0o600);
+  assert.equal((await call('/api/secret-grants',token))[1].filter(item=>item.integration.startsWith('gmail.')).length,2);
   gmail=(await call('/api/plugins',token))[1].find(x=>x.id==='gmail');assert.equal(gmail.connected,true);assert.equal(gmail.enabled,false);assert.equal(gmail.accountId,'owner@example.test');assert.deepEqual(gmail.agentAccessIds,[]);
   assert.doesNotMatch(JSON.stringify(gmail),/synthetic-secret|synthetic-refresh|synthetic-access/);
+  assert.ok(!readFileSync(path).includes(Buffer.from('synthetic-secret')));assert.ok(!readFileSync(path).includes(Buffer.from('synthetic-refresh')));
   assert.equal((await call('/api/plugins/gmail/access',token,{botId:bot.id,enabled:true}))[0],200);
   rejectRefresh=true;assert.equal((await call('/api/plugins/gmail/enable',token,{}))[0],400);gmail=(await call('/api/plugins',token))[1].find(x=>x.id==='gmail');assert.equal(gmail.enabled,false);assert.equal(gmail.status,'Connection check failed');rejectRefresh=false;
   assert.equal((await call('/api/plugins/gmail/enable',token,{}))[0],200);
@@ -48,7 +50,7 @@ test('invalid OAuth state and a different Gmail account cannot connect',async()=
  const call=async(route,token,body)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body===undefined?'GET':'POST',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body===undefined?{}:{'Content-Type':'application/json'})},...(body===undefined?{}:{body:JSON.stringify(body)})});return [response.status,await response.json()];};
  try {
   const token=(await call('/api/pair','',{code:app.code}))[1].token;
-  const attempt=(await call('/api/plugins/gmail/start',token,{email:'owner@example.test',clientId:'synthetic.apps.googleusercontent.com',clientSecret:'secret'}))[1];
+  const attempt=(await call('/api/plugins/gmail/start',token,{confirm:true,email:'owner@example.test',clientId:'synthetic.apps.googleusercontent.com',clientSecret:'secret'}))[1];
   const u=new URL(attempt.url),callback=new URL(u.searchParams.get('redirect_uri'));callback.searchParams.set('state','wrong');callback.searchParams.set('code','code');assert.equal((await fetch(callback)).status,400);assert.equal(requests.length,0);
   callback.searchParams.set('state',u.searchParams.get('state'));assert.equal((await fetch(callback)).status,400);
   const gmail=(await call('/api/plugins',token))[1].find(x=>x.id==='gmail');assert.equal(gmail.connected,false);
@@ -63,7 +65,7 @@ test('disconnect while token exchange is pending fences the callback and profile
  const call=async(route,token,body)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body===undefined?'GET':'POST',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body===undefined?{}:{'Content-Type':'application/json'})},...(body===undefined?{}:{body:JSON.stringify(body)})});return [response.status,await response.json()];};
  try {
   const token=(await call('/api/pair','',{code:app.code}))[1].token;
-  const attempt=(await call('/api/plugins/gmail/start',token,{email:'owner@example.test',clientId:'synthetic.apps.googleusercontent.com',clientSecret:'secret'}))[1],u=new URL(attempt.url),callback=new URL(u.searchParams.get('redirect_uri'));
+  const attempt=(await call('/api/plugins/gmail/start',token,{confirm:true,email:'owner@example.test',clientId:'synthetic.apps.googleusercontent.com',clientSecret:'secret'}))[1],u=new URL(attempt.url),callback=new URL(u.searchParams.get('redirect_uri'));
   callback.searchParams.set('state',u.searchParams.get('state'));callback.searchParams.set('code','code');const pending=fetch(callback);await waiting;
   assert.equal((await call('/api/plugins/gmail/disconnect',token,{}))[0],200);release();assert.equal((await pending).status,400);assert.equal(profileCalls,0);
   assert.equal((await call('/api/plugins',token))[1].find(x=>x.id==='gmail').connected,false);

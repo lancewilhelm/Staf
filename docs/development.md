@@ -118,6 +118,9 @@ Staf writes a backup under the development data directory before reset and befor
 a supported schema upgrade. It includes SQLite, authoritative agent files, and the
 complete core revision tree,
 but not provider credentials. Protect the backup like the original conversations.
+Named secrets and their use approvals in `secrets/credentials.sqlite` are also outside these development
+snapshots and stay in the current data directory during reset or restore. Back up
+the stopped data directory separately when those values must be recoverable.
 If startup reports interrupted maintenance, stop all instances and run:
 
 ```sh
@@ -320,26 +323,14 @@ For an offline basic-tool review, use the controlled fixture agent and repeat th
 1. Send `Scripted clock fixture`. Expect the time and an action record. Hybrid
    and Code Mode also expose source, result and linked action IDs under
    **Code execution**.
-2. Send `Basic tools fixture direct`, then `Revise basic tools fixture direct`
-   (replace `direct` with the selected mode). The first request creates
-   `work/basic-acceptance.txt` containing `before` and an agent memory. The
-   second reads, edits and searches the file, updates the memory and forgets it.
-   Expect the file to contain `after` and no `browser acceptance` memory to remain.
-3. Send `Interactive process fixture`. Open its **Process** detail after the
-   response finishes. Expect a retained PTY and `interactive ready`. Send a line;
-   **Refresh output** shows `answer:` followed by that line. Change Columns/Rows
-   and select **Resize terminal**. Select **Stop process** before its 30-second
-   fixture sleep ends; expect an observed exit.
-4. Open a private window or another browser at the same address. Enter `pair`
-   in the fixture terminal for a new code, then pair this client and inspect
-   or stop the same process. For CLI controls, use the
-   [process reference](reference.md#native-process-api) with that instance and a separate paired
-   credential file. Both clients should show the same process ID and outcome.
+2. Send `Interactive process fixture`. With default settings, expect host
+   isolation to be unavailable and no process to start. An explicitly selected
+   Linux boundary is available for disposable verification but remains
+   unverified; see [credential isolation](credential-isolation.md).
 
-These prompts execute actual local commands and modify only this fixture's
-agent work files and memory. They exercise controlled responses; they are not
-prompts for a live provider. General project management and automatic
-self-improvement remain outside this feature.
+These prompts use controlled responses, not a live provider. The previous
+file, retained PTY and cross-client process walkthroughs require the missing
+host-work boundary and cannot currently be used as acceptance checks.
 
 To finish a held response normally, enter `stream-next` twice in the fixture
 terminal. Stop the fixture with Ctrl+C when finished.
@@ -398,6 +389,66 @@ behavior they control. Prefer normal development commands and existing setup
 over temporary directories or test-specific IDs in the user's manual steps.
 Separate checks already run from steps the user can perform. Report skips and
 distinguish synthetic coverage from live provider, VM, or Docker acceptance.
+
+For a disposable offline secret-request UI check, build and run
+`node test/fixtures/secret-request-ui.mjs`. It prints a local address and pairing
+code, uses a synthetic model, and removes its temporary dataset when stopped.
+Create an agent using provider `live` and model `fixture-offline`, then send a
+message to trigger a request. Use synthetic values only. This specialized
+fixture can also receive `try terminal` to demonstrate the current fail-closed
+host-terminal result. It does not exercise a Linux isolation boundary or a live
+provider.
+
+For a disposable guided Slack check, run `corepack pnpm run build` and then
+`node test/fixtures/slack-setup-ui.mjs`. Open its printed address and pair using
+the printed code. Create an agent with provider `live` and model `fixture-offline`,
+then send any message. Save `xapp-synthetic-app` and `xoxb-synthetic-bot` in the
+two protected requests, review the `T123` / `U123` / `D123` destination and agent,
+and approve. The synthetic transport reports connected in Slack settings. Stop
+the fixture with Ctrl-C to remove its disposable data. This check does not use a
+live model or Slack account and does not demonstrate Linux isolation.
+For a disposable guided Gmail check, build and run
+`node test/fixtures/gmail-guided-ui.mjs`. It prints a local address, pairing code,
+and synthetic values. Create an agent with provider `live` and model
+`fixture-offline`, then ask it to set up Gmail. After confirming the preview, open
+the synthetic loopback callback printed in the terminal, not the Google link.
+Refresh the setup status and submit the set. This uses synthetic Google and model
+responses; it does not establish live Google or Linux isolation behavior.
+
+## Review guided setup and protected requests
+
+On the integration branch, stop any other launcher using the same data and port,
+then run `corepack pnpm dev`. Use the existing paired browser at
+`http://127.0.0.1:3210/` and an agent with a connected, tool-capable model.
+In chat, ask the agent to help set up an unconnected Gmail or Slack plugin.
+For a fresh setup, follow the prerequisites in the [Gmail](usage.md#gmail-plugin)
+or [Slack](usage.md#slack-plugin) guide; choosing a real account and provider
+is optional and can send data to those services. Enter credentials only in the
+protected Staf controls. Expect a masked field and an explicit save, then review
+the named secrets, account or workspace, user, DM, and destinations before
+confirming use. Gmail also requires completing Google's authorization. A saved
+secret alone is not a connection; check the observed result in the request and
+plugin settings. Agent and model permissions remain separate.
+
+Ask for a set containing choices and a written answer. Navigate forward and
+back, leave one unanswered, and submit; expect the chosen answers and a skipped
+state in the continuation. For a background task, expect its question indicator
+in Staf. Restart while a task is waiting: its draft should remain, but the
+interrupted task must not resume automatically. Inspect any prior external effect
+before starting a new attempt. In **Settings → Named secrets**, review a saved
+name and its approvals; replacing or deleting it requires confirmation and
+revokes its use approvals. Do not replace or delete credentials needed by an
+existing connection just to exercise the controls.
+
+For controlled offline coverage, run `node test/browser/guided-slack-smoke.mjs`,
+`node test/browser/guided-gmail-smoke.mjs`,
+`node test/browser/gmail-authorization-history-smoke.mjs`, and
+`node test/browser/background-questions-smoke.mjs` after the build. These use
+disposable local data and synthetic providers. They do not establish live
+account behavior or Linux process isolation. The full instance backup and
+restore procedure, including restored secret approvals, is in the
+[native installation guide](native-linux-installation.md#back-up-before-updating).
+
 For docs-only changes, report the relevant documentation checks instead of
 requiring an application launch.
 
@@ -519,11 +570,30 @@ contexts, a real service restart, and blocked external networking. It proves
 cropping, saved identity, and supported UI interactions without a live provider.
 The broader workspace and memory browser journeys remain relevant regressions.
 
-The native process fixture uses disposable paired instances, a controlled
-provider and real host commands. Run `node --test test/native-process.test.js test/native-process-lifecycle.test.js`
-after building. In the controlled chat fixture above, send `Native process fixture`;
-open its process detail to see `native browser output`, then select **Stop process**
-and expect the process to reach an observed exited state. This is a controlled provider with a real host command; it does not establish live-provider behavior.
+Service and protocol tests that need file or process actions explicitly inject
+`startControlledInstance` from `test/fixtures/controlled-instance.mjs`. It runs
+the tests' trusted synthetic commands and temporary-file operations locally,
+with a restricted child environment, through the real Staf action and process
+lifecycle. This fixture is not an operating-system isolation boundary and is
+not selectable by service configuration, environment, HTTP, or the UI. Separate
+tests exercise the production default and require it to reject host work when
+isolation is unavailable. The opt-in Linux tests are the only tests here that
+attempt to exercise the experimental kernel boundary.
+
+### Linux credential isolation handoff
+
+The experimental Linux host boundary is unverified. For this test branch, an
+administrator can run the controlled synthetic suite only on a separately
+prepared disposable Linux host. Follow the exact account, workspace, build and
+command prerequisites in [required Linux verification](credential-isolation.md#required-linux-verification).
+Expect every opt-in Linux case to pass with no skips, including ordinary task
+work and rejected credential and privilege attempts; a skip or failure does not
+establish isolation. The delegated-helper permission tests also run on other
+platforms, but do not establish a Linux process boundary. These tests use no
+live accounts or paid services. They have not been run on Linux in this change,
+so #117 and #122 remain incomplete. Normal persistent development remains the
+starting point for other manual checks; do not enable this boundary for real
+secrets before it is verified.
 
 ### Task action verification
 
@@ -533,9 +603,11 @@ For a manual CLI check, start the controlled fixture as described in [Review cha
 
 ### Interactive terminal verification
 
-After one build, run `node --test test/native-interactive.test.js` for the paired real pipe/PTY, retained-work, EOF/resize, cross-client/CLI, Stop, privacy and input-recovery checks. Reuse these disposable fixtures for focused development; run the required check/full suite at completed integration and the combined GUI/CLI journey at final feature acceptance. No extra test environment or live provider is needed. The distribution test packs Staf, installs production dependencies, and executes a real PTY command using the installed native binding. Linux runtime is separate from macOS arm64 evidence.
-
-For a manual offline check, use the existing controlled instance above, create a Hybrid fixture agent and send `Interactive process fixture`. Its process should remain running after the response. Open process details, set a size and select Resize terminal, type `hello` and select Send line, then refresh output. Expect `answer:hello` in the terminal stream. Select Stop process and expect an observed exit. The same resource is inspectable and controllable from the paired CLI.
+`test/native-interactive.test.js` exercises pipe/PTY, retained-work,
+EOF/resize, cross-client/CLI, Stop, privacy and input-recovery behavior using
+the injected fixture. The distribution and isolation tests verify that a fresh
+service rejects host execution when its boundary is unavailable. Linux kernel
+isolation and launcher behavior require separate controlled Linux tests.
 
 ## Creation defaults and legacy Demo data
 

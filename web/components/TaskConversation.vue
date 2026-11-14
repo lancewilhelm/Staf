@@ -3,11 +3,16 @@ import { computed } from 'vue';
 import type { ConversationTask, InboxItem } from '../controller';
 import { useWorkspace } from '../workspace';
 import ApprovalItem from './ApprovalItem.vue';
+import SecretRequest from './SecretRequest.vue';
+import SlackSetupApproval from './SlackSetupApproval.vue';
 import DisclosureSummary from './DisclosureSummary.vue';
 import ResponseText from './ResponseText.vue';
+import QuestionSet from './QuestionSet.vue';
+import SlackOutcomeReview from './SlackOutcomeReview.vue';
 const props=defineProps<{task:ConversationTask;inbox:InboxItem[]}>();
-const {app}=useWorkspace();
+const {app,state}=useWorkspace();
 const relevant=computed(()=>props.inbox.filter(item=>item.kind==='question'?item.attemptId===props.task.id:item.work.kind==='task' && item.work.id===props.task.id));
+const questions=computed(()=>state.value.questionSets.filter(item=>item.workKind==='task' && item.workId===props.task.id));
 const observations=computed(()=>props.task.activity.filter(event=>event.type==='assistant_observed' && !!event.text));
 </script>
 <template>
@@ -19,7 +24,11 @@ const observations=computed(()=>props.task.activity.filter(event=>event.type==='
     <template v-if="task.state==='completed' && task.outcome"><ResponseText :text="task.outcome" /></template>
     <p v-else-if="task.outcome" class="meta">{{ task.outcome }}</p>
     <div v-for="event in observations" :key="event.seq"><p class="meta">Observed output{{ event.late ? ' after Stop' : ' (not a completed result)' }}</p><ResponseText :text="event.text ?? ''" /></div>
-    <ApprovalItem v-for="item in relevant" :key="item.id" :item="item" />
+    <template v-for="item in relevant" :key="item.id"><SecretRequest v-if="item.kind==='secret'" :item="item" /><SlackSetupApproval v-else-if="item.kind==='slack-setup'" :item="item" /><ApprovalItem v-else :item="item" /></template>
+    <p v-if="questions.some(q=>q.state==='open')" role="status">This task has questions in Staf.</p>
+    <QuestionSet v-for="request in questions" :key="request.id" :request="request" />
+    <div v-if="['failed','stopped','interrupted'].includes(task.state) && questions.length && questions.every(q=>q.state!=='open')"><p v-if="task.retryBlocked">This Gmail task cannot be retried safely. Start fresh authorized Gmail work without copying private questions or answers into chat.</p><template v-else><p>Review the prior work and any uncertain effects before starting a new attempt. Scheduled work requires its occurrence to be reviewed first.</p><button class="quiet" type="button" @click="app.retryTask(task,questions)">Start a new attempt</button></template></div>
+    <SlackOutcomeReview v-if="task.slackOutcomeReview" :task-id="task.id" :review="task.slackOutcomeReview" />
     <details v-if="task.activity.length"><DisclosureSummary>Task activity</DisclosureSummary>
       <div v-for="event in task.activity" :key="event.seq" class="task-event"><strong>{{ event.type }}</strong><pre v-if="event.message || event.content">{{ event.message || event.content }}</pre></div>
     </details>

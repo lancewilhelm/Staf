@@ -260,3 +260,9 @@ test('real credential commit honors revocation, cancellation and the committing 
   if(action==='commit')assert.equal((await loadDirectCredential(root)).subject,'subject');else await assert.rejects(loadDirectCredential(root));
  }
 });
+
+test('direct provider refreshes dispatch messages after awaiting its access token',async()=>{
+ let release,started;const gate=new Promise(resolve=>release=resolve),entered=new Promise(resolve=>started=resolve);let status='credentials_available',payload;
+ const p=directCodexProvider({model,sessionId:'refresh-test',dataDir:'/unused',token:async()=>{started();await gate;return 'synthetic-token';},request:async(_url,options)=>{payload=JSON.parse(options.body);return sse([completed([message('done')])]);}});
+ const result=p.complete([{role:'user',content:'stale'}],[],{refreshMessages:()=>[{role:'user',content:status}]});await entered;status='credentials_unavailable';release();await result;assert.equal(payload.input[0].content[0].text,'credentials_unavailable');assert.ok(!JSON.stringify(payload).includes('synthetic-token'));
+});

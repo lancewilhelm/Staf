@@ -7,6 +7,7 @@ import type { Json } from './code-mode/json.js';
 import type { ToolMode } from './tool-mode.js';
 import type { ToolDefinition } from './types.js';
 import {z} from 'zod';
+import {assertEncodedResult} from './encoded-results.js';
 
 export const workActionsSchema = `
 CREATE TABLE IF NOT EXISTS work_action_state (kind TEXT NOT NULL, work_id TEXT NOT NULL, used INTEGER NOT NULL DEFAULT 0, closed TEXT, epoch INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(kind,work_id));
@@ -43,7 +44,12 @@ export type Capability<I,O> = {
   restoreJournalInput?(input:Json,work:WorkContext,action:ActionIdentity):unknown;
   maxResultBytes?:number;
   releaseResult?(output:O,work:WorkContext):void;
-  recovery?: {overlaps?(previous:I,next:I,work:WorkContext):boolean; reconcile?(input:I,evidence:unknown,work:WorkContext,action:ActionIdentity):boolean};
+  validateInput?(input:I,work:WorkContext):void;
+  /** Parse recorded input without applying today’s admission policy. */
+  parseHistoricalInput?(input:unknown):I;
+  sameAction?(previous:I,next:I,work:WorkContext):boolean;
+  sameEffect?(previous:I,next:I,work:WorkContext):boolean;
+  recovery?: {overlaps?(previous:I,next:I,work:WorkContext):boolean; reconcile?(input:I,evidence:unknown,work:WorkContext,action:ActionIdentity):boolean|Promise<boolean>};
 };
 export class ActionDenied extends Error {}
 export class ActionDeferred extends Error {}
@@ -74,8 +80,11 @@ type ErasedCapability = {
   parse(input:unknown):Json;describe(input:Json,work:WorkContext):Description;
   check(input:Json,work:WorkContext,action?:ActionIdentity):void;authorize(input:Json,work:WorkContext,action:ActionIdentity):Promise<void|AuthorityClaim>;
   execute(input:Json,work:WorkContext,action:ActionIdentity):Promise<Json>;visible(output:Json):string;releaseResult?(output:Json,work:WorkContext):void;
+  validateInput?: (input:Json,work:WorkContext)=>void;
+  sameAction?: (previous:Json,next:Json,work:WorkContext)=>boolean;
+  sameEffect?: (previous:Json,next:Json,work:WorkContext)=>boolean;
   overlaps?: (previous:Json,next:Json,work:WorkContext)=>boolean;
-  reconcile?: (input:Json,evidence:unknown,work:WorkContext,action:ActionIdentity)=>boolean;
+  reconcile?: (input:Json,evidence:unknown,work:WorkContext,action:ActionIdentity)=>boolean|Promise<boolean>;
   journalInput?: (input:Json,work:WorkContext,digest:(value:string)=>string)=>Json;
   restoreJournalInput?: (input:Json,work:WorkContext,action:ActionIdentity)=>Json;
 };
@@ -83,6 +92,9 @@ type ErasedCapability = {
 /** One instance owns this coordinator and its registry. Callers cannot choose action IDs. */
 export class WorkActionService {
   private readonly capabilities=new Map<string,ErasedCapability>();
+  private secretGeneration:()=>number=()=>0;
+  private secretValues:()=>readonly string[]=()=>[];
+  setSecretGeneration(get:()=>number,values:()=>readonly string[]=()=>[]):void {this.secretGeneration=get;this.secretValues=values;}
   private readonly queues=new Map<string,Promise<void>>();
   private readonly queueDepth=new Map<string,number>();
   private readonly journal:ActionJournal;
@@ -95,18 +107,27 @@ export class WorkActionService {
   setPrivateWork(check:(work:WorkContext)=>boolean,disclosure:(work:WorkContext)=>void):void {this.privateWork=check;this.privateDisclosure=disclosure;}
   isPrivate(context:WorkContext):boolean {return this.privateWork(context);}
   assertPrivateDisclosure(context:WorkContext):void {if(this.privateWork(context))this.privateDisclosure(context);}
+  private privateCapabilityAllowed(context:WorkContext,name:string) {return ['gmail_search','gmail_read','gmail_reply','gmail_modify'].includes(name) || (context.work.kind==='task' && (name==='ask_questions' || name==='ask_owner'));}
   private readonly closures=new Map<string,{controller:AbortController;refs:number}>();
   private readonly completedHopParents=new Set<string>();
-  private readonly readReceipts=new Map<string,{work:string;value:Json}>();
+  private readonly readReceipts=new Map<string,{work:string;value:Json;generation:number;encoded:boolean}>();
+  private readonly encodedResultGenerations=new Map<string,number>();
+  private safeResult(value:Json):Json {
+    if(typeof value==='string')return this.inputRedactor(value);
+    if(Array.isArray(value))return value.map(item=>this.safeResult(item));
+    if(value && typeof value==='object')return Object.fromEntries(Object.entries(value).map(([key,item])=>[this.inputRedactor(key),this.safeResult(item)]));
+    return value;
+  }
   constructor(private readonly db:DatabaseSync, private readonly key:Uint8Array,
     private readonly context:(work:WorkRef,signal:AbortSignal)=>WorkContext,
-    private readonly active:(work:WorkRef)=>void, private readonly budget=32, private readonly deferred:(work:WorkRef)=>boolean=()=>false,private readonly inputRedactor:(value:string)=>string=value=>value) {
+    private readonly active:(work:WorkRef)=>void, private readonly budget=32, private readonly deferred:(work:WorkRef)=>boolean=()=>false,private readonly inputRedactor:(value:string)=>string=value=>value,private readonly precedingCommands:(work:WorkRef)=>string[]=()=>[]) {
     this.journal=new ActionJournal(db);
     this.db.exec("UPDATE work_action_invocations SET private_result=NULL WHERE private_result IS NOT NULL AND CASE WHEN json_valid(description) THEN json_extract(description,'$.effect')='read' ELSE 0 END");
   }
   register<I,O>(capability:Capability<I,O>):void {
     if (!capability.name || capability.name==='code_mode' || this.capabilities.has(capability.name) || capability.definition.function.name!==capability.name) throw Error('Invalid or duplicate capability');
     const parse=(input:unknown)=>capability.parseInput(input);
+    const historical=(input:unknown)=>capability.parseHistoricalInput ? capability.parseHistoricalInput(input) : parse(input);
     this.capabilities.set(capability.name,{
       name:capability.name,internal:capability.internal===true,directOnly:capability.directOnly===true,definition:structuredClone(capability.definition),eligible:work=>this.availability(capability.name) && capability.eligible(work),maxResultBytes:capability.maxResultBytes ?? 256*1024,
       parse:input=>jsonValue.parse(parse(input)),
@@ -118,6 +139,9 @@ export class WorkActionService {
       ...(capability.journalInput ? {journalInput:(input:Json,work:WorkContext,digest:(value:string)=>string)=>jsonValue.parse(capability.journalInput!(parse(input),work,digest))} : {}),
       ...(capability.restoreJournalInput ? {restoreJournalInput:(input:Json,work:WorkContext,action:ActionIdentity)=>jsonValue.parse(parse(capability.restoreJournalInput!(input,work,action)))} : {}),
       ...(capability.releaseResult ? {releaseResult:(output:Json,work:WorkContext)=>{try{capability.releaseResult!(capability.parseResult(output),work);}catch(error){if(!(error instanceof ActionDeferred))this.close(work,'authority');throw error;}}} : {}),
+      ...(capability.validateInput ? {validateInput:(input:Json,work:WorkContext)=>capability.validateInput!(parse(input),work)} : {}),
+      ...(capability.sameEffect ? {sameEffect:(a:Json,b:Json,work:WorkContext)=>{let previous:I;try{previous=historical(a);}catch(error){if(!capability.parseHistoricalInput)throw error;return true;}return capability.sameEffect!(previous,parse(b),work);}} : {}),
+      ...(capability.sameAction ? {sameAction:(a:Json,b:Json,work:WorkContext)=>{let previous:I;try{previous=historical(a);}catch(error){if(!capability.parseHistoricalInput)throw error;return false;}return capability.sameAction!(previous,parse(b),work);}} : {}),
       ...(capability.recovery?.overlaps ? {overlaps:(a:Json,b:Json,work:WorkContext)=>capability.recovery!.overlaps!(parse(a),parse(b),work)} : {}),
       ...(capability.recovery?.reconcile ? {reconcile:(input:Json,evidence:unknown,work:WorkContext,action:ActionIdentity)=>capability.recovery!.reconcile!(parse(input),evidence,work,action)} : {}),
     });
@@ -132,11 +156,11 @@ export class WorkActionService {
   }
   offers(context:WorkContext,route:'direct'|'guest'):ToolDefinition[] {
     if ((route==='direct' && context.mode==='code') || (route==='guest' && context.mode==='direct')) return [];
-    return [...this.capabilities.values()].filter(cap=>!cap.internal && !(route==='guest' && cap.directOnly) && (!this.privateWork(context) || ['gmail_search','gmail_read','gmail_reply','gmail_modify'].includes(cap.name)) && cap.eligible(context)).map(cap=>structuredClone(cap.definition));
+    return [...this.capabilities.values()].filter(cap=>!cap.internal && !(route==='guest' && cap.directOnly) && (!this.privateWork(context) || this.privateCapabilityAllowed(context,cap.name)) && cap.eligible(context)).map(cap=>structuredClone(cap.definition));
   }
   recognizes(name:string):boolean {const cap=this.capabilities.get(name);return !!cap && !cap.internal;}
   private digest(value:string):string {return createHmac('sha256',this.key).update(value).digest('hex');}
-  private state(work:WorkRef) {const recovery=work.kind==='task' && !!this.db.prepare('SELECT 1 FROM task_attempts WHERE id=? AND predecessor IS NOT NULL').get(work.id);this.db.prepare('INSERT OR IGNORE INTO work_action_state(kind,work_id,epoch) VALUES (?,?,?)').run(work.kind,work.id,recovery?1:0);return this.db.prepare('SELECT used,closed,epoch FROM work_action_state WHERE kind=? AND work_id=?').get(work.kind,work.id)!;}
+  private state(work:WorkRef) {const recovery=(work.kind==='task' && !!this.db.prepare('SELECT 1 FROM task_attempts WHERE id=? AND predecessor IS NOT NULL').get(work.id)) || this.precedingCommands(work).length>0;this.db.prepare('INSERT OR IGNORE INTO work_action_state(kind,work_id,epoch) VALUES (?,?,?)').run(work.kind,work.id,recovery?1:0);return this.db.prepare('SELECT used,closed,epoch FROM work_action_state WHERE kind=? AND work_id=?').get(work.kind,work.id)!;}
   private admit(context:WorkContext, allowPending=false):void {
     const state=this.state(context.work);if (typeof state.closed==='string') throw Error(`Action admission closed: ${state.closed}`);
     try {context.signal.throwIfAborted();this.active(context.work);this.workCheck(context.work);} catch(error) {this.close(context,context.signal.aborted?'stopped':'authority');throw error;}
@@ -148,20 +172,27 @@ export class WorkActionService {
     const records=rows.map(row=>{const action=this.journal.get(String(row.action_id));if (!action) throw Error('Missing journal action');return {action,capability:String(row.capability),input:jsonValue.parse(JSON.parse(String(row.input))),description:actionDescription.parse(JSON.parse(String(row.description)))};});
     const unknown=this.db.prepare(`WITH RECURSIVE lineage(id) AS (SELECT ? UNION ALL SELECT predecessor FROM task_attempts JOIN lineage ON task_attempts.id=lineage.id WHERE predecessor IS NOT NULL) SELECT a.id FROM action_journal a WHERE a.state IN ('started','uncertain') AND ((?='command' AND a.command_id=?) OR (?='task' AND a.task_attempt_id IN lineage)) AND NOT EXISTS (SELECT 1 FROM work_action_invocations i WHERE i.action_id=a.id)`).all(context.work.id,context.work.kind,context.work.id,context.work.kind);
     for(const row of unknown) {const action=this.journal.get(String(row.id));if(action)records.push({action,capability:'',input:null,description:{summary:action.summary,resource:'unknown',effect:'change',opaque:true}});}
+    for(const priorId of this.precedingCommands(context.work)) {
+      const prior=this.db.prepare("SELECT action_id,capability,input,description FROM work_action_invocations WHERE kind='command' AND work_id=? GROUP BY action_id ORDER BY MIN(rowid)").all(priorId);
+      for(const row of prior) {const action=this.journal.get(String(row.action_id));if(!action)throw Error('Missing prior action');if(!records.some(record=>record.action.id===action.id))records.push({action,capability:String(row.capability),input:jsonValue.parse(JSON.parse(String(row.input))),description:actionDescription.parse(JSON.parse(String(row.description)))});}
+      const unknown=this.db.prepare("SELECT id FROM action_journal a WHERE command_id=? AND state IN ('started','uncertain') AND NOT EXISTS (SELECT 1 FROM work_action_invocations i WHERE i.action_id=a.id)").all(priorId);
+      for(const row of unknown){const action=this.journal.get(String(row.id));if(action && !records.some(record=>record.action.id===action.id))records.push({action,capability:'',input:null,description:{summary:action.summary,resource:'unknown',effect:'change',opaque:true}});}
+    }
     return records;
   }
   private resolved(id:string):boolean {return !!this.db.prepare('SELECT 1 FROM work_action_resolutions WHERE action_id=?').get(id);}
   private accounted(action:ActionRecord):boolean {return action.state==='succeeded' || (action.state==='uncertain' && this.resolved(action.id));}
   manifest(context:WorkContext):RecoveryManifest {const records=this.records(context).map(item=>item.action);return {actions:records.slice(-32),resolutions:records.filter(action=>this.resolved(action.id)).map(action=>action.id),truncated:records.length>32,instructions:'Resume a completed action by ID. Read receipts expire when work ends. A paired owner can reconcile supported changes with service evidence. A matching completed or resolved change still requires a repeat challenge.'};}
   private retainedResult(id:string):Json|undefined {
-    const read=this.readReceipts.get(id);if(read)return structuredClone(read.value);
-    const saved=this.db.prepare('SELECT private_result FROM work_action_invocations WHERE action_id=? AND private_result IS NOT NULL LIMIT 1').get(id);
-    return typeof saved?.private_result==='string'?jsonValue.parse(JSON.parse(saved.private_result)):undefined;
+    const read=this.readReceipts.get(id);if(read){if(read.encoded && read.generation!==this.secretGeneration())throw Error('Known secrets changed after encoded output was produced');assertEncodedResult(read.value,this.inputRedactor);return structuredClone(read.value);}
+    const saved=this.db.prepare('SELECT capability,private_result FROM work_action_invocations WHERE action_id=? AND private_result IS NOT NULL LIMIT 1').get(id);
+    if(saved?.capability==='run_scratch_shell' && this.encodedResultGenerations.get(id)!==this.secretGeneration())return undefined;
+    if(typeof saved?.private_result!=='string')return undefined;const value=jsonValue.parse(JSON.parse(saved.private_result));if(saved.capability==='run_scratch_shell')assertEncodedResult(value,this.inputRedactor,true,this.secretValues());return value;
   }
   beginRecovery(context:WorkContext):RecoveryManifest {
     this.admit(context,true);this.db.prepare('UPDATE work_action_state SET epoch=epoch+1 WHERE kind=? AND work_id=?').run(context.work.kind,context.work.id);return this.manifest(context);
   }
-  reconcile(context:WorkContext,actionId:string,evidence:unknown):void {
+  async reconcile(context:WorkContext,actionId:string,evidence:unknown):Promise<void> {
     this.admit(context);const record=this.records(context).find(item=>item.action.id===actionId && (item.action.state==='uncertain' || (item.action.state==='succeeded' && item.description.effect==='change' && item.description.opaque)));
     const cap=record && this.capabilities.get(record.capability);
     if(!record || !cap?.reconcile)throw Error('Feature reconciliation did not establish the outcome');
@@ -170,7 +201,7 @@ export class WorkActionService {
     const restored=cap.restoreJournalInput && !legacy ? cap.restoreJournalInput(record.input,context,identity) : record.input;
     if(cap.journalInput && !legacy && encoded(cap.journalInput(restored,context,value=>this.digest(value)))!==encoded(record.input))throw Error('Feature reconciliation did not establish the outcome');
     cap.check(restored,context,identity);
-    if(!cap.reconcile(restored,evidence,context,identity))throw Error('Feature reconciliation did not establish the outcome');
+    if(!await cap.reconcile(restored,evidence,context,identity))throw Error('Feature reconciliation did not establish the outcome');
     this.admit(context);cap.check(restored,context,identity);
     this.db.exec('BEGIN IMMEDIATE');
     try {const added=this.db.prepare('INSERT OR IGNORE INTO work_action_resolutions VALUES (?)').run(actionId);if(added.changes)this.db.prepare('UPDATE work_action_state SET epoch=epoch+1 WHERE kind=? AND work_id=?').run(context.work.kind,context.work.id);this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
@@ -199,6 +230,20 @@ export class WorkActionService {
   isSkillExecution(id:string,callId:string):boolean {
     return !!this.db.prepare("SELECT 1 FROM code_executions e JOIN work_action_invocations i ON i.kind=e.kind AND i.work_id=e.work_id AND json_extract(i.source,'$.kind')='guest' AND json_extract(i.source,'$.executionId')=e.id WHERE e.id=? AND e.call_id=? AND i.capability='select_skill' LIMIT 1").get(id,callId);
   }
+  recordCodeOutput(context:WorkContext,id:string,callId:string,content:string,outputKind:'plain'|'bytes'|'scratch'):void {
+    const row=this.db.prepare('SELECT 1 FROM code_executions WHERE id=? AND kind=? AND work_id=? AND call_id=?').get(id,context.work.kind,context.work.id,callId);
+    if(!row)throw Error('Code output identity unavailable');
+    const encoded=outputKind==='bytes'?1:outputKind==='scratch'?2:0,proof=this.digest(JSON.stringify(['code-output-v1',context.botId,id,callId,encoded,content]));
+    this.db.prepare('INSERT INTO code_output_provenance (execution_id,encoded,proof) VALUES (?,?,?)').run(id,encoded,proof);
+  }
+  codeOutputProvenance(context:WorkContext,callId:string,content:string):'plain'|'bytes'|'scratch'|null {
+    let parsed:unknown;try{parsed=JSON.parse(content);}catch{return null;}
+    if(!parsed || typeof parsed!=='object' || !('executionId' in parsed) || typeof parsed.executionId!=='string')return null;
+    const id=parsed.executionId;
+    const row=(()=>{try{return this.db.prepare(`SELECT p.encoded,p.proof FROM code_executions e JOIN code_output_provenance p ON p.execution_id=e.id WHERE e.id=? AND e.call_id=? AND ((e.kind='command' AND EXISTS (SELECT 1 FROM commands c WHERE c.id=e.work_id AND c.bot_id=?)) OR (e.kind='task' AND EXISTS (SELECT 1 FROM task_attempts t WHERE t.id=e.work_id AND t.bot_id=?)))`).get(id,callId,context.botId,context.botId);}catch{return undefined;}})();
+    if(!row || (row.encoded!==0 && row.encoded!==1 && row.encoded!==2) || typeof row.proof!=='string' || row.proof!==this.digest(JSON.stringify(['code-output-v1',context.botId,id,callId,row.encoded,content])))return null;
+    return row.encoded===1?'bytes':row.encoded===2?'scratch':'plain';
+  }
   inspect(work:WorkRef) {
     const executions=this.db.prepare('SELECT id,response_id AS responseId,call_id AS callId,source,source_hash AS sourceHash,outcome,result FROM code_executions WHERE kind=? AND work_id=? ORDER BY rowid').all(work.kind,work.id);
     return executions.map(row=>({...row,result:typeof row.result==='string'?JSON.parse(row.result):null,actions:this.db.prepare("SELECT action_id AS actionId FROM work_action_invocations WHERE kind=? AND work_id=? AND json_extract(source,'$.kind')='guest' AND json_extract(source,'$.executionId')=? ORDER BY rowid").all(work.kind,work.id,String(row.id)).map(item=>item.actionId)}));
@@ -216,7 +261,7 @@ export class WorkActionService {
     const queueKey=encoded(context.work),prior=this.queues.get(queueKey)??Promise.resolve();
     const depth=this.queueDepth.get(queueKey)??0;if(depth>=8){this.close(context,'pending action limit');throw Error('Too many pending actions');}this.queueDepth.set(queueKey,depth+1);
     let release!:()=>void;const next=new Promise<void>(resolve=>{release=resolve;});this.queues.set(queueKey,next);
-    try {await prior;try{return await this.dispatch(context,snapshot);}catch(error){if(error instanceof ActionDeferred)return {kind:'blocked',reason:error.message};throw error;}} finally {release();const remaining=(this.queueDepth.get(queueKey)??1)-1;if(remaining)this.queueDepth.set(queueKey,remaining);else this.queueDepth.delete(queueKey);if(this.queues.get(queueKey)===next)this.queues.delete(queueKey);}
+    try {await prior;try{return await this.dispatch(context,snapshot);}catch(error){if(error instanceof ActionDeferred)return {kind:'blocked',reason:this.inputRedactor(error.message)};throw error;}} finally {release();const remaining=(this.queueDepth.get(queueKey)??1)-1;if(remaining)this.queueDepth.set(queueKey,remaining);else this.queueDepth.delete(queueKey);if(this.queues.get(queueKey)===next)this.queues.delete(queueKey);}
   }
   completeWebRedirect(context:WorkContext,action:ActionIdentity):void {
     const record=this.journal.get(action.id),invocation=this.db.prepare("SELECT capability FROM work_action_invocations WHERE action_id=? LIMIT 1").get(action.id);
@@ -230,7 +275,7 @@ export class WorkActionService {
   }
   private async dispatch(context:WorkContext,request:{source:InvocationSource|InternalInvocationSource;name:string;input:unknown;intent:ActionIntent}):Promise<InvocationResult> {
     this.admit(context);
-    if(this.privateWork(context) && !['gmail_search','gmail_read','gmail_reply','gmail_modify'].includes(request.name)) return {kind:'blocked',reason:'Capability unavailable after private Gmail data was read'};
+    if(this.privateWork(context) && !this.privateCapabilityAllowed(context,request.name)) return {kind:'blocked',reason:'Capability unavailable after private Gmail data was read'};
     this.assertPrivateDisclosure(context);
     const route=request.source.kind==='provider'?'direct':request.source.kind==='guest'?'guest':'internal';
     const cap=this.capabilities.get(request.name);
@@ -241,12 +286,15 @@ export class WorkActionService {
     if(this.inputRedactor(raw)!==raw)return {kind:'blocked',reason:'Tool input cannot be retained faithfully under the instance redaction rules.'};
     let input:Json;
     try {input=cap.parse(rawInput);}
-    catch(error){if(error instanceof ActionFailed)return {kind:'blocked',reason:error.safeResult.slice(0,16000)};throw error;}
+    catch(error){if(error instanceof ActionFailed)return {kind:'blocked',reason:this.inputRedactor(error.safeResult).slice(0,16000)};throw error;}
+    try {cap.validateInput?.(input,context);}
+    catch(error){if(error instanceof ActionFailed)return {kind:'blocked',reason:this.inputRedactor(error.safeResult).slice(0,16000)};throw error;}
     const canonical=encoded(input);
     if(Buffer.byteLength(canonical)>256*1024)throw Error('Parsed input exceeds the limit');
     if(this.inputRedactor(canonical)!==canonical)return {kind:'blocked',reason:'Tool input cannot be retained faithfully under the instance redaction rules.'};
     const journalInput=cap.journalInput ? encoded(cap.journalInput(input,context,value=>this.digest(value))) : canonical;
-    const matchesInput=(previous:Json)=>encoded(previous)===journalInput || (!!cap.journalInput && encoded(previous)===canonical);
+    const matchesInput=(previous:Json)=>encoded(previous)===journalInput || (!!cap.journalInput && encoded(previous)===canonical) || (!cap.journalInput && !!cap.sameAction?.(previous,input,context));
+    const matchesEffect=(previous:Json)=>matchesInput(previous) || (!cap.journalInput && !!cap.sameEffect?.(previous,input,context));
     const digest=this.digest(encoded([request.name,rawInput,request.intent]));
     const pending=this.db.prepare('SELECT digest,challenge,reason FROM work_action_requests WHERE kind=? AND work_id=? AND source=?').get(context.work.kind,context.work.id,source);
     if(pending) {
@@ -257,7 +305,7 @@ export class WorkActionService {
       const previous=this.db.prepare('SELECT epoch,prior_ids,consumed FROM work_action_challenges WHERE id=?').get(pending.challenge);
       if(typeof previous?.prior_ids!=='string') throw Error('Missing recovery challenge');
       const state=this.state(context.work);
-      const matching=this.records(context).filter(item=>this.accounted(item.action) && item.capability===request.name && matchesInput(item.input)).map(item=>item.action);
+      const matching=this.records(context).filter(item=>this.accounted(item.action) && item.capability===request.name && matchesEffect(item.input)).map(item=>item.action);
       const priorIds=JSON.stringify(matching.map(item=>item.id));
       if(previous.epoch!==state.epoch || previous.prior_ids!==priorIds || previous.consumed!==0) {
         const challenge=randomUUID();
@@ -279,6 +327,12 @@ export class WorkActionService {
     if(Number(state.used)>=this.budget) {this.close(context,'limit');return {kind:'blocked',reason:'Action limit reached'};}
     this.db.prepare('UPDATE work_action_state SET used=used+1 WHERE kind=? AND work_id=?').run(context.work.kind,context.work.id);
     const records=this.records(context);
+    const priorRecords=records.filter(item=>item.action.work.kind==='command' && context.work.kind==='command' && item.action.work.id!==context.work.id);
+    if(request.intent.kind==='resume') {const actionId=request.intent.actionId;if(priorRecords.some(item=>item.action.id===actionId))throw new ActionConflict('The originating action cannot be resumed in a question continuation');}
+    if(priorRecords.some(item=>item.capability===request.name && matchesEffect(item.input))) {
+      const reason='An action from the originating work cannot be repeated by this continuation';
+      this.db.prepare('INSERT INTO work_action_requests VALUES (?,?,?,?,NULL,?)').run(context.work.kind,context.work.id,source,digest,reason);return {kind:'blocked',reason};
+    }
     if(request.intent.kind==='resume') {
       const actionId=request.intent.actionId;
       const record=records.find(item=>item.action.id===actionId);
@@ -291,14 +345,14 @@ export class WorkActionService {
     }
     const description=actionDescription.parse(cap.describe(input,context));
     if(description.effect==='change') {
-      const uncertain=records.filter(item=>(item.action.state==='uncertain' || item.action.state==='started') && item.description.effect==='change' && !this.resolved(item.action.id));
+      const uncertain=records.filter(item=>item.capability!=='ask_questions' && item.capability!=='guide_gmail_setup' && !(item.capability==='ask_owner' && this.db.prepare('SELECT 1 FROM task_question_sets WHERE id=?').get(item.action.id)) && (item.action.state==='uncertain' || item.action.state==='started') && item.description.effect==='change' && !this.resolved(item.action.id));
       if(uncertain.some(item=>item.description.opaque || description.opaque || item.capability!==request.name || !!cap.journalInput || !cap.overlaps || cap.overlaps(item.input,input,context))) {
         const reason='Uncertain overlapping change requires reconciliation';
         this.db.prepare('INSERT INTO work_action_requests VALUES (?,?,?,?,NULL,?)').run(context.work.kind,context.work.id,source,digest,reason);return {kind:'blocked',reason};
       }
       const state=this.state(context.work);
-      const matching=Number(state.epoch)>0 ? records.filter(item=>this.accounted(item.action) && item.capability===request.name && matchesInput(item.input)).map(item=>item.action) : [];
-      const ambiguous=Number(state.epoch)>0 && records.some(item=>item.action.state==='succeeded' && item.description.effect==='change' && (item.description.opaque || description.opaque) && !(item.capability===request.name && matchesInput(item.input)) && !this.resolved(item.action.id));
+      const matching=Number(state.epoch)>0 ? records.filter(item=>this.accounted(item.action) && item.capability===request.name && matchesEffect(item.input)).map(item=>item.action) : [];
+      const ambiguous=Number(state.epoch)>0 && records.some(item=>item.capability!=='ask_questions' && item.capability!=='guide_gmail_setup' && !(item.capability==='ask_owner' && this.db.prepare('SELECT 1 FROM task_question_sets WHERE id=?').get(item.action.id)) && item.action.state==='succeeded' && item.description.effect==='change' && (item.description.opaque || description.opaque) && !(item.capability===request.name && matchesEffect(item.input)) && !this.resolved(item.action.id));
       if(ambiguous) {
         const reason='Opaque prior change requires reconciliation';
         this.db.prepare('INSERT INTO work_action_requests VALUES (?,?,?,?,NULL,?)').run(context.work.kind,context.work.id,source,digest,reason);return {kind:'blocked',reason};
@@ -325,19 +379,23 @@ export class WorkActionService {
     if(prepared.kind!=='created')throw Error('New action already exists');
     const action=Object.freeze({id:actionId,fingerprint});let claim:void|AuthorityClaim=undefined;
     try {cap.check(input,context);claim=await cap.authorize(input,context,action);this.admit(context);cap.check(input,context,action);}
-    catch(error){claim?.release();this.journal.cancel(actionId);if(error instanceof ActionRevision)return {kind:'revision-requested',direction:error.direction};if(error instanceof ActionDeferred)return {kind:'blocked',reason:error.message};const reason=context.signal.aborted?'Work stopped':error instanceof ActionDenied?'Action denied':'Action authorization failed';this.close(context,'authority');return {kind:'blocked',reason};}
+    catch(error){claim?.release();this.journal.cancel(actionId);if(error instanceof ActionRevision)return {kind:'revision-requested',direction:this.inputRedactor(error.direction)};if(error instanceof ActionDeferred)return {kind:'blocked',reason:this.inputRedactor(error.message)};const reason=context.signal.aborted?'Work stopped':error instanceof ActionDenied?'Action denied':'Action authorization failed';this.close(context,'authority');return {kind:'blocked',reason};}
     try {
     this.db.exec('BEGIN IMMEDIATE');
     try {this.admit(context);cap.check(input,context,action);claim?.start();this.journal.startInInstanceTransaction(prepared.permit,this.db,{id:actionId,fingerprint,work:context.work});this.db.exec('COMMIT');this.journal.finalizeInstanceStart(prepared.permit);}
-    catch(error){this.db.exec('ROLLBACK');this.journal.cancel(actionId);if(error instanceof ActionDeferred)return {kind:'blocked',reason:error.message};this.close(context,'authority');return {kind:'blocked',reason:context.signal.aborted?'Work stopped':'Action could not start'};}
+    catch(error){this.db.exec('ROLLBACK');this.journal.cancel(actionId);if(error instanceof ActionDeferred)return {kind:'blocked',reason:this.inputRedactor(error.message)};this.close(context,'authority');return {kind:'blocked',reason:context.signal.aborted?'Work stopped':'Action could not start'};}
     let output:Json;let visible:string;
-    try {output=await cap.execute(input,context,action);if(Buffer.byteLength(encoded(output))>cap.maxResultBytes)throw Error('Result exceeds the limit');visible=route!=='direct' && description.effect==='read'?'Read completed':cap.visible(output).slice(0,16000);} catch(error) {if(!this.completedHopParents.has(actionId))this.journal.finish(actionId,error instanceof ActionFailed || error instanceof ActionDenied?'failed':'uncertain',error instanceof ActionFailed?error.safeResult.slice(0,16000):error instanceof ActionDenied?'Action denied':'Outcome unknown');if(error instanceof ActionDenied){this.close(context,'denied');return {kind:'blocked',reason:'Action denied'};}this.admit(context,true);cap.check(input,context,action);return {kind:'status',action:this.journal.get(actionId)!};}
-    if(description.effect==='read')this.readReceipts.set(actionId,{work:encoded(context.work),value:structuredClone(output)});
-    else this.db.prepare('UPDATE work_action_invocations SET private_result=? WHERE action_id=?').run(encoded(output),actionId);
+    const outputGeneration=this.secretGeneration();
+    try {output=await cap.execute(input,context,action);if(Buffer.byteLength(encoded(output))>cap.maxResultBytes)throw Error('Result exceeds the limit');visible=route!=='direct' && description.effect==='read'?'Read completed':this.inputRedactor(cap.visible(output)).slice(0,16000);} catch(error) {if(!this.completedHopParents.has(actionId))this.journal.finish(actionId,error instanceof ActionFailed || error instanceof ActionDenied?'failed':'uncertain',error instanceof ActionFailed?this.inputRedactor(error.safeResult).slice(0,16000):error instanceof ActionDenied?'Action denied':'Outcome unknown');if(error instanceof ActionDenied){this.close(context,'denied');return {kind:'blocked',reason:'Action denied'};}this.admit(context,true);cap.check(input,context,action);return {kind:'status',action:this.journal.get(actionId)!};}
+    try {if(['file_read','terminal_read','run_scratch_shell'].includes(request.name)){if(this.secretGeneration()!==outputGeneration)throw Error('Secret state changed');assertEncodedResult(output,this.inputRedactor,request.name==='run_scratch_shell',request.name==='run_scratch_shell'?this.secretValues():[]);}} catch {if(!this.completedHopParents.has(actionId))this.journal.finish(actionId,description.effect==='read'?'failed':'uncertain','Encoded action result cannot be retained safely');return {kind:'blocked',reason:'Encoded action result cannot be retained safely'};}
+    const safeOutput=this.safeResult(output);
+    if(['file_read','terminal_read'].includes(request.name) && output && typeof output==='object' && !Array.isArray(output) && output.encoding==='base64' && (!safeOutput || typeof safeOutput!=='object' || Array.isArray(safeOutput) || safeOutput.encoding!=='base64')) {if(!this.completedHopParents.has(actionId))this.journal.finish(actionId,'failed','Encoded action result cannot be retained safely');return {kind:'blocked',reason:'Encoded action result cannot be retained safely'};}
+    if(description.effect==='read')this.readReceipts.set(actionId,{work:encoded(context.work),value:structuredClone(safeOutput),generation:this.secretGeneration(),encoded:['file_read','terminal_read'].includes(request.name)});
+    else {this.db.prepare('UPDATE work_action_invocations SET private_result=? WHERE action_id=?').run(encoded(safeOutput),actionId);if(request.name==='run_scratch_shell')this.encodedResultGenerations.set(actionId,this.secretGeneration());}
     if(!this.completedHopParents.has(actionId))this.journal.finish(actionId,'succeeded',visible);
     this.admit(context,true);cap.check(input,context,action);
     cap.releaseResult?.(output,context);
-    return {kind:'completed',actionId,value:output};
+    return {kind:'completed',actionId,value:safeOutput};
     } finally {this.completedHopParents.delete(actionId);claim?.release();}
   }
 }
@@ -351,6 +409,8 @@ export class WorkActions {
   isPrivate() {return this.service.isPrivate(this.context);}
   assertPrivateDisclosure() {this.service.assertPrivateDisclosure(this.context);}
   isSkillExecution(id:string,callId:string) {return this.service.isSkillExecution(id,callId);}
+  codeOutputProvenance(callId:string,content:string) {return this.service.codeOutputProvenance(this.context,callId,content);}
+  recordCodeOutput(id:string,callId:string,content:string,outputKind:'plain'|'bytes'|'scratch') {this.service.recordCodeOutput(this.context,id,callId,content,outputKind);}
   invoke(request:{source:InvocationSource;name:string;input:unknown;intent:ActionIntent}) {return this.service.invoke(this.context,request);}
   beginRecovery() {return this.service.beginRecovery(this.context);}
   manifest() {return this.service.manifest(this.context);}

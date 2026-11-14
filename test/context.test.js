@@ -92,3 +92,8 @@ test('recurring footer is concise; detailed measurements remain only on explicit
  const footer=contextFooter(contextStatus(session,effective()));
  assert.match(footer,/Context:/);assert.ok(!/Measured:|bytes\/4|Compaction:/.test(footer));assert.ok(!footer.includes('\x1b'));
 });
+
+
+test('context estimates exclude internal service message identity',()=>{
+ const marked={...session,messages:[{...session.messages[0],stafMessageId:'internal-service-message'},session.messages[1]]};assert.equal(contextStatus(marked,effective(),undefined,catalog).bytes,contextStatus(session,effective(),undefined,catalog).bytes);assert.equal(contextStatus(marked,effective('codex'),undefined,catalog).bytes,contextStatus(session,effective('codex'),undefined,catalog).bytes);
+});

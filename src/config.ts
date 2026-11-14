@@ -4,6 +4,14 @@ import { hasCode } from './validation.js';
 
 const allowed = new Set(['OPENROUTER_API_KEY', 'STAF_API_KEY', 'STAF_MODEL', 'STAF_BASE_URL', 'STAF_CODEX_MODEL', 'LMSTUDIO_BASE_URL', 'LMSTUDIO_MODEL', 'LMSTUDIO_API_KEY', 'OPENROUTER_REASONING_EFFORT', 'STAF_CODEX_REASONING', 'LMSTUDIO_REASONING_EFFORT', 'STAF_REASONING_EFFORT']);
 export type Environment = Record<string, string | undefined>;
+const credentialEnvironmentNames = ['OPENROUTER_API_KEY', 'STAF_API_KEY', 'OPENAI_API_KEY', 'CODEX_API_KEY', 'LMSTUDIO_API_KEY'] as const;
+
+/** Exclude supported credential variables from agent-run process environments. */
+export function agentProcessEnvironment(env: Environment): Environment {
+  const result = {...env};
+  for (const name of credentialEnvironmentNames) delete result[name];
+  return result;
+}
 
 /** Load literal project settings; never execute, expand, or replace shell values. */
 export async function loadEnvironment(path: string, shell: Environment = process.env): Promise<Environment> {
@@ -36,8 +44,8 @@ export async function loadEnvironment(path: string, shell: Environment = process
 }
 
 /** Redact known credential values before output or conversation persistence. */
-function credentialValues(env: Environment): string[] {
-  return [env.OPENROUTER_API_KEY, env.STAF_API_KEY, env.OPENAI_API_KEY, env.CODEX_API_KEY, env.LMSTUDIO_API_KEY]
+export function credentialValues(env: Environment): string[] {
+  return credentialEnvironmentNames.map(name => env[name])
     .filter((value): value is string => typeof value === 'string' && value.length > 0);
 }
 /** Keep only an unfinished suffix that could still become a complete secret. */

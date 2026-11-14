@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { startInstance } from './fixtures/controlled-instance.mjs';
+import {startInstance,startControlledInstance} from './fixtures/controlled-instance.mjs';
 
 const run=promisify(execFile);
 test('CLI creation operation is retryable across restart and shared with the service',async()=>{
@@ -162,7 +162,7 @@ test('CLI configures and approves a synthetic local search',async()=>{
 test('CLI controls scratch configuration and exact command approval without Docker',async()=>{
  const dir=mkdtempSync(join(tmpdir(),'staf-cli-shell-'));let calls=0,executions=0;
  const shellExecutor=async request=>{executions++;assert.deepEqual(request.workspace,{kind:'scratch',sizeBytes:16777216,maxInodes:1024});return {output:'synthetic output',exitCode:0,outputComplete:true,stopped:'completed'};};const providerFactory=async()=>({name:'fixture',capabilities:{toolCalls:true},async complete(){if(calls++===0)return {role:'assistant',content:null,tool_calls:[{id:'shell',type:'function',function:{name:'run_scratch_shell',arguments:JSON.stringify({command:'printf safe'})}}]};return {role:'assistant',content:'Done'};}});
- const app=startInstance(join(dir,'db'),0,{env:{},providerFactory,shellExecutor}),port=await app.listen(),url=`http://127.0.0.1:${port}`,credential=join(dir,'client.json');const cli=async(...args)=>(await run(process.execPath,['dist/cli.js','instance',...args])).stdout;
+ const app=startControlledInstance(join(dir,'db'),0,{env:{},providerFactory,shellExecutor}),port=await app.listen(),url=`http://127.0.0.1:${port}`,credential=join(dir,'client.json');const cli=async(...args)=>(await run(process.execPath,['dist/cli.js','instance',...args])).stdout;
  try{await cli('pair',url,credential,app.code);const bot=JSON.parse(await cli('create',url,credential,'Owner','--provider','live','--model','fixture-offline')),config=JSON.parse(await cli('shell-config',url,credential));assert.equal(config.dockerBinary,null);await cli('shell-config-set',url,credential,String(config.revision),'/usr/bin/docker','/tmp/synthetic.sock','sha256:'+'a'.repeat(64));await cli('shell-permission-set',url,credential,'instance','true');await cli('shell-permission-set',url,credential,`bot:${bot.id}`,'true');
   const sent=await cli('send',url,credential,bot.id,'Run'),id=sent.match(/Command ID: ([\w-]+)/)?.[1];assert.ok(id);let pending;for(let i=0;i<50;i++){pending=JSON.parse(await cli('shell-approvals',url,credential))[0];if(pending)break;}assert.ok(pending);assert.equal(pending.command,'printf safe');assert.equal(executions,0);assert.equal(JSON.parse(await cli('shell-approve',url,credential,pending.id)).decision,'approve');let status;for(let i=0;i<50;i++){status=JSON.parse(await cli('status',url,credential,id));if(status.state==='completed')break;}assert.equal(status.state,'completed');assert.equal(status.shellActions[0].state,'succeeded');assert.equal(executions,1);
  }finally{await app.close();rmSync(dir,{recursive:true,force:true});}

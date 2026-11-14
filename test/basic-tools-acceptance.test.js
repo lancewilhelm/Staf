@@ -4,7 +4,7 @@ import {mkdtempSync, readFileSync, rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {Instance} from '../dist/instance.js';
-import {startInstance} from './fixtures/controlled-instance.mjs';
+import {startControlledInstance as startInstance} from './fixtures/controlled-instance.mjs';
 
 const assistant = content => ({role:'assistant', content});
 const tools = calls => ({role:'assistant', content:null, tool_calls:calls.map(([name,input]) => ({id:name, type:'function', function:{name, arguments:JSON.stringify(input)}}))});

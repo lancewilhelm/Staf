@@ -35,6 +35,10 @@ CREATE TABLE IF NOT EXISTS slack_work (attempt_id TEXT PRIMARY KEY REFERENCES ta
 CREATE TABLE IF NOT EXISTS slack_deliveries (id TEXT PRIMARY KEY, attempt_id TEXT NOT NULL REFERENCES slack_work(attempt_id), text TEXT NOT NULL, state TEXT NOT NULL, retry_at INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS slack_notices (id TEXT PRIMARY KEY, team_id TEXT NOT NULL, user_id TEXT NOT NULL, channel_id TEXT NOT NULL, thread_ts TEXT, bot_id TEXT NOT NULL, text TEXT NOT NULL, state TEXT NOT NULL, retry_at INTEGER NOT NULL DEFAULT 0);
 CREATE INDEX IF NOT EXISTS slack_deliveries_pending ON slack_deliveries(state,retry_at);`;
+export const slackOutcomeReviewSchema=`CREATE TABLE IF NOT EXISTS slack_outcome_reviews (
+ id TEXT PRIMARY KEY REFERENCES slack_deliveries(id), attempt_id TEXT NOT NULL REFERENCES slack_work(attempt_id),
+ slack_revision INTEGER NOT NULL, bot_revision TEXT NOT NULL
+);`;
 
 export class PluginStore {
  constructor(private readonly db:DatabaseSync) {
@@ -71,16 +75,18 @@ export class PluginStore {
   const agentAccessIds=this.db.prepare("SELECT bot_id FROM plugin_agent_access WHERE plugin_id='gmail' AND account_id=? AND enabled=1 ORDER BY bot_id").all(String(row.account_id)).map(item=>String(item.bot_id));
   return {accountId:String(row.account_id),config,connected:row.connected===1,enabled:row.enabled===1,revision:Number(row.revision),agentAccessIds};
  }
- gmailConnect(config:GmailConfig,historyId:string) {
+ gmailConnect(config:GmailConfig,historyId:string,guidedSetupId?:string) {
   const existing=this.gmailConnection();if(existing && existing.accountId!==config.email)throw Error('Delete the existing Gmail configuration before changing accounts');
-  if(!/^\d+$/.test(historyId))throw Error('Invalid Gmail history ID');this.db.exec('BEGIN IMMEDIATE');
+  if(!/^\d+$/.test(historyId))throw Error('Invalid Gmail history ID');this.db.exec('SAVEPOINT gmail_connect');
   try {
    const baseline=this.db.prepare('SELECT 1 FROM gmail_history WHERE account_id=?').get(config.email);
    if(existing && !baseline)this.db.prepare('INSERT INTO gmail_history_gaps VALUES (?,NULL,?,?,?)').run(config.email,historyId,'Monitoring began after the account was connected',Date.now());
    this.db.prepare("INSERT OR IGNORE INTO gmail_history VALUES (?,?,'ready',NULL)").run(config.email,historyId);
    this.db.prepare("INSERT INTO plugin_connections VALUES ('gmail',?,?,1,0,1) ON CONFLICT(plugin_id,account_id) DO UPDATE SET config=excluded.config,connected=1,enabled=0,revision=plugin_connections.revision+1").run(config.email,JSON.stringify(config));
-   this.db.exec('COMMIT');
-  }catch(error){this.db.exec('ROLLBACK');throw error;}
+   if(guidedSetupId && !this.db.prepare("UPDATE gmail_setup_requests SET state='connected' WHERE question_id=? AND state='authorizing'").run(guidedSetupId).changes)throw Error('Gmail setup authority changed');
+   if(guidedSetupId)this.db.prepare('INSERT OR IGNORE INTO gmail_setup_successes (question_id) VALUES (?)').run(guidedSetupId);
+   this.db.exec('RELEASE SAVEPOINT gmail_connect');
+  }catch(error){this.db.exec('ROLLBACK TO SAVEPOINT gmail_connect; RELEASE SAVEPOINT gmail_connect');throw error;}
   return this.gmailConnection();
  }
  gmailSetEnabled(enabled:boolean) {const c=this.gmailConnection();if(!c || (enabled && !c.connected))throw Error('Connect Gmail first');this.db.prepare("UPDATE plugin_connections SET enabled=?,revision=revision+1 WHERE plugin_id='gmail' AND account_id=?").run(enabled?1:0,c.accountId);return this.gmailConnection();}
@@ -95,6 +101,21 @@ export class PluginStore {
  gmailDeleteConfig() {const c=this.gmailConnection();if(c){this.db.prepare('DELETE FROM gmail_work_model_access WHERE account_id=?').run(c.accountId);this.db.prepare('DELETE FROM gmail_model_access WHERE account_id=?').run(c.accountId);this.db.prepare("DELETE FROM plugin_agent_access WHERE plugin_id='gmail' AND account_id=?").run(c.accountId);this.db.prepare("DELETE FROM plugin_connections WHERE plugin_id='gmail' AND account_id=?").run(c.accountId);}return null;}
  work() {return this.db.prepare("SELECT w.* FROM slack_work w JOIN task_attempts a ON a.id=w.attempt_id WHERE a.state IN ('queued','running','stopping','waiting') OR NOT EXISTS (SELECT 1 FROM slack_deliveries d WHERE d.id=w.attempt_id||':outcome') ORDER BY w.rowid").all();}
  workBinding(id:string) {return this.db.prepare('SELECT * FROM slack_work WHERE attempt_id=?').get(id);}
+ outcomeReview(id:string) {return this.db.prepare(`SELECT r.id,r.slack_revision AS slackRevision,r.bot_revision AS botRevision,d.state,d.text FROM slack_outcome_reviews r JOIN slack_deliveries d ON d.id=r.id WHERE r.attempt_id=? ORDER BY r.rowid DESC LIMIT 1`).get(id);}
+ outcomeApproval(id:string) {return this.db.prepare('SELECT slack_revision AS slackRevision,bot_revision AS botRevision FROM slack_outcome_reviews WHERE id=?').get(id);}
+ blockOutcome(id:string) {this.db.prepare("UPDATE slack_deliveries SET state='blocked' WHERE id=? AND state='pending'").run(id);}
+ approveOutcome(input:{id:string;attemptId:string;text:string;slackRevision:number;botRevision:string}) {
+  this.db.exec('BEGIN IMMEDIATE');
+  try {
+   const existing=this.db.prepare('SELECT d.text,r.slack_revision,r.bot_revision FROM slack_outcome_reviews r JOIN slack_deliveries d ON d.id=r.id WHERE r.id=? AND r.attempt_id=?').get(input.id,input.attemptId);
+   if(existing) {if(existing.text!==input.text || existing.slack_revision!==input.slackRevision || existing.bot_revision!==input.botRevision)throw Error('Disclosure identity conflict');this.db.exec('COMMIT');return;}
+   const prior=this.outcomeReview(input.attemptId);
+   if(prior && prior.state!=='blocked')throw Error('An outcome disclosure is already recorded');
+   this.db.prepare("INSERT INTO slack_deliveries (id,attempt_id,text,state) VALUES (?,?,?,'pending')").run(input.id,input.attemptId,input.text);
+   this.db.prepare('INSERT INTO slack_outcome_reviews VALUES (?,?,?,?)').run(input.id,input.attemptId,input.slackRevision,input.botRevision);
+   this.db.exec('COMMIT');
+  } catch(error){this.db.exec('ROLLBACK');throw error;}
+ }
  threadWork(config:SlackConfig,threadTs:string) {return this.db.prepare('SELECT attempt_id FROM slack_work WHERE team_id=? AND user_id=? AND channel_id=? AND bot_id=? AND thread_ts=? ORDER BY rowid').all(config.teamId,config.userId,config.channelId,config.botId,threadTs).map(row=>String(row.attempt_id));}
  deliveries() {return this.db.prepare("SELECT attemptId,id,state FROM (SELECT attempt_id AS attemptId,id,state,rowid AS ordering FROM slack_deliveries UNION ALL SELECT NULL AS attemptId,id,state,rowid AS ordering FROM slack_notices) ORDER BY ordering DESC LIMIT 30").all();}
  queueNotice(input:{id:string;config:SlackConfig;threadTs?:string;text:string}) {this.db.prepare("INSERT OR IGNORE INTO slack_notices VALUES (?,?,?,?,?,?,?,'pending',0)").run(input.id,input.config.teamId,input.config.userId,input.config.channelId,input.threadTs ?? null,input.config.botId,input.text);}

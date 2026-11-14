@@ -2,20 +2,38 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {slackTransport} from '../dist/slack.js';
 
+test('Socket Mode startup waits for open and fails when the socket closes first',async()=>{
+ const originalFetch=globalThis.fetch,OriginalWebSocket=globalThis.WebSocket;let socket,settled=false;
+ class FakeSocket extends EventTarget {static OPEN=1;readyState=0;constructor(){super();socket=this;}close(){this.readyState=3;this.dispatchEvent(new Event('close'));}send(){}}
+ globalThis.WebSocket=FakeSocket;globalThis.fetch=async()=>Response.json({ok:true,url:'wss://wss.slack.com/link'});
+ try {
+  const tokens={appToken:'xapp-synthetic',botToken:'xoxb-synthetic'},start=slackTransport.start(tokens,async()=>{});void start.then(()=>{settled=true;});
+  for(let i=0;i<100&&!socket;i++)await new Promise(resolve=>setTimeout(resolve,1));assert.ok(socket);await new Promise(resolve=>setImmediate(resolve));assert.equal(settled,false);
+  socket.readyState=1;socket.dispatchEvent(new Event('open'));const stop=await start;assert.equal(settled,true);stop();
+  socket=undefined;const failure=slackTransport.start(tokens,async()=>{});for(let i=0;i<100&&!socket;i++)await new Promise(resolve=>setTimeout(resolve,1));socket.close();await assert.rejects(failure);
+  socket=undefined;const controller=new AbortController(),cancelled=slackTransport.start(tokens,async()=>{},undefined,undefined,undefined,controller.signal);for(let i=0;i<100&&!socket;i++)await new Promise(resolve=>setTimeout(resolve,1));controller.abort();await assert.rejects(cancelled);assert.equal(socket.readyState,3);
+ } finally {globalThis.fetch=originalFetch;globalThis.WebSocket=OriginalWebSocket;}
+});
+
+test('DM verification fails closed when Slack does not return a channel',async()=>{
+ const originalFetch=globalThis.fetch;try{globalThis.fetch=async()=>Response.json({ok:true});await assert.rejects(slackTransport.verifyDestination({appToken:'xapp-synthetic',botToken:'xoxb-synthetic'},{userId:'U123'}));}finally{globalThis.fetch=originalFetch;}
+});
+
 test('Socket Mode accepts only plain DMs and acknowledges envelopes; posting uses the configured conversation',async()=>{
  const originalFetch=globalThis.fetch,OriginalWebSocket=globalThis.WebSocket,requests=[],events=[];let socket;
  class FakeSocket extends EventTarget {
   static OPEN=1;readyState=1;sent=[];
-  constructor(url){super();this.url=String(url);socket=this;}
+  constructor(url){super();this.url=String(url);socket=this;queueMicrotask(()=>this.dispatchEvent(new Event('open')));}
   send(text){this.sent.push(JSON.parse(text));}
   close(){this.readyState=3;this.dispatchEvent(new Event('close'));}
   incoming(data){this.dispatchEvent(new MessageEvent('message',{data:JSON.stringify(data)}));}
  }
  globalThis.WebSocket=FakeSocket;
- globalThis.fetch=async(url,options)=>{requests.push({url:String(url),authorization:options.headers.Authorization,body:JSON.parse(options.body)});return new Response(JSON.stringify(String(url).endsWith('apps.connections.open')?{ok:true,url:'wss://wss.slack.com/link/?ticket=fixture'}:String(url).endsWith('auth.test')?{ok:true,team_id:'T123',user_id:'B123'}:{ok:true}),{status:200});};
+ globalThis.fetch=async(url,options)=>{requests.push({url:String(url),authorization:options.headers.Authorization,body:JSON.parse(options.body)});return new Response(JSON.stringify(String(url).endsWith('apps.connections.open')?{ok:true,url:'wss://wss.slack.com/link/?ticket=fixture'}:String(url).endsWith('auth.test')?{ok:true,team_id:'T123',user_id:'B123'}:String(url).endsWith('conversations.open')?{ok:true,channel:{id:'D123'}}:{ok:true}),{status:200});};
  try{
   const tokens={appToken:'xapp-synthetic',botToken:'xoxb-synthetic'};
   assert.deepEqual(await slackTransport.identify(tokens),{teamId:'T123',botUserId:'B123'});
+  assert.deepEqual(await slackTransport.verifyDestination(tokens,{userId:'U123'}),{channelId:'D123'});assert.deepEqual(requests.at(-1).body,{users:'U123',prevent_creation:true});
   const stop=await slackTransport.start(tokens,async event=>{events.push(event)});
   const payload={event_id:'Ev1',team_id:'T123',event:{type:'message',channel_type:'im',channel:'D123',user:'U123',text:'hello',thread_ts:'123.4'}};
   socket.incoming({type:'events_api',envelope_id:'one',payload});
@@ -29,6 +47,15 @@ test('Socket Mode accepts only plain DMs and acknowledges envelopes; posting use
   assert.deepEqual(requests.at(-1),{url:'https://slack.com/api/chat.postMessage',authorization:'Bearer xoxb-synthetic',body:{channel:'D123',text:'reply',unfurl_links:false,unfurl_media:false,thread_ts:'123.4'}});
   stop();
  }finally{globalThis.fetch=originalFetch;globalThis.WebSocket=OriginalWebSocket;}
+});
+
+test('Socket Mode rejects non-Slack hosts, credentials and nonstandard ports',async()=>{
+ const originalFetch=globalThis.fetch,OriginalWebSocket=globalThis.WebSocket;let opened=0;
+ globalThis.WebSocket=class {constructor(){opened++;}};
+ try {for(const url of ['wss://evil.example/socket','wss://wss.slack.com:444/socket','wss://user:password@wss.slack.com/socket']){
+  globalThis.fetch=async(_url,options)=>{assert.equal(options.redirect,'error');return Response.json({ok:true,url});};
+  await assert.rejects(slackTransport.start({appToken:'xapp-synthetic',botToken:'xoxb-synthetic'},async()=>{}));
+ }assert.equal(opened,0);}finally{globalThis.fetch=originalFetch;globalThis.WebSocket=OriginalWebSocket;}
 });
 
 test('HTTP 429 exposes a safe retry delay while other transport failures remain ambiguous',async()=>{
@@ -45,7 +72,7 @@ test('Socket Mode carries button identity and refuses malformed interactive mess
  const originalFetch=globalThis.fetch,OriginalWebSocket=globalThis.WebSocket,requests=[],interactions=[];let socket;
  class FakeSocket extends EventTarget {
   static OPEN=1;readyState=1;sent=[];
-  constructor(){super();socket=this;}
+  constructor(){super();socket=this;queueMicrotask(()=>this.dispatchEvent(new Event('open')));}
   send(text){this.sent.push(JSON.parse(text));}
   close(){this.readyState=3;this.dispatchEvent(new Event('close'));}
   incoming(data){this.dispatchEvent(new MessageEvent('message',{data:JSON.stringify(data)}));}

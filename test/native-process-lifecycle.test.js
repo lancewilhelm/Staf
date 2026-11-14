@@ -4,12 +4,19 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { DatabaseSync } from 'node:sqlite';
 import { NativeProcesses, nativeProcessSchema } from '../dist/native-processes.js';
+import {isolatedVisiblePath} from '../dist/linux-host-boundary.js';
 
 function setup() {
   const db=new DatabaseSync(':memory:');db.exec('CREATE TABLE action_journal (id TEXT PRIMARY KEY)');db.exec(nativeProcessSchema);db.prepare('INSERT INTO action_journal VALUES (?)').run('action');
   const controller=new AbortController();
   return {db,controller,manager:new NativeProcesses(db),work:{botId:'bot',work:{kind:'command',id:'work'},workingDirectory:process.cwd(),signal:controller.signal}};
 }
+
+test('isolated process records use the terminal-visible workspace path',async()=>{
+ const {db,manager,work}=setup();const started=[];
+ const backend={launch(cwd,observer){started.push(cwd);queueMicrotask(()=>{observer.started(1);observer.exited(0,null);observer.closed(0,null);});return {terminate(){},detach(){}};}};
+ try {for(const input of ['/workspace/project','/srv/staf-workspace/project']) {const cwd=isolatedVisiblePath('/srv/staf-workspace',input);const result=await manager.startBackend(work,{id:'action',fingerprint:'fixture'},{baseCwd:'/workspace',cwd,mode:'pipe',backend});assert.equal(result.cwd,'/workspace/project');}assert.deepEqual(started,['/workspace/project','/workspace/project']);}finally{await manager.shutdown();db.close();}
+});
 
 test('Stop during starting reaches the real child when its handle becomes ready',async()=>{
   const {db,controller,manager,work}=setup();let child,requested=false;
