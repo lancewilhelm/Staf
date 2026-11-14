@@ -10,7 +10,7 @@ const until=async fn=>{for(let i=0;i<500;i++){const result=await fn();if(result)
 test('Slack background request delivers an actual outcome without another message',async()=>{
  const dir=mkdtempSync(join(tmpdir(),'staf-slack-work-'));let receive,release,entered,calls=0;const posts=[];
  const gate=new Promise(resolve=>{release=resolve}),started=new Promise(resolve=>{entered=resolve});
- const slackTransport={identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async(_tokens,handler)=>{receive=handler;return ()=>{receive=undefined}},post:async(_tokens,message)=>{posts.push(message)}};
+ const slackTransport={verifyDestination:async(_tokens,config)=>({channelId:config.channelId}),identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async(_tokens,handler,status)=>{status?.('connected');receive=handler;return ()=>{receive=undefined}},post:async(_tokens,message)=>{posts.push(message)}};
  const providerFactory=async()=>({name:'fixture',capabilities:{toolCalls:false,incrementalText:false},complete:async()=>{calls++;entered();await gate;return {role:'assistant',content:'Actual task result'}}});
  const app=startInstance(join(dir,'db'),0,{env:{},slackTransport,providerFactory}),port=await app.listen();
  const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body===undefined?'GET':'POST',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body===undefined?{}:{'Content-Type':'application/json'})},...(body===undefined?{}:{body:JSON.stringify(body)})});return [r.status,await r.json()]};
@@ -29,7 +29,7 @@ test('disabled delivery resumes after restart, rate limits retry, and stale cont
  const {SlackRateLimited}=await import('../dist/slack.js');
  const dir=mkdtempSync(join(tmpdir(),'staf-slack-recovery-')),path=join(dir,'db');let receive,release,entered,calls=0,rateLimited=true;const posts=[];
  const gate=new Promise(resolve=>{release=resolve}),started=new Promise(resolve=>{entered=resolve});
- const slackTransport={identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async(_tokens,handler)=>{receive=handler;return ()=>{receive=undefined}},post:async(_tokens,message)=>{if(rateLimited){rateLimited=false;throw new SlackRateLimited(10);}posts.push(message)}};
+ const slackTransport={verifyDestination:async(_tokens,config)=>({channelId:config.channelId}),identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async(_tokens,handler,status)=>{status?.('connected');receive=handler;return ()=>{receive=undefined}},post:async(_tokens,message)=>{if(rateLimited){rateLimited=false;throw new SlackRateLimited(10);}posts.push(message)}};
  const providerFactory=async()=>({name:'fixture',capabilities:{toolCalls:false,incrementalText:false},complete:async()=>{calls++;entered();await gate;return {role:'assistant',content:'Recovered result'}}});
  let app=startInstance(path,0,{env:{},slackTransport,providerFactory}),port=await app.listen();
  const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body===undefined?'GET':'POST',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body===undefined?{}:{'Content-Type':'application/json'})},...(body===undefined?{}:{body:JSON.stringify(body)})});return [r.status,await r.json()]};
@@ -49,7 +49,7 @@ test('disabled delivery resumes after restart, rate limits retry, and stale cont
 test('Slack controls stop only the bound attempt and preserve a stopped outcome',async()=>{
  const dir=mkdtempSync(join(tmpdir(),'staf-slack-stop-'));let receive,entered,release,enteredLater,releaseLater,calls=0;const posts=[];
  const started=new Promise(resolve=>{entered=resolve}),gate=new Promise(resolve=>{release=resolve}),laterStarted=new Promise(resolve=>{enteredLater=resolve}),laterGate=new Promise(resolve=>{releaseLater=resolve});
- const slackTransport={identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async(_tokens,handler)=>{receive=handler;return ()=>{receive=undefined}},post:async(_tokens,message)=>{posts.push(message)}};
+ const slackTransport={verifyDestination:async(_tokens,config)=>({channelId:config.channelId}),identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async(_tokens,handler,status)=>{status?.('connected');receive=handler;return ()=>{receive=undefined}},post:async(_tokens,message)=>{posts.push(message)}};
  const providerFactory=async()=>({name:'fixture',capabilities:{toolCalls:false,incrementalText:false},complete:async()=>{calls++;if(calls===1){entered();await gate;return {role:'assistant',content:'Late observation'}}enteredLater();await laterGate;return {role:'assistant',content:'Later result'}}});
  const app=startInstance(join(dir,'db'),0,{env:{},slackTransport,providerFactory}),port=await app.listen();
  const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body===undefined?'GET':'POST',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body===undefined?{}:{'Content-Type':'application/json'})},...(body===undefined?{}:{body:JSON.stringify(body)})});return [r.status,await r.json()]};
@@ -67,7 +67,7 @@ test('Slack controls stop only the bound attempt and preserve a stopped outcome'
 test('Slack status and direction apply to the selected task and its real progress',async()=>{
  const dir=mkdtempSync(join(tmpdir(),'staf-slack-direction-'));let receive,entered,release,calls=0;const posts=[],requests=[];
  const started=new Promise(resolve=>{entered=resolve}),gate=new Promise(resolve=>{release=resolve});
- const slackTransport={identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async(_tokens,handler)=>{receive=handler;return ()=>{receive=undefined}},post:async(_tokens,message)=>{posts.push(message)}};
+ const slackTransport={verifyDestination:async(_tokens,config)=>({channelId:config.channelId}),identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async(_tokens,handler,status)=>{status?.('connected');receive=handler;return ()=>{receive=undefined}},post:async(_tokens,message)=>{posts.push(message)}};
  const providerFactory=async()=>({name:'fixture',capabilities:{toolCalls:true,incrementalText:false,transport:'demo'},complete:async messages=>{calls++;requests.push(structuredClone(messages));if(calls===1){entered();await gate;return {role:'assistant',content:'Initial observation'};}if(calls===2)return {role:'assistant',content:null,tool_calls:[{id:'missing-tool',type:'function',function:{name:'not_a_tool',arguments:'{}'}}]};return {role:'assistant',content:'Directed result'};}});
  const app=startInstance(join(dir,'db'),0,{env:{},slackTransport,providerFactory}),port=await app.listen();
  const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body===undefined?'GET':'POST',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body===undefined?{}:{'Content-Type':'application/json'})},...(body===undefined?{}:{body:JSON.stringify(body)})});return [r.status,await r.json()]};
@@ -82,7 +82,7 @@ test('Slack status and direction apply to the selected task and its real progres
 
 test('an ambiguous result delivery is retained and never replayed after restart',async()=>{
  const dir=mkdtempSync(join(tmpdir(),'staf-slack-uncertain-')),path=join(dir,'db');let receive,outcomeCalls=0,modelCalls=0;const posts=[];
- const slackTransport={identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async(_tokens,handler)=>{receive=handler;return ()=>{receive=undefined}},post:async(_tokens,message)=>{if(message.text.includes('Final answer')){outcomeCalls++;throw Error('connection lost after dispatch');}posts.push(message)}};
+ const slackTransport={verifyDestination:async(_tokens,config)=>({channelId:config.channelId}),identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async(_tokens,handler,status)=>{status?.('connected');receive=handler;return ()=>{receive=undefined}},post:async(_tokens,message)=>{if(message.text.includes('Final answer')){outcomeCalls++;throw Error('connection lost after dispatch');}posts.push(message)}};
  const providerFactory=async()=>({name:'fixture',capabilities:{toolCalls:false,incrementalText:false},complete:async()=>{modelCalls++;return {role:'assistant',content:'Final answer'}}});
  let app=startInstance(path,0,{env:{},slackTransport,providerFactory}),port=await app.listen();
  const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body===undefined?'GET':'POST',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body===undefined?{}:{'Content-Type':'application/json'})},...(body===undefined?{}:{body:JSON.stringify(body)})});return [r.status,await r.json()]};
@@ -107,7 +107,7 @@ test('schema 41 upgrades Slack work without replacing configured core tools or p
 test('restart reports interrupted work without restarting its provider',async()=>{
  const dir=mkdtempSync(join(tmpdir(),'staf-slack-interrupted-')),path=join(dir,'db');let receive,entered,calls=0;const posts=[];
  const started=new Promise(resolve=>{entered=resolve});
- const slackTransport={identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async(_tokens,handler)=>{receive=handler;return ()=>{receive=undefined}},post:async(_tokens,message)=>{posts.push(message)}};
+ const slackTransport={verifyDestination:async(_tokens,config)=>({channelId:config.channelId}),identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async(_tokens,handler,status)=>{status?.('connected');receive=handler;return ()=>{receive=undefined}},post:async(_tokens,message)=>{posts.push(message)}};
  const providerFactory=async()=>({name:'fixture',capabilities:{toolCalls:false,incrementalText:false},complete:async(_messages,_tools,{signal})=>{calls++;entered();await new Promise(resolve=>{if(signal.aborted)resolve();else signal.addEventListener('abort',resolve,{once:true});});throw Error('interrupted');}});
  let app=startInstance(path,0,{env:{},slackTransport,providerFactory}),port=await app.listen();
  const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body===undefined?'GET':'POST',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body===undefined?{}:{'Content-Type':'application/json'})},...(body===undefined?{}:{body:JSON.stringify(body)})});return [r.status,await r.json()]};
@@ -121,7 +121,7 @@ test('restart reports interrupted work without restarting its provider',async()=
 test('socket reconnect resumes pending task delivery without rerunning the task',async()=>{
  const dir=mkdtempSync(join(tmpdir(),'staf-slack-reconnect-'));let receive,status,entered,release,calls=0;const posts=[];
  const started=new Promise(resolve=>{entered=resolve}),gate=new Promise(resolve=>{release=resolve});
- const slackTransport={identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async(_tokens,handler,onStatus)=>{receive=handler;status=onStatus;status('connected');return ()=>{receive=undefined}},post:async(_tokens,message)=>{posts.push(message)}};
+ const slackTransport={verifyDestination:async(_tokens,config)=>({channelId:config.channelId}),identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async(_tokens,handler,onStatus)=>{receive=handler;status=onStatus;status('connected');return ()=>{receive=undefined}},post:async(_tokens,message)=>{posts.push(message)}};
  const providerFactory=async()=>({name:'fixture',capabilities:{toolCalls:false,incrementalText:false},complete:async()=>{calls++;entered();await gate;return {role:'assistant',content:'Reconnect result'}}});
  const app=startInstance(join(dir,'db'),0,{env:{},slackTransport,providerFactory}),port=await app.listen();
  const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body===undefined?'GET':'POST',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body===undefined?{}:{'Content-Type':'application/json'})},...(body===undefined?{}:{body:JSON.stringify(body)})});return [r.status,await r.json()]};

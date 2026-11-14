@@ -34,7 +34,7 @@ function connect(){if(!setupReview.value)return;void action('connect',{...form.v
    <p v-else-if="plugin.connected && !plugin.credentialsAvailable">Credentials or use approvals are unavailable. Reconnect Slack or approve the missing uses in Named secrets.</p>
    <p v-if="plugin.connected">Agent access: {{ plugin.agentAccess ? 'Allowed' : 'Not allowed' }}</p>
    <details class="saved-settings"><DisclosureSummary>{{ plugin.config ? 'Change connection' : 'Set up Slack' }}</DisclosureSummary>
-    <p>Use a Slack app with Socket Mode and a bot token. Enter the IDs of the one workspace, user, and direct message you approve. <a href="https://docs.slack.dev/apis/events-api/using-socket-mode/" target="_blank" rel="noreferrer">Slack Socket Mode setup</a>.</p>
+    <p>Use a Slack app with Socket Mode and a bot token with <code>im:write</code>. Staf verifies that the direct message belongs to the approved user before delivery. <a href="https://docs.slack.dev/apis/events-api/using-socket-mode/" target="_blank" rel="noreferrer">Slack Socket Mode setup</a>.</p>
     <form @submit.prevent="connect">
      <label>App-level token<input v-model="form.appToken" type="password" autocomplete="off" required /></label>
      <label>Bot user token<input v-model="form.botToken" type="password" autocomplete="off" required /></label>
@@ -49,6 +49,7 @@ function connect(){if(!setupReview.value)return;void action('connect',{...form.v
    </details>
    <div v-if="plugin.connected && plugin.config" class="row">
     <button class="quiet" :disabled="busy" @click="action('access',{botId:plugin.config.botId,enabled:!plugin.agentAccess})">{{ plugin.agentAccess ? 'Revoke agent access' : 'Allow agent access' }}</button>
+    <button v-if="plugin.enabled && plugin.status!=='connected'" :disabled="busy" @click="action('enable')">Retry connection</button>
     <button :disabled="busy" @click="action(plugin.enabled ? 'disable' : 'enable')">{{ plugin.enabled ? 'Disable' : 'Enable' }}</button>
     <button class="quiet" :disabled="busy" @click="confirm='disconnect'">Disconnect</button>
    </div>

@@ -3,7 +3,7 @@ import {startInstance} from '../../dist/instance-service.js';
 
 const [path,stage]=process.argv.slice(2);
 let armed=false;
-const slackTransport={identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async(_tokens,_receive,status)=>{status?.('connected');return ()=>{};},post:async()=>{}};
+const slackTransport={verifyDestination:async(_tokens,config)=>({channelId:config.channelId}),identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async(_tokens,_receive,status)=>{status?.('connected');return ()=>{};},post:async()=>{}};
 const providerFactory=async()=>({name:'fixture',capabilities:{toolCalls:true},async complete(messages){return messages.at(-1).role==='tool'?{role:'assistant',content:'Finished'}:{role:'assistant',content:null,tool_calls:[{id:'setup',type:'function',function:{name:'setup_slack',arguments:JSON.stringify({teamId:'T123',userId:'U123',channelId:'D123'})}}]};}});
 const app=startInstance(path,0,{dataDir:dirname(path),env:{},slackTransport,providerFactory},{credentialTransition:(_kind,point)=>{if(armed && point===stage)process.exit(73);}});
 const port=await app.listen();let token;

@@ -11,6 +11,7 @@ export function slackSetupCapability(hooks:{
  eligible:(work:WorkContext)=>boolean;
  check:(work:WorkContext)=>void;
  confirm:(approval:SlackSetupSelection,work:WorkContext,action:ActionIdentity)=>Promise<string>;
+ ready:(work:WorkContext,action:ActionIdentity)=>boolean;
  pause:(work:WorkContext)=>void;
  resume:(work:WorkContext)=>void;
 }):Capability<SlackSetupInput,string> {
@@ -40,6 +41,7 @@ export function slackSetupCapability(hooks:{
     hooks.check(work);
     if(!hooks.secrets.selection(`${action.id}-app`) || !hooks.secrets.selection(`${action.id}-bot`))throw new ActionFailed('A selected secret changed; start a new Slack setup attempt.');
     const result=await hooks.confirm({config:{...input,botId:work.botId},app,bot},work,action);
+    if(result==='connected' && !hooks.ready(work,action))throw new ActionFailed('Slack setup was interrupted before completion.');
     if(result==='failed' || result==='connection failed')throw new ActionFailed('Slack setup failed. Check the connection status before trying again.');
     return result==='dismissed'?'Slack setup dismissed.':`Slack setup status: ${result}.`;
    } finally {if(!work.signal.aborted)hooks.resume(work);}

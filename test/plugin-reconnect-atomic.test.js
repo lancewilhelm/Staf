@@ -12,7 +12,7 @@ function failSecretInsert(dir){const db=new DatabaseSync(join(dir,'secrets','cre
 test('Slack reconnect storage failure preserves prior connection and grant versions',async()=>{
  const dir=mkdtempSync(join(tmpdir(),'staf-slack-reconnect-'));let app;
  try {
-  app=startInstance(join(dir,'instance.sqlite'),0,{dataDir:dir,env:{},slackTransport:{identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async()=>()=>{},post:async()=>{}}});const port=await app.listen();let token;
+  app=startInstance(join(dir,'instance.sqlite'),0,{dataDir:dir,env:{},slackTransport:{verifyDestination:async(_tokens,config)=>({channelId:config.channelId}),identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async(_tokens,_receive,status)=>{status?.('connected');return ()=>{};},post:async()=>{}}});const port=await app.listen();let token;
   const call=async(route,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});return [r.status,await r.json()];};
   token=(await call('/api/pair',{code:app.code}))[1].token;const bot=(await call('/api/bots',{name:'Agent',provider:'live',model:'fixture'}))[1];
   const config={confirm:true,appToken:'xapp-before-synthetic',botToken:'xoxb-before-synthetic',teamId:'T123',userId:'U123',channelId:'D123',botId:bot.id};assert.equal((await call('/api/plugins/slack/connect',config))[0],200);
@@ -38,7 +38,7 @@ test('Gmail reconnect storage failure preserves prior connection and grant versi
 
 for(const kind of ['slack','gmail'])test(`${kind} reconnect rolls back each failed transaction boundary and fences an uncertain commit`,async()=>{
  const dir=mkdtempSync(join(tmpdir(),`staf-${kind}-boundary-`)),path=join(dir,'instance.sqlite');let app,port,token,fault=null;const starts=[];
- const slackTransport={identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async tokens=>{starts.push(tokens.appToken);return ()=>{};},post:async()=>{}};
+ const slackTransport={verifyDestination:async(_tokens,config)=>({channelId:config.channelId}),identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async(tokens,_receive,status)=>{starts.push(tokens.appToken);status?.('connected');return ()=>{};},post:async()=>{}};
  const gmailRequest=async(url)=>new URL(url).hostname==='oauth2.googleapis.com'?Response.json({access_token:'synthetic-access-token',refresh_token:'synthetic-refresh-token',token_type:'Bearer',scope:'https://www.googleapis.com/auth/gmail.readonly'}):Response.json({emailAddress:'owner@example.test',historyId:'100'});
  const start=async()=>{app=startInstance(path,0,{dataDir:dir,env:{},slackTransport,gmailRequest},{credentialTransition:(plugin,stage)=>{if(plugin===kind && stage===fault)throw Error('synthetic fault');}});port=await app.listen();};
  const call=async(route,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});return [r.status,await r.json()];};
@@ -63,13 +63,13 @@ for(const kind of ['slack','gmail'])test(`${kind} reconnect rolls back each fail
 });
 
 test('in-memory plugin connections use the same transactional credential store',async()=>{
- const app=startInstance(':memory:',0,{env:{},slackTransport:{identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async()=>()=>{},post:async()=>{}}});
+ const app=startInstance(':memory:',0,{env:{},slackTransport:{verifyDestination:async(_tokens,config)=>({channelId:config.channelId}),identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async(_tokens,_receive,status)=>{status?.('connected');return ()=>{};},post:async()=>{}}});
  try {const port=await app.listen();let token;const call=async(route,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});return [r.status,await r.json()];};token=(await call('/api/pair',{code:app.code}))[1].token;const bot=(await call('/api/bots',{name:'Agent',provider:'live',model:'fixture'}))[1];assert.equal((await call('/api/plugins/slack/connect',{confirm:true,appToken:'xapp-memory-fixture',botToken:'xoxb-memory-fixture',teamId:'T123',userId:'U123',channelId:'D123',botId:bot.id}))[0],200);assert.equal((await call('/api/secret-grants'))[1].length,2);}finally{await app.close();}
 });
 
 test('persistent reconnect rejects a database in WAL mode without changing connection or grants',async()=>{
  const dir=mkdtempSync(join(tmpdir(),'staf-reconnect-wal-')),path=join(dir,'instance.sqlite');let app,port,token;
- const options={dataDir:dir,env:{},slackTransport:{identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async()=>()=>{},post:async()=>{}}};
+ const options={dataDir:dir,env:{},slackTransport:{verifyDestination:async(_tokens,config)=>({channelId:config.channelId}),identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async(_tokens,_receive,status)=>{status?.('connected');return ()=>{};},post:async()=>{}}};
  const call=async(route,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});return [r.status,await r.json()];};
  try{
   app=startInstance(path,0,options);port=await app.listen();token=(await call('/api/pair',{code:app.code}))[1].token;const bot=(await call('/api/bots',{name:'Agent',provider:'live',model:'fixture'}))[1];
@@ -81,7 +81,7 @@ test('persistent reconnect rejects a database in WAL mode without changing conne
 
 for(const kind of ['slack','gmail'])test(`${kind} restart recovers crashes at each reconnect boundary`,async()=>{
  const dir=mkdtempSync(join(tmpdir(),`staf-${kind}-crash-`)),path=join(dir,'instance.sqlite');let app,port,token,child;
- const slackTransport={identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async()=>()=>{},post:async()=>{}};
+ const slackTransport={verifyDestination:async(_tokens,config)=>({channelId:config.channelId}),identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async(_tokens,_receive,status)=>{status?.('connected');return ()=>{};},post:async()=>{}};
  const gmailRequest=async(url)=>new URL(url).hostname==='oauth2.googleapis.com'?Response.json({access_token:'synthetic-access-token',refresh_token:'synthetic-refresh-token',token_type:'Bearer',scope:'https://www.googleapis.com/auth/gmail.readonly'}):Response.json({emailAddress:'owner@example.test',historyId:'100'});
  const start=async()=>{app=startInstance(path,0,{dataDir:dir,env:{},slackTransport,gmailRequest});port=await app.listen();};
  const call=async(route,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});return [r.status,await r.json()];};

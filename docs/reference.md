@@ -641,11 +641,13 @@ current binding and Slack grant-review snapshot as a `slack-setup` inbox item.
 `confirmDisplacements: true` when the review lists existing grants. `/dismiss`
 takes the same approval. Confirmation rechecks the client, work, agent, binding,
 secret selections and reviewed grant state before identification and commit.
-The result distinguishes connecting, connected, reconnecting and failure; a
-verified socket does not verify the user or DM IDs. Restart interrupts an
-unfinished request without replay. Grants and binding commit together; an
-interrupted activation remains fenced until the owner keeps it disabled and
-reviews the connection. See [Slack setup](usage.md#slack-plugin).
+The service checks that Slack returns the selected DM for the selected user
+using `conversations.open` with `prevent_creation` and the `im:write` bot scope.
+The result distinguishes connecting, connected, reconnecting and failure; the
+action cannot succeed before the Socket Mode WebSocket opens. Grants and binding
+commit together. An interrupted activation remains fenced until the owner keeps
+it disabled and reviews the connection; unfinished requests are not replayed.
+See [Slack setup](usage.md#slack-plugin).
 
 
 ### Native process API

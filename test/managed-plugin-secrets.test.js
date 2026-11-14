@@ -18,7 +18,7 @@ test('legacy plugin credentials stay untouched and cannot authorize a connection
   saveSlackTokens({root:dir,appToken:'xapp-old-synthetic',botToken:'xoxb-old-synthetic'});
   saveGmailCredential(dir,{email:'owner@example.test',clientId:'synthetic-client',clientSecret:'old-client-secret',refreshToken:'old-refresh-token'});
   const oldSlack=readFileSync(join(dir,'auth','slack.json')),oldGmail=readFileSync(join(dir,'auth','gmail.json'));let network=0;
-  const slackTransport={identify:async()=>{network++;return {teamId:'T123',botUserId:'B123'};},start:async()=>{network++;return ()=>{};},post:async()=>{network++;}};
+  const slackTransport={verifyDestination:async(_tokens,config)=>({channelId:config.channelId}),identify:async()=>{network++;return {teamId:'T123',botUserId:'B123'};},start:async()=>{network++;return ()=>{};},post:async()=>{network++;}};
   const gmailRequest=async()=>{network++;throw Error('Unexpected network');};
   app=startInstance(path,0,{dataDir:dir,env:{},slackTransport,gmailRequest});const port=await app.listen();let token;
   const call=async(route,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});return [r.status,await r.json()];};
@@ -33,7 +33,7 @@ test('legacy plugin credentials stay untouched and cannot authorize a connection
 
 test('Slack use stops at grant revocation and only the current destination can be approved',async()=>{
  const dir=mkdtempSync(join(tmpdir(),'staf-managed-slack-')),path=join(dir,'instance.sqlite');let app,receiver,starts=0,stops=0;
- const slackTransport={identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async(_tokens,receive)=>{starts++;receiver=receive;return ()=>{stops++;receiver=undefined;};},post:async()=>{}};
+ const slackTransport={verifyDestination:async(_tokens,config)=>({channelId:config.channelId}),identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async(_tokens,receive,status)=>{status?.('connected');starts++;receiver=receive;return ()=>{stops++;receiver=undefined;};},post:async()=>{}};
  try {
   app=startInstance(path,0,{dataDir:dir,env:{},slackTransport});const port=await app.listen();let token;
   const call=async(route,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});return [r.status,await r.json()];};
@@ -55,7 +55,7 @@ test('Slack use stops at grant revocation and only the current destination can b
 test('a stale grant approval cannot restore access after another client revokes it',async()=>{
  const dir=mkdtempSync(join(tmpdir(),'staf-grant-stale-'));let app;
  try {
-  app=startInstance(join(dir,'instance.sqlite'),0,{dataDir:dir,env:{},slackTransport:{identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async()=>()=>{},post:async()=>{}}});const port=await app.listen();
+  app=startInstance(join(dir,'instance.sqlite'),0,{dataDir:dir,env:{},slackTransport:{verifyDestination:async(_tokens,config)=>({channelId:config.channelId}),identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async(_tokens,_receive,status)=>{status?.('connected');return ()=>{};},post:async()=>{}}});const port=await app.listen();
   const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});return [r.status,await r.json()];};
   const first=(await call('/api/pair','',{code:app.code}))[1].token,second=(await call('/api/pair','',{code:app.issueCode()}))[1].token,bot=(await call('/api/bots',first,{name:'Agent',provider:'live',model:'fixture'}))[1];
   assert.equal((await call('/api/plugins/slack/connect',first,{confirm:true,appToken:'xapp-stale-synthetic',botToken:'xoxb-stale-synthetic',teamId:'T123',userId:'U123',channelId:'D123',botId:bot.id}))[0],200);
@@ -69,7 +69,7 @@ test('a stale grant approval cannot restore access after another client revokes 
 test('grant decisions bind the reviewed secret and version across two clients and racing requests',async()=>{
  const dir=mkdtempSync(join(tmpdir(),'staf-grant-review-'));let app;
  try {
-  app=startInstance(join(dir,'instance.sqlite'),0,{dataDir:dir,env:{},slackTransport:{identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async()=>()=>{},post:async()=>{}}});const port=await app.listen();
+  app=startInstance(join(dir,'instance.sqlite'),0,{dataDir:dir,env:{},slackTransport:{verifyDestination:async(_tokens,config)=>({channelId:config.channelId}),identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async(_tokens,_receive,status)=>{status?.('connected');return ()=>{};},post:async()=>{}}});const port=await app.listen();
   const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});return [r.status,await r.json()];};
   const first=(await call('/api/pair','',{code:app.code}))[1].token,second=(await call('/api/pair','',{code:app.issueCode()}))[1].token,bot=(await call('/api/bots',first,{name:'Agent',provider:'live',model:'fixture'}))[1];
   await call('/api/plugins/slack/connect',first,{confirm:true,appToken:'xapp-original-synthetic',botToken:'xoxb-original-synthetic',teamId:'T123',userId:'U123',channelId:'D123',botId:bot.id});
@@ -111,7 +111,7 @@ test('grant decisions bind the reviewed secret and version across two clients an
 test('plugin reconnection names and fences displaced approvals',async()=>{
  const dir=mkdtempSync(join(tmpdir(),'staf-setup-review-'));let app,identifications=0;
  try {
-  const slackTransport={identify:async()=>{identifications++;return {teamId:'T123',botUserId:'B123'};},start:async()=>()=>{},post:async()=>{}};
+  const slackTransport={verifyDestination:async(_tokens,config)=>({channelId:config.channelId}),identify:async()=>{identifications++;return {teamId:'T123',botUserId:'B123'};},start:async(_tokens,_receive,status)=>{status?.('connected');return ()=>{};},post:async()=>{}};
   app=startInstance(join(dir,'instance.sqlite'),0,{dataDir:dir,env:{},slackTransport});const port=await app.listen();
   const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});return [r.status,await r.json()];};
   const first=(await call('/api/pair','',{code:app.code}))[1].token,second=(await call('/api/pair','',{code:app.issueCode()}))[1].token,bot=(await call('/api/bots',first,{name:'Agent',provider:'live',model:'fixture'}))[1];
@@ -130,7 +130,7 @@ test('plugin reconnection names and fences displaced approvals',async()=>{
 
 test('revoked grant versions survive a service restart and stopped-data restore',async()=>{
  const dir=mkdtempSync(join(tmpdir(),'staf-grant-service-')),backup=mkdtempSync(join(tmpdir(),'staf-grant-service-backup-'));let app,port,token;
- const options={dataDir:dir,env:{},slackTransport:{identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async()=>()=>{},post:async()=>{}}};
+ const options={dataDir:dir,env:{},slackTransport:{verifyDestination:async(_tokens,config)=>({channelId:config.channelId}),identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async(_tokens,_receive,status)=>{status?.('connected');return ()=>{};},post:async()=>{}}};
  const start=async()=>{app=startInstance(join(dir,'instance.sqlite'),0,options);port=await app.listen();};
  const call=async(route,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});return [r.status,await r.json()];};
  try {
@@ -246,7 +246,7 @@ test('revoking Gmail grant during refresh blocks the later profile request',asyn
 test('revoking the paired client during Slack identification prevents saving and use',async()=>{
  const dir=mkdtempSync(join(tmpdir(),'staf-managed-slack-client-'));let app,started,release;
  const entered=new Promise(resolve=>{started=resolve;}),gate=new Promise(resolve=>{release=resolve;});
- const slackTransport={identify:async()=>{started();await gate;return {teamId:'T123',botUserId:'B123'};},start:async()=>{throw Error('Must not start');},post:async()=>{throw Error('Must not post');}};
+ const slackTransport={verifyDestination:async(_tokens,config)=>({channelId:config.channelId}),identify:async()=>{started();await gate;return {teamId:'T123',botUserId:'B123'};},start:async()=>{throw Error('Must not start');},post:async()=>{throw Error('Must not post');}};
  try {
   app=startInstance(join(dir,'instance.sqlite'),0,{dataDir:dir,env:{},slackTransport});const port=await app.listen();
   const call=async(route,token,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});return [r.status,await r.json()];};

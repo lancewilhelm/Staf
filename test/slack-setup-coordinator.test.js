@@ -10,7 +10,7 @@ test('Slack setup requests two protected secrets and passes only their exact rev
  const dir=mkdtempSync(join(tmpdir(),'staf-slack-setup-'));const secrets=new SecretRequests(dir,false);
  const signal=new AbortController().signal,work={botId:'agent',work:{kind:'command',id:'work'},signal};
  const action={id:'action',fingerprint:'fingerprint'},input={teamId:'T123',userId:'U123',channelId:'D123'};let approval,pauses=0;
- const capability=slackSetupCapability({secrets,eligible:()=>true,check:()=>{},pause:()=>pauses++,resume:()=>pauses--,confirm:async value=>{approval=value;return 'Connection pending';}});
+ const capability=slackSetupCapability({secrets,eligible:()=>true,check:()=>{},pause:()=>pauses++,resume:()=>pauses--,ready:()=>true,confirm:async value=>{approval=value;return 'Connection pending';}});
  try {
   const result=capability.execute(input,work,action);
   let [request]=secrets.list();assert.match(request.purpose,/Socket Mode/);assert.match(request.destination,/T123.*U123.*D123/);
@@ -27,7 +27,7 @@ test('Slack setup requests two protected secrets and passes only their exact rev
 test('skipping a token or replacing a selected token prevents Slack confirmation',async()=>{
  const dir=mkdtempSync(join(tmpdir(),'staf-slack-setup-'));const secrets=new SecretRequests(dir,false);
  const work={botId:'agent',work:{kind:'command',id:'work'},signal:new AbortController().signal},input={teamId:'T123',userId:'U123',channelId:'D123'};let confirmations=0;
- const capability=slackSetupCapability({secrets,eligible:()=>true,check:()=>{},pause:()=>{},resume:()=>{},confirm:async()=>{confirmations++;return 'connected';}});
+ const capability=slackSetupCapability({secrets,eligible:()=>true,check:()=>{},pause:()=>{},resume:()=>{},ready:()=>true,confirm:async()=>{confirmations++;return 'connected';}});
  try {
   const skipped=capability.execute(input,work,{id:'skip',fingerprint:'skip'});secrets.decide('skip-app','skipped');
   assert.match(await skipped,/not completed/);assert.equal(confirmations,0);

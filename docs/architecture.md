@@ -430,8 +430,12 @@ store without transition tracking, an older setup recorded as connecting is
 fenced during the same transaction that adds the tracking tables; the latest
 completed guided setup is retained as a conservative origin for the startup
 work check. A restart leaves an
-unfinished review interrupted. Connection status comes from the Slack
-transport; identifying the bot's workspace does not verify the user or DM IDs.
+unfinished review interrupted. Before delivery, including after restart, Staf
+checks the workspace and compares the selected DM with Slack's response for the
+selected user via `conversations.open` with `prevent_creation` and the `im:write`
+bot scope. Socket startup succeeds only after the WebSocket opens; status belongs
+to the verified generation and binding. The action journal must succeed before
+delivery is released.
 These paths use synthetic Slack and model fixtures, not live account verification.
 
 ### Native process slice
