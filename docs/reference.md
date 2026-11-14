@@ -495,9 +495,13 @@ that older versions had already overwritten. `gmailConnection` reports the curre
 account's `credentials_available`, `credentials_unavailable`, `disconnected`,
 or `unknown` status and its enabled state. Available credentials do not verify
 Google access or imply agent or model permission. Submitted and dismissed results
-include `gmailConnectionAtResolution`; model delivery includes a fresh
-`gmailConnectionAtDelivery`. Both snapshots describe the current account, which
-may differ from an earlier authorized account. The reviewed client approval is
+include `gmailConnectionAtResolution`. Each relevant model request receives a
+fresh `gmailConnectionAtDelivery` after provider initialization and adapter
+preflight. This value is added to a transient request copy, not the saved
+question result. Older delivery snapshots are removed from replay; the retained
+resolution stays unchanged. Both snapshots describe the current account, which
+may differ from an earlier authorized account. A connection can change after a
+request is sent, and already transmitted model input cannot be recalled. The reviewed client approval is
 used for the attempt; durable grants, authorization history and the connection
 commit together after Google verification. A definite rollback retains earlier
 grants and configuration; an uncertain result requires restart and review.

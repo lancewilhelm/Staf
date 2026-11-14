@@ -111,7 +111,7 @@ export function directCodexProvider(options:{model:string;sessionId:string;dataD
  const stream=async function*(messages:Message[],tools:ToolDefinition[],call:ProviderCallOptions={}):AsyncGenerator<ProviderEvent>{
   const signal=AbortSignal.any([AbortSignal.timeout(60000),...(call.signal?[call.signal]:[])]);signal.throwIfAborted();
   const token=await(options.token?options.token(signal):directAccessToken(options.dataDir,request,signal));signal.throwIfAborted();
-  let response:Response;try{response=await request(DIRECT_RESPONSES_URL,{method:'POST',redirect:'error',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json','User-Agent':'Staf/0.1'},body:JSON.stringify(responsesRequest(messages,tools,options.model,options.sessionId,options.reasoning,options.instructions)),signal});}catch{if(signal.aborted)throw Error('Direct request cancelled or timed out');throw Error('Direct Responses connection failed');}
+  let response:Response;try{response=await request(DIRECT_RESPONSES_URL,{method:'POST',redirect:'error',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json','User-Agent':'Staf/0.1'},body:JSON.stringify(responsesRequest(call.refreshMessages?.() ?? messages,tools,options.model,options.sessionId,options.reasoning,options.instructions)),signal});}catch{if(signal.aborted)throw Error('Direct request cancelled or timed out');throw Error('Direct Responses connection failed');}
   if(!response.ok)throw Error(`Direct Responses HTTP ${response.status}; check Staf direct sign-in, plan permission and model. No paid API fallback.`);
   let withheld='';
   const redact=(text:string)=>text.split(token).join('[REDACTED]');
