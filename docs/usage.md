@@ -960,7 +960,10 @@ Text stored before it was recognized as a secret may remain in older records and
 backups. Staf checks its structured file and process bytes against current known
 values before replay and storage. When an earlier encoded result cannot be checked
 safely, Staf omits that tool result from later replay while keeping the surrounding
-conversation. A secret change during an in-flight encoded result can stop that
+conversation. This includes earlier Code Mode results that received file or
+terminal bytes, because guest code can return base64 without its
+encoding tag. Earlier guest results without verifiable service provenance are
+also omitted; verified guest results without such output remain available. A secret change during an in-flight encoded result can stop that
 turn; retry after review. Running terminal capture stops retaining new bytes when
 the known-secret set changes and reports incomplete output. These safeguards do
 not detect every transformation or unknown secret, including split or reassembled

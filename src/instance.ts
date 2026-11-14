@@ -37,7 +37,7 @@ import {CredentialTransitionFailed,CredentialTransitionUncertain,type Credential
 const clockAction: Action = { capability:'clock', operation:'read', resource:'utc', effect:'read', limits:{}, risk:'safe' };
 const clockBoundary = { enabledCapabilities:['clock'], actions:[clockAction] };
 const modes: ApprovalMode[] = ['ask-every-time','ask-for-risky-actions','never-ask'];
-export const INSTANCE_SCHEMA_VERSION = 60;
+export const INSTANCE_SCHEMA_VERSION = 61;
 const MAINTENANCE_VERSION = 2147483647;
 
 export const starterSoul = "You are an assistant working for the owner. Be clear and candid. Distinguish observations from assumptions. Follow the owner's role instructions and work within the permissions and task scope granted to you.";
@@ -271,6 +271,7 @@ export class Instance {
     if(version < 44) this.db.exec(`CREATE TABLE IF NOT EXISTS memory_sensitivity (id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL, mode TEXT NOT NULL CHECK(mode IN ('model','review-all')), terms TEXT NOT NULL);
       INSERT OR IGNORE INTO memory_sensitivity VALUES (1,1,'model','["medical","health","diagnosis","medication","therapy","sexual","financial","password"]');
       CREATE TABLE IF NOT EXISTS sensitive_memory_proposals (id TEXT PRIMARY KEY, bot_id TEXT NOT NULL REFERENCES bots(id), work_kind TEXT NOT NULL CHECK(work_kind IN ('command','task')), work_id TEXT NOT NULL, scope TEXT NOT NULL CHECK(scope IN ('bot','user')), operation TEXT NOT NULL CHECK(operation IN ('create','update')), target_id TEXT, target_version INTEGER, text TEXT, fingerprint TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('pending','confirmed','denied')), CHECK((state='pending' AND text IS NOT NULL) OR (state<>'pending' AND text IS NULL)));`);
+    if(version < 61) this.db.exec("CREATE TABLE IF NOT EXISTS code_output_provenance (execution_id TEXT PRIMARY KEY REFERENCES code_executions(id), encoded INTEGER NOT NULL CHECK(encoded IN (0,1,2)), proof TEXT NOT NULL)");
     if (!maintenanceToken) this.db.exec(`PRAGMA user_version=${INSTANCE_SCHEMA_VERSION}`);
     for (const row of this.db.prepare("SELECT id,bot_id FROM task_attempts WHERE state IN ('queued','running','stopping','waiting') ORDER BY rowid").all()) {
       if (typeof row.id !== 'string' || typeof row.bot_id !== 'string') throw Error('Invalid interrupted task');

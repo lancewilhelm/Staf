@@ -38,7 +38,7 @@ export function assertEncodedResult(value:unknown,redact:(text:string)=>string,s
 }
 
 /** Omit only unsafe historical capability payloads; ordinary messages stay intact. */
-export function omitUnsafeHistoricalMessages(messages:Message[],historicalThrough:number,redact:(text:string)=>string,secrets:readonly string[],guestCall?:(id:string)=>boolean|null):Message[] {
+export function omitUnsafeHistoricalMessages(messages:Message[],historicalThrough:number,redact:(text:string)=>string,secrets:readonly string[],guestCall?:(id:string,content:string)=>'plain'|'bytes'|'scratch'|null):Message[] {
   const calls=new Map<string,string>();
   return messages.map((message,index)=>{
     if(message.role==='assistant')for(const call of message.tool_calls??[])calls.set(call.id,call.function.name);
@@ -46,16 +46,16 @@ export function omitUnsafeHistoricalMessages(messages:Message[],historicalThroug
     const name=calls.get(message.tool_call_id);if(!name || !encodedActions.has(name))return message;
     let value:unknown;try{value=JSON.parse(message.content);}catch{if(secrets.length && (name==='file_read' || name==='terminal_read' || name==='code_mode'))return {...message,content:redact(omittedEncodedOutput)};value=message.content;}
     if((name==='file_read' || name==='terminal_read') && value && typeof value==='object' && !Array.isArray(value)){const record=value as Record<string,unknown>;if(record.encoding!=='base64' && !['status','blocked','repeat-required','revision-requested'].includes(String(record.kind)))return {...message,content:redact(omittedEncodedOutput)};}
-    if(name==='code_mode' && guestCall?.(message.tool_call_id)!==false && (redact('encoding')!=='encoding' || redact('base64')!=='base64'))return {...message,content:redact(omittedEncodedOutput)};
+    if(name==='code_mode'){const kind=guestCall?.(message.tool_call_id,message.content);if(kind!=='plain' && kind!=='scratch')return {...message,content:redact(omittedEncodedOutput)};}
     try{assertEncodedResult(name==='code_mode'?guestPayload(value):value,redact,['code_mode','run_scratch_shell'].includes(name),secrets);return message;}catch{return {...message,content:redact(omittedEncodedOutput)};}
   });
 }
-export function omitUnsafeHistoricalEvents(events:RuntimeEvent[],historicalThrough:number,redact:(text:string)=>string,secrets:readonly string[],guestCall?:(id:string)=>boolean|null):RuntimeEvent[] {
+export function omitUnsafeHistoricalEvents(events:RuntimeEvent[],historicalThrough:number,redact:(text:string)=>string,secrets:readonly string[],guestCall?:(id:string,content:string)=>'plain'|'bytes'|'scratch'|null):RuntimeEvent[] {
   return events.map((event,index)=>{
     if(index>=historicalThrough || event.type!=='tool_result' || !encodedActions.has(event.name) || isFixedToolResult(event.content,redact))return event;
+    if(event.name==='code_mode'){const kind=guestCall?.(event.id,event.content);if(kind!=='plain' && kind!=='scratch')return {...event,content:redact(omittedEncodedOutput)};}
     let value:unknown;try{value=JSON.parse(event.content);}catch{return !secrets.length || event.name==='run_scratch_shell'?event:{...event,content:redact(omittedEncodedOutput)};}
     if((event.name==='file_read' || event.name==='terminal_read') && event.success && value && typeof value==='object' && !Array.isArray(value) && (value as Record<string,unknown>).encoding!=='base64')return {...event,content:redact(omittedEncodedOutput)};
-    if(event.name==='code_mode' && guestCall?.(event.id)!==false && (redact('encoding')!=='encoding' || redact('base64')!=='base64'))return {...event,content:redact(omittedEncodedOutput)};
     try{assertEncodedResult(event.name==='code_mode'?guestPayload(value):value,redact,['code_mode','run_scratch_shell'].includes(event.name),secrets);return event;}catch{return {...event,content:redact(omittedEncodedOutput)};}
   });
 }
@@ -91,11 +91,11 @@ export function assertEncodedGeneration(messages:Message[],changed:boolean,histo
 }
 
 /** Guest code can transform a fresh encoded receipt; fence it only while the turn is in flight. */
-export function assertPendingGuestResults(messages:Message[],historicalThrough:number,changed:boolean,encodedCall:(id:string)=>boolean|null):void {
+export function assertPendingGuestResults(messages:Message[],historicalThrough:number,changed:boolean,encodedCall:(id:string,content:string)=>'plain'|'bytes'|'scratch'|null):void {
   const calls=new Map<string,string>();
   for(const [index,message] of messages.entries()){
     if(message.role==='assistant')for(const call of message.tool_calls??[])calls.set(call.id,call.function.name);
     if(message.role!=='tool' || calls.get(message.tool_call_id)!=='code_mode' || fixedToolResults.has(message.content))continue;
-    if(index>=historicalThrough && changed && encodedCall(message.tool_call_id)!==false)throw Error('Encoded guest result cannot be safely replayed after secret changes');
+    if(index>=historicalThrough && changed && encodedCall(message.tool_call_id,message.content)!=='plain')throw Error('Encoded guest result cannot be safely replayed after secret changes');
   }
 }

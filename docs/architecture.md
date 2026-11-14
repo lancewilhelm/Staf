@@ -603,7 +603,13 @@ current known values, including partial pages and interleaved process streams;
 unsafe or unverifiable tool results are omitted from later replay and session
 saves without removing unrelated conversation text. Structured bytes are checked
 before text redaction can obscure their encoding tag; a new result is withheld
-if redaction would make that tag unverifiable. Earlier durable records and
+if redaction would make that tag unverifiable. Code Mode records an authenticated
+proof bound to the exact guest result and whether it received file or terminal
+bytes. Because a guest can return raw base64 without the original
+encoding tag, historical guest results with such receipts, or without valid
+provenance, are omitted from replay and new session/event saves. Other verified
+guest results remain available. This also applies to records made before the
+proof was introduced; the surrounding conversation is retained. Earlier durable records and
 backups are not erased. The checks do not establish safety for every transformed
 or unattributed fragment, including arbitrary scratch output. They do not prove
 a platform isolation boundary. At preparation, tool

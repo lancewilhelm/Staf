@@ -54,7 +54,7 @@ export async function runTurn({ session, store, provider, text, emit = () => {},
   const secretsChanged=()=>capturedSecrets!==undefined && secretGeneration?.()!==capturedSecrets;
   text = redact(text);
   if (!text.trim()) throw new Error('Message cannot be empty');
-  const historicalCall=(id:string)=>actions?.encodedCodeCall(id)??null;
+  const historicalCall=(id:string,content:string)=>actions?.codeOutputProvenance(id,content)??null;
   // Inspect structured bytes before text redaction can alter their encoding tag.
   const sanitizedHistory={...session,messages:omitUnsafeHistoricalMessages(session.messages,session.messages.length,redact,secretValues?.()??[],historicalCall),events:omitUnsafeHistoricalEvents(session.events,session.events.length,redact,secretValues?.()??[],historicalCall)};
   const history = redactSession ? redactSession(sanitizedHistory, redact) : redactValue(sanitizedHistory, redact);

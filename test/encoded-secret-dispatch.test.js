@@ -15,7 +15,7 @@ test('newly recognized secret in a base64 action output is blocked before Direct
 });
 
 test('structured encoded file, terminal chunks and code-mode values are checked without interpreting user chat',async()=>{
- const {assertEncodedMessages,assertEncodedResult,omitUnsafeHistoricalMessages}=await import('../dist/encoded-results.js'),marker='synthetic-secret-in-bytes-9612',redact=value=>value.split(marker).join('[REDACTED]'),b64=text=>Buffer.from(text).toString('base64');
+ const {assertEncodedMessages,assertEncodedResult,omitUnsafeHistoricalMessages,omitUnsafeHistoricalEvents}=await import('../dist/encoded-results.js'),marker='synthetic-secret-in-bytes-9612',redact=value=>value.split(marker).join('[REDACTED]'),b64=text=>Buffer.from(text).toString('base64');
  assert.throws(()=>assertEncodedResult({encoding:'base64',data:b64('prefix '+marker+' suffix')},redact));
  assert.throws(()=>assertEncodedResult({encoding:'base64'},redact));
  assert.throws(()=>assertEncodedResult({encoding:'base64',data:'',chunks:[]},redact));
@@ -27,6 +27,7 @@ test('structured encoded file, terminal chunks and code-mode values are checked 
  assert.doesNotThrow(()=>assertEncodedMessages([{role:'user',content:b64(marker)}],redact));
  const prior=[{role:'user',content:b64(marker)},{role:'assistant',content:null,tool_calls:[{id:'f',function:{name:'file_read',arguments:'{}'}}]},{role:'tool',tool_call_id:'f',content:JSON.stringify({encoding:'base64',data:b64(marker),offset:0,nextOffset:null})}];const safe=omitUnsafeHistoricalMessages(prior,prior.length,redact,[marker]);assert.equal(safe[0].content,b64(marker));assert.match(safe[2].content,/Earlier tool output omitted/);
  assert.throws(()=>assertEncodedMessages([{role:'assistant',content:null,tool_calls:[{id:'f',function:{name:'file_read',arguments:'{}'}}]},{role:'tool',tool_call_id:'f',content:JSON.stringify({encoding:'base64',data:b64(marker)})}],redact));
+ const events=omitUnsafeHistoricalEvents([{type:'tool_result',id:'legacy',name:'code_mode',success:true,content:b64(marker)}],1,redact,[],()=>null);assert.match(events[0].content,/Earlier tool output omitted/);
 });
 
 test('an encoded file page fragment is fenced after a secret becomes known',async()=>{

@@ -518,11 +518,15 @@ requires a matching
 Google profile and a successful plugin commit. No secret value is included in
 the question result. Existing agent/model access remains separate.
 
-Schema 60 accepts datasets written by the earlier output-safety checkpoint.
+Schema 61 accepts datasets written by the earlier output-safety checkpoints.
 Its agent and shared taint tables, if present, are left intact but are no longer
 used to block work. Existing conversations, grants, and agents remain in place.
 Structured file and process bytes are checked again before provider dispatch and
 session persistence; an unsafe historical tool result is omitted from replay.
+Code Mode results that received file or terminal bytes are omitted
+from later replay and new session/event saves, because their original encoded
+bytes may have been returned without an encoding tag. Older results without
+verifiable service provenance are also omitted; surrounding text is preserved.
 These checks are secondary to the isolation boundary and cannot detect every
 unknown or transformed secret.
 

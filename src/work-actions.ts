@@ -230,10 +230,19 @@ export class WorkActionService {
   isSkillExecution(id:string,callId:string):boolean {
     return !!this.db.prepare("SELECT 1 FROM code_executions e JOIN work_action_invocations i ON i.kind=e.kind AND i.work_id=e.work_id AND json_extract(i.source,'$.kind')='guest' AND json_extract(i.source,'$.executionId')=e.id WHERE e.id=? AND e.call_id=? AND i.capability='select_skill' LIMIT 1").get(id,callId);
   }
-  encodedCodeCall(context:WorkContext,callId:string):boolean|null {
-    const rows=this.db.prepare(`SELECT e.id FROM code_executions e WHERE e.call_id=? AND ((e.kind='command' AND EXISTS (SELECT 1 FROM commands c WHERE c.id=e.work_id AND c.bot_id=?)) OR (e.kind='task' AND EXISTS (SELECT 1 FROM task_attempts t WHERE t.id=e.work_id AND t.bot_id=?)))`).all(callId,context.botId,context.botId);
-    if(!rows.length)return null;
-    return rows.some(row=>!!this.db.prepare("SELECT 1 FROM work_action_invocations i JOIN action_journal a ON a.id=i.action_id WHERE json_extract(i.source,'$.kind')='guest' AND json_extract(i.source,'$.executionId')=? AND i.capability IN ('file_read','terminal_read','run_scratch_shell') AND a.state='succeeded' LIMIT 1").get(String(row.id)));
+  recordCodeOutput(context:WorkContext,id:string,callId:string,content:string,outputKind:'plain'|'bytes'|'scratch'):void {
+    const row=this.db.prepare('SELECT 1 FROM code_executions WHERE id=? AND kind=? AND work_id=? AND call_id=?').get(id,context.work.kind,context.work.id,callId);
+    if(!row)throw Error('Code output identity unavailable');
+    const encoded=outputKind==='bytes'?1:outputKind==='scratch'?2:0,proof=this.digest(JSON.stringify(['code-output-v1',context.botId,id,callId,encoded,content]));
+    this.db.prepare('INSERT INTO code_output_provenance (execution_id,encoded,proof) VALUES (?,?,?)').run(id,encoded,proof);
+  }
+  codeOutputProvenance(context:WorkContext,callId:string,content:string):'plain'|'bytes'|'scratch'|null {
+    let parsed:unknown;try{parsed=JSON.parse(content);}catch{return null;}
+    if(!parsed || typeof parsed!=='object' || !('executionId' in parsed) || typeof parsed.executionId!=='string')return null;
+    const id=parsed.executionId;
+    const row=(()=>{try{return this.db.prepare(`SELECT p.encoded,p.proof FROM code_executions e JOIN code_output_provenance p ON p.execution_id=e.id WHERE e.id=? AND e.call_id=? AND ((e.kind='command' AND EXISTS (SELECT 1 FROM commands c WHERE c.id=e.work_id AND c.bot_id=?)) OR (e.kind='task' AND EXISTS (SELECT 1 FROM task_attempts t WHERE t.id=e.work_id AND t.bot_id=?)))`).get(id,callId,context.botId,context.botId);}catch{return undefined;}})();
+    if(!row || (row.encoded!==0 && row.encoded!==1 && row.encoded!==2) || typeof row.proof!=='string' || row.proof!==this.digest(JSON.stringify(['code-output-v1',context.botId,id,callId,row.encoded,content])))return null;
+    return row.encoded===1?'bytes':row.encoded===2?'scratch':'plain';
   }
   inspect(work:WorkRef) {
     const executions=this.db.prepare('SELECT id,response_id AS responseId,call_id AS callId,source,source_hash AS sourceHash,outcome,result FROM code_executions WHERE kind=? AND work_id=? ORDER BY rowid').all(work.kind,work.id);
@@ -400,7 +409,8 @@ export class WorkActions {
   isPrivate() {return this.service.isPrivate(this.context);}
   assertPrivateDisclosure() {this.service.assertPrivateDisclosure(this.context);}
   isSkillExecution(id:string,callId:string) {return this.service.isSkillExecution(id,callId);}
-  encodedCodeCall(callId:string) {return this.service.encodedCodeCall(this.context,callId);}
+  codeOutputProvenance(callId:string,content:string) {return this.service.codeOutputProvenance(this.context,callId,content);}
+  recordCodeOutput(id:string,callId:string,content:string,outputKind:'plain'|'bytes'|'scratch') {this.service.recordCodeOutput(this.context,id,callId,content,outputKind);}
   invoke(request:{source:InvocationSource;name:string;input:unknown;intent:ActionIntent}) {return this.service.invoke(this.context,request);}
   beginRecovery() {return this.service.beginRecovery(this.context);}
   manifest() {return this.service.manifest(this.context);}
