@@ -13,7 +13,7 @@ const run = promisify(execFile);
 const source = process.cwd();
 async function checkoutAt(root) {
   await mkdir(root);
-  for (const name of ['src', 'web', 'scripts', 'package.json', 'tsconfig.json', 'vite.config.ts']) await cp(join(source,name),join(root,name),{recursive:true});
+  for (const name of ['src', 'web', 'scripts', 'package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'tsconfig.json', 'vite.config.ts']) await cp(join(source,name),join(root,name),{recursive:true});
   await symlink(join(source,'node_modules'),join(root,'node_modules'),'dir');
 }
 
