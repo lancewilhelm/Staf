@@ -10,6 +10,7 @@ import { providerEvents } from './provider-events.js';
 import { appendTaskInputs } from './task-inbox.js';
 import { checkedOwnerWebUrl, containsUnsafeWebUrl } from './web-reader.js';
 import {secretRequestInput} from './secret-requests.js';
+import {slackSetupInput} from './slack-setup-types.js';
 import type { Provider, RuntimeEvent, Session, SessionWriter, ToolDefinition } from './types.js';
 import { errorMessage, isAssistantMessage, isRecord, validSession } from './validation.js';
 
@@ -126,12 +127,13 @@ export async function runTurn({ session, store, provider, text, emit = () => {},
       if (raw === undefined) throw new Error('Provider returned no final message');
       if(actions?.isPrivate()) {signal?.throwIfAborted();beforeProvider?.();}
       if (isAssistantMessage(raw)) {
-        for(const call of raw.tool_calls ?? []) if(call.function.name==='request_secret') {
-          let input:unknown;try{input=JSON.parse(call.function.arguments);}catch{throw Error('Invalid secret request metadata');}
-          if(!isRecord(input))throw Error('Invalid secret request metadata');
+        for(const call of raw.tool_calls ?? []) if(call.function.name==='request_secret' || call.function.name==='setup_slack') {
+          const error=call.function.name==='request_secret'?'Invalid secret request metadata':'Invalid Slack setup metadata';
+          let input:unknown;try{input=JSON.parse(call.function.arguments);}catch{throw Error(error);}
+          if(!isRecord(input))throw Error(error);
           const {_staf,...metadata}=input;
-          const parsed=secretRequestInput.safeParse(metadata);
-          if(!parsed.success || (_staf!==undefined && !actionIntent.safeParse(_staf).success))throw Error('Invalid secret request metadata');
+          const parsed=(call.function.name==='setup_slack'?slackSetupInput:secretRequestInput).safeParse(metadata);
+          if(!parsed.success || (_staf!==undefined && !actionIntent.safeParse(_staf).success))throw Error(error);
         }
         const unsafe=(value:unknown):boolean => typeof value === 'string' ? containsUnsafeWebUrl(value) : Array.isArray(value) ? value.some(unsafe) : value !== null && typeof value === 'object' ? Object.values(value).some(unsafe) : false;
         if(unsafe(raw.content)) throw Error('Web URLs with credentials or query strings are not supported');

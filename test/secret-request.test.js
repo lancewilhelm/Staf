@@ -6,6 +6,27 @@ import {tmpdir} from 'node:os';
 import {startInstance} from './fixtures/controlled-instance.mjs';
 import {SecretRequests} from '../dist/secret-requests.js';
 
+test('saved and selected requests bind to the exact current secret revision',()=>{
+ const dir=mkdtempSync(join(tmpdir(),'staf-secret-selection-'));let store;
+ try {
+  store=new SecretRequests(dir,false);
+  store.create('new','agent',{kind:'command',id:'work'},{name:'New token',purpose:'Synthetic setup'});
+  store.decide('new','saved','synthetic-new-token');
+  const saved=store.selection('new');assert.ok(saved);assert.equal(saved.name,'New token');
+  store.create('selected','agent',{kind:'command',id:'work'},{name:'Requested token',purpose:'Synthetic setup'});
+  store.select('selected',saved.name,saved.revision);
+  assert.deepEqual(store.selection('selected'),saved);
+  store.close();store=new SecretRequests(dir,false);
+  assert.deepEqual(store.selection('new'),saved);assert.deepEqual(store.selection('selected'),saved);
+  store.replace({name:saved.name,revision:saved.revision,value:'synthetic-replacement'});
+  assert.equal(store.selection('new'),undefined);assert.equal(store.selection('selected'),undefined);
+  const replacement=store.names().find(item=>item.name===saved.name);
+  store.create('deleted','agent',{kind:'command',id:'work'},{name:'Another request',purpose:'Synthetic setup'});
+  store.select('deleted',saved.name,replacement.revision);
+  store.delete(saved.name,replacement.revision);assert.equal(store.selection('deleted'),undefined);
+ } finally {store?.close();rmSync(dir,{recursive:true,force:true});}
+});
+
 test('paired owner saves a requested secret without exposing its value to the model or ordinary records',async()=>{
  const dir=mkdtempSync(join(tmpdir(),'staf-secret-request-')),seen=[];
  const secret='synthetic-example-credential-48152';

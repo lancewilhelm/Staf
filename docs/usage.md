@@ -841,6 +841,11 @@ storage. Detection can miss credentials and can flag ordinary text. Other
 clients do not provide this browser warning, and Staf cannot retract a message
 already sent to Slack.
 
+For incoming Slack messages, Staf also blocks recognizable credential patterns
+and known saved values before sending the message to the model. It replies with
+a generic reminder to use protected entry. This is incomplete detection and
+cannot remove a message that Slack already received.
+
 Known saved and supported environment credential values are filtered from
 applicable tool results and action records before model delivery. The filter is
 a secondary safeguard: unknown, encoded, fragmented, or transformed secrets
@@ -1164,9 +1169,16 @@ To set up your own Slack app:
    [`message.im` reference](https://docs.slack.dev/reference/events/message.im/),
    and [`chat.postMessage` reference](https://docs.slack.dev/reference/methods/chat.postMessage/)
    describe the transport, scopes and reply behavior.
-3. In **Settings → Plugins → Slack**, enter the app-level and bot user tokens,
-   the IDs and an existing active agent. **Connect and approve** checks the bot token's
-   workspace with Slack and approves the displayed credential use. Then explicitly **Allow agent access** and **Enable**.
+3. In the main chat of the agent you want to bind, ask for help setting up Slack.
+   Provide the workspace, user, and DM IDs in conversation or optional questions.
+   Enter or select the app-level and bot user tokens in the two protected Staf
+   requests; do not paste tokens into chat or Slack. Review the displayed agent,
+   destination, secret versions, and any existing grants before confirming.
+   Alternatively, use **Settings → Plugins → Slack** without a model: enter the
+   tokens, IDs and an existing active agent, choose **Connect and approve**, then
+   explicitly **Allow agent access** and **Enable**.
+   Staf checks the bot token's workspace with Slack; the identity check does not
+   prove that the supplied user and DM IDs are correct.
    A connected status means the Socket Mode WebSocket opened, not that a DM
    has been tested. An app token or Slack settings error may require correcting
    the setup and enabling again.
@@ -1182,7 +1194,10 @@ saved Slack tokens, while preserving the tokens, binding, and history. Delete sa
 removes the binding and agent access as well. These actions do not uninstall the
 Slack app or revoke tokens at Slack. Reconnect requires the tokens again. Tokens
 are separate named secrets in the managed store. Old `auth/slack.json` files are
-left untouched and are not used. Protect host access and backups.
+left untouched and are not used. If guided setup fails after replacing approvals,
+the new approvals may remain while the connection is disabled. Inspect **Named
+secrets** and the Slack connection before retrying; Staf does not automatically
+replay an interrupted setup. Protect host access and backups.
 
 Ask the agent for work in a normal DM, for example, “Please investigate this
 and let me know what you find.” A tool-capable model can choose to start
