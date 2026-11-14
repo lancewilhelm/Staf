@@ -640,8 +640,12 @@ current binding and Slack grant-review snapshot as a `slack-setup` inbox item.
 `confirmDisplacements: true` when the review lists existing grants. `/dismiss`
 takes the same approval. Confirmation rechecks the client, work, agent, binding,
 secret selections and reviewed grant state before identification and commit.
-The result distinguishes connecting, connected, reconnecting and failure; a
-verified socket does not verify the user or DM IDs. Restart interrupts an
+The service verifies that Slack returns the selected DM for the selected user
+using `conversations.open` with `prevent_creation` and the `im:write` bot scope.
+The result distinguishes connecting, connected, reconnecting and failure; the
+action cannot succeed before the Socket Mode WebSocket opens. Interrupted
+activation is durably fenced from automatic startup until an owner retries.
+Restart interrupts an
 unfinished request without replay. The secret-grant update and instance binding
 are separate transactions: after a failure the owner must inspect both, since
 new grants can remain while the old binding is disabled. See [Slack setup](usage.md#slack-plugin).

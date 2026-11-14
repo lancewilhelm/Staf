@@ -7,7 +7,7 @@ import {startInstance} from '../../dist/instance-service.js';
 const directory=mkdtempSync(join(tmpdir(),'staf-slack-setup-ui-'));
 const app=startInstance(join(directory,'instance.sqlite'),0,{
  dataDir:directory,env:{},
- slackTransport:{identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async(_tokens,_receive,status,_interact,assertAuthority)=>{assertAuthority();status?.('connected');return ()=>{};},post:async()=>{}},
+ slackTransport:{verifyDestination:async(_tokens,config)=>({channelId:config.channelId}),identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async(_tokens,_receive,status,_interact,assertAuthority)=>{assertAuthority();status?.('connected');return ()=>{};},post:async()=>{}},
  providerFactory:async()=>({name:'offline-fixture',capabilities:{toolCalls:true},async complete(messages){
   if(messages.at(-1)?.role==='tool')return {role:'assistant',content:'The fixture action finished. Check its status in the work item and Slack settings.'};
   return {role:'assistant',content:null,tool_calls:[{id:'slack-setup',type:'function',function:{name:'setup_slack',arguments:JSON.stringify({teamId:'T123',userId:'U123',channelId:'D123'})}}]};
