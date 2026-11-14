@@ -858,17 +858,29 @@ Gmail, memory, and skill action output acquired before that state changes taints
 change, Staf stops later model dispatch and new output persistence from that
 agent; taint follows approved helper disclosures and shared writes. A shared
 write can consequently fence other agents too. Legacy or unverifiable output
-state also fails closed. Existing output and backups are not erased, and there
-is currently no owner-facing way to clear this fence or approve an individual
-output. Creating another agent does not bypass a shared-output fence. This is a
-substantial limitation, including for otherwise harmless files and commands.
+state also fails closed. Existing output and backups are not erased. In
+Settings, **Output safety review** shows the selected agent's status and safe
+action identities and states, without displaying captured output. Those actions
+may be related; the existing record does not identify the exact output. When
+shared state is blocked, the review also lists bounded candidate shared actions
+across agents, without their inputs or outputs. If its own
+output is stale, shared output remains current, all work has settled, and no
+action outcome is unresolved, the owner may confirm a separate fresh agent.
+It uses current creation defaults; it does not copy the old conversation,
+tasks, or integration permissions, and it cannot resume an old action. The
+original agent and its records stay intact. This does not clear the old fence,
+and a shared or unverifiable fence has no safe recovery yet. A new agent does
+not bypass a shared-output fence. These restrictions can block otherwise
+harmless files, commands, and unrelated agents.
 
 The boundary covers the listed Staf-managed action outputs when the secret state
 changes. It does not prove that already-known secrets cannot be transformed by
 authorized web, Gmail, memory, or skill content, nor that unrelated integrations,
 external programs, provider output, or ordinary owner text cannot contain transformed credentials. A complete
 rollback of both local databases, or privileged modification of service data,
-is not detectable as a monotonic history. A separate writer can also change a
+is not detectable as a monotonic history. Restoring an earlier instance backup
+can also forget that a fresh agent was created; inspect the restored agent list
+and request a new review after recovery. A separate writer can also change a
 credential source between the service's check and dispatch or persistence; no
 cross-process lock covers that interval. Use one service and coordinated writers
 for a dataset. Do not rely on text filtering to

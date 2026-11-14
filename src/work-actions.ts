@@ -131,9 +131,9 @@ export class WorkActionService {
   private taintProof(botId:string,generation:number):string {return createHmac('sha256',this.key).update(JSON.stringify(['agent-output-taint',botId,generation])).digest('hex');}
   private taint(botId:string):number|undefined {
     const row=this.db.prepare('SELECT generation,proof FROM agent_output_taint WHERE bot_id=?').get(botId);
-    if(!row || typeof row.generation!=='number' || !Number.isSafeInteger(row.generation) || row.generation< -2 || typeof row.proof!=='string' || row.proof!==this.taintProof(botId,row.generation))throw Error('Earlier output has unverifiable secret state; start a new agent conversation');
+    if(!row || typeof row.generation!=='number' || !Number.isSafeInteger(row.generation) || row.generation< -2 || typeof row.proof!=='string' || row.proof!==this.taintProof(botId,row.generation))throw Error('Earlier output has unverifiable secret state; open Settings and review output safety');
     if(row.generation===-2)return undefined;
-    if(row.generation<0)throw Error('Earlier output has unverifiable secret state; start a new agent conversation');
+    if(row.generation<0)throw Error('Earlier output has unverifiable secret state; open Settings and review output safety');
     return row.generation;
   }
   private sharedTaint():number|undefined {
@@ -156,8 +156,25 @@ export class WorkActionService {
     const generation=this.taint(botId);
     if(generation===undefined){
       const prior=this.db.prepare(`SELECT 1 FROM work_action_invocations i JOIN action_journal a ON a.id=i.action_id WHERE i.capability IN ('file_read','file_search','terminal_run','terminal_read','run_scratch_shell','read_web','search_web','gmail_search','gmail_read','memory_search','memory_read','select_skill') AND a.state IN ('succeeded','uncertain') AND ((i.kind='command' AND EXISTS(SELECT 1 FROM commands c WHERE c.id=i.work_id AND c.bot_id=?)) OR (i.kind='task' AND EXISTS(SELECT 1 FROM task_attempts t WHERE t.id=i.work_id AND t.bot_id=?))) LIMIT 1`).get(botId,botId);
-      if(prior || this.db.prepare('SELECT 1 FROM native_processes WHERE bot_id=? LIMIT 1').get(botId))throw Error('Earlier output has unverifiable secret state; start a new agent conversation');
-    }else if(generation!==current)throw Error('Earlier output predates the current secret state; start a new agent conversation');
+      if(prior || this.db.prepare('SELECT 1 FROM native_processes WHERE bot_id=? LIMIT 1').get(botId))throw Error('Earlier output has unverifiable secret state; open Settings and review output safety');
+    }else if(generation!==current)throw Error('Earlier output predates the current secret state; open Settings and review output safety');
+  }
+  /** Owner-facing review never returns captured inputs, outputs, or journal details. */
+  reviewOutputTaint(botId:string) {
+    const current=this.secretGeneration();
+    let shared:'clear'|'current'|'stale'|'unknown'='unknown',agent:'clear'|'current'|'stale'|'unknown'='unknown';
+    try {const value=this.sharedTaint();shared=value===undefined?'clear':value===current?'current':'stale';}catch {/* Unverifiable shared state is not recoverable. */}
+    try {const value=this.taint(botId);agent=value===undefined?'clear':value===current?'current':'stale';if(agent==='clear')this.assertAgentTaint(botId);}catch {if(shared==='clear' || shared==='current')agent='unknown';}
+    const rows=this.db.prepare(`SELECT DISTINCT a.id,i.kind,i.work_id,i.capability,a.state FROM work_action_invocations i JOIN action_journal a ON a.id=i.action_id JOIN work_bindings b ON b.kind=i.kind AND b.work_id=i.work_id WHERE b.bot_id=? ORDER BY a.rowid DESC LIMIT 51`).all(botId);
+    const allowed=new Set([...this.dataCapabilities,...this.sharedSinks]);
+    const actions=rows.slice(0,50).flatMap(row=>typeof row.id==='string' && /^[a-f0-9-]{36}$/.test(row.id) && (row.kind==='command' || row.kind==='task') && typeof row.capability==='string' && allowed.has(row.capability) && ['prepared','started','succeeded','failed','uncertain','cancelled'].includes(String(row.state)) ? [{actionId:row.id,workKind:row.kind,workId:typeof row.work_id==='string' && /^[a-f0-9-]{36}$/.test(row.work_id) ? row.work_id : null,capability:row.capability,state:row.state}] : []);
+    const sharedRows=shared==='stale' || shared==='unknown' ? this.db.prepare(`SELECT DISTINCT a.id,i.kind,i.work_id,i.capability,a.state,b.bot_id FROM work_action_invocations i JOIN action_journal a ON a.id=i.action_id JOIN work_bindings b ON b.kind=i.kind AND b.work_id=i.work_id WHERE i.capability IN ('file_write','file_edit','terminal_run','terminal_write','run_scratch_shell','memory_remember','memory_update') ORDER BY a.rowid DESC LIMIT 51`).all() : [];
+    const sharedActions=sharedRows.slice(0,50).flatMap(row=>typeof row.id==='string' && /^[a-f0-9-]{36}$/.test(row.id) && (row.kind==='command' || row.kind==='task') && typeof row.capability==='string' && this.sharedSinks.has(row.capability) && ['prepared','started','succeeded','failed','uncertain','cancelled'].includes(String(row.state)) ? [{actionId:row.id,workKind:row.kind,workId:typeof row.work_id==='string' && /^[a-f0-9-]{36}$/.test(row.work_id) ? row.work_id : null,agentId:typeof row.bot_id==='string' && /^[a-f0-9-]{36}$/.test(row.bot_id) ? row.bot_id : null,capability:row.capability,state:row.state}] : []);
+    const active=!!this.db.prepare("SELECT 1 FROM commands WHERE bot_id=? AND state='pending' UNION ALL SELECT 1 FROM task_attempts WHERE bot_id=? AND state IN ('queued','running','stopping','waiting') UNION ALL SELECT 1 FROM native_processes WHERE bot_id=? AND (state NOT IN ('exited','failed') OR output_complete<>1) LIMIT 1").get(botId,botId,botId);
+    const uncertain=!!this.db.prepare("SELECT 1 FROM action_journal a JOIN work_bindings b ON (b.kind='command' AND b.work_id=a.command_id) OR (b.kind='task' AND b.work_id=a.task_attempt_id) WHERE b.bot_id=? AND a.state IN ('prepared','started','uncertain') AND NOT EXISTS (SELECT 1 FROM work_action_resolutions r WHERE r.action_id=a.id) LIMIT 1").get(botId);
+    const snapshot={current,shared,agent,active,uncertain,actions,truncated:rows.length>50,sharedActions,sharedTruncated:sharedRows.length>50};
+    const version=createHmac('sha256',this.key).update(JSON.stringify(['output-review',botId,snapshot])).digest('hex');
+    return {...snapshot,version,canStartFresh:agent==='stale' && (shared==='clear' || shared==='current') && !active && !uncertain};
   }
   markAgentTaint(botId:string):void {
     this.assertAgentTaint(botId);const generation=this.secretGeneration(),prior=this.taint(botId);

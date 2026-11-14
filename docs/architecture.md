@@ -601,8 +601,19 @@ the boundary. A generation change fences affected work; a tainted shared write
 also fences other agents. Unverifiable older output fails closed. While any
 secret has been observed, file reads and searches, terminal starts and reads,
 and scratch commands are blocked before execution: decoding or matching encodings cannot prove arbitrary guest
-transformations safe. There is no individual output-disclosure approval or
-owner-facing taint reset. Whole-dataset rollback and privileged store tampering
+transformations safe. The paired output review exposes only bounded action IDs,
+work kinds, capability names and states; shared-state review includes bounded
+candidate actions across agents. These candidates do not identify the exact
+source, and the review never returns retained payloads.
+A review version binds the agent, its taint and shared state, live and uncertain
+work, secret generation, agent revision, and creation defaults. An explicit
+confirmation can create an independent fresh agent only for verified stale
+agent output while shared state is current and work and uncertain effects are
+settled. The creation operation is idempotent for that reviewed version. It
+copies no conversation, tasks, action receipts, or integration grants, and does
+not change the old fence. Unknown and shared-stale histories cannot be cleared
+by this workflow. There is no individual output-disclosure approval or
+taint reset. Whole-dataset rollback and privileged store tampering
 are outside the monotonicity guarantee; previously persisted data is not erased.
 The boundary does not lock out separate processes or uncoordinated external-file
 writers between a check and a dispatch or save.

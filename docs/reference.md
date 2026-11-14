@@ -565,7 +565,13 @@ once a supported credential has been observed, or if its state is unavailable.
 An output captured earlier is bound to a durable secret generation; after a
 change, affected dispatch and new persistence fail closed. Taint follows approved
 helper context and shared writes, and older unverifiable output is fenced. There
-is no approval or reset for this fence. See [usage](usage.md#secret-requests)
+is no approval or reset for this fence. A paired owner can inspect the affected
+agent with `GET /api/output-reviews/BOT_ID`; the response contains only safe
+action metadata and a review version. `POST /api/output-reviews/BOT_ID/fresh-agent`
+requires that exact version and `confirm: true`, and creates a separate agent
+only when the review is still eligible. Repeating the same decision returns the
+same agent. Shared or unknown state, active work, and uncertain effects block
+this option. See [usage](usage.md#secret-requests)
 for limitations and other sources of transformed output.
 
 `file_read({path, offset?, limit?})` returns at most 32,768 bytes (default 8,192) and returns base64 data, byte offset, size, next offset and, for files up to 1 MiB, a SHA-256. `file_write({path, content})` writes UTF-8. `file_edit({path, expectedHash, oldText, newText})` requires valid UTF-8, a file at most 1 MiB, the current hash and one exact match. `file_search({path, query, offset?, limit?})` returns byte offsets in a file, scanning up to 65,536 bytes per page, or matching names in a single directory. A page has at most 100 matches; a directory over 10,000 entries is rejected. Paths are at most 4,096 characters; write content is at most 131,072 UTF-16 code units, each edit string at most 65,536, and search queries at most 1,024. The shared 256 KiB serialized invocation limit also applies. Follow `nextOffset` until null. Concurrent host changes can invalidate a page or race an edit; the hash check is not an atomic compare-and-swap.

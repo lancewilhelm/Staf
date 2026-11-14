@@ -7,6 +7,7 @@ import CoreSettings from './CoreSettings.vue';
 import ToolSettings from './ToolSettings.vue';
 import PluginSettings from './PluginSettings.vue';
 import SecretSettings from './SecretSettings.vue';
+import OutputRecovery from './OutputRecovery.vue';
 import AppearanceOptions from './AppearanceOptions.vue';
 import ConfirmAction from './ConfirmAction.vue';
 import { ref } from 'vue';
@@ -121,6 +122,7 @@ async function disconnectRouter() {
     </section>
     <ToolSettings />
     <SecretSettings />
+    <OutputRecovery />
     <PluginSettings />
     <ProviderDefaults />
     <CoreSettings />
