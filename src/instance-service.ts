@@ -1,5 +1,5 @@
 import {isProviderId} from './provider-ids.js';
-import {questionSetInput} from './question-sets.js';
+import {gmailConnectionNotice,questionSetInput} from './question-sets.js';
 import {gmailSetupActionInput,gmailSetupQuestions,parseGmailSetupDraft} from './gmail-setup.js';
 import {registerSkillCapability, skillTracker, skillWorkKey, type SkillTracker} from './skill-actions.js';
 import { z } from 'zod';
@@ -589,7 +589,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
     catch{return {status:'unknown',enabled:null};}
   }
   function questionResultAtDelivery(request:ReturnType<typeof instance.questionSets.list>[number]) {
-    return request.gmailSetup && request.result ? {...request.result,gmailConnectionAtDelivery:gmailConnectionStatus()} : request.result;
+    return request.gmailSetup && request.result ? {...request.result,gmailAuthorization:request.gmailAuthorization,gmailConnectionAtDelivery:gmailConnectionStatus(),gmailConnectionNotice} : request.result;
   }
   function gmailSetupStale(request:{id:string;botId:string;gmailSetup:string|null;state:string}):boolean {
     if(!request.gmailSetup || request.state!=='open')return false;
