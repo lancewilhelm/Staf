@@ -50,14 +50,14 @@ Clock, memory, web research and file tools are enabled for availability in **Set
 terminal to issue a fresh one-time code for another client. This preview binds
 only to loopback. The optional native Linux HTTPS gateway provides paired home-network browser access; see [native Linux installation](docs/native-linux-installation.md). See [usage](docs/usage.md#local-shared-instance-offline-preview) for CLI commands and limitations.
 
-A tool-capable agent can present optional [question sets in chat and background tasks](docs/usage.md#answer-a-question-set). Drafts survive a restart. Interrupted tasks require a reviewed new attempt.
+A tool-capable agent can present optional [question sets in chat and background tasks](docs/usage.md#answer-a-question-set). Ordinary drafts survive a restart; protected secret steps save independently. Interrupted tasks require a reviewed new attempt.
 
 Explicit background tasks and their outcomes appear in the shared conversation, with a task Stop control; separate Activity management remains deferred. It is an offline-tested preview with important permission and recovery limitations; see [usage](docs/usage.md#background-task-preview).
 
 
 The optional bundled [Slack plugin](docs/usage.md#slack-plugin) connects one approved DM to a chosen agent through Socket Mode. It is inactive until configured and enabled, with separate agent access. An approved DM can request and follow service-owned background work in its thread. Controlled integration tests do not establish live Slack behavior.
 
-The optional [Gmail plugin](docs/usage.md#gmail-plugin) supports owner-operated Google authorization, durable candidates, and agent read/search after separate model permission. An opt-in inbox assistant sends scoped updates and digests to an approved Slack DM. With optional Google scopes, an agent can propose replies or inbox changes for approval in Slack. Historical inbox membership and expired-history gaps are explicit. Google, Slack, and model behavior has controlled tests but has not been tested with real accounts.
+The optional [Gmail plugin](docs/usage.md#gmail-plugin) supports guided setup in Staf or owner-operated Google authorization in Settings, durable candidates, and agent read/search after separate model permission. An opt-in inbox assistant sends scoped updates and digests to an approved Slack DM. With optional Google scopes, an agent can propose replies or inbox changes for approval in Slack. Historical inbox membership and expired-history gaps are explicit. Google, Slack, and model behavior has controlled tests but has not been tested with real accounts.
 
 The shared instance supports owner-imported [skills](docs/usage.md#skills-in-the-shared-instance) as an offline-tested preview. Eligible chat and task work can select them in Direct, Hybrid, or Code Mode.
 

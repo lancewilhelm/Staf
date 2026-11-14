@@ -36,7 +36,7 @@ import {InboxMonitorStore,inboxMonitorSchema} from './inbox-monitor.js';
 const clockAction: Action = { capability:'clock', operation:'read', resource:'utc', effect:'read', limits:{}, risk:'safe' };
 const clockBoundary = { enabledCapabilities:['clock'], actions:[clockAction] };
 const modes: ApprovalMode[] = ['ask-every-time','ask-for-risky-actions','never-ask'];
-export const INSTANCE_SCHEMA_VERSION = 55;
+export const INSTANCE_SCHEMA_VERSION = 56;
 const MAINTENANCE_VERSION = 2147483647;
 
 export const starterSoul = "You are an assistant working for the owner. Be clear and candid. Distinguish observations from assumptions. Follow the owner's role instructions and work within the permissions and task scope granted to you.";
@@ -256,6 +256,8 @@ export class Instance {
     if(version < 53) this.db.exec(questionSetSchema);
     if(version < 54) this.db.exec(taskQuestionSetSchema);
     if(version < 55) this.db.exec(slackOutcomeReviewSchema);
+    if(version < 56) this.db.exec("CREATE TABLE IF NOT EXISTS gmail_setup_requests (question_id TEXT PRIMARY KEY, bot_revision TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('pending','authorizing','connected','failed','interrupted')))");
+    this.db.exec("UPDATE gmail_setup_requests SET state='interrupted' WHERE state='authorizing'");
     this.questionSets = new QuestionSets(this.db);
     this.plugins = new PluginStore(this.db);
     this.inboxMonitor = new InboxMonitorStore(this.db);

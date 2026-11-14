@@ -407,6 +407,14 @@ two protected requests, review the `T123` / `U123` / `D123` destination and agen
 and approve. The synthetic transport reports connected in Slack settings. Stop
 the fixture with Ctrl-C to remove its disposable data. This check does not use a
 live model or Slack account and does not demonstrate Linux isolation.
+For a disposable guided Gmail check, build and run
+`node test/fixtures/gmail-guided-ui.mjs`. It prints a local address, pairing code,
+and synthetic values. Create an agent with provider `live` and model
+`fixture-offline`, then ask it to set up Gmail. After confirming the preview, open
+the synthetic loopback callback printed in the terminal, not the Google link.
+Refresh the setup status and submit the set. This uses synthetic Google and model
+responses; it does not establish live Google or Linux isolation behavior.
+
 For docs-only changes, report the relevant documentation checks instead of
 requiring an application launch.
 
