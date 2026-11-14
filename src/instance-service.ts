@@ -600,14 +600,14 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
   }
   function prepareGmailQuestionContext(work:{kind:'command'|'task';id:string;botId:string},messages:import('./types.js').Message[]) {
     const questions=instance.questionSets.list().filter(request=>request.gmailSetup && request.state!=='open' && request.botId===work.botId);
-    let relevant=work.kind==='task' && questions.some(request=>request.workKind==='task' && request.workId===work.id);
+    let relevant=questions.some(request=>work.kind==='task' ? request.workKind==='task' && request.workId===work.id : request.workKind==='command' && request.continuationId===work.id);
     if(work.kind==='command')for(const request of questions) {
       if(request.workKind!=='command')continue;
-      const prefix=`Owner response to question set ${request.id}, requested in earlier chat ${request.workId}:\n`;
+      const prefix=redact(`Owner response to question set ${request.id}, requested in earlier chat ${request.workId}:\n`);
       for(const message of messages)if(message.role==='user') {
         const start=message.content.indexOf(prefix);if(start<0)continue;relevant=true;
-        const from=start+prefix.length,to=message.content.indexOf('\n',from);if(to<0)continue;
-        try {const old:unknown=JSON.parse(message.content.slice(from,to));if(isRecord(old) && 'gmailConnectionAtDelivery' in old){const {gmailConnectionAtDelivery:_,...historical}=old;message.content=message.content.slice(0,from)+JSON.stringify(historical)+message.content.slice(to);}}catch{/* Older unparseable messages remain historical. */}
+        const from=start+prefix.length,to=message.content.indexOf('\n',from);if(to<0)throw Error('Cannot safely refresh prior Gmail result');
+        try {const old:unknown=JSON.parse(message.content.slice(from,to));if(!isRecord(old))throw Error('Invalid Gmail result');if('gmailConnectionAtDelivery' in old){const {gmailConnectionAtDelivery:_,...historical}=old;message.content=message.content.slice(0,from)+JSON.stringify(historical)+message.content.slice(to);}}catch{throw Error('Cannot safely refresh prior Gmail result');}
       }
     }
     if(!relevant)return;

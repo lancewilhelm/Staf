@@ -586,9 +586,14 @@ Agent and model permissions are retained. Protected
 secret changes require the captured agent revision, and stale requests require a
 new setup. The service records an observed authorization success in the same
 instance transaction as the plugin connection. Revocation or a later failed
-attempt cannot erase that evidence. It computes credential availability separately
-for the current account at resolution and again when delivering the result. That
-status does not verify Google access or agent and model permissions. Older results
+attempt cannot erase that evidence. It records credential availability for the
+current account at resolution. For each relevant provider call it computes a
+fresh status in a transient message copy, after provider initialization and any
+adapter preflight. The built-in adapters refresh that copy immediately before
+sending. An adapter that performs asynchronous preparation must call the supplied
+`refreshMessages` callback at its own dispatch boundary. A later revocation
+cannot recall input already sent to a provider.
+That status does not verify Google access or agent and model permissions. Older results
 whose success was already overwritten cannot be reconstructed. The OAuth attempt
 rechecks client, request, agent revision, grant identity and
 version, connection revision, and nonsecret fields at dispatch and before commit.
