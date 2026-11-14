@@ -535,7 +535,17 @@ Gmail uses the same account-keyed connection and agent-access tables. A paired
 client starts an in-memory desktop OAuth attempt with PKCE and a loopback
 callback; the service exchanges the code, verifies the Gmail profile identity,
 and saves the client secret and refresh token as separate managed secrets with
-destination-scoped approvals.
+destination-scoped approvals. Guided setup uses a service-defined mixed question
+set and resolves its saved secret by revision. A paired owner reviews the exact
+account, scopes, selected secret, destination, prior client and refresh grants,
+and durable review versions before starting. The OAuth attempt rechecks client,
+request, agent revision, grant identity and version, connection revision, and
+nonsecret fields at dispatch and before commit. A failure or interrupted attempt
+is not success and may leave saved credentials or use approvals; the owner must
+review them. Startup marks a pending exchange interrupted and never replays it.
+The secret store and instance database commit separately; this is not an atomic
+cross-store transaction. Controlled service and Google fixtures do not establish
+live Google behavior.
 The service fences an in-flight exchange against cancellation, expiry, client
 revocation and connection revision changes. The connection-time history ID and
 candidate message IDs are stored in SQLite; complete pages and the next cursor

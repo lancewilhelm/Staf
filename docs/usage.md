@@ -919,11 +919,32 @@ The pinned node-pty 1.2.0-beta.17 dependency ships native bindings; source insta
 
 ## Gmail plugin
 
-Gmail is optional and starts disconnected. One account can be connected through
-**Settings → Plugins → Gmail**. The service records new message candidates and
+Gmail is optional and starts disconnected. One account can be connected in a
+guided conversation or through **Settings → Plugins → Gmail**. The service records new message candidates and
 lets a paired owner inspect them. An agent can search and read mail in chat only
 after both agent access and a separate, explicit model disclosure decision.
 Connecting Gmail alone does not authorize sending email to a model. The opt-in inbox assistant can assess new candidates and send scoped Slack updates. Optional Google scopes allow an agent to propose a reply or inbox change for approval in Slack.
+
+To use guided setup, first complete the Google Cloud preparation in step 1 below.
+In a paired Staf browser on the loopback address, ask a tool-capable agent to
+help set up Gmail. In its question set, enter the Gmail address and desktop
+client ID, then save or select the client secret in the protected step. Choose
+optional Google scopes only if wanted. Each answer can be skipped; saving the
+secret is independent and does not authorize its use. Select **Review Gmail
+connection** and check the account, client ID, secret name, Google destinations,
+scopes, and any existing uses shown as being replaced. Confirm to begin Google
+authorization, open the authorization link, sign in to the intended account,
+and return to Staf. Refresh the status and submit the answers so the agent can
+report the observed result. A saved secret alone is not a connection. Submitting
+or dismissing while Google authorization is pending interrupts that attempt.
+A failed or interrupted attempt can have saved credentials or approvals; check
+Gmail status and named-secret uses before retrying. This flow does not enable
+Gmail or grant an agent/model access. A new connection starts disabled; existing
+agent and model permissions are retained for a reconnect to the same account.
+The guided service journey has controlled synthetic coverage, not a live Google
+or live model acceptance test. Linux credential isolation remains unverified.
+
+The equivalent Settings path remains available without a model:
 
 To prepare an owner-operated connection:
 
@@ -955,7 +976,7 @@ To prepare an owner-operated connection:
    to the intended account and grant the requested access. Google redirects to
    the local Staf callback. Return to Settings and refresh Gmail status. Staf
    checks that the Google profile email matches the address entered; the
-   connection starts disabled and agent access starts off.
+   connection starts disabled; a new account has no agent access. Existing access permissions are retained on reconnection.
 4. Choose **Enable** to start monitoring. To let an agent read mail, allow its
    access and separately confirm **Allow Gmail to** the displayed provider and
    model. That decision allows message text and search results to be sent to

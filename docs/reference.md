@@ -473,6 +473,19 @@ The structured main-chat capability is not offered to Slack commands. A task wai
 Known credentials and recognized OpenRouter key patterns are rejected from drafts,
 but detection is incomplete.
 
+Schema 56 adds service-owned guided Gmail request state. `guide_gmail_setup`
+creates the fixed mixed set in main chat or a task. A paired client can review
+`GET /api/question-sets/ID/gmail-preview` and confirm its exact returned review
+with `POST /api/question-sets/ID/gmail-start`. The review includes the current
+client and refresh grant versions and the uses that would be replaced. The
+in-memory `GET /api/question-sets/ID/gmail-authorization` URL is available only
+while authorization is pending. Submitting or dismissing during authorization
+interrupts it. Failures may leave saved use approvals or credentials, because
+the instance and secret stores do not share a transaction. Restart interrupts an
+unfinished exchange without replay. The connected result requires a matching
+Google profile and a successful plugin commit. No secret value is included in
+the question result. Existing agent/model access remains separate.
+
 ## Saved tool mode contract
 
 `src/tool-mode.ts` exports `ToolMode` (`direct`, `hybrid`, or `code`) and

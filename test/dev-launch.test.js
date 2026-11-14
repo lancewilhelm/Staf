@@ -76,7 +76,7 @@ test('development startup refuses an interrupted dataset before initializing it'
   const temp=await mkdtemp(join(tmpdir(),'staf-dev-barrier-')),checkout=join(temp,'checkout'),dir=join(temp,'data');
   try {
     await checkoutAt(checkout);await mkdir(dir);await writeFile(join(dir,'instance.sqlite.maintenance.json'),'{}');
-    const child=spawn('corepack',['pnpm','dev'],{cwd:checkout,env:{PATH:process.env.PATH,HOME:process.env.HOME,TMPDIR:temp,STAF_DEV_DATA_DIR:dir,STAF_DEV_PORT:String(await freePort())},stdio:['ignore','pipe','pipe']});
+    const child=spawn('corepack',['pnpm','dev'],{cwd:checkout,env:{PATH:process.env.PATH,HOME:process.env.HOME,TMPDIR:temp,npm_config_verify_deps_before_run:'false',STAF_DEV_DATA_DIR:dir,STAF_DEV_PORT:String(await freePort())},stdio:['ignore','pipe','pipe']});
     let output='';child.stdout.on('data',b=>output+=b);child.stderr.on('data',b=>output+=b);
     await new Promise(resolve=>child.once('exit',resolve));assert.notEqual(child.exitCode,0);assert.match(output,/maintenance was interrupted.*dev:recover/i);
     await assert.rejects(readFile(join(dir,'instance.sqlite')),{code:'ENOENT'});
@@ -88,7 +88,7 @@ test('development startup rejects a newer schema without changing it', {timeout:
   try {
     await checkoutAt(checkout); await mkdir(dir);
     const path=join(dir,'instance.sqlite'), db=new DatabaseSync(path); db.exec('PRAGMA user_version=999'); db.close();
-    const child=spawn('corepack',['pnpm','dev'],{cwd:checkout,env:{PATH:process.env.PATH,HOME:process.env.HOME,TMPDIR:temp,STAF_DEV_DATA_DIR:dir,STAF_DEV_PORT:String(await freePort())},stdio:['ignore','pipe','pipe']});
+    const child=spawn('corepack',['pnpm','dev'],{cwd:checkout,env:{PATH:process.env.PATH,HOME:process.env.HOME,TMPDIR:temp,npm_config_verify_deps_before_run:'false',STAF_DEV_DATA_DIR:dir,STAF_DEV_PORT:String(await freePort())},stdio:['ignore','pipe','pipe']});
     let output=''; child.stdout.on('data',b=>output+=b); child.stderr.on('data',b=>output+=b);
     await new Promise(resolve=>child.once('exit',resolve)); assert.notEqual(child.exitCode,0);
     assert.match(output,/Database version 999 is newer.*select another data directory/i);
