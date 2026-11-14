@@ -37,7 +37,7 @@ import {CredentialTransitionFailed,CredentialTransitionUncertain,type Credential
 const clockAction: Action = { capability:'clock', operation:'read', resource:'utc', effect:'read', limits:{}, risk:'safe' };
 const clockBoundary = { enabledCapabilities:['clock'], actions:[clockAction] };
 const modes: ApprovalMode[] = ['ask-every-time','ask-for-risky-actions','never-ask'];
-export const INSTANCE_SCHEMA_VERSION = 61;
+export const INSTANCE_SCHEMA_VERSION = 62;
 const MAINTENANCE_VERSION = 2147483647;
 
 export const starterSoul = "You are an assistant working for the owner. Be clear and candid. Distinguish observations from assumptions. Follow the owner's role instructions and work within the permissions and task scope granted to you.";
@@ -272,6 +272,7 @@ export class Instance {
       INSERT OR IGNORE INTO memory_sensitivity VALUES (1,1,'model','["medical","health","diagnosis","medication","therapy","sexual","financial","password"]');
       CREATE TABLE IF NOT EXISTS sensitive_memory_proposals (id TEXT PRIMARY KEY, bot_id TEXT NOT NULL REFERENCES bots(id), work_kind TEXT NOT NULL CHECK(work_kind IN ('command','task')), work_id TEXT NOT NULL, scope TEXT NOT NULL CHECK(scope IN ('bot','user')), operation TEXT NOT NULL CHECK(operation IN ('create','update')), target_id TEXT, target_version INTEGER, text TEXT, fingerprint TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('pending','confirmed','denied')), CHECK((state='pending' AND text IS NOT NULL) OR (state<>'pending' AND text IS NULL)));`);
     if(version < 61) this.db.exec("CREATE TABLE IF NOT EXISTS code_output_provenance (execution_id TEXT PRIMARY KEY REFERENCES code_executions(id), encoded INTEGER NOT NULL CHECK(encoded IN (0,1,2)), proof TEXT NOT NULL)");
+    if(version < 62) this.db.exec('CREATE TABLE IF NOT EXISTS task_question_retries (attempt_id TEXT NOT NULL REFERENCES task_attempts(id), question_id TEXT NOT NULL REFERENCES task_question_sets(id), position INTEGER NOT NULL, PRIMARY KEY(attempt_id,question_id), UNIQUE(attempt_id,position))');
     if (!maintenanceToken) this.db.exec(`PRAGMA user_version=${INSTANCE_SCHEMA_VERSION}`);
     for (const row of this.db.prepare("SELECT id,bot_id FROM task_attempts WHERE state IN ('queued','running','stopping','waiting') ORDER BY rowid").all()) {
       if (typeof row.id !== 'string' || typeof row.bot_id !== 'string') throw Error('Invalid interrupted task');
@@ -1045,6 +1046,9 @@ export class Instance {
       a.state, a.outcome, a.limit_ms AS limitMs, a.delegation_clock AS delegationClock, json_extract(a.profile,'$.revision') AS profileRevision, a.profile AS capturedProfile
       FROM task_attempts a JOIN tasks t ON t.id=a.task_id WHERE a.bot_id=? ORDER BY a.rowid DESC`).all(botId).map(({capturedProfile,...row})=>({...row,state:row.state,toolMode:parseToolModeFromProfile(capturedProfile)}));
   }
+  private gmailRetryBlocked(id:string) {
+    return !!this.db.prepare(`WITH RECURSIVE lineage(id) AS (SELECT ? UNION SELECT a.predecessor FROM task_attempts a JOIN lineage l ON a.id=l.id WHERE a.predecessor IS NOT NULL) SELECT 1 FROM lineage l WHERE EXISTS (SELECT 1 FROM gmail_private_tasks p WHERE p.attempt_id=l.id) OR EXISTS (SELECT 1 FROM gmail_task_scopes s WHERE s.attempt_id=l.id) LIMIT 1`).get(id);
+  }
   slackOutcomeReview(id:string) {
     const task=this.db.prepare('SELECT bot_id,state,outcome FROM task_attempts WHERE id=?').get(id);
     const binding=this.plugins.workBinding(id);
@@ -1075,13 +1079,13 @@ export class Instance {
       a.state, a.outcome, a.limit_ms AS limitMs, a.delegation_clock AS delegationClock, json_extract(a.profile,'$.revision') AS profileRevision, a.profile AS capturedProfile
       FROM task_attempts a JOIN tasks t ON t.id=a.task_id WHERE a.id=?`).get(id);
     if (!row) return undefined;
-    const attempt = row as {id:string; taskId:string; botId:string; objective:string; predecessor:string | null; state:string; outcome:string | null; limitMs:number; profileRevision:string};
+    const attempt = row as {id:string; taskId:string; botId:string; objective:string; predecessor:string | null; state:string; outcome:string | null; limitMs:number; delegationClock:number; profileRevision:string};
     const saved=this.db.prepare('SELECT session FROM task_attempts WHERE id=?').get(id);
     const session: Session | undefined=typeof saved?.session === 'string' ? JSON.parse(saved.session) : undefined;
     const inbox = new TaskInbox(this.db).inspect({botId:attempt.botId,attemptId:id});
     const waitReason=attempt.state === 'waiting' ? 'replacement' : (inbox.questions.some(question=>question.state === 'open') || this.questionSets.hasOpenTask(id)) ? 'owner-input' : this.db.prepare("SELECT 1 FROM approval_requests WHERE work_kind='task' AND work_id=? AND state='pending'").get(id) ? 'approval' : null;
     const {capturedProfile,...visible}=row as typeof attempt & {capturedProfile:unknown};
-    return {...visible,toolMode:parseToolModeFromProfile(capturedProfile), slackOutcomeReview:this.slackOutcomeReview(id),workActions:this.workActions().inspectActions({kind:'task',id}),codeExecutions:this.workActions().inspect({kind:'task',id}), waitReason, inbox, usage:session?.usage ?? [], activity: this.db.prepare('SELECT seq,event FROM task_activity WHERE attempt_id=? ORDER BY seq').all(id).map(event => { const value = JSON.parse(String(event.event)); if (value.type === 'tool_result' && value.name === 'select_skill' && typeof value.content === 'string') { value.content = this.redactSkill(value.content); if (value.success) { try { const detail=JSON.parse(value.content); if (typeof detail.digest === 'string' && detail.sourceDigest === undefined) { detail.sourceDigest=detail.digest; delete detail.digest; value.content=JSON.stringify(detail); } } catch { /* Historical error text is not structured selection evidence. */ } } } return {seq:event.seq, ...value}; })};
+    return {...visible,retryBlocked:this.gmailRetryBlocked(id),toolMode:parseToolModeFromProfile(capturedProfile), slackOutcomeReview:this.slackOutcomeReview(id),workActions:this.workActions().inspectActions({kind:'task',id}),codeExecutions:this.workActions().inspect({kind:'task',id}), waitReason, inbox, usage:session?.usage ?? [], activity: this.db.prepare('SELECT seq,event FROM task_activity WHERE attempt_id=? ORDER BY seq').all(id).map(event => { const value = JSON.parse(String(event.event)); if (value.type === 'tool_result' && value.name === 'select_skill' && typeof value.content === 'string') { value.content = this.redactSkill(value.content); if (value.success) { try { const detail=JSON.parse(value.content); if (typeof detail.digest === 'string' && detail.sourceDigest === undefined) { detail.sourceDigest=detail.digest; delete detail.digest; value.content=JSON.stringify(detail); } } catch { /* Historical error text is not structured selection evidence. */ } } } return {seq:event.seq, ...value}; })};
   }
   acceptTask(input: {id:string; botId:string; objective:string; limitMs:number; predecessor?:string; delegateClock?:boolean; gmailQuery?:string}, visibleObjective=input.objective) {
     this.db.exec('BEGIN IMMEDIATE');
@@ -1091,6 +1095,20 @@ export class Instance {
       return result;
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
   }
+  acceptQuestionRetry(input:{id:string;predecessor:string;questionIds:string[]}) {
+    this.db.exec('BEGIN IMMEDIATE');try {
+      const previous=this.taskAttempt(input.predecessor);if(!previous)throw new BotConflict('Task not found');
+      const requests=this.questionSets.list().filter(q=>q.workKind==='task' && q.workId===input.predecessor);
+      if(!requests.length || requests.some(q=>q.state==='open') || input.questionIds.length!==requests.length || new Set(input.questionIds).size!==input.questionIds.length || input.questionIds.some(id=>!requests.some(q=>q.id===id)))throw new BotConflict('Resolve all questions for this task before starting a new attempt');
+      const result=this.acceptTaskInTransaction({id:input.id,botId:previous.botId,objective:previous.objective,limitMs:previous.limitMs,predecessor:input.predecessor,delegateClock:previous.delegationClock===1,retryQuestionIds:input.questionIds},previous.objective);
+      this.db.exec('COMMIT');return result;
+    }catch(error){this.db.exec('ROLLBACK');throw error;}
+  }
+  questionRetryResponses(id:string) {
+    const rows=this.db.prepare(`SELECT q.id,q.result,q.state FROM task_question_retries r JOIN task_question_sets q ON q.id=r.question_id JOIN task_attempts a ON a.id=r.attempt_id AND a.predecessor=q.attempt_id WHERE r.attempt_id=? ORDER BY r.position`).all(id);
+    return rows.map(row=>{if(row.state==='open' || typeof row.result!=='string')throw Error('Question retry context is unavailable');return {questionId:String(row.id),result:JSON.parse(row.result)};});
+  }
+  questionRetryIncludesGmailSetup(id:string) {return !!this.db.prepare('SELECT 1 FROM task_question_retries r JOIN gmail_setup_requests g ON g.question_id=r.question_id WHERE r.attempt_id=?').get(id);}
   acceptInboxTask(input:{id:string;botId:string;accountId:string;messageId:string;revision:number;objective:string}) {
     this.db.exec('BEGIN IMMEDIATE');
     try {
@@ -1131,8 +1149,8 @@ export class Instance {
       this.db.exec('COMMIT');return result;
     } catch(error) {this.db.exec('ROLLBACK');throw error;}
   }
-  private acceptTaskInTransaction(input: {id:string; botId:string; objective:string; limitMs:number; predecessor?:string; delegateClock?:boolean; gmailQuery?:string}, visibleObjective=input.objective, isolated=false) {
-    const digest=createHmac('sha256',this.fingerprintKey).update(JSON.stringify([input.id,input.botId,input.objective,input.limitMs,input.predecessor ?? null,...(input.delegateClock ? ['delegate-clock'] : []),...(input.gmailQuery ? ['gmail',input.gmailQuery] : [])])).digest('hex');
+  private acceptTaskInTransaction(input: {id:string; botId:string; objective:string; limitMs:number; predecessor?:string; delegateClock?:boolean; gmailQuery?:string;retryQuestionIds?:string[]}, visibleObjective=input.objective, isolated=false) {
+    const digest=createHmac('sha256',this.fingerprintKey).update(JSON.stringify([input.id,input.botId,input.objective,input.limitMs,input.predecessor ?? null,...(input.delegateClock ? ['delegate-clock'] : []),...(input.gmailQuery ? ['gmail',input.gmailQuery] : []),...(input.retryQuestionIds ? ['question-retry',input.retryQuestionIds] : [])])).digest('hex');
       const existing = this.taskAttempt(input.id);
       if (existing) {
         if (this.db.prepare('SELECT digest FROM task_fingerprints WHERE attempt_id=?').get(input.id)?.digest !== digest) throw new BotConflict('Task command ID conflict');
@@ -1149,6 +1167,7 @@ export class Instance {
       if (input.predecessor) {
         const previous = this.taskAttempt(input.predecessor);
         if (!previous || previous.botId !== input.botId || !['failed','stopped','interrupted'].includes(String(previous.state))) throw new BotConflict('Only failed, stopped or interrupted attempts can be retried');
+        if(this.gmailRetryBlocked(input.predecessor))throw new BotConflict('Gmail task retry is unavailable. Start fresh authorized Gmail work without copying private questions or answers into chat.');
         origin=this.scheduleOrigin(input.predecessor);
         if (origin && (origin.revoked !== 0 || !['reviewed','completed'].includes(String(origin.status)))) throw new BotConflict('Review the scheduled occurrence and ensure its authorization is not revoked before retrying');
         if (origin && previous.objective !== visibleObjective) throw new BotConflict('Scheduled retries must retain their original objective');
@@ -1164,6 +1183,7 @@ export class Instance {
       const capturedProfile=typeof previousCapture?.profile==='string' ? previousCapture.profile : JSON.stringify({...bot,core:effectiveCore});
       const capturedContext=typeof previousCapture?.context==='string' ? previousCapture.context : JSON.stringify(isolated ? [] : this.taskContext(input.botId));
       this.db.prepare("INSERT INTO task_attempts (id,task_id,bot_id,predecessor,profile,context,state,limit_ms) VALUES (?,?,?,?,?,?,'queued',?)").run(input.id,taskId,input.botId,input.predecessor ?? null,capturedProfile,capturedContext,input.limitMs);
+      for(const [position,questionId] of (input.retryQuestionIds ?? []).entries())this.db.prepare('INSERT INTO task_question_retries VALUES (?,?,?)').run(input.id,questionId,position);
       if(input.gmailQuery) {
         const c=this.plugins.gmailConnection(),profile=parseCapturedProfile(JSON.parse(capturedProfile));
         if(input.predecessor || !c?.connected || !c.enabled || !c.agentAccessIds.includes(input.botId) || !profile.model || !this.plugins.gmailModelAllowed(c.accountId,input.botId,profile.provider,profile.model) || !this.plugins.gmailWorkModelAllowed(c.accountId,input.botId,profile.provider,profile.model))throw new BotConflict('Gmail task scope is not authorized');
@@ -1280,6 +1300,7 @@ export class Instance {
     try {
       const previous=this.taskAttempt(input.predecessor);
       if (!previous) throw Error('Task not found');
+      if(this.gmailRetryBlocked(input.predecessor))throw new BotConflict('Gmail task replacement is unavailable. Start fresh authorized Gmail work without copying private questions or answers into chat.');
       if (this.scheduleOrigin(input.predecessor)) throw new BotConflict('Scheduled tasks cannot be replaced. Stop this task and explicitly start a new task.');
       const digest=createHmac('sha256',this.fingerprintKey).update(JSON.stringify([input.id,previous.botId,input.objective,input.limitMs,input.predecessor,...(input.delegateClock ? ['delegate-clock'] : [])])).digest('hex');
       const existing=this.taskAttempt(input.id);
@@ -1423,7 +1444,7 @@ export class Instance {
     this.taskEvent(id,{type:state,message:outcome}); const attempt=this.taskAttempt(id);
     if(attempt) {
       const privateWork=this.gmailPrivateWork({kind:'task',id});const notice=this.taskAnnouncement(attempt.botId,privateWork?`Task ${id} ${state}. Gmail details are available in the task.`:`Task ${id} ${state}: ${outcome}`);
-      if(!privateWork && state==='completed') {const row=this.db.prepare('SELECT context FROM task_attempts WHERE id=?').get(id),question=this.db.prepare("SELECT 1 FROM task_question_sets q JOIN gmail_setup_requests g ON g.question_id=q.id WHERE q.attempt_id=? AND q.state<>'open'").get(id);if(typeof row?.context==='string'){const context:unknown=JSON.parse(row.context);if(question || Array.isArray(context) && capturedTaskConversation(context,this.questionSets.gmailChatMessageIds(attempt.botId)).capturedGmailSetup)this.db.prepare('INSERT INTO gmail_task_notices VALUES (?,?,?)').run(notice,attempt.botId,id);}}
+      if(!privateWork && state==='completed') {const row=this.db.prepare('SELECT context FROM task_attempts WHERE id=?').get(id),question=this.db.prepare("SELECT 1 FROM task_question_sets q JOIN gmail_setup_requests g ON g.question_id=q.id WHERE q.attempt_id=? AND q.state<>'open'").get(id);if(typeof row?.context==='string'){const context:unknown=JSON.parse(row.context);if(question || this.questionRetryIncludesGmailSetup(id) || Array.isArray(context) && capturedTaskConversation(context,this.questionSets.gmailChatMessageIds(attempt.botId)).capturedGmailSetup)this.db.prepare('INSERT INTO gmail_task_notices VALUES (?,?,?)').run(notice,attempt.botId,id);}}
     }
     const next=this.db.prepare("SELECT id FROM task_attempts WHERE predecessor=? AND state='waiting'").get(id);
     if(typeof next?.id === 'string') {this.db.prepare("UPDATE task_attempts SET state='queued' WHERE id=?").run(next.id);this.taskEvent(next.id,{type:'queued',message:'Previous attempt settled'});}

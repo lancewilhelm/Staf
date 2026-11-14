@@ -21,7 +21,7 @@ test('both schema 43 predecessors keep their Gmail and sensitive-memory state',(
    else db.exec('DROP TABLE gmail_history; DROP TABLE gmail_arrivals; DROP TABLE gmail_history_gaps; DROP TABLE gmail_model_access; DROP TABLE gmail_private_commands; DROP TABLE gmail_private_messages');
    db.exec('PRAGMA user_version=43');db.close();
    instance=new Instance(path);assert.ok(instance.migrationBackup);instance.close();instance=undefined;
-   db=new DatabaseSync(path,{readOnly:true});assert.equal(db.prepare('PRAGMA user_version').get().user_version,INSTANCE_SCHEMA_VERSION);assert.equal(INSTANCE_SCHEMA_VERSION,61);
+   db=new DatabaseSync(path,{readOnly:true});assert.equal(db.prepare('PRAGMA user_version').get().user_version,INSTANCE_SCHEMA_VERSION);assert.equal(INSTANCE_SCHEMA_VERSION,62);
    assert.ok(db.prepare("SELECT 1 FROM sqlite_master WHERE name='gmail_history'").get());assert.ok(db.prepare("SELECT 1 FROM sqlite_master WHERE name='memory_sensitivity'").get());
    if(predecessor==='gmail'){assert.equal(db.prepare("SELECT message_id FROM gmail_arrivals").get().message_id,'retained');assert.equal(db.prepare('SELECT cursor FROM gmail_history').get().cursor,'17');}
    else {assert.equal(db.prepare('SELECT mode FROM memory_sensitivity').get().mode,'review-all');assert.equal(db.prepare('SELECT text FROM sensitive_memory_proposals').get().text,'pending detail');}

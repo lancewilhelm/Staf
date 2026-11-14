@@ -13,7 +13,11 @@ Submit at any time, including with no answers; unanswered questions are sent as
 skipped. **Dismiss** declines the set. The chat remains available while it is
 open, and ordinary drafts are saved on the instance across browser refresh and
 service restart. Drafts may briefly be unsaved while a network request is in
-progress; errors appear beside the controls.
+progress; errors appear beside the controls. If another client saves first, Staf
+keeps your unsaved answers on screen and reports a conflict. Choose **Load saved
+answers** to use the other draft, or **Replace saved answers with mine** to
+explicitly save yours. If the set was already resolved, copy any unsaved answers
+before leaving.
 
 For main chat, Staf retains the submitted set as a new chat input, separate from later corrections.
 If the original response completed, Staf sends one correlated follow-up to the
@@ -35,7 +39,9 @@ Avoid putting credentials in ordinary answers; detection is incomplete.
 
 A waiting task pauses its execution limit while you answer. Other chats and tasks remain available. The agent sidebar shows a count when questions need attention. Open the task in its agent's conversation to answer or dismiss the set.
 
-After a restart or stop, the questions and drafts remain available, but the interrupted attempt does not resume. Submit or dismiss the set, inspect the prior task and any uncertain effects, then choose **Start a new attempt** if appropriate. A new attempt checks prior action records and current permissions. It cannot establish whether every external effect occurred.
+After a restart or stop, the questions and drafts remain available, but the interrupted attempt does not resume. Submit or dismiss the set, inspect the prior task and any uncertain effects, then choose **Start a new attempt** if appropriate. A new attempt retains the original objective, receives the resolved answers separately, and checks prior action records and current permissions. Scheduled attempts also retain their original occurrence and require its review before retry. It cannot establish whether every external effect occurred.
+
+Gmail-private or Gmail-scoped tasks cannot be retried or replaced, including through their earlier task lineage. Start fresh Gmail work under current authorization instead; do not copy private questions or answers into ordinary chat.
 
 This behavior has controlled synthetic service coverage, not live
 model or Slack acceptance. Availability depends on the selected model supporting
