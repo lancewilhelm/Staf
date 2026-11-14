@@ -39,6 +39,8 @@
     "test/fixtures/echo-provider.mjs",
     "test/fixtures/legacy-agent.mjs",
     "test/fixtures/controlled-instance.mjs",
+    "test/fixtures/plugin-transition-child.mjs",
+    "test/fixtures/slack-guided-transition-child.mjs",
     "test/fixtures/session-v1.json",
     "docs/*.md",
     "tsconfig.json",

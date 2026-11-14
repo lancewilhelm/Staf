@@ -1168,10 +1168,12 @@ saved Slack tokens, while preserving the tokens, binding, and history. Delete sa
 removes the binding and agent access as well. These actions do not uninstall the
 Slack app or revoke tokens at Slack. Reconnect requires the tokens again. Tokens
 are separate named secrets in the managed store. Old `auth/slack.json` files are
-left untouched and are not used. If guided setup fails after replacing approvals,
-the new approvals may remain while the connection is disabled. Inspect **Named
-secrets** and the Slack connection before retrying; Staf does not automatically
-replay an interrupted setup. Protect host access and backups.
+left untouched and are not used. A failed reconnect that is rolled back keeps the
+previous connection and approvals. If a connection outcome is uncertain, restart
+Staf and review it. If guided setup was interrupted, Settings offers **Keep
+disabled and review**: confirm it, then inspect the Slack binding and **Named
+secrets** before enabling or reconnecting. Staf does not automatically replay
+the setup. Protect host access and backups.
 
 Ask the agent for work in a normal DM, for example, “Please investigate this
 and let me know what you find.” A tool-capable model can choose to start

@@ -406,14 +406,24 @@ review presents the agent, destination, existing connection and current Slack
 grants; replacing any grants requires a separate explicit confirmation. The
 service checks the paired client, originating work, agent and connection
 revisions, secret selections, and durable grant-review version before Slack
-identification and again after it returns. Both new grants replace the reviewed
-Slack grants in one secret-store transaction. A previous active connection is
-disabled before grants are changed; binding and enabling occur afterward in the
-instance database. A failure between those separate databases can leave the new
-grants saved while the connection is disabled or unconfigured. The action reports
-failure, does not replay the setup, and the owner should inspect the connection
-and grants; durable cross-store recovery remains separate work. A restart leaves
-an unfinished review interrupted. Connection status comes from the Slack
+identification and again after it returns. Direct Gmail and Slack reconnects
+attach the secret database to the instance database and commit configuration,
+credentials and grant versions in one SQLite transaction. The service requires
+rollback journals and full synchronous writes for both persistent databases;
+unsupported journal settings reject the transition. A definite rollback retains
+the previous configuration and grant versions. An ambiguous transaction stops
+work and requires a restart and review. SQLite's cross-database crash atomicity
+depends on its VFS, filesystem and storage honoring its durability assumptions;
+process-interruption fixtures do not establish power-loss behavior.
+
+Guided Slack setup commits its selected grants and binding with a durable pending
+marker in the same transaction. Until setup completes, credential use is fenced
+outside its initial socket attempt. A restart never resumes a marked setup: a
+paired owner must keep Slack disabled and review the saved binding and approvals.
+The recovery operation disables the plugin before clearing the marker, so it can
+be repeated after interruption. The approval and marker are completed together;
+the originating work is not replayed. A restart leaves an unfinished review
+interrupted. Connection status comes from the Slack
 transport; identifying the bot's workspace does not verify the user or DM IDs.
 These paths use synthetic Slack and model fixtures, not live account verification.
 

@@ -692,6 +692,14 @@ would replace. If a prior grant state exists, the connection request must includ
 the reviewed `reviewedVersion`. If an approval exists, it also requires
 `confirmDisplacements: true`. Setup rechecks the reviewed state before committing
 the connection. An older backup restores the grant state recorded in that backup.
+Persistent reconnects require both databases to support rollback journals and
+full synchronous writes. A definite transaction failure preserves the prior
+connection and grant versions; an uncertain result requires restart and review.
+`GET /api/plugins` exposes `reconnectUncertain` and, for Slack,
+`setupRecoveryPending`. After a guided setup is interrupted, the paired owner
+can call `POST /api/plugins/slack/recover-setup` with `confirm: true` to keep
+Slack disabled and clear the recovery fence before reviewing the configuration
+and approvals. This operation does not enable or replay the setup.
 
 Gmail uses `POST /api/plugins/gmail/start` with `email`, `clientId`,
 `clientSecret`, `confirm: true`, and optional booleans `sendEnabled` and `modifyEnabled`; it

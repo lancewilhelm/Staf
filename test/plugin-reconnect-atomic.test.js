@@ -56,7 +56,7 @@ for(const kind of ['slack','gmail'])test(`${kind} reconnect rolls back each fail
    if(kind==='slack'){assert.match(result[1].error,/not changed/);assert.equal(starts.at(-1),'xapp-original-fixture');}else {assert.match(current.authorizationStatus,/not changed/);assert.equal((await call('/api/plugins/gmail/check',{}))[0],200);}
   }
   fault='after-commit';const result=kind==='slack'?await call('/api/plugins/slack/connect',changed):await authorize(changed);assert.equal(result[0],400);
-  const uncertain=(await call('/api/plugins'))[1].find(item=>item.id===kind);assert.equal(uncertain.reconnectUncertain,true);assert.match(uncertain.status,/uncertain/i);assert.equal((await call(`/api/plugins/${kind}/enable`,{}))[0],409);
+  const uncertain=(await call('/api/plugins'))[1].find(item=>item.id===kind);assert.equal(uncertain.reconnectUncertain,true);assert.match(uncertain.status,/uncertain/i);assert.equal((await call(`/api/plugins/${kind}/enable`,{}))[0],503);
   assert.ok(!JSON.stringify([uncertain,result]).includes('xapp-new-fixture'));assert.ok(!JSON.stringify([uncertain,result]).includes('synthetic-client-secret'));
   fault=null;await app.close();app=undefined;await start();const restored=(await call('/api/plugins'))[1].find(item=>item.id===kind);assert.equal(restored.reconnectUncertain,false);assert.notDeepEqual(restored.config,before.config);assert.equal(restored.enabled,false);assert.notDeepEqual((await call('/api/secret-grants'))[1],beforeGrants);
  } finally {await app?.close();rmSync(dir,{recursive:true,force:true});}
@@ -65,6 +65,18 @@ for(const kind of ['slack','gmail'])test(`${kind} reconnect rolls back each fail
 test('in-memory plugin connections use the same transactional credential store',async()=>{
  const app=startInstance(':memory:',0,{env:{},slackTransport:{identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async()=>()=>{},post:async()=>{}}});
  try {const port=await app.listen();let token;const call=async(route,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});return [r.status,await r.json()];};token=(await call('/api/pair',{code:app.code}))[1].token;const bot=(await call('/api/bots',{name:'Agent',provider:'live',model:'fixture'}))[1];assert.equal((await call('/api/plugins/slack/connect',{confirm:true,appToken:'xapp-memory-fixture',botToken:'xoxb-memory-fixture',teamId:'T123',userId:'U123',channelId:'D123',botId:bot.id}))[0],200);assert.equal((await call('/api/secret-grants'))[1].length,2);}finally{await app.close();}
+});
+
+test('persistent reconnect rejects a database in WAL mode without changing connection or grants',async()=>{
+ const dir=mkdtempSync(join(tmpdir(),'staf-reconnect-wal-')),path=join(dir,'instance.sqlite');let app,port,token;
+ const options={dataDir:dir,env:{},slackTransport:{identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async()=>()=>{},post:async()=>{}}};
+ const call=async(route,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});return [r.status,await r.json()];};
+ try{
+  app=startInstance(path,0,options);port=await app.listen();token=(await call('/api/pair',{code:app.code}))[1].token;const bot=(await call('/api/bots',{name:'Agent',provider:'live',model:'fixture'}))[1];
+  const input={confirm:true,appToken:'xapp-original-fixture',botToken:'xoxb-original-fixture',teamId:'T123',userId:'U123',channelId:'D123',botId:bot.id};assert.equal((await call('/api/plugins/slack/connect',input))[0],200);const before=(await call('/api/plugins'))[1].find(item=>item.id==='slack'),grants=(await call('/api/secret-grants'))[1];await app.close();app=undefined;
+  const db=new DatabaseSync(path);try{assert.equal(db.prepare('PRAGMA journal_mode=WAL').get().journal_mode,'wal');}finally{db.close();}
+  app=startInstance(path,0,options);port=await app.listen();const review=(await call('/api/secret-setup-review?integration=slack'))[1];const result=await call('/api/plugins/slack/connect',{...input,userId:'U999',reviewedVersion:review.version,confirmDisplacements:true});assert.equal(result[0],400);assert.match(result[1].error,/not changed/);assert.deepEqual((await call('/api/plugins'))[1].find(item=>item.id==='slack').config,before.config);assert.deepEqual((await call('/api/secret-grants'))[1],grants);
+ }finally{await app?.close();rmSync(dir,{recursive:true,force:true});}
 });
 
 for(const kind of ['slack','gmail'])test(`${kind} restart recovers crashes at each reconnect boundary`,async()=>{

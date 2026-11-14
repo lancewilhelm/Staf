@@ -1,0 +1,22 @@
+import {dirname} from 'node:path';
+import {startInstance} from '../../dist/instance-service.js';
+
+const [path,stage]=process.argv.slice(2);
+let armed=false;
+const slackTransport={identify:async()=>({teamId:'T123',botUserId:'B123'}),start:async(_tokens,_receive,status)=>{status?.('connected');return ()=>{};},post:async()=>{}};
+const providerFactory=async()=>({name:'fixture',capabilities:{toolCalls:true},async complete(messages){return messages.at(-1).role==='tool'?{role:'assistant',content:'Finished'}:{role:'assistant',content:null,tool_calls:[{id:'setup',type:'function',function:{name:'setup_slack',arguments:JSON.stringify({teamId:'T123',userId:'U123',channelId:'D123'})}}]};}});
+const app=startInstance(path,0,{dataDir:dirname(path),env:{},slackTransport,providerFactory},{credentialTransition:(_kind,point)=>{if(armed && point===stage)process.exit(73);}});
+const port=await app.listen();let token;
+const call=async(route,body)=>{const r=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});const value=await r.json();if(!r.ok)throw Error(`Fixture request failed: ${route}`);return value;};
+const until=async fn=>{for(let n=0;n<500;n++){const value=await fn();if(value)return value;await new Promise(resolve=>setTimeout(resolve,10));}throw Error('Fixture timed out');};
+token=(await call('/api/pair',{code:app.code})).token;
+const bot=await call('/api/bots',{name:'Agent',provider:'live',model:'fixture',toolMode:'direct'});
+await call('/api/plugins/slack/connect',{confirm:true,appToken:'xapp-original-fixture',botToken:'xoxb-original-fixture',teamId:'T123',userId:'U123',channelId:'D123',botId:bot.id});
+const before=await call('/api/secret-grants');
+await call('/api/commands',{id:'setup',botId:bot.id,content:'Help set up Slack'});
+const first=await until(async()=>(await call('/api/inbox')).find(item=>item.kind==='secret'));await call(`/api/secret-requests/${first.id}/save`,{value:'xapp-new-fixture'});
+const second=await until(async()=>(await call('/api/inbox')).find(item=>item.kind==='secret' && item.id!==first.id));await call(`/api/secret-requests/${second.id}/save`,{value:'xoxb-new-fixture'});
+const request=await until(async()=>(await call('/api/inbox')).find(item=>item.kind==='slack-setup'));
+process.send?.({token,before});armed=true;
+await call(`/api/slack-setup/${request.id}/confirm`,{approval:request.approval,confirmDisplacements:true});
+process.exit(74);

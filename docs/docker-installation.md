@@ -34,6 +34,8 @@ docker compose start staf
 
 The stopped volume includes the unencrypted named-secret database and use approvals. Protect the archive like the data volume. An older backup can restore secrets and approvals deleted or revoked later; review access and provider credentials after restoring it. Preserve the owner-only permissions on the `secrets` directory and its database.
 
+Keep the instance and secret databases on storage that honors SQLite's rollback-journal and sync guarantees. Capture the entire stopped volume together, including SQLite journal files if present, so interrupted transactions can recover on startup. If guided Slack setup was interrupted, keep it disabled and review its binding and approvals in Settings after restart or restore.
+
 To restore the archive into a separate Compose project, use the same source checkout and build its image first. The separate project has its own named volume. Do not start both projects on port 3210 at the same time. This command restores into the destination volume and overwrites matching files there; choose a new project with an empty volume.
 
 ```sh

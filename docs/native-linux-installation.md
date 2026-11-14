@@ -216,6 +216,10 @@ Stop the gateway too before backup or replacement. The archive command runs only
 Each run creates a new owner-only directory, so simultaneous backups do not
 overwrite one another. A full data-directory backup includes the unencrypted named
 secret store at `secrets/credentials.sqlite`; protect the archive accordingly.
+Keep both databases on storage that honors SQLite's rollback-journal and sync
+guarantees, and copy the entire stopped data directory including any journal
+files. After an interrupted guided Slack setup, keep Slack disabled and review
+its binding and approvals in Settings after restart or restore.
 Preserve its owner-only directory and file permissions on restore. The service
 rejects a secrets directory or database accessible to group or other users.
 Restoring an old backup can restore secrets and use approvals deleted or revoked

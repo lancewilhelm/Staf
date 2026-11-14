@@ -95,6 +95,9 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
   let secretRequests:SecretRequests;
   try {secretRequests=new SecretRequests(resolve(dirname(path)),path===':memory:');for(const value of secretRequests.values())knownKeys.add(value);}catch(error){instance.close();throw error;}
   const transitionFences=new Set<'gmail'|'slack'>();
+  if(secretRequests.pendingSlackTransition())transitionFences.add('slack');
+  let credentialTransitionUnsafe=false;
+  function fenceTransition(kind:'gmail'|'slack') {transitionFences.add(kind);credentialTransitionUnsafe=true;for(const controller of active)controller.abort();}
   const gmailDestination=(email:string)=>JSON.stringify(['https://oauth2.googleapis.com/token','https://gmail.googleapis.com',email]);
   const slackDestination=(config:SlackConfig)=>JSON.stringify(['https://slack.com/api','wss://slack.com or *.slack.com',config.teamId,config.userId,config.channelId]);
   const gmailRoles=['gmail.client','gmail.refresh'] as const,slackRoles=['slack.app','slack.bot'] as const;
@@ -108,8 +111,8 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
     const config=z.object({sendEnabled:z.boolean(),modifyEnabled:z.boolean()}).safeParse(JSON.parse(secretRequests.getConfig('gmail',destination)??'null'));if(!config.success)return undefined;
     return {email:c.accountId,clientId:c.config.clientId,clientSecret,refreshToken,...config.data};
   }
-  function loadSlackTokens(_root:string):{appToken:string;botToken:string}|undefined {
-    if(transitionFences.has('slack'))return undefined;
+  function loadSlackTokens(_root:string,allowPending=false):{appToken:string;botToken:string}|undefined {
+    if(transitionFences.has('slack') || (!allowPending && secretRequests.pendingSlackTransition()))return undefined;
     const c=instance.plugins.connection();if(!c || !c.agentAccess || instance.bot(c.config.botId)?.archived!==false)return undefined;const destination=slackDestination(c.config);
     const appToken=secretRequests.resolve({integration:'slack.app',destination}),botToken=secretRequests.resolve({integration:'slack.bot',destination});
     return appToken && botToken?{appToken,botToken}:undefined;
@@ -124,7 +127,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
     if(redact(credential.email)!==credential.email || redact(credential.clientId)!==credential.clientId)throw Error('Gmail account and client ID cannot contain credentials');
     const destination=gmailDestination(credential.email),stage=(value:CredentialTransitionStage)=>dependencies.credentialTransition?.('gmail',value);
     try {instance.atomicCredentialTransition(secretRequests.attachment(),db=>{secretRequests.installForPlugin(db,{integrations:gmailRoles,config:{integration:'gmail',destination,value:JSON.stringify({sendEnabled:credential.sendEnabled===true,modifyEnabled:credential.modifyEnabled===true})},entries:[{integration:'gmail.client',destination,name:`Gmail client secret ${randomUUID()}`,purpose:`Gmail OAuth client for ${credential.email}`,value:credential.clientSecret},{integration:'gmail.refresh',destination,name:`Gmail refresh token ${randomUUID()}`,purpose:`Gmail account ${credential.email}`,value:credential.refreshToken}]},stage);instance.plugins.gmailConnect({email:credential.email,clientId:credential.clientId},historyId);stage('plugin-config-written');},stage);}
-    catch(error){if(error instanceof CredentialTransitionUncertain){transitionFences.add('gmail');gmailHealth=error.message;stopGmailChecks();stopGmailWork();throw error;}throw new CredentialTransitionFailed();}
+    catch(error){if(error instanceof CredentialTransitionUncertain){fenceTransition('gmail');gmailHealth=error.message;stopGmailChecks();stopGmailWork();throw error;}throw new CredentialTransitionFailed();}
     gmailHealth='Connected';
   },(email,clientId)=>{if(redact(email)!==email || redact(clientId)!==clientId)throw Error('Gmail account and client ID cannot contain credentials');},value=>knownKeys.add(value));
   async function checkGmailConnection(client:string) {
@@ -1066,13 +1069,13 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
     if(!next || !instance.gmailReplyDecision(event.value,state,next,event.messageTs))return;
     try {if(next==='denied')instance.plugins.queueNotice({id:event.value+':denied',config:c.config,text:'Gmail action denied. Nothing was changed.'});} finally {pending.resolve(next);}
   }
-  async function startSlackConnection(assertInitial?:()=>void) {
+  async function startSlackConnection(assertInitial?:()=>void,allowPending=false) {
     stopSlackConnection();const c=instance.plugins.connection();if(!c?.enabled || !c.connected)return;
-    let tokens:ReturnType<typeof loadSlackTokens>;try{tokens=loadSlackTokens(dataDir);}catch{slackStatus='credentials unavailable';return;}
+    let tokens:ReturnType<typeof loadSlackTokens>;try{tokens=loadSlackTokens(dataDir,allowPending);}catch{slackStatus='credentials unavailable';return;}
     if(!tokens){slackStatus='credentials unavailable';return;}
     const generation=slackGeneration;slackStatus='connecting';let initial=true;
-    const assertAuthority=()=>{const current=instance.plugins.connection(),saved=loadSlackTokens(dataDir);if(closing || generation!==slackGeneration || !current?.enabled || !current.connected || current.revision!==c.revision || saved?.appToken!==tokens.appToken || saved.botToken!==tokens.botToken)throw Error('Slack authority changed');if(initial)assertInitial?.();};
-    try {assertAuthority();const stop=await slack.start(tokens,event=>generation===slackGeneration ? receiveSlack(event) : Promise.resolve(),status=>{if(!closing && generation===slackGeneration)slackStatus=status;},event=>generation===slackGeneration ? receiveSlackInteraction(event) : Promise.resolve(),assertAuthority);try{assertAuthority();}catch{stop();throw Error('Slack authority changed');}initial=false;if(closing || generation!==slackGeneration){stop();return;}stopSlack=stop;}
+    const assertAuthority=()=>{const current=instance.plugins.connection(),saved=loadSlackTokens(dataDir,initial && allowPending);if(closing || generation!==slackGeneration || !current?.enabled || !current.connected || current.revision!==c.revision || saved?.appToken!==tokens.appToken || saved.botToken!==tokens.botToken)throw Error('Slack authority changed');if(initial)assertInitial?.();};
+    try {assertAuthority();const stop=await slack.start(tokens,event=>generation===slackGeneration ? secretRequests.pendingSlackTransition()?Promise.reject(Error('Slack setup pending')):receiveSlack(event) : Promise.resolve(),status=>{if(!closing && generation===slackGeneration)slackStatus=status;},event=>generation===slackGeneration ? secretRequests.pendingSlackTransition()?Promise.reject(Error('Slack setup pending')):receiveSlackInteraction(event) : Promise.resolve(),assertAuthority);try{assertAuthority();}catch{stop();throw Error('Slack authority changed');}initial=false;if(closing || generation!==slackGeneration){stop();return;}stopSlack=stop;}
     catch {if(generation===slackGeneration)slackStatus='connection failed';}
   }
   function pluginStatus() {
@@ -1084,7 +1087,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
     const arrivals=gmail ? instance.inboxMonitor.annotateArrivals(gmail.accountId,gmailSnapshot.arrivals) : [];
     return bundledPlugins.map(definition=>definition.id==='gmail'
       ? {...definition,connected:gmail?.connected??false,enabled:gmail?.enabled??false,config:gmail?.config??null,accountId:gmail?.accountId??null,sendEnabled:gmailSendEnabled,modifyEnabled:gmailModifyEnabled,agentAccessIds:gmail?.agentAccessIds??[],modelAccess:instance.plugins.gmailModelAccess(),workModelAccess:instance.plugins.gmailWorkModelAccess(),inboxTarget:target && c && gmail?{botId:target.id,name:target.name,provider:target.provider,model:target.model,accountId:gmail.accountId,gmailRevision:gmail.revision,slackRevision:c.revision,teamId:c.config.teamId,userId:c.config.userId,channelId:c.config.channelId}:null,inboxPreferences:instance.inboxMonitor.settings(),inboxStatus:instance.inboxMonitor.status(),reconnectUncertain:transitionFences.has('gmail'),status:transitionFences.has('gmail')?gmailHealth:gmail?.connected?(gmailCredentials?gmailHealth:'Credentials unavailable'):gmailAuth.status(),authorizationStatus:gmailAuth.status(),events:[],...gmailSnapshot,arrivals}
-      : {...definition,connected:c?.connected??false,enabled:c?.enabled??false,config:c?.config??null,accountId:c?.accountId??null,agentAccess:c?.agentAccess??false,credentialsAvailable:slackCredentials,reconnectUncertain:transitionFences.has('slack'),status:transitionFences.has('slack')?slackStatus:c?.enabled?slackStatus:'inactive',events:instance.plugins.events(),deliveries:instance.plugins.deliveries()});
+      : {...definition,connected:c?.connected??false,enabled:c?.enabled??false,config:c?.config??null,accountId:c?.accountId??null,agentAccess:c?.agentAccess??false,credentialsAvailable:slackCredentials,reconnectUncertain:transitionFences.has('slack'),setupRecoveryPending:!!secretRequests.pendingSlackTransition(),status:transitionFences.has('slack')?'Slack connection outcome uncertain; review required':c?.enabled?slackStatus:'inactive',events:instance.plugins.events(),deliveries:instance.plugins.deliveries()});
   }
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     res.setHeader('Cache-Control', 'no-store'); res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -1123,6 +1126,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
       }
       if (!isRecord(body)) return json(400,{error:'Invalid body'});
       const value = body;
+      if(credentialTransitionUnsafe && req.method==='POST')return json(503,{error:'Connection outcome is uncertain. Restart Staf and review the connection before continuing.'});
       if (imageBody && (!isRecord(value.image) || value.image.kind!=='upload-data')) return json(400,{error:'An image body requires an uploaded PNG crop'});
       if (!imageBody && isRecord(value.image) && value.image.kind==='upload-data') return json(415,{error:'Use the agent image content type for uploaded crops'});
       if (req.method === 'POST' && req.url === '/api/pair') {
@@ -1131,7 +1135,8 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
       }
       const token = req.headers.authorization?.match(/^Bearer ([A-Za-z0-9_-]+)$/)?.[1];
       if (!token || !instance.authorized(token)) return json(401,{error:'Unauthorized'});
-      if(req.method==='POST' && (((req.url??'').startsWith('/api/plugins/gmail/') && transitionFences.has('gmail')) || ((req.url??'').startsWith('/api/plugins/slack/') && transitionFences.has('slack'))))return json(409,{error:'Connection outcome is uncertain. Restart Staf and review the connection before continuing.'});
+      if(req.method==='POST' && (((req.url??'').startsWith('/api/plugins/gmail/') && transitionFences.has('gmail')) || ((req.url??'').startsWith('/api/plugins/slack/') && transitionFences.has('slack') && req.url!=='/api/plugins/slack/recover-setup')))return json(409,{error:'Connection outcome is uncertain. Restart Staf and review the connection before continuing.'});
+      if(req.method==='POST' && req.url==='/api/plugins/slack/recover-setup') {const id=secretRequests.pendingSlackTransition();if(value.confirm!==true || !id)throw Error('No interrupted Slack setup to review');stopSlackConnection();if(instance.plugins.connection()?.enabled)instance.plugins.setEnabled(false);dependencies.credentialTransition?.('slack','recovery-disabled');secretRequests.clearSlackTransition(id);transitionFences.delete('slack');slackStatus='inactive';return json(200,pluginStatus()[0]);}
       if(req.method==='POST' && (req.url==='/api/secrets/replace' || req.url==='/api/secrets/delete') && transitionFences.size)return json(409,{error:'Connection outcome is uncertain. Restart Staf and review the connection before changing secrets.'});
       const imageMatch=req.url?.match(/^\/api\/agent-images\/([a-f0-9]{64})$/);
       if(req.method==='GET' && imageMatch?.[1]) {
@@ -1241,7 +1246,7 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
         if(!instance.authorized(token) || generation!==slackGeneration || instance.plugins.connection()?.revision!==existing?.revision || instance.bot(config.botId)?.archived!==false || setupReview('slack').version!==reviewed.version)throw Error('Slack settings changed during connection. Review and try again');
         stopSlackConnection();const destination=slackDestination(config),stage=(value:CredentialTransitionStage)=>dependencies.credentialTransition?.('slack',value);knownKeys.add(tokens.appToken);knownKeys.add(tokens.botToken);
         try {instance.atomicCredentialTransition(secretRequests.attachment(),db=>{secretRequests.installForPlugin(db,{integrations:slackRoles,entries:[{integration:'slack.app',destination,name:`Slack app token ${randomUUID()}`,purpose:`Slack workspace ${config.teamId}`,value:tokens.appToken},{integration:'slack.bot',destination,name:`Slack bot token ${randomUUID()}`,purpose:`Slack workspace ${config.teamId}`,value:tokens.botToken}]},stage);instance.plugins.connect(config);stage('plugin-config-written');},stage);}
-        catch(error){if(error instanceof CredentialTransitionUncertain){transitionFences.add('slack');slackStatus=error.message;throw error;}if(existing?.enabled)await startSlackConnection();throw new CredentialTransitionFailed();}
+        catch(error){if(error instanceof CredentialTransitionUncertain){fenceTransition('slack');slackStatus=error.message;throw error;}if(existing?.enabled)await startSlackConnection();throw new CredentialTransitionFailed();}
         return json(200,pluginStatus()[0]);
       }
       if(req.method==='POST' && req.url==='/api/plugins/slack/access') {
@@ -1324,15 +1329,19 @@ export function startInstance(path: string, port = 0, options: {dataDir?: string
           check();const identity=await slack.identify({appToken,botToken});check();
           if(!secretRequests.slackSetups().some(item=>item.id===request.id && item.state==='connecting'))throw Error('Slack setup interrupted');
           if(identity.teamId!==config.teamId || identity.botUserId===config.userId)throw Error('Slack identity does not match');
-          stopSlackConnection();if(instance.plugins.connection()?.enabled)instance.plugins.setEnabled(false);
-          secretRequests.replaceSlackGrants({reviewedVersion:approval.grantReview.version,destination,app:approval.app,bot:approval.bot,confirmDisplacements:input.confirmDisplacements===true});
-          const bind=()=>{instance.plugins.connect(config);};if(dependencies.slackSetupBinding)dependencies.slackSetupBinding(bind);else bind();instance.plugins.setAccess(config.botId,true);instance.plugins.setEnabled(true);
+          const previous=instance.plugins.connection();stopSlackConnection();
+          const stage=(point:CredentialTransitionStage)=>dependencies.credentialTransition?.('slack',point);
+          try {instance.atomicCredentialTransition(secretRequests.attachment(),db=>{
+            secretRequests.installSelectedSlack(db,{id:request.id,reviewedVersion:approval.grantReview.version,destination,app:approval.app,bot:approval.bot,confirmDisplacements:input.confirmDisplacements===true},stage);
+            const bind=()=>{instance.plugins.connect(config);};if(dependencies.slackSetupBinding)dependencies.slackSetupBinding(bind);else bind();instance.plugins.setAccess(config.botId,true);instance.plugins.setEnabled(true);stage('plugin-config-written');
+          },stage);}catch(error){if(error instanceof CredentialTransitionUncertain){fenceTransition('slack');slackStatus=error.message;throw error;}if(previous?.enabled)await startSlackConnection();throw new CredentialTransitionFailed();}
           const bound=instance.plugins.connection(),applied=secretRequests.grants().filter(grant=>grant.destination===destination && (grant.integration==='slack.app' || grant.integration==='slack.bot'));
-          const checkClient=()=>{if(!instance.authorized(token))throw Error('Client authorization changed');instance.assertWorkAuthority(request.work);};
-          await startSlackConnection(checkClient);
+          const checkClient=()=>{if(!instance.authorized(token))throw Error('Client authorization changed');instance.assertWorkAuthority(request.work);const current=instance.plugins.connection(),bot=instance.bot(request.botId),grants=secretRequests.grants().filter(grant=>grant.destination===destination && (grant.integration==='slack.app' || grant.integration==='slack.bot'));if(!bound || !current?.enabled || !current.agentAccess || current.revision!==bound.revision || !bot || bot.archived || bot.revision!==approval.authority.agentRevision || JSON.stringify(grants)!==JSON.stringify(applied) || secretRequests.pendingSlackTransition()!==request.id)throw Error('Slack setup authority changed');};
+          await startSlackConnection(checkClient,true);
           try{checkClient();}catch(error){const current=instance.plugins.connection();if(bound && current?.revision===bound.revision){stopSlackConnection();instance.plugins.disconnect();for(const grant of applied){const parsed=z.object({name:z.string(),revision:z.string(),integration:z.enum(['slack.app','slack.bot']),destination:z.string(),version:z.string()}).parse(grant);secretRequests.revoke(parsed);}}throw error;}
-          const status=slackStatus;secretRequests.finishSlackSetup(request.id,'completed',status);return json(200,{status});
-        } catch {secretRequests.finishSlackSetup(request.id,'failed','failed');throw Error('Slack setup failed');}
+          stage('setup-socket-started');
+          const status=slackStatus;secretRequests.completeSlackTransition(request.id,status);return json(200,{status});
+        } catch(error) {if(error instanceof CredentialTransitionUncertain)fenceTransition('slack');if(transitionFences.has('slack') || secretRequests.pendingSlackTransition()){transitionFences.add('slack');stopSlackConnection();slackStatus='Slack setup interrupted. Restart Staf and review the connection.';}try{secretRequests.finishSlackSetup(request.id,'failed','failed');}catch{/* Restart recovers the durable transition. */}if(error instanceof CredentialTransitionUncertain || error instanceof CredentialTransitionFailed)throw error;throw Error('Slack setup failed');}
       }
       if(req.method==='GET' && req.url==='/api/question-sets')return json(200,instance.questionSets.list());
       const questionSetMatch=req.url?.match(/^\/api\/question-sets\/([\w-]+)\/(draft|submit|dismiss)$/);
