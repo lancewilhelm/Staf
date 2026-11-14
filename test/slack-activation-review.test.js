@@ -19,6 +19,16 @@ test('Slack Settings refuses a DM that is not the approved user’s DM',async()=
  }finally{await app.close();rmSync(dir,{recursive:true,force:true});}
 });
 
+test('Slack Settings fails closed when DM verification is unavailable',async()=>{
+ const dir=mkdtempSync(join(tmpdir(),'staf-slack-missing-scope-'));let starts=0;
+ const slackTransport={identify:async()=>({teamId:'T123',botUserId:'B123'}),verifyDestination:async()=>{throw Error('missing_scope');},start:async()=>{starts++;return ()=>{};},post:async()=>{throw Error('Unexpected send');}};
+ const app=startInstance(join(dir,'instance.sqlite'),0,{dataDir:dir,env:{},slackTransport});try{
+  const port=await app.listen();let token;const call=async(route,body)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});return [response.status,await response.json()];};
+  token=(await call('/api/pair',{code:app.code}))[1].token;const bot=(await call('/api/bots',{name:'Agent',provider:'live',model:'fixture'}))[1];
+  assert.notEqual((await call('/api/plugins/slack/connect',{confirm:true,appToken:'xapp-synthetic',botToken:'xoxb-synthetic',teamId:'T123',userId:'U123',channelId:'D123',botId:bot.id}))[0],200);assert.equal(starts,0);assert.equal((await call('/api/plugins'))[1][0].connected,false);
+ }finally{await app.close();rmSync(dir,{recursive:true,force:true});}
+});
+
 test('a killed setup never auto-activates across any durable startup boundary',async()=>{
  for(const stage of ['intent','grants','bound','enabled','socket-open','committed']){
   const dir=mkdtempSync(join(tmpdir(),'staf-slack-crash-')),path=join(dir,'instance.sqlite');let app,child,port,token,starts=0;

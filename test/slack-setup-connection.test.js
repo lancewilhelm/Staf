@@ -7,11 +7,11 @@ import {DatabaseSync} from 'node:sqlite';
 import {Instance} from '../dist/instance.js';
 import {startInstance} from '../dist/instance-service.js';
 
-async function fixture({identity={teamId:'T123',botUserId:'B123'},identify,verifyDestination,prepare,slackSetupBinding,slackStartTimeoutMs,startError=false,startHook,startStatus='connected',appValue='xapp-synthetic-journey'}={}){
+async function fixture({identity={teamId:'T123',botUserId:'B123'},identify,verifyDestination,prepare,slackSetupBinding,slackActivation,slackStartTimeoutMs,startError=false,startHook,startStatus='connected',signalBeforeHook=false,appValue='xapp-synthetic-journey'}={}){
  const dir=mkdtempSync(join(tmpdir(),'staf-slack-journey-')),path=join(dir,'instance.sqlite'),model=[],starts=[],posts=[];
- const slackTransport={verifyDestination:verifyDestination??(async(_tokens,config)=>({channelId:config.channelId})),identify:identify??(async()=>identity),start:async(tokens,receive,status,_interact,assertAuthority)=>{assertAuthority();starts.push({...tokens});await startHook?.(receive);assertAuthority();if(startError)throw Error('Synthetic socket failure');if(startStatus)status?.(startStatus);return ()=>{};},post:async(_tokens,message)=>{posts.push(message);}};
+ const slackTransport={verifyDestination:verifyDestination??(async(_tokens,config)=>({channelId:config.channelId})),identify:identify??(async()=>identity),start:async(tokens,receive,status,_interact,assertAuthority)=>{assertAuthority();starts.push({...tokens});if(signalBeforeHook && startStatus)status?.(startStatus);await startHook?.(receive);assertAuthority();if(startError)throw Error('Synthetic socket failure');if(!signalBeforeHook && startStatus)status?.(startStatus);return ()=>{};},post:async(_tokens,message)=>{posts.push(message);}};
  const providerFactory=async()=>({name:'fixture',capabilities:{toolCalls:true},async complete(messages){model.push(JSON.stringify(messages));return messages.at(-1).role==='tool'?{role:'assistant',content:'Finished'}:{role:'assistant',content:null,tool_calls:[{id:'setup',type:'function',function:{name:'setup_slack',arguments:JSON.stringify({teamId:'T123',userId:'U123',channelId:'D123'})}}]};}});
- const options={dataDir:dir,env:{},slackTransport,providerFactory},dependencies={slackSetupBinding,slackStartTimeoutMs};let app=startInstance(path,0,options,dependencies),port=await app.listen(),token;
+ const options={dataDir:dir,env:{},slackTransport,providerFactory},dependencies={slackSetupBinding,slackActivation,slackStartTimeoutMs};let app=startInstance(path,0,options,dependencies),port=await app.listen(),token;
  const call=async(route,body,credential=token)=>{const response=await fetch(`http://127.0.0.1:${port}${route}`,{method:body?'POST':'GET',headers:{...(credential?{Authorization:`Bearer ${credential}`} : {}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});return [response.status,await response.json()];};
  const until=async fn=>{for(let n=0;n<500;n++){const value=await fn();if(value)return value;await new Promise(resolve=>setTimeout(resolve,10));}throw Error('Timed out');};
  token=(await call('/api/pair',{code:app.code},''))[1].token;const bot=(await call('/api/bots',{name:'Agent',provider:'live',model:'fixture-offline',toolMode:'direct'}))[1];
@@ -151,6 +151,15 @@ test('a returned transport without an open socket cannot report setup success',a
  }finally{await f.close();}}
 });
 
+test('an observed open remains pending until the setup activation is committed',async()=>{
+ let entered,release;const started=new Promise(resolve=>{entered=resolve;}),gate=new Promise(resolve=>{release=resolve;});
+ const f=await fixture({signalBeforeHook:true,startHook:async()=>{entered();await gate;}});try{
+  const pending=f.call(`/api/slack-setup/${f.request.id}/confirm`,{approval:f.request.approval});await started;
+  assert.equal((await f.call('/api/commands/setup'))[1].state,'pending');assert.equal((await f.call('/api/plugins'))[1].find(item=>item.id==='slack').status,'connecting');assert.deepEqual(f.posts,[]);
+  release();assert.equal((await pending)[1].status,'connected');
+ }finally{release?.();await f.close();}
+});
+
 test('an event arriving before activation completes is not acknowledged as handled',async()=>{
  let rejected=false;const f=await fixture({startHook:async receive=>{try{await receive({eventId:'early',teamId:'T123',userId:'U123',channelId:'D123',text:'hello'});}catch{rejected=true;}}});try{
   assert.equal((await f.call(`/api/slack-setup/${f.request.id}/confirm`,{approval:f.request.approval}))[0],200);assert.equal(rejected,true);assert.deepEqual(f.posts,[]);
@@ -228,5 +237,13 @@ test('an injected plugin binding failure leaves Slack disabled and is reported a
   const command=await f.until(async()=>{const item=(await f.call('/api/commands/setup'))[1];return item.state!=='pending'&&item;});assert.equal(command.workActions.find(item=>item.summary==='Set up Slack with owner confirmation')?.state,'failed');
   const plugin=(await f.call('/api/plugins'))[1].find(item=>item.id==='slack');assert.equal(plugin.enabled,false);assert.equal(f.starts.length,0);
   await f.restart();const restored=(await f.call('/api/plugins'))[1].find(item=>item.id==='slack');assert.equal(restored.enabled,false);assert.equal(f.starts.length,0);
+ }finally{await f.close();}
+});
+
+test('an error after activation commit cannot release a successful setup result',async()=>{
+ const f=await fixture({slackActivation:stage=>{if(stage==='committed')throw Error('Synthetic post-commit failure');}});try{
+  assert.notEqual((await f.call(`/api/slack-setup/${f.request.id}/confirm`,{approval:f.request.approval}))[0],200);
+  const command=await f.until(async()=>{const item=(await f.call('/api/commands/setup'))[1];return item.state!=='pending'&&item;});assert.equal(command.workActions.find(item=>item.summary==='Set up Slack with owner confirmation')?.state,'failed');assert.deepEqual(f.posts,[]);
+  await f.restart();await new Promise(resolve=>setTimeout(resolve,100));assert.equal(f.starts.length,1);assert.deepEqual(f.posts,[]);
  }finally{await f.close();}
 });
